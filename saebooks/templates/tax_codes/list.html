@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Tax codes — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Tax codes</h1>
+  <div class="meta">{{ tax_codes|length }} active · {{ company_name }}</div>
+</div>
+
+<table class="acct-table">
+  <thead>
+    <tr>
+      <th class="code">Code</th>
+      <th>Name</th>
+      <th class="rate">Rate %</th>
+      <th>System</th>
+      <th>Reporting</th>
+      <th>Description</th>
+      <th class="actions"></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for tc in tax_codes %}
+    <tr>
+      <td class="code">{{ tc.code }}</td>
+      <td>{{ tc.name }}</td>
+      <td class="rate">{{ "%.3f"|format(tc.rate) }}</td>
+      <td>{{ tc.tax_system }}</td>
+      <td>{{ tc.reporting_type }}</td>
+      <td class="dim">{{ tc.description or "" }}</td>
+      <td class="actions">
+        <a href="/admin/tax-codes/{{ tc.id }}/edit">edit</a>
+        <form method="post" action="/admin/tax-codes/{{ tc.id }}/archive" style="display:inline"
+              onsubmit="return confirm('Archive {{ tc.code }}?');">
+          <button type="submit" class="linkish">archive</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<section class="new-form">
+  <h2>+ New tax code</h2>
+  <form method="post" action="/admin/tax-codes" class="tc-form">
+    <label>Code <input name="code" required maxlength="16" placeholder="e.g. GST"></label>
+    <label>Name <input name="name" required placeholder="e.g. GST 10%"></label>
+    <label>Rate %<input name="rate" type="number" step="0.001" value="0"></label>
+    <label>System
+      <select name="tax_system">
+        {% for s in tax_systems %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Reporting
+      <select name="reporting_type">
+        {% for v, l in reporting_types %}<option value="{{ v }}">{{ l }}</option>{% endfor %}
+      </select>
+    </label>
+    <label class="wide">Description <input name="description"></label>
+    <button type="submit">Create</button>
+  </form>
+</section>
+{% endblock %}

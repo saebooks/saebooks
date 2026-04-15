@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ tax_code.code }} — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Edit tax code <span class="dim">{{ tax_code.code }}</span></h1>
+  <div class="meta">{{ company_name }}</div>
+</div>
+
+<form method="post" action="/admin/tax-codes/{{ tax_code.id }}" class="tc-form">
+  <label>Code <input name="code" required maxlength="16" value="{{ tax_code.code }}"></label>
+  <label>Name <input name="name" required value="{{ tax_code.name }}"></label>
+  <label>Rate % <input name="rate" type="number" step="0.001" value="{{ tax_code.rate }}"></label>
+  <label>System
+    <select name="tax_system">
+      {% for s in tax_systems %}
+      <option value="{{ s }}" {% if s == tax_code.tax_system %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Reporting
+    <select name="reporting_type">
+      {% for v, l in reporting_types %}
+      <option value="{{ v }}" {% if v == tax_code.reporting_type %}selected{% endif %}>{{ l }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label class="wide">Description <input name="description" value="{{ tax_code.description or '' }}"></label>
+  <div class="form-actions">
+    <button type="submit">Save</button>
+    <a href="/admin/tax-codes">Cancel</a>
+  </div>
+</form>
+{% endblock %}
