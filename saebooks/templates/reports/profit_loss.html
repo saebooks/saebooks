@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Profit & Loss — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Profit & Loss</h1>
+  <div class="meta">{{ company_name }}</div>
+</div>
+
+<form class="report-filter" method="get">
+  <label>From <input name="from" type="date" value="{{ from_date }}"></label>
+  <label>To <input name="to" type="date" value="{{ to_date }}"></label>
+  <button type="submit" class="btn-secondary">Run</button>
+</form>
+
+<table class="report-table">
+  <thead>
+    <tr><th>Code</th><th>Account</th><th class="num">Amount</th></tr>
+  </thead>
+  {% for section in sections %}
+  <tbody>
+    <tr class="section-header"><td colspan="3">{{ section.label }}</td></tr>
+    {% for r in section.rows %}
+    <tr>
+      <td class="code">{{ r.code }}</td>
+      <td>{{ r.name }}</td>
+      <td class="num">{{ "%.2f"|format(r.balance|abs) }}</td>
+    </tr>
+    {% endfor %}
+    <tr class="section-total">
+      <td></td><td>Total {{ section.label }}</td>
+      <td class="num">{{ "%.2f"|format(section.total_balance|abs) }}</td>
+    </tr>
+  </tbody>
+  {% endfor %}
+  <tfoot>
+    <tr class="grand-total">
+      <td></td>
+      <td><strong>Net profit</strong></td>
+      <td class="num"><strong>{{ "%.2f"|format(net_profit) }}</strong></td>
+    </tr>
+  </tfoot>
+</table>
+{% endblock %}

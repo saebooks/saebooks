@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Reports — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Reports</h1></div>
+<div class="report-links">
+  <a href="/reports/trial-balance" class="report-card">
+    <strong>Trial balance</strong>
+    <span>Debit and credit totals per account</span>
+  </a>
+  <a href="/reports/profit-loss" class="report-card">
+    <strong>Profit & Loss</strong>
+    <span>Income minus expenses for a period</span>
+  </a>
+  <a href="/reports/balance-sheet" class="report-card">
+    <strong>Balance sheet</strong>
+    <span>Assets, liabilities, and equity at a point in time</span>
+  </a>
+  <a href="/reports/bas" class="report-card">
+    <strong>BAS report</strong>
+    <span>GST collected and paid — ATO labels</span>
+  </a>
+</div>
+{% endblock %}

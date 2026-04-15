@@ -223,3 +223,57 @@ form.tc-form button[type="submit"] {
 }
 .settings-form button { margin-top: 0.5rem; }
 .alert-ok { background: #efe; border-color: #0a5; color: #063; }
+
+/* Report pages */
+.report-filter {
+  display: flex; gap: 0.75rem; align-items: end; margin-bottom: 1rem;
+}
+.report-filter label {
+  display: flex; flex-direction: column; font-size: 11px;
+  color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.03em;
+}
+.report-filter input {
+  font: 14px/1.2 inherit; padding: 0.3rem 0.4rem;
+  border: 1px solid var(--rule); background: #fff; color: var(--fg);
+}
+.report-table {
+  width: 100%; border-collapse: collapse; background: var(--panel);
+  border: 1px solid var(--rule); font-size: 13px;
+}
+.report-table th, .report-table td {
+  padding: 0.25rem 0.5rem; text-align: left;
+  border-bottom: 1px solid var(--rule);
+}
+.report-table th {
+  background: #f3f3ec; font-size: 11px; text-transform: uppercase;
+  color: var(--fg-dim); font-weight: 600;
+}
+.report-table .num { text-align: right; font-family: var(--mono); }
+.report-table .code { font-family: var(--mono); width: 6rem; }
+.report-table .section-header td {
+  font-weight: 600; background: #f8f8f4; padding-top: 0.5rem;
+  font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em;
+  color: var(--accent);
+}
+.report-table .section-total td {
+  font-weight: 600; border-top: 1px solid var(--rule);
+  font-size: 12px; color: var(--fg-dim);
+}
+.report-table .grand-total td {
+  border-top: 2px solid var(--fg); padding-top: 0.4rem;
+}
+.report-table tfoot { border-top: 2px solid var(--rule); }
+
+/* Report index cards */
+.report-links {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: 0.75rem;
+}
+.report-card {
+  display: flex; flex-direction: column; padding: 0.75rem 1rem;
+  background: var(--panel); border: 1px solid var(--rule);
+  text-decoration: none; color: var(--fg);
+}
+.report-card:hover { border-color: var(--accent); }
+.report-card strong { margin-bottom: 0.25rem; }
+.report-card span { font-size: 12px; color: var(--fg-dim); }
