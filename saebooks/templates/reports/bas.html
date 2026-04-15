@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}BAS report — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>BAS report</h1>
+  <div class="meta">{{ company_name }}</div>
+</div>
+
+<form class="report-filter" method="get">
+  <label>From <input name="from" type="date" value="{{ from_date }}"></label>
+  <label>To <input name="to" type="date" value="{{ to_date }}"></label>
+  <button type="submit" class="btn-secondary">Run</button>
+</form>
+
+<table class="report-table bas-table">
+  <thead>
+    <tr><th>Label</th><th>Description</th><th class="num">Amount</th></tr>
+  </thead>
+  <tbody>
+    <tr class="section-header"><td colspan="3">Sales</td></tr>
+    {% for line in [report.g1, report.g2, report.g3] %}
+    <tr>
+      <td class="code">{{ line.label }}</td>
+      <td>{{ line.description }}</td>
+      <td class="num">{{ "%.2f"|format(line.amount) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+  <tbody>
+    <tr class="section-header"><td colspan="3">Purchases</td></tr>
+    {% for line in [report.g10, report.g11] %}
+    <tr>
+      <td class="code">{{ line.label }}</td>
+      <td>{{ line.description }}</td>
+      <td class="num">{{ "%.2f"|format(line.amount) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+  <tbody>
+    <tr class="section-header"><td colspan="3">GST calculation</td></tr>
+    <tr>
+      <td class="code">{{ report.label_1a.label }}</td>
+      <td>{{ report.label_1a.description }}</td>
+      <td class="num">{{ "%.2f"|format(report.label_1a.amount) }}</td>
+    </tr>
+    <tr>
+      <td class="code">{{ report.label_1b.label }}</td>
+      <td>{{ report.label_1b.description }}</td>
+      <td class="num">{{ "%.2f"|format(report.label_1b.amount) }}</td>
+    </tr>
+  </tbody>
+  <tfoot>
+    <tr class="grand-total">
+      <td></td>
+      <td><strong>Net GST payable</strong></td>
+      <td class="num"><strong>{{ "%.2f"|format(report.gst_payable) }}</strong></td>
+    </tr>
+  </tfoot>
+</table>
+{% endblock %}

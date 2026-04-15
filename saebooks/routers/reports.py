@@ -10,6 +10,7 @@ from sqlalchemy import select
 from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
+from saebooks.services import bas as bas_svc
 from saebooks.services import reports as svc
 
 router = APIRouter(prefix="/reports")
@@ -92,6 +93,30 @@ async def profit_loss(
             "from_date": from_date or "",
             "to_date": to_date or "",
             "net_profit": net_profit,
+        },
+    )
+
+
+@router.get("/bas", response_class=HTMLResponse)
+async def bas_report(
+    request: Request,
+    from_date: str | None = Query(None, alias="from"),
+    to_date: str | None = Query(None, alias="to"),
+) -> HTMLResponse:
+    company = await _first_company()
+    fd = _parse_date(from_date)
+    td = _parse_date(to_date)
+    async with AsyncSessionLocal() as session:
+        report = await bas_svc.bas_report(session, company.id, from_date=fd, to_date=td)
+    return templates.TemplateResponse(
+        request,
+        "reports/bas.html",
+        {
+            "edition": settings.edition,
+            "company_name": company.name,
+            "report": report,
+            "from_date": from_date or "",
+            "to_date": to_date or "",
         },
     )
 
