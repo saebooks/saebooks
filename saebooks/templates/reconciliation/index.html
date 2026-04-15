@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Bank reconciliation — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Bank reconciliation</h1></div>
+
+{% if accounts %}
+<p class="dim">Select a bank account to reconcile:</p>
+<div class="report-links">
+  {% for a in accounts %}
+  <a href="/reconciliation/{{ a.id }}" class="report-card">
+    <strong>{{ a.code }} — {{ a.name }}</strong>
+    <span>Reconcile transactions</span>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<p class="dim">No reconcilable bank accounts found. Mark asset accounts as reconcilable in the accounts list.</p>
+{% endif %}
+{% endblock %}
