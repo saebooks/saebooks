@@ -93,37 +93,82 @@ it wrong.
   committed by automated tools on behalf of Richard counts as Richard's
   work.
 
-## 6. Monetisation model
+## 6. Monetisation model — open core
 
-The core product is free, open-source, forever. Revenue sources, in
-order of likelihood:
+SAE Books is **open core**. Two editions, one codebase, runtime feature
+flags decide what's enabled.
 
-1. **Compliance APIs.** Paid hosted API for BAS submission, STP (when
-   relevant), ABN/LEI/ABR/Companies-House lookup. The lei-agent project
-   already proves we can build these. Small businesses pay a flat
-   annual fee to submit through us rather than the ATO portal UI.
-2. **Hosted SaaS.** Same codebase, we run it. Target: users who like
-   the philosophy but don't want to operate a server. Priced clearly
-   against QBO/Xero, with the honest pitch: "Exactly the same software
-   you could run yourself."
-3. **Custom solutions.** Bespoke integrations, migrations, reporting,
-   industry-specific customisations. Project-based.
-4. **Partnerships.** Revenue share with certified bodies (e.g. LEI
-   Register for LEI issuance, ASIC data providers, bank-feed
-   aggregators). We front their service as a one-click feature; they
-   give us margin.
+### 6.1 Community edition (free, AGPL-3.0)
 
-**Explicitly not doing:**
+The hero promise lives here. Community is not crippleware — it's a
+complete, usable bookkeeping system for a single Australian small
+business.
 
-- Paywalling core ledger, reporting, or BAS. That would break the hero
-  promise and the AGPL spirit.
-- Ads. Ever.
-- Selling user data. Ever.
+Community includes: full chart of accounts, journal entries, sales,
+purchases, contacts, banking, reconciliation, GST/BAS reporting,
+standard reports, full export, SQLite or Postgres backend, immutable
+ledger audit mode, single-company runtime.
+
+### 6.2 Enterprise edition (paid, commercial licence)
+
+Same codebase. The features below are compiled in but gated behind a
+runtime licence-key flag. Anyone who builds from source can flip the
+flag — that's AGPL. Practically, the friction of rebuilding and
+self-supporting is the moat, not DRM.
+
+Enterprise adds:
+
+- **Multi-company / intercompany.** Multiple companies under one
+  login, reciprocal journals between them, consolidated reporting.
+  The schema is always multi-tenant; Enterprise unlocks the UI and
+  runtime to use it.
+- **Ledger audit mode choice.** Community is immutable-only.
+  Enterprise unlocks Open Journal and Hybrid modes (per §7.2).
+- **Compliance API access from the app.** Built-in BAS submission,
+  STP (when offered), ABN/LEI/ABR/Companies-House lookup, e-invoicing.
+  Community users can call those APIs directly (they're separate paid
+  services); Enterprise bundles them into the UI.
+- **Priority support + signed releases + LTS branches.**
+
+### 6.3 Revenue sources, in order of likelihood
+
+1. **Enterprise licence.** Annual per-company fee. Priced well below
+   QBO/Xero for equivalent functionality.
+2. **Hosted SaaS.** Same codebase, we run it. Enterprise features on.
+   Target: users who like the philosophy but don't want to operate a
+   server.
+3. **Compliance APIs.** Paid hosted APIs (BAS, STP, ABN/LEI/ABR).
+   Usable standalone or via Enterprise UI integration.
+4. **Plugin marketplace revenue share.** First-party premium plugins
+   we publish; 3rd-party plugin listings with revenue share (see §14).
+5. **Custom solutions.** Bespoke integrations, migrations, reporting.
+6. **Partnerships.** Revenue share with certified bodies (LEI
+   Register, ASIC data providers, bank-feed aggregators).
+
+### 6.4 Ad slots (deferred, not enabled)
+
+The UI ships with **named rendering slots** (e.g. dashboard sidebar,
+empty-state panels) that are empty by default and config-driven. This
+costs nothing to build in now and preserves the option to run
+sponsored content in the hosted SaaS later without retrofitting the UI.
+Self-hosted deployments never render ads unless the operator
+explicitly enables a slot provider.
+
+### 6.5 Explicitly not doing
+
+- **Paywalling core ledger, reporting, or BAS.** Hero promise and
+  AGPL spirit. The Community edition is real, not a demo.
+- **Ads in self-hosted deployments by default.** Slots exist; they
+  stay empty unless the operator opts in.
+- **Selling user data.** Ever.
+- **DRM / phone-home licence enforcement.** Enterprise licence keys
+  validate locally against a public key. No network call required to
+  run the product.
 
 If the product never earns revenue, Richard has still replaced a $40/mo
 QBO subscription and owns his data outright. If it does earn revenue,
-it's from plumbing value-added services on top, not from holding the
-ledger hostage.
+it's from Enterprise gating, compliance plumbing, and the marketplace
+— not from holding the ledger hostage.
 
 ## 7. Architecture decisions
 
@@ -132,35 +177,45 @@ ledger hostage.
 - **Schema is multi-tenant from day 1.** Every business-data table has
   a `company_id` FK. Migrations assume this. Retrofitting is a refactor
   nobody wants.
-- **Deployment is single-tenant by default.** One Docker container per
-  business. Self-hosted users get privacy and simplicity. The multi-
-  tenant capability is used primarily for **intercompany support within
-  a single logged-in user** — e.g. Sauer Pty Ltd and Saueesti Trust
-  under one login, with reciprocal journals between them. That's a
-  genuine gap in the market.
-- **Future hosted SaaS** flips one flag to run multi-tenant across
-  businesses. Same code, different deployment config.
+- **Community runtime is single-tenant.** A runtime flag enforces
+  exactly one active `company_id` per deployment. The schema supports
+  more; the Community binary refuses to use them.
+- **Enterprise runtime unlocks multi-company / intercompany.**
+  Multiple companies under one login, reciprocal journals between
+  them — e.g. Sauer Pty Ltd and Saueesti Trust under one login. That's
+  the genuine gap in the market and the single biggest Enterprise
+  hook.
+- **Self-compiling users can flip the flag.** AGPL reality. Accepted.
+  The friction of rebuilding + self-supporting is the moat.
+- **Future hosted SaaS** flips the same flag server-side to run
+  multi-tenant across businesses. Same code, different deployment.
 
 ### 7.2 Audit / immutability model
 
-User-configurable per-company setting with three modes:
+Three modes exist in the codebase:
 
-1. **Immutable ledger** (default for paranoid users): posted journal
-   entries cannot be edited or deleted. Corrections are made via
-   explicit reversal entries. Full audit trail of who posted what when.
+1. **Immutable ledger:** posted journal entries cannot be edited or
+   deleted. Corrections are made via explicit reversal entries. Full
+   audit trail of who posted what when.
 2. **Open journal:** posted entries can be edited, but every edit is
    logged with actor, timestamp, and before/after snapshot. More
    convenient for bookkeepers who know what they're doing; still
    forensically recoverable.
-3. **Hybrid** (recommended default): entries editable within the
-   current period until period close; immutable after. Matches how
-   MYOB/Xero/QBO actually behave in practice.
+3. **Hybrid:** entries editable within the current period until period
+   close; immutable after. Matches how MYOB/Xero/QBO actually behave
+   in practice.
 
-The setting is per-company and changeable (with the change itself
-audited). A regulator auditing a Hybrid-mode business sees the
-period-close events and can reason about immutability windows. This
-decision goes in `settings.audit_mode` and is visible on every screen
-that writes data.
+**Edition gating:**
+
+- **Community edition:** Immutable ledger only. Not configurable.
+  This is the safest default for self-hosters and removes a class
+  of foot-guns for users who aren't trained bookkeepers.
+- **Enterprise edition:** All three modes available, per-company,
+  changeable at runtime (with the change itself audited).
+
+The setting lives in `settings.audit_mode` and is visible on every
+screen that writes data. A regulator auditing a Hybrid-mode business
+sees the period-close events and can reason about immutability windows.
 
 ### 7.3 Data integrity non-negotiables
 
@@ -217,6 +272,19 @@ kind of app:
   needs it. No Celery unless we're forced.
 - **Tests:** pytest + Hypothesis. Target 90%+ coverage on money
   arithmetic paths, 80%+ overall.
+- **Plugin / extension architecture:** a first-class plugin system
+  (see §14) lets the core stay small while letting third parties
+  extend sales, purchases, reporting, payments, imports. Plugins are
+  Python packages that register extension points declared by the
+  core — not iframes, not embedded browser views.
+- **Named rendering slots:** the UI renders through explicit slots
+  (e.g. `dashboard.sidebar`, `invoice.footer`, `account.empty_state`).
+  Slots are empty by default and config-driven. Plugins and the
+  future ad provider both use the same mechanism; the core never
+  knows the difference.
+- **Edition flag:** a runtime config key `edition = community |
+  enterprise` gates §6.2 features. Validated at startup from a
+  signed licence key (Enterprise only); Community needs no key.
 
 ## 8. Governance
 
@@ -268,7 +336,129 @@ Writing these down so we can't pretend they weren't known:
 | Data corruption bug in pre-v1 destroys Richard's live books. | Parallel-run with QBO for one full quarter before cutover. Automated DB backup every hour. Point-in-time recovery tested monthly. |
 | CLA wording inadequate for future commercial licensing. | Use a known-good template (Apache ICLA-derived). Lawyer review before first external contribution. |
 
-## 12. Reference material
+## 12. Edition matrix
+
+Unambiguous split so nobody has to guess what's in which tier.
+
+| Capability | Community (AGPL, free) | Enterprise (paid) |
+|---|---|---|
+| Chart of accounts, journal, GL | ✅ | ✅ |
+| Sales, purchases, contacts | ✅ | ✅ |
+| Bank reconcile | ✅ | ✅ |
+| GST / BAS report generation | ✅ | ✅ |
+| Full export (CSV, JSON, OFX, QIF, DB dump) | ✅ | ✅ |
+| Postgres + SQLite | ✅ | ✅ |
+| Single-company runtime | ✅ | ✅ |
+| Immutable audit mode | ✅ | ✅ |
+| Multi-company / intercompany runtime | ❌ | ✅ |
+| Open Journal / Hybrid audit modes | ❌ | ✅ |
+| Built-in BAS/STP/ABN API UI | ❌ | ✅ |
+| Priority support + signed LTS releases | ❌ | ✅ |
+| Marketplace plugin distribution (first-party) | ❌ | ✅ |
+| Source available | ✅ (AGPL) | ✅ (AGPL; Enterprise features under commercial licence) |
+| Self-compile to flip feature flags | ✅ allowed | ✅ allowed |
+
+Flipping a flag in a self-compiled build is never a licence violation.
+Running an unflagged commercial-licensed binary in production is.
+
+## 13. Plugin integration guidelines
+
+The product must feel like one application, not a skinned aggregator
+of third-party bolt-ons. MYOB v19's "Feature Pass" bundles and QBO's
+App Store both fail this bar — plugins live in iframes, carry
+inconsistent UX, re-authenticate against foreign systems, and leak
+their own terminology into the user's mental model. SAE Books plugins
+must not feel like that. The guidelines below are non-optional for
+listing in the first-party marketplace and strongly recommended for
+all plugins.
+
+### 13.1 What a plugin is
+
+- A Python package that declares extension points (hooks, commands,
+  UI slots, domain objects) against the SAE Books core plugin API.
+- Installed into the same Python environment as the core. Runs
+  in-process, uses the same database session, the same auth, the
+  same request/response cycle.
+- Distributed via the SAE Books plugin index (first-party) or
+  pip/git (third-party).
+
+### 13.2 What a plugin is not
+
+- **Not an iframe.** No embedding third-party web apps inside the
+  core UI via `<iframe>`, `<webview>`, or equivalent.
+- **Not a separate login.** Plugins use the core's authenticated
+  session. No "connect your Xyz account" flows that pop a second
+  auth surface *inside* the app. (External OAuth to third-party
+  services is fine — that's the plugin acting on behalf of the
+  user, not the user authenticating twice.)
+- **Not a separate visual language.** No plugin-specific fonts,
+  colour palettes, button shapes, or layout grids. The core ships
+  a design system; plugins consume it.
+- **Not a data island.** Plugins must store data in the same
+  Postgres database, in tables they declare via core-provided
+  migration helpers. No side databases, no plugin-owned SaaS
+  backends holding the user's financial data.
+
+### 13.3 Required integration surfaces
+
+A compliant plugin uses these and only these:
+
+1. **Hooks.** Named extension points the core emits (e.g.
+   `journal.before_post`, `invoice.after_send`, `report.bas.render`).
+   Plugins subscribe; the core calls them in-process.
+2. **Named UI slots.** The core renders through `{% slot "name" %}`
+   in HTMX templates. Plugins register slot contributions that
+   return HTML using the core's component library. Slot contributions
+   must be CSP-compliant and must not load external scripts or
+   stylesheets.
+3. **Domain objects.** Plugins can declare new doctypes (e.g.
+   "Lease", "Fixed Asset Register") via the core's ORM layer.
+   These participate in the core audit log automatically.
+4. **CLI commands.** Plugins can register `saebooks <plugin>
+   <command>` subcommands for admin/maintenance tasks.
+5. **API endpoints.** Plugins can mount FastAPI routers under
+   `/api/plugin/<name>/`. Same auth middleware, same rate limits,
+   same OpenAPI generation as the core.
+
+### 13.4 Plugin manifest
+
+Every plugin ships `saebooks.toml` declaring:
+
+- Name, version, author, licence
+- AGPL-compatibility statement (required for Community-marketplace
+  listing; Enterprise-marketplace plugins may be any licence)
+- Minimum SAE Books core version
+- Declared hooks, slots, doctypes, routes
+- Required core permissions
+- Third-party network endpoints the plugin will contact (shown to
+  the user at install time, per §7.4)
+
+### 13.5 First-party marketplace review
+
+Plugins listed in the first-party marketplace go through review:
+
+- Manifest accurate and complete
+- No iframe / webview / external-script usage
+- Uses the core design system components, not custom-rolled UI
+- Declared third-party endpoints match what the code actually
+  calls (we run it behind a recording proxy during review)
+- Security review proportional to permissions requested
+- Licence compatible with listing tier
+
+Third-party plugins distributed outside the marketplace are welcome
+but carry a "unverified plugin" warning at install time and cannot
+use the first-party marketplace namespace.
+
+### 13.6 Why this matters
+
+Every bookkeeping product that has tried to be an ecosystem without
+enforcing integration standards has ended up feeling like a portal
+of other people's websites. The core value proposition — *your
+books, your database, your control* — dies the moment a plugin
+slots an iframe over half the screen and asks the user to log into
+a third-party service to see their own data. This is a hard line.
+
+## 14. Reference material
 
 Extracted during project kickoff, retained as source material:
 
@@ -281,7 +471,7 @@ Extracted during project kickoff, retained as source material:
   - `odoo-l10n-au/` — Odoo Community AU chart of accounts + tax codes
     + BAS tags. This is our v1 seed.
 
-## 13. What's next
+## 15. What's next
 
 The immediate technical next step is Phase 1 of `SPEC.md`:
 
