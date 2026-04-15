@@ -1,11 +1,11 @@
 import asyncio
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from alembic import context
 from saebooks.config import settings as app_settings
 from saebooks.db import Base
 
@@ -16,7 +16,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Import models so they register with Base.metadata
-import saebooks.models  # noqa: F401
+import saebooks.models  # noqa: E402, F401
 
 target_metadata = Base.metadata
 

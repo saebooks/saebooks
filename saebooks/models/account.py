@@ -18,7 +18,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from saebooks.db import Base
 
 
-class AccountType(str, enum.Enum):
+class AccountType(enum.StrEnum):
     ASSET = "ASSET"
     LIABILITY = "LIABILITY"
     EQUITY = "EQUITY"
