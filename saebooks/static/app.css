@@ -286,3 +286,23 @@ form.tc-form button[type="submit"] {
 .recon-matched { opacity: 0.6; }
 .recon-table .num { font-family: var(--mono); }
 .match-source { margin-bottom: 1rem; }
+
+/* Account deletion / dependency report */
+.dep-report { margin-top: 0.5rem; }
+.dep-section { margin-bottom: 1.25rem; }
+.dep-section h2 {
+  font-size: 13px; text-transform: uppercase; letter-spacing: 0.03em;
+  margin: 0 0 0.4rem; color: var(--accent);
+}
+.migrate-form {
+  display: flex; gap: 0.75rem; align-items: end; margin-top: 0.5rem;
+}
+.migrate-form label {
+  display: flex; flex-direction: column; font-size: 11px;
+  color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.03em;
+}
+.migrate-form select {
+  font: 14px/1.2 inherit; padding: 0.3rem 0.4rem;
+  border: 1px solid var(--rule); background: #fff; color: var(--fg); min-width: 20rem;
+}
+.delete-clean { margin-top: 0.5rem; }

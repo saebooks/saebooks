@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}Delete {{ deps.account.code }} — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Delete account <span class="dim">{{ deps.account.code }} — {{ deps.account.name }}</span></h1>
+  <div class="meta">{{ company_name }}</div>
+</div>
+
+{% if request.query_params.get('error') == 'no_target' %}
+<div class="alert alert-error">Please select a target account for migration.</div>
+{% elif request.query_params.get('error') %}
+<div class="alert alert-error">{{ request.query_params.get('error') }}</div>
+{% endif %}
+
+{% if request.query_params.get('migrated') %}
+<div class="alert alert-ok">Migrated {{ request.query_params.get('migrated') }} references. You can now delete this account.</div>
+{% endif %}
+
+{% if not deps.has_any %}
+{# Clean account — can delete straight away #}
+<div class="delete-clean">
+  <p>This account has no journal entries, bank statement lines, child accounts, or templates referencing it.</p>
+  <form method="post" action="/accounts/{{ deps.account.id }}/delete"
+        onsubmit="return confirm('Permanently delete {{ deps.account.code }} {{ deps.account.name }}? This cannot be undone.')">
+    <button type="submit" class="btn-warn">Delete account</button>
+    <a href="/accounts" class="btn-secondary" style="margin-left:0.5rem">Cancel</a>
+  </form>
+</div>
+
+{% else %}
+{# Account has references — show them all #}
+<div class="dep-report">
+
+  {% if deps.journal_entries %}
+  <section class="dep-section">
+    <h2>Journal entries <span class="dim">· {{ deps.journal_entries|length }} entries, {{ deps.total_journal_lines }} lines</span></h2>
+    <table class="acct-table">
+      <thead>
+        <tr><th>Ref</th><th>Date</th><th>Status</th><th class="num">Lines on this account</th><th class="actions"></th></tr>
+      </thead>
+      <tbody>
+        {% for je in deps.journal_entries %}
+        <tr>
+          <td class="code">{{ je.ref }}</td>
+          <td>{{ je.entry_date }}</td>
+          <td>
+            {% if je.status == 'DRAFT' %}<span class="status-draft">Draft</span>
+            {% elif je.status == 'POSTED' %}<span class="status-posted">Posted</span>
+            {% else %}<span class="status-reversed">Reversed</span>{% endif %}
+          </td>
+          <td class="num">{{ je.line_count }}</td>
+          <td class="actions"><a href="/journal/{{ je.entry_id }}">View</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% endif %}
+
+  {% if deps.bank_statement_count > 0 %}
+  <section class="dep-section">
+    <h2>Bank statement lines <span class="dim">· {{ deps.bank_statement_count }}</span></h2>
+    <p class="dim">This account is used as a bank account with {{ deps.bank_statement_count }} imported statement line{{ 's' if deps.bank_statement_count != 1 }}.</p>
+  </section>
+  {% endif %}
+
+  {% if deps.child_accounts %}
+  <section class="dep-section">
+    <h2>Child accounts <span class="dim">· {{ deps.child_accounts|length }}</span></h2>
+    <p class="dim">These accounts have this account as their parent. Migration will reassign them to the target account.</p>
+    <table class="acct-table" style="max-width:30rem">
+      <tbody>
+        {% for child in deps.child_accounts %}
+        <tr>
+          <td class="code">{{ child.code }}</td>
+          <td>{{ child.name }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% endif %}
+
+  {% if deps.templates %}
+  <section class="dep-section">
+    <h2>Journal templates <span class="dim">· {{ deps.templates|length }}</span></h2>
+    <p class="dim">These templates reference this account in their lines. Migration will update them to the target account.</p>
+    <table class="acct-table" style="max-width:30rem">
+      <tbody>
+        {% for tmpl in deps.templates %}
+        <tr>
+          <td>{{ tmpl.name }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% endif %}
+
+  {# Migration option #}
+  {% if deps.has_blockers and candidates %}
+  <section class="dep-section migrate-section">
+    <h2>Migrate references</h2>
+    <p>Move all journal lines, bank statement lines, child accounts, and template references to another account, then delete this one.</p>
+    <form method="post" action="/accounts/{{ deps.account.id }}/migrate" class="migrate-form"
+          onsubmit="return confirm('Migrate all references from {{ deps.account.code }} to the selected account?')">
+      <label>
+        Target account
+        <select name="target_id" required>
+          <option value="">Select account…</option>
+          {% for a in candidates %}
+          <option value="{{ a.id }}">{{ a.code }} — {{ a.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit" class="btn">Migrate all references</button>
+    </form>
+  </section>
+  {% elif deps.has_blockers and not candidates %}
+  <div class="alert alert-error" style="margin-top:1rem">
+    No other {{ deps.account.account_type.value|replace('_',' ')|lower }} accounts available to migrate to.
+    Create one first, or manually reassign the journal entries above.
+  </div>
+  {% endif %}
+
+  {# Delete button — always shown, but with appropriate warning #}
+  <section class="dep-section" style="margin-top:1.5rem; padding-top:1rem; border-top:2px solid var(--rule);">
+    {% if deps.has_blockers %}
+    <p class="dim">You can also manually edit the journal entries above to remove references to this account, then come back here to delete it.</p>
+    <form method="post" action="/accounts/{{ deps.account.id }}/delete"
+          onsubmit="return confirm('⚠️ This account still has {{ deps.total_journal_lines }} journal line(s) and {{ deps.bank_statement_count }} bank statement line(s). The database will REJECT this delete. Are you sure?')">
+      <button type="submit" class="btn-warn">Force delete (will fail if references remain)</button>
+      <a href="/accounts" class="btn-secondary" style="margin-left:0.5rem">Cancel</a>
+    </form>
+    {% else %}
+    <p>All hard references have been cleared. This account can now be safely deleted.</p>
+    <form method="post" action="/accounts/{{ deps.account.id }}/delete"
+          onsubmit="return confirm('Permanently delete {{ deps.account.code }} {{ deps.account.name }}? This cannot be undone.')">
+      <button type="submit" class="btn-warn">Delete account</button>
+      <a href="/accounts" class="btn-secondary" style="margin-left:0.5rem">Cancel</a>
+    </form>
+    {% endif %}
+  </section>
+
+</div>
+{% endif %}
+{% endblock %}

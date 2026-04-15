@@ -21,6 +21,7 @@
         <td class="rec">{% if a.reconcile %}✓{% endif %}</td>
         <td class="actions">
           <a href="/accounts/{{ a.id }}/edit">edit</a>
+          <a href="/accounts/{{ a.id }}/delete">delete</a>
           <form method="post" action="/accounts/{{ a.id }}/archive" style="display:inline"
                 onsubmit="return confirm('Archive {{ a.code }} {{ a.name }}?')">
             <button type="submit" class="linkish">archive</button>

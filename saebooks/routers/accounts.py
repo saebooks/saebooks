@@ -142,3 +142,68 @@ async def accounts_archive(account_id: UUID) -> RedirectResponse:
     async with AsyncSessionLocal() as session:
         await svc.archive(session, account_id)
     return RedirectResponse("/accounts", status_code=303)
+
+
+@router.get("/accounts/{account_id}/delete", response_class=HTMLResponse)
+async def accounts_delete_check(request: Request, account_id: UUID) -> HTMLResponse:
+    """Show dependency report before deletion."""
+    company = await _first_company()
+    async with AsyncSessionLocal() as session:
+        deps = await svc.check_dependencies(session, account_id)
+
+        # Get candidate accounts for migration (same type, not archived, not self)
+        all_accounts = await svc.list_active(session, company.id)
+        candidates = [
+            a for a in all_accounts
+            if a.id != account_id and a.account_type == deps.account.account_type
+        ]
+
+    return templates.TemplateResponse(
+        request,
+        "accounts/delete.html",
+        {
+            "edition": settings.edition,
+            "company_name": company.name,
+            "deps": deps,
+            "candidates": candidates,
+        },
+    )
+
+
+@router.post("/accounts/{account_id}/migrate", response_model=None)
+async def accounts_migrate(
+    request: Request,
+    account_id: UUID,
+) -> RedirectResponse | HTMLResponse:
+    """Migrate all references to target account, then redirect to delete check."""
+    form = await request.form()
+    target_raw = str(form.get("target_id", ""))
+    if not target_raw:
+        return RedirectResponse(f"/accounts/{account_id}/delete?error=no_target", status_code=303)
+
+    target_id = UUID(target_raw)
+    async with AsyncSessionLocal() as session:
+        counts = await svc.migrate_account(session, account_id, target_id)
+
+    total = sum(counts.values())
+    return RedirectResponse(
+        f"/accounts/{account_id}/delete?migrated={total}",
+        status_code=303,
+    )
+
+
+@router.post("/accounts/{account_id}/delete", response_model=None)
+async def accounts_delete(
+    request: Request,
+    account_id: UUID,
+) -> RedirectResponse | HTMLResponse:
+    """Hard-delete the account."""
+    try:
+        async with AsyncSessionLocal() as session:
+            await svc.delete_account(session, account_id)
+    except Exception as exc:
+        return RedirectResponse(
+            f"/accounts/{account_id}/delete?error={exc}",
+            status_code=303,
+        )
+    return RedirectResponse("/accounts?deleted=1", status_code=303)
