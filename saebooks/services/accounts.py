@@ -1,4 +1,22 @@
-"""Account service — CRUD, dependency check, migrate, delete."""
+"""Account service — CRUD, dependency check, migrate, delete.
+
+Account code structure:
+  - Codes must be numeric only
+  - First digit determines the account type range
+  - Parent is auto-derived from the longest matching code prefix
+  - Shorter codes act as group headers; leaf codes are posting accounts
+
+Digit-to-type mapping (Australian standard):
+  1 = ASSET
+  2 = LIABILITY
+  3 = EQUITY
+  4 = INCOME, OTHER_INCOME
+  5 = COST_OF_SALES
+  6 = EXPENSE
+  7 = OTHER_EXPENSE
+  8 = OTHER_INCOME
+  9 = EXPENSE, OTHER_EXPENSE
+"""
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -12,6 +30,108 @@ from saebooks.models.account import Account, AccountType
 from saebooks.models.bank_statement import BankStatementLine
 from saebooks.models.journal import JournalEntry, JournalLine
 from saebooks.models.journal_template import JournalTemplate
+
+# ---------------------------------------------------------------------------
+# Code structure: first digit → allowed account types
+# ---------------------------------------------------------------------------
+
+DIGIT_TO_TYPES: dict[str, set[AccountType]] = {
+    "1": {AccountType.ASSET},
+    "2": {AccountType.LIABILITY},
+    "3": {AccountType.EQUITY},
+    "4": {AccountType.INCOME, AccountType.OTHER_INCOME},
+    "5": {AccountType.COST_OF_SALES},
+    "6": {AccountType.EXPENSE},
+    "7": {AccountType.OTHER_EXPENSE},
+    "8": {AccountType.OTHER_INCOME},
+    "9": {AccountType.EXPENSE, AccountType.OTHER_EXPENSE},
+}
+
+DIGIT_TO_LABEL: dict[str, str] = {
+    "1": "Assets",
+    "2": "Liabilities",
+    "3": "Equity",
+    "4": "Income",
+    "5": "Cost of sales",
+    "6": "Expenses",
+    "7": "Other expense",
+    "8": "Other income",
+    "9": "Other expense",
+}
+
+
+def validate_code(code: str, account_type: AccountType) -> list[str]:
+    """Validate an account code. Returns list of error messages (empty = OK)."""
+    errors: list[str] = []
+    code = code.strip()
+
+    if not code:
+        errors.append("Account code is required.")
+        return errors
+
+    if not code.isdigit():
+        errors.append("Account code must be numeric only (digits 0-9).")
+        return errors
+
+    first = code[0]
+    allowed = DIGIT_TO_TYPES.get(first)
+    if allowed is None:
+        errors.append(f"First digit '{first}' is not a valid account range (use 1-9).")
+    elif account_type not in allowed:
+        type_names = ", ".join(sorted(t.value.replace("_", " ").title() for t in allowed))
+        errors.append(
+            f"Account code starting with '{first}' must be type: {type_names}. "
+            f"Got: {account_type.value.replace('_', ' ').title()}."
+        )
+
+    return errors
+
+
+def check_code_anomaly(code: str, account_type: AccountType) -> str | None:
+    """Check if an existing account's code doesn't match the expected type range.
+
+    Returns a warning string if there's a mismatch, None otherwise.
+    Used for flagging seed data anomalies without blocking.
+    """
+    if not code or not code.isdigit():
+        return None
+    first = code[0]
+    allowed = DIGIT_TO_TYPES.get(first)
+    if allowed and account_type not in allowed:
+        expected = ", ".join(sorted(t.value for t in allowed))
+        return f"Code {code} starts with '{first}' (expected {expected}) but is {account_type.value}"
+    return None
+
+
+async def find_parent(
+    session: AsyncSession, company_id: uuid.UUID, code: str
+) -> Account | None:
+    """Find the parent account by longest matching code prefix.
+
+    For code "11111", tries "1111", "111", "11", "1" in order.
+    Returns the first existing account that matches.
+    """
+    for length in range(len(code) - 1, 0, -1):
+        prefix = code[:length]
+        result = await session.execute(
+            select(Account).where(
+                Account.company_id == company_id,
+                Account.code == prefix,
+                Account.archived_at.is_(None),
+            )
+        )
+        parent = result.scalars().first()
+        if parent is not None:
+            return parent
+    return None
+
+
+def indent_level(code: str, min_length: int = 1) -> int:
+    """Calculate the indent level for display.
+
+    Level 0 for single-digit codes (top headers), +1 per extra digit.
+    """
+    return max(0, len(code) - min_length)
 
 
 async def list_active(
@@ -39,12 +159,24 @@ async def create(
     reconcile: bool = False,
     is_header: bool = False,
     tax_code_default: str | None = None,
+    skip_validation: bool = False,
 ) -> Account:
+    code = code.strip()
+
+    if not skip_validation:
+        errors = validate_code(code, account_type)
+        if errors:
+            raise ValueError("; ".join(errors))
+
+    # Auto-derive parent from code prefix
+    parent = await find_parent(session, company_id, code)
+
     account = Account(
         company_id=company_id,
-        code=code.strip(),
+        code=code,
         name=name.strip(),
         account_type=account_type,
+        parent_id=parent.id if parent else None,
         reconcile=reconcile,
         is_header=is_header,
         tax_code_default=tax_code_default,
@@ -65,12 +197,22 @@ async def update(
     reconcile: bool | None = None,
     is_header: bool | None = None,
     tax_code_default: str | None = None,
+    skip_validation: bool = False,
 ) -> Account:
     account = await session.get(Account, account_id)
     if account is None:
         raise ValueError(f"Account {account_id} not found")
+
+    new_code = code.strip() if code is not None else account.code
+    new_type = account_type if account_type is not None else account.account_type
+
+    if not skip_validation:
+        errors = validate_code(new_code, new_type)
+        if errors:
+            raise ValueError("; ".join(errors))
+
     if code is not None:
-        account.code = code.strip()
+        account.code = new_code
     if name is not None:
         account.name = name.strip()
     if account_type is not None:
@@ -81,6 +223,14 @@ async def update(
         account.is_header = is_header
     if tax_code_default is not None:
         account.tax_code_default = tax_code_default or None
+
+    # Re-derive parent if code changed
+    if code is not None:
+        parent = await find_parent(
+            session, account.company_id, new_code
+        )
+        account.parent_id = parent.id if parent else None
+
     await session.commit()
     await session.refresh(account)
     return account

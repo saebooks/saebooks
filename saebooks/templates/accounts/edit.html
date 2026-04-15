@@ -6,8 +6,13 @@
   <div class="meta">{{ company_name }}</div>
 </div>
 
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
 <form method="post" action="/accounts/{{ account.id }}" class="tc-form">
-  <label>Code <input name="code" required maxlength="32" value="{{ account.code }}"></label>
+  <label>Code <input name="code" required maxlength="32" pattern="[0-9]+" title="Digits only"
+    value="{{ account.code }}"></label>
   <label>Name <input name="name" required value="{{ account.name }}"></label>
   <label>Type
     <select name="account_type">
@@ -34,4 +39,10 @@
     <a href="/accounts">Cancel</a>
   </div>
 </form>
+
+{% if account.parent_id %}
+<p class="dim" style="margin-top:0.75rem;font-size:12px">
+  Parent is auto-derived from code prefix.
+</p>
+{% endif %}
 {% endblock %}

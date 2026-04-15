@@ -6,26 +6,49 @@
   <div class="meta">{{ total }} accounts · {{ company_name }}</div>
 </div>
 
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
+{% if request.query_params.get('deleted') %}
+<div class="alert alert-ok">Account deleted.</div>
+{% endif %}
+
 {% for group in groups %}
 <section class="acct-group">
-  <h2>{{ group.label }} <span class="dim">· {{ group.accounts|length }}</span></h2>
+  <h2>{{ group.digit }} — {{ group.label }} <span class="dim">· {{ group.count }}</span></h2>
   <table class="acct-table">
     <thead>
-      <tr><th class="code">Code</th><th>Name</th><th class="rec">Reconcile</th><th class="actions"></th></tr>
+      <tr>
+        <th class="code">Code</th>
+        <th>Name</th>
+        <th style="width:8rem;font-size:10px">Type</th>
+        <th class="rec">Rec</th>
+        <th class="rec">Hdr</th>
+        <th class="actions"></th>
+      </tr>
     </thead>
     <tbody>
-      {% for a in group.accounts %}
-      <tr>
-        <td class="code">{{ a.code }}</td>
-        <td>{{ a.name }}</td>
-        <td class="rec">{% if a.reconcile %}✓{% endif %}</td>
+      {% for row in group.rows %}
+      <tr class="{{ 'acct-header-row' if row.account.is_header }}{{ ' acct-anomaly' if row.anomaly }}">
+        <td class="code">{{ row.account.code }}</td>
+        <td style="padding-left: {{ 0.5 + row.indent * 1.2 }}rem">
+          {% if row.account.is_header %}<strong>{{ row.account.name }}</strong>
+          {% else %}{{ row.account.name }}{% endif %}
+        </td>
+        <td style="font-size:10px;color:var(--fg-dim)">{{ row.account.account_type.value|replace('_',' ')|lower }}</td>
+        <td class="rec">{% if row.account.reconcile %}✓{% endif %}</td>
+        <td class="rec">{% if row.account.is_header %}H{% endif %}</td>
         <td class="actions">
-          <a href="/accounts/{{ a.id }}/edit">edit</a>
-          <a href="/accounts/{{ a.id }}/delete">delete</a>
-          <form method="post" action="/accounts/{{ a.id }}/archive" style="display:inline"
-                onsubmit="return confirm('Archive {{ a.code }} {{ a.name }}?')">
+          <a href="/accounts/{{ row.account.id }}/edit">edit</a>
+          <a href="/accounts/{{ row.account.id }}/delete">delete</a>
+          <form method="post" action="/accounts/{{ row.account.id }}/archive" style="display:inline"
+                onsubmit="return confirm('Archive {{ row.account.code }} {{ row.account.name }}?')">
             <button type="submit" class="linkish">archive</button>
           </form>
+          {% if row.anomaly %}
+          <span class="anomaly-flag" title="{{ row.anomaly }}">⚠</span>
+          {% endif %}
         </td>
       </tr>
       {% endfor %}
@@ -36,12 +59,22 @@
 
 <section class="new-form">
   <h2>+ New account</h2>
+  <div class="code-help">
+    <strong>Numbering structure:</strong> First digit determines the type range.
+    {% for d, label in digit_labels.items() %}
+    <span class="code-hint">{{ d }}=<em>{{ label }}</em></span>
+    {% endfor %}
+  </div>
   <form method="post" action="/accounts" class="tc-form">
-    <label>Code <input name="code" required maxlength="32" placeholder="e.g. 61500"></label>
-    <label>Name <input name="name" required placeholder="e.g. Insurance expense"></label>
+    <label>Code <input name="code" required maxlength="32" pattern="[0-9]+" title="Digits only"
+      placeholder="e.g. 11111" value="{{ form_code or '' }}"></label>
+    <label>Name <input name="name" required placeholder="e.g. Westpac Business Account"
+      value="{{ form_name or '' }}"></label>
     <label>Type
-      <select name="account_type">
-        {% for v, l in account_types %}<option value="{{ v }}">{{ l }}</option>{% endfor %}
+      <select name="account_type" id="new-acct-type">
+        {% for v, l in account_types %}
+        <option value="{{ v }}" {% if form_type == v %}selected{% endif %}>{{ l }}</option>
+        {% endfor %}
       </select>
     </label>
     <label>Reconcile
@@ -58,4 +91,23 @@
     <button type="submit">Create</button>
   </form>
 </section>
+
+<script>
+// Auto-suggest account type based on first digit of code
+const digitTypes = {
+  {% for d, types in digit_types.items() %}
+  '{{ d }}': '{{ types|list|first }}',
+  {% endfor %}
+};
+const codeInput = document.querySelector('input[name="code"]');
+const typeSelect = document.getElementById('new-acct-type');
+if (codeInput && typeSelect) {
+  codeInput.addEventListener('input', function() {
+    const first = this.value.trim()[0];
+    if (first && digitTypes[first]) {
+      typeSelect.value = digitTypes[first];
+    }
+  });
+}
+</script>
 {% endblock %}
