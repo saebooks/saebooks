@@ -139,6 +139,12 @@
   {% if not readonly %}
   <div class="je-actions">
     <button type="button" id="add-line" class="btn-secondary">+ Add line</button>
+    {% if entry %}
+    <form method="post" action="/journal/{{ entry.id }}/delete" style="display:inline"
+          onsubmit="return confirm('Delete {{ entry.ref }}? This cannot be undone.')">
+      <button type="submit" class="btn-warn">Delete</button>
+    </form>
+    {% endif %}
     <div class="spacer"></div>
     <div class="override-group" id="override-group" style="display:none">
       <label>Override reason <input name="override_reason" placeholder="e.g. BAS amendment"></label>
@@ -147,15 +153,19 @@
     <button type="submit" name="action" value="post" class="btn">Post</button>
   </div>
   {% else %}
-    {% if entry.status == 'POSTED' %}
     <div class="je-actions">
-      <div class="spacer"></div>
+      {% if entry.status == 'POSTED' %}
       <form method="post" action="/journal/{{ entry.id }}/reverse" style="display:inline"
             onsubmit="return confirm('Create reversal of {{ entry.ref }}?')">
-        <button type="submit" class="btn-warn">Reverse this entry</button>
+        <button type="submit" class="btn-warn">Reverse</button>
       </form>
+      {% endif %}
+      <form method="post" action="/journal/{{ entry.id }}/delete" style="display:inline"
+            onsubmit="return confirm('Delete {{ entry.ref }}? This cannot be undone.')">
+        <button type="submit" class="btn-warn">Delete</button>
+      </form>
+      <div class="spacer"></div>
     </div>
-    {% endif %}
     {% if entry.status == 'REVERSED' %}
     <div class="alert alert-info">This entry has been reversed.</div>
     {% endif %}

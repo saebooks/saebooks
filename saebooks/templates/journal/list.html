@@ -23,6 +23,7 @@
       <th>Lines</th>
       <th class="rate">Total DR</th>
       <th>Status</th>
+      <th class="actions"></th>
     </tr>
   </thead>
   <tbody>
@@ -36,10 +37,16 @@
       <td>
         <span class="status-{{ e.status|lower }}">{{ e.status }}</span>
       </td>
+      <td class="actions">
+        <form method="post" action="/journal/{{ e.id }}/delete" style="display:inline"
+              onsubmit="return confirm('Delete {{ e.ref }}?')">
+          <button type="submit" class="linkish">delete</button>
+        </form>
+      </td>
     </tr>
     {% endfor %}
     {% if not entries %}
-    <tr><td colspan="6" class="dim" style="text-align:center;padding:1rem">No entries yet</td></tr>
+    <tr><td colspan="7" class="dim" style="text-align:center;padding:1rem">No entries yet</td></tr>
     {% endif %}
   </tbody>
 </table>

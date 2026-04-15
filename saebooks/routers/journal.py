@@ -238,3 +238,10 @@ async def journal_reverse(entry_id: uuid.UUID) -> RedirectResponse:
         except PostingError as exc:
             raise HTTPException(400, str(exc)) from exc
     return RedirectResponse(f"/journal/{reversal.id}", status_code=303)
+
+
+@router.post("/{entry_id}/delete")
+async def journal_delete(entry_id: uuid.UUID) -> RedirectResponse:
+    async with AsyncSessionLocal() as session:
+        await svc.delete(session, entry_id)
+    return RedirectResponse("/journal", status_code=303)

@@ -28,7 +28,7 @@ services:
       - ./alembic.ini:/app/alembic.ini
       - ./tests:/app/tests
     ports:
-      - "127.0.0.1:8042:8000"
+      - "8042:8000"
 
 volumes:
   saebooks_db:

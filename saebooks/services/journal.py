@@ -1,4 +1,4 @@
-"""Journal entry service — create, update, post, reverse.
+"""Journal entry service — create, update, post, reverse, delete.
 
 Business rules:
 - Drafts may be unbalanced; posts must balance (sum debits == sum credits).
@@ -262,6 +262,16 @@ async def reverse(
     await session.commit()
 
     return reversal
+
+
+async def delete(
+    session: AsyncSession,
+    entry_id: uuid.UUID,
+) -> None:
+    """Delete a journal entry and its lines. Any status — MYOB-style."""
+    entry = await get(session, entry_id)
+    await session.delete(entry)
+    await session.commit()
 
 
 async def lock_period(
