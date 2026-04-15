@@ -2,7 +2,7 @@
 {% block title %}{% if entry %}{{ entry.ref }}{% else %}New journal entry{% endif %} — SAE Books{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h1>{% if entry %}{{ entry.ref }}{% else %}New journal entry{% endif %}</h1>
+  <h1>{% if entry %}{{ entry.ref }}{% elif template_name is defined and template_name %}From template: {{ template_name }}{% else %}New journal entry{% endif %}</h1>
   <div class="meta">{{ company_name }}</div>
 </div>
 
@@ -91,25 +91,34 @@
         </tr>
         {% endfor %}
       {% else %}
-        {% for i in range(3) %}
+        {% set tlines = template_lines if template_lines is defined and template_lines else [] %}
+        {% set line_count = tlines|length if tlines else 3 %}
+        {% for i in range(line_count) %}
+        {% set tl = tlines[i] if tlines and i < tlines|length else {} %}
         <tr class="je-line" data-idx="{{ i }}">
           <td class="ln">{{ i + 1 }}</td>
           <td class="acct">
             <select name="line_{{ i }}_account_id">
               <option value="">—</option>
               {% for a in accounts %}
-              <option value="{{ a.id }}">{{ a.code }} {{ a.name }}</option>
+              <option value="{{ a.id }}"
+                {% if tl.get('account_id') == a.id|string %}selected{% endif %}>
+                {{ a.code }} {{ a.name }}
+              </option>
               {% endfor %}
             </select>
           </td>
-          <td><input name="line_{{ i }}_description"></td>
-          <td class="num"><input name="line_{{ i }}_debit" type="number" step="0.01" value="0" class="debit-input"></td>
-          <td class="num"><input name="line_{{ i }}_credit" type="number" step="0.01" value="0" class="credit-input"></td>
+          <td><input name="line_{{ i }}_description" value="{{ tl.get('description', '') }}"></td>
+          <td class="num"><input name="line_{{ i }}_debit" type="number" step="0.01" value="{{ tl.get('debit', '0') }}" class="debit-input"></td>
+          <td class="num"><input name="line_{{ i }}_credit" type="number" step="0.01" value="{{ tl.get('credit', '0') }}" class="credit-input"></td>
           <td class="tc">
             <select name="line_{{ i }}_tax_code_id" class="tc-select">
               <option value="">—</option>
               {% for tc in tax_codes %}
-              <option value="{{ tc.id }}" data-rate="{{ tc.rate }}">{{ tc.code }}</option>
+              <option value="{{ tc.id }}" data-rate="{{ tc.rate }}"
+                {% if tl.get('tax_code_id') == tc.id|string %}selected{% endif %}>
+                {{ tc.code }}
+              </option>
               {% endfor %}
             </select>
           </td>
@@ -165,6 +174,15 @@
         <button type="submit" class="btn-warn">Delete</button>
       </form>
       <div class="spacer"></div>
+      <div class="save-template-inline" id="save-template-toggle">
+        <button type="button" class="btn-secondary" onclick="document.getElementById('save-template-form').style.display='flex'">Save as template</button>
+      </div>
+      <form method="post" action="/templates/from-entry/{{ entry.id }}" id="save-template-form"
+            style="display:none;gap:0.5rem;align-items:end">
+        <input name="name" required placeholder="Template name" style="padding:0.3rem;border:1px solid var(--rule)">
+        <input name="description" placeholder="Description (optional)" style="padding:0.3rem;border:1px solid var(--rule)">
+        <button type="submit" class="btn">Save</button>
+      </form>
     </div>
     {% if entry.status == 'REVERSED' %}
     <div class="alert alert-info">This entry has been reversed.</div>

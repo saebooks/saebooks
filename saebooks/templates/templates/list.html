@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Journal templates — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Journal templates</h1>
+  <div class="meta">{{ templates|length }} templates · {{ company_name }}</div>
+</div>
+
+<table class="acct-table">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Description</th>
+      <th>Lines</th>
+      <th class="actions"></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for t in templates %}
+    <tr>
+      <td><strong>{{ t.name }}</strong></td>
+      <td class="dim">{{ t.description or "" }}</td>
+      <td>{{ t.lines|length }}</td>
+      <td class="actions">
+        <a href="/templates/{{ t.id }}/use" class="btn-secondary" style="padding:0.15rem 0.5rem;font-size:11px">Use</a>
+        <form method="post" action="/templates/{{ t.id }}/delete" style="display:inline"
+              onsubmit="return confirm('Delete template {{ t.name }}?')">
+          <button type="submit" class="linkish">delete</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    {% if not templates %}
+    <tr><td colspan="4" class="dim" style="text-align:center;padding:1rem">
+      No templates yet. Save one from a journal entry.
+    </td></tr>
+    {% endif %}
+  </tbody>
+</table>
+
+<p class="dim" style="font-size:12px;margin-top:1rem">
+  To create a template, open a journal entry and click "Save as template".
+</p>
+{% endblock %}
