@@ -77,6 +77,18 @@ async def test_duplicate_code_blocked_within_company() -> None:
 async def test_archive_then_reuse_code() -> None:
     """After archive, the same code can be re-created (partial-unique index)."""
     company = await _active_company()
+
+    # Cleanup from any prior run
+    async with AsyncSessionLocal() as session:
+        rows = await session.execute(
+            select(TaxCode).where(
+                TaxCode.company_id == company.id, TaxCode.code == "REUSE"
+            )
+        )
+        for row in rows.scalars().all():
+            await session.delete(row)
+        await session.commit()
+
     async with AsyncSessionLocal() as session:
         first = await svc.create(
             session, company.id, code="REUSE", name="v1", rate=Decimal("10")
@@ -85,4 +97,17 @@ async def test_archive_then_reuse_code() -> None:
 
     async with AsyncSessionLocal() as session:
         # Should succeed — the archived one no longer occupies the unique slot
-        await svc.create(session, company.id, code="REUSE", name="v2", rate=Decimal("0"))
+        await svc.create(
+            session, company.id, code="REUSE", name="v2", rate=Decimal("0")
+        )
+
+    # Cleanup
+    async with AsyncSessionLocal() as session:
+        rows = await session.execute(
+            select(TaxCode).where(
+                TaxCode.company_id == company.id, TaxCode.code == "REUSE"
+            )
+        )
+        for row in rows.scalars().all():
+            await session.delete(row)
+        await session.commit()

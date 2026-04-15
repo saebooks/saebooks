@@ -1,0 +1,283 @@
+"""Journal entry service — create, update, post, reverse.
+
+Business rules:
+- Drafts may be unbalanced; posts must balance (sum debits == sum credits).
+- Period-lock check: posting into a locked period requires override_reason.
+- Immutable mode (Community default): posted entries can only be reversed,
+  not edited. Hybrid/Open modes allow edit with full audit trail.
+- Auto-ref: JE-NNNNNN, from a Postgres sequence. User may override.
+"""
+import uuid
+from datetime import UTC, date, datetime
+from decimal import Decimal
+
+from sqlalchemy import func, select, text
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine, PeriodLock
+from saebooks.services import settings as settings_svc
+
+
+class PostingError(Exception):
+    pass
+
+
+async def next_ref(session: AsyncSession) -> str:
+    result = await session.execute(text("SELECT nextval('journal_ref_seq')"))
+    seq = result.scalar_one()
+    return f"JE-{seq:06d}"
+
+
+async def create_draft(
+    session: AsyncSession,
+    *,
+    company_id: uuid.UUID,
+    entry_date: date,
+    description: str | None = None,
+    ref: str | None = None,
+    lines: list[dict[str, object]] | None = None,
+) -> JournalEntry:
+    if not ref:
+        ref = await next_ref(session)
+
+    entry = JournalEntry(
+        company_id=company_id,
+        ref=ref,
+        entry_date=entry_date,
+        description=description,
+        status=EntryStatus.DRAFT,
+    )
+    session.add(entry)
+    await session.flush()
+
+    if lines:
+        for i, line_data in enumerate(lines, 1):
+            session.add(
+                JournalLine(
+                    entry_id=entry.id,
+                    line_no=i,
+                    account_id=line_data["account_id"],
+                    description=line_data.get("description"),
+                    debit=Decimal(str(line_data.get("debit", 0))),
+                    credit=Decimal(str(line_data.get("credit", 0))),
+                    tax_code_id=line_data.get("tax_code_id"),
+                    gst_amount=line_data.get("gst_amount"),
+                )
+            )
+
+    await session.commit()
+    return await get(session, entry.id)
+
+
+async def get(session: AsyncSession, entry_id: uuid.UUID) -> JournalEntry:
+    result = await session.execute(
+        select(JournalEntry)
+        .options(selectinload(JournalEntry.lines))
+        .where(JournalEntry.id == entry_id)
+    )
+    entry = result.scalar_one_or_none()
+    if entry is None:
+        raise ValueError(f"Journal entry {entry_id} not found")
+    return entry
+
+
+async def list_entries(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    *,
+    status: EntryStatus | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[JournalEntry]:
+    stmt = (
+        select(JournalEntry)
+        .options(selectinload(JournalEntry.lines))
+        .where(JournalEntry.company_id == company_id)
+    )
+    if status is not None:
+        stmt = stmt.where(JournalEntry.status == status)
+    stmt = stmt.order_by(JournalEntry.entry_date.desc(), JournalEntry.ref.desc())
+    stmt = stmt.limit(limit).offset(offset)
+    result = await session.execute(stmt)
+    return list(result.scalars().unique().all())
+
+
+async def update_draft(
+    session: AsyncSession,
+    entry_id: uuid.UUID,
+    *,
+    entry_date: date | None = None,
+    description: str | None = None,
+    ref: str | None = None,
+    lines: list[dict[str, object]] | None = None,
+) -> JournalEntry:
+    entry = await get(session, entry_id)
+    if entry.status != EntryStatus.DRAFT:
+        audit_mode = await settings_svc.get(session, "audit_mode", "immutable")
+        if audit_mode == "immutable":
+            raise PostingError("Cannot edit a posted entry in immutable mode — reverse instead")
+
+    if entry_date is not None:
+        entry.entry_date = entry_date
+    if description is not None:
+        entry.description = description
+    if ref is not None:
+        entry.ref = ref
+
+    if lines is not None:
+        # Replace all lines
+        for old_line in entry.lines:
+            await session.delete(old_line)
+        await session.flush()
+        for i, line_data in enumerate(lines, 1):
+            session.add(
+                JournalLine(
+                    entry_id=entry.id,
+                    line_no=i,
+                    account_id=line_data["account_id"],
+                    description=line_data.get("description"),
+                    debit=Decimal(str(line_data.get("debit", 0))),
+                    credit=Decimal(str(line_data.get("credit", 0))),
+                    tax_code_id=line_data.get("tax_code_id"),
+                    gst_amount=line_data.get("gst_amount"),
+                )
+            )
+
+    await session.commit()
+    return await get(session, entry_id)
+
+
+async def _check_balance(entry: JournalEntry) -> None:
+    total_debit = sum(line.debit for line in entry.lines)
+    total_credit = sum(line.credit for line in entry.lines)
+    if total_debit != total_credit:
+        raise PostingError(
+            f"Entry {entry.ref} is unbalanced: "
+            f"debits={total_debit}, credits={total_credit}"
+        )
+    if not entry.lines:
+        raise PostingError(f"Entry {entry.ref} has no lines")
+
+
+async def _check_period_lock(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    entry_date: date,
+    override_reason: str | None,
+) -> None:
+    result = await session.execute(
+        select(func.max(PeriodLock.locked_through)).where(
+            PeriodLock.company_id == company_id
+        )
+    )
+    locked_through = result.scalar_one_or_none()
+    if (
+        locked_through is not None
+        and entry_date <= locked_through
+        and not override_reason
+    ):
+        raise PostingError(
+            f"Period is locked through {locked_through}. "
+            f"Provide an override reason to post into a locked period."
+        )
+
+
+async def post(
+    session: AsyncSession,
+    entry_id: uuid.UUID,
+    *,
+    posted_by: str | None = None,
+    override_reason: str | None = None,
+) -> JournalEntry:
+    entry = await get(session, entry_id)
+    if entry.status == EntryStatus.POSTED:
+        raise PostingError(f"Entry {entry.ref} is already posted")
+    if entry.status == EntryStatus.REVERSED:
+        raise PostingError(f"Entry {entry.ref} has been reversed")
+
+    await _check_balance(entry)
+    await _check_period_lock(session, entry.company_id, entry.entry_date, override_reason)
+
+    entry.status = EntryStatus.POSTED
+    entry.posted_at = datetime.now(UTC)
+    entry.posted_by = posted_by
+    if override_reason:
+        entry.override_reason = override_reason
+
+    await session.commit()
+    return entry
+
+
+async def reverse(
+    session: AsyncSession,
+    entry_id: uuid.UUID,
+    *,
+    reversal_date: date | None = None,
+    posted_by: str | None = None,
+    override_reason: str | None = None,
+) -> JournalEntry:
+    """Create and post a reversal of a posted entry."""
+    original = await get(session, entry_id)
+    if original.status != EntryStatus.POSTED:
+        raise PostingError(f"Can only reverse posted entries (current: {original.status})")
+
+    rev_date = reversal_date or original.entry_date
+    rev_ref = await next_ref(session)
+
+    reversal = JournalEntry(
+        company_id=original.company_id,
+        ref=rev_ref,
+        entry_date=rev_date,
+        description=f"Reversal of {original.ref}: {original.description or ''}".strip(),
+        status=EntryStatus.DRAFT,
+        reversal_of_id=original.id,
+    )
+    session.add(reversal)
+    await session.flush()
+
+    for line in original.lines:
+        session.add(
+            JournalLine(
+                entry_id=reversal.id,
+                line_no=line.line_no,
+                account_id=line.account_id,
+                description=line.description,
+                debit=line.credit,
+                credit=line.debit,
+                tax_code_id=line.tax_code_id,
+                gst_amount=-line.gst_amount if line.gst_amount else None,
+            )
+        )
+
+    await session.commit()
+
+    # Auto-post the reversal
+    reversal = await post(
+        session, reversal.id, posted_by=posted_by, override_reason=override_reason
+    )
+
+    # Mark original as reversed
+    original.status = EntryStatus.REVERSED
+    await session.commit()
+
+    return reversal
+
+
+async def lock_period(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    locked_through: date,
+    *,
+    locked_by: str | None = None,
+    reason: str | None = None,
+) -> PeriodLock:
+    lock = PeriodLock(
+        company_id=company_id,
+        locked_through=locked_through,
+        locked_by=locked_by,
+        reason=reason,
+    )
+    session.add(lock)
+    await session.commit()
+    return lock
