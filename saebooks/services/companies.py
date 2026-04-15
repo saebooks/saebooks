@@ -7,15 +7,16 @@ from saebooks.models.company import Company
 
 async def ensure_seed_company(session: AsyncSession) -> Company:
     """Idempotent: create the default company from env if none exists."""
+    name = settings.seed_company_name or "Default Company"
     result = await session.execute(
-        select(Company).where(Company.archived_at.is_(None))
+        select(Company).where(Company.name == name, Company.archived_at.is_(None))
     )
-    existing = result.scalar_one_or_none()
+    existing = result.scalars().first()
     if existing is not None:
         return existing
 
     company = Company(
-        name=settings.seed_company_name or "Default Company",
+        name=name,
         legal_name=settings.seed_company_legal_name or None,
         trading_name=settings.seed_company_trading_name or None,
         abn=settings.seed_company_abn or None,
