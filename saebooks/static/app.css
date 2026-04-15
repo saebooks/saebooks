@@ -201,3 +201,25 @@ form.tc-form button[type="submit"] {
 .override-group label { font-size: 11px; display: flex; flex-direction: column;
   color: var(--fg-dim); text-transform: uppercase; }
 .override-group input { font: 13px/1.2 inherit; padding: 0.3rem; border: 1px solid var(--rule); }
+
+/* Settings form */
+.settings-form fieldset {
+  border: 1px solid var(--rule); padding: 0.75rem 1rem; margin-bottom: 1rem;
+  background: var(--panel);
+}
+.settings-form legend {
+  font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--accent); font-weight: 600; padding: 0 0.3rem;
+}
+.settings-form label {
+  display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.4rem;
+}
+.settings-form .label-text {
+  min-width: 14rem; font-size: 13px; color: var(--fg-dim);
+}
+.settings-form input, .settings-form select {
+  font: 14px/1.2 inherit; padding: 0.3rem 0.4rem;
+  border: 1px solid var(--rule); background: #fff; color: var(--fg); width: 12rem;
+}
+.settings-form button { margin-top: 0.5rem; }
+.alert-ok { background: #efe; border-color: #0a5; color: #063; }

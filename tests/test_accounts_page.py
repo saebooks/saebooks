@@ -20,7 +20,8 @@ async def test_account_detail_stub(client: AsyncClient) -> None:
     assert "TODO" in r.text
 
 
-async def test_admin_settings_stub(client: AsyncClient) -> None:
+async def test_admin_settings_page(client: AsyncClient) -> None:
     r = await client.get("/admin/settings")
     assert r.status_code == 200
-    assert "TODO" in r.text
+    assert "Settings" in r.text
+    assert "base_currency" in r.text or "AUD" in r.text

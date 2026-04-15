@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Settings — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Settings</h1>
+  <div class="meta">{{ edition }}</div>
+</div>
+
+{% if saved %}
+<div class="alert alert-ok">Settings saved.</div>
+{% endif %}
+
+<form method="post" action="/admin/settings" class="settings-form">
+  {% for group in schema %}
+  <fieldset>
+    <legend>{{ group.group }}</legend>
+    {% for item in group["fields"] %}
+    <label>
+      <span class="label-text">{{ item.label }}</span>
+      {% if item.type == 'choice' %}
+      <select name="{{ item.key }}">
+        {% for c in item.choices %}
+        <option value="{{ c }}" {% if current.get(item.key) == c %}selected{% endif %}>{{ c }}</option>
+        {% endfor %}
+      </select>
+      {% elif item.type == 'int' %}
+      <input name="{{ item.key }}" type="number" value="{{ current.get(item.key, 0) }}">
+      {% else %}
+      <input name="{{ item.key }}" value="{{ current.get(item.key, '') }}">
+      {% endif %}
+    </label>
+    {% endfor %}
+  </fieldset>
+  {% endfor %}
+  <button type="submit" class="btn">Save</button>
+</form>
+{% endblock %}
