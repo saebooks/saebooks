@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from saebooks.config import settings
-from saebooks.routers import health
+from saebooks.routers import admin, health
 
 logging.basicConfig(level=settings.log_level)
 logger = logging.getLogger("saebooks")
@@ -27,6 +27,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     app.include_router(health.router)
+    app.include_router(admin.router)
     return app
 
 
