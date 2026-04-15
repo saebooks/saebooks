@@ -16,7 +16,7 @@
 
 {% for group in groups %}
 <section class="acct-group">
-  <h2>{{ group.digit }} — {{ group.label }} <span class="dim">· {{ group.count }}</span></h2>
+  <h2>{{ group.prefix }} — {{ group.label }} <span class="dim">· {{ group.count }}</span></h2>
   <table class="acct-table">
     <thead>
       <tr>
@@ -35,6 +35,7 @@
         <td style="padding-left: {{ 0.5 + row.indent * 1.2 }}rem">
           {% if row.account.is_header %}<strong>{{ row.account.name }}</strong>
           {% else %}{{ row.account.name }}{% endif %}
+          {% if row.bustard %}<span class="bustard-tag">bustard</span>{% endif %}
         </td>
         <td style="font-size:10px;color:var(--fg-dim)">{{ row.account.account_type.value|replace('_',' ')|lower }}</td>
         <td class="rec">{% if row.account.reconcile %}✓{% endif %}</td>
@@ -60,13 +61,20 @@
 <section class="new-form">
   <h2>+ New account</h2>
   <div class="code-help">
-    <strong>Numbering structure:</strong> First digit determines the type range.
-    {% for d, label in digit_labels.items() %}
-    <span class="code-hint">{{ d }}=<em>{{ label }}</em></span>
-    {% endfor %}
+    <strong>Code structure:</strong>
+    <code>{prefix}{child1-5}[-letter]</code>
+    — up to 5 child digits after the range prefix, then an optional letter suffix for one more level.
+    <div style="margin-top:0.3rem">
+      <strong>Ranges:</strong>
+      {% for r in ranges %}
+      <span class="code-hint">{{ r.prefix }}=<em>{{ r.label }}</em></span>
+      {% endfor %}
+      <a href="/admin/ranges" style="font-size:11px;margin-left:0.5rem">manage ranges</a>
+    </div>
   </div>
   <form method="post" action="/accounts" class="tc-form">
-    <label>Code <input name="code" required maxlength="32" pattern="[0-9]+" title="Digits only"
+    <label>Code <input name="code" required maxlength="32"
+      pattern="[0-9]+(-[a-zA-Z])?" title="Digits, optionally -letter suffix"
       placeholder="e.g. 11111" value="{{ form_code or '' }}"></label>
     <label>Name <input name="name" required placeholder="e.g. Westpac Business Account"
       value="{{ form_name or '' }}"></label>
@@ -93,19 +101,23 @@
 </section>
 
 <script>
-// Auto-suggest account type based on first digit of code
-const digitTypes = {
-  {% for d, types in digit_types.items() %}
-  '{{ d }}': '{{ types|list|first }}',
+// Auto-suggest account type based on range prefix match
+const ranges = [
+  {% for r in ranges %}
+  {prefix: '{{ r.prefix }}', type: '{{ r.account_types[0] }}'},
   {% endfor %}
-};
+].sort((a, b) => b.prefix.length - a.prefix.length);  // longest first
+
 const codeInput = document.querySelector('input[name="code"]');
 const typeSelect = document.getElementById('new-acct-type');
 if (codeInput && typeSelect) {
   codeInput.addEventListener('input', function() {
-    const first = this.value.trim()[0];
-    if (first && digitTypes[first]) {
-      typeSelect.value = digitTypes[first];
+    const digits = this.value.trim().replace(/-[a-zA-Z]$/, '');
+    for (const r of ranges) {
+      if (digits.startsWith(r.prefix)) {
+        typeSelect.value = r.type;
+        break;
+      }
     }
   });
 }

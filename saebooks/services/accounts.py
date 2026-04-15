@@ -1,22 +1,20 @@
 """Account service — CRUD, dependency check, migrate, delete.
 
-Account code structure:
-  - Codes must be numeric only
-  - First digit determines the account type range
-  - Parent is auto-derived from the longest matching code prefix
-  - Shorter codes act as group headers; leaf codes are posting accounts
+Account code structure (structured numbering mode):
+  {prefix}{child1}{child2}{child3}{child4}{child5}[-{bustard}]
 
-Digit-to-type mapping (Australian standard):
-  1 = ASSET
-  2 = LIABILITY
-  3 = EQUITY
-  4 = INCOME, OTHER_INCOME
-  5 = COST_OF_SALES
-  6 = EXPENSE
-  7 = OTHER_EXPENSE
-  8 = OTHER_INCOME
-  9 = EXPENSE, OTHER_EXPENSE
+  - prefix:   registered range code (any width — 1, 10, 200, etc.)
+  - child1-5: one digit each, up to 5 levels of hierarchy
+  - bustard:  single letter after hyphen — the "come on you bastard,
+              just one more level" overflow when 5 isn't enough
+
+The prefix is matched against company-defined account_ranges using
+longest-prefix match. Each range defines allowed account types.
+
+When structured_numbering is OFF (company setting), codes are freeform
+text — no validation, no auto-parent from prefix.
 """
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -27,41 +25,224 @@ from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.models.account import Account, AccountType
+from saebooks.models.account_range import AccountRange
 from saebooks.models.bank_statement import BankStatementLine
 from saebooks.models.journal import JournalEntry, JournalLine
 from saebooks.models.journal_template import JournalTemplate
 
+# Max child levels (digits after prefix, before the bustard)
+MAX_CHILD_LEVELS = 5
+
+# Regex: digits, optionally followed by -letter (the bustard)
+CODE_PATTERN = re.compile(r"^(\d+)(?:-([a-zA-Z]))?$")
+
+# Default ranges seeded for new companies (Australian standard)
+DEFAULT_RANGES: list[dict[str, Any]] = [
+    {"prefix": "1", "label": "Assets", "account_types": ["ASSET"], "sort_order": 1},
+    {"prefix": "2", "label": "Liabilities", "account_types": ["LIABILITY"], "sort_order": 2},
+    {"prefix": "3", "label": "Equity", "account_types": ["EQUITY"], "sort_order": 3},
+    {"prefix": "4", "label": "Income", "account_types": ["INCOME", "OTHER_INCOME"], "sort_order": 4},
+    {"prefix": "5", "label": "Cost of sales", "account_types": ["COST_OF_SALES"], "sort_order": 5},
+    {"prefix": "6", "label": "Expenses", "account_types": ["EXPENSE"], "sort_order": 6},
+]
+
+
 # ---------------------------------------------------------------------------
-# Code structure: first digit → allowed account types
+# Code parsing
 # ---------------------------------------------------------------------------
 
-DIGIT_TO_TYPES: dict[str, set[AccountType]] = {
-    "1": {AccountType.ASSET},
-    "2": {AccountType.LIABILITY},
-    "3": {AccountType.EQUITY},
-    "4": {AccountType.INCOME, AccountType.OTHER_INCOME},
-    "5": {AccountType.COST_OF_SALES},
-    "6": {AccountType.EXPENSE},
-    "7": {AccountType.OTHER_EXPENSE},
-    "8": {AccountType.OTHER_INCOME},
-    "9": {AccountType.EXPENSE, AccountType.OTHER_EXPENSE},
-}
-
-DIGIT_TO_LABEL: dict[str, str] = {
-    "1": "Assets",
-    "2": "Liabilities",
-    "3": "Equity",
-    "4": "Income",
-    "5": "Cost of sales",
-    "6": "Expenses",
-    "7": "Other expense",
-    "8": "Other income",
-    "9": "Other expense",
-}
+@dataclass
+class ParsedCode:
+    """Result of parsing an account code against registered ranges."""
+    raw: str
+    prefix: str          # the matched range prefix
+    children: str        # the child digits after the prefix (up to 5)
+    bustard: str         # single letter after hyphen, or ""
+    depth: int           # 0 = range header, 1-5 = child level, 6 = bustard
+    range_label: str     # label from the matched range
+    allowed_types: list[str]  # allowed AccountType values from the range
 
 
-def validate_code(code: str, account_type: AccountType) -> list[str]:
-    """Validate an account code. Returns list of error messages (empty = OK)."""
+def parse_code(code: str, ranges: list[AccountRange]) -> ParsedCode | None:
+    """Parse an account code against registered ranges.
+
+    Returns None if the code doesn't match any range or is malformed.
+    Uses longest-prefix match against the numeric portion of the code.
+    """
+    match = CODE_PATTERN.match(code.strip())
+    if not match:
+        return None
+
+    digits = match.group(1)
+    bustard = match.group(2) or ""
+
+    # Sort ranges by prefix length descending for longest-match-first
+    sorted_ranges = sorted(ranges, key=lambda r: len(r.prefix), reverse=True)
+
+    for rng in sorted_ranges:
+        if digits.startswith(rng.prefix):
+            children = digits[len(rng.prefix):]
+            if len(children) > MAX_CHILD_LEVELS:
+                return None  # too many child levels
+
+            # Bustard is only valid at max child depth
+            if bustard and len(children) < MAX_CHILD_LEVELS:
+                return None  # bustard only allowed at the deepest child level
+
+            depth = len(children) + (1 if bustard else 0)
+
+            return ParsedCode(
+                raw=code.strip(),
+                prefix=rng.prefix,
+                children=children,
+                bustard=bustard,
+                depth=depth,
+                range_label=rng.label,
+                allowed_types=list(rng.account_types),
+            )
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Range management
+# ---------------------------------------------------------------------------
+
+async def get_ranges(
+    session: AsyncSession, company_id: uuid.UUID
+) -> list[AccountRange]:
+    """Get all account ranges for a company, sorted by sort_order."""
+    result = await session.execute(
+        select(AccountRange)
+        .where(AccountRange.company_id == company_id)
+        .order_by(AccountRange.sort_order, AccountRange.prefix)
+    )
+    return list(result.scalars().all())
+
+
+async def create_range(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    *,
+    prefix: str,
+    label: str,
+    account_types: list[str],
+    sort_order: int = 0,
+) -> AccountRange:
+    """Create a new account range."""
+    prefix = prefix.strip()
+    if not prefix.isdigit():
+        raise ValueError("Range prefix must be numeric only.")
+
+    # Check for prefix conflicts (one prefix can't be a prefix of another)
+    existing = await get_ranges(session, company_id)
+    for rng in existing:
+        if (rng.prefix.startswith(prefix) or prefix.startswith(rng.prefix)) and rng.prefix != prefix:
+            raise ValueError(
+                f"Prefix '{prefix}' conflicts with existing range "
+                f"'{rng.prefix}' ({rng.label}). One cannot be a prefix of the other."
+            )
+
+    # Validate account types
+    valid_types = {t.value for t in AccountType}
+    for at in account_types:
+        if at not in valid_types:
+            raise ValueError(f"Invalid account type: {at}")
+
+    rng = AccountRange(
+        company_id=company_id,
+        prefix=prefix,
+        label=label.strip(),
+        account_types=account_types,
+        sort_order=sort_order,
+    )
+    session.add(rng)
+    await session.commit()
+    await session.refresh(rng)
+    return rng
+
+
+async def update_range(
+    session: AsyncSession,
+    range_id: uuid.UUID,
+    *,
+    label: str | None = None,
+    account_types: list[str] | None = None,
+    sort_order: int | None = None,
+) -> AccountRange:
+    """Update an existing account range. Prefix cannot be changed."""
+    rng = await session.get(AccountRange, range_id)
+    if rng is None:
+        raise ValueError(f"Range {range_id} not found")
+    if label is not None:
+        rng.label = label.strip()
+    if account_types is not None:
+        valid_types = {t.value for t in AccountType}
+        for at in account_types:
+            if at not in valid_types:
+                raise ValueError(f"Invalid account type: {at}")
+        rng.account_types = account_types
+    if sort_order is not None:
+        rng.sort_order = sort_order
+    await session.commit()
+    await session.refresh(rng)
+    return rng
+
+
+async def delete_range(session: AsyncSession, range_id: uuid.UUID) -> None:
+    """Delete an account range. Doesn't delete the accounts — just the range definition."""
+    rng = await session.get(AccountRange, range_id)
+    if rng is None:
+        raise ValueError(f"Range {range_id} not found")
+    await session.delete(rng)
+    await session.commit()
+
+
+async def seed_default_ranges(
+    session: AsyncSession, company_id: uuid.UUID
+) -> list[AccountRange]:
+    """Seed the default Australian account ranges for a company.
+
+    Idempotent — skips ranges that already exist.
+    """
+    existing = await get_ranges(session, company_id)
+    existing_prefixes = {r.prefix for r in existing}
+    created = []
+
+    for dflt in DEFAULT_RANGES:
+        if dflt["prefix"] not in existing_prefixes:
+            rng = AccountRange(
+                company_id=company_id,
+                prefix=dflt["prefix"],
+                label=dflt["label"],
+                account_types=dflt["account_types"],
+                sort_order=dflt["sort_order"],
+            )
+            session.add(rng)
+            created.append(rng)
+
+    if created:
+        await session.commit()
+        for rng in created:
+            await session.refresh(rng)
+
+    return created
+
+
+# ---------------------------------------------------------------------------
+# Code validation (structured numbering mode)
+# ---------------------------------------------------------------------------
+
+async def validate_code(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    code: str,
+    account_type: AccountType,
+) -> list[str]:
+    """Validate an account code against registered ranges.
+
+    Returns list of error messages (empty = OK).
+    """
     errors: list[str] = []
     code = code.strip()
 
@@ -69,37 +250,80 @@ def validate_code(code: str, account_type: AccountType) -> list[str]:
         errors.append("Account code is required.")
         return errors
 
-    if not code.isdigit():
-        errors.append("Account code must be numeric only (digits 0-9).")
+    match = CODE_PATTERN.match(code)
+    if not match:
+        errors.append(
+            "Account code must be digits, optionally followed by "
+            "a hyphen and single letter (the bustard)."
+        )
         return errors
 
-    first = code[0]
-    allowed = DIGIT_TO_TYPES.get(first)
-    if allowed is None:
-        errors.append(f"First digit '{first}' is not a valid account range (use 1-9).")
-    elif account_type not in allowed:
-        type_names = ", ".join(sorted(t.value.replace("_", " ").title() for t in allowed))
+    ranges = await get_ranges(session, company_id)
+    if not ranges:
+        # No ranges defined — skip range validation
+        return errors
+
+    parsed = parse_code(code, ranges)
+    if parsed is None:
+        digits = match.group(1)
+        bustard = match.group(2) or ""
+
+        # Check if it's too deep
+        for rng in sorted(ranges, key=lambda r: len(r.prefix), reverse=True):
+            if digits.startswith(rng.prefix):
+                children = digits[len(rng.prefix):]
+                if len(children) > MAX_CHILD_LEVELS:
+                    errors.append(
+                        f"Too many child levels. Range '{rng.prefix}' ({rng.label}) "
+                        f"allows {MAX_CHILD_LEVELS} child digits, got {len(children)}."
+                    )
+                elif bustard and len(children) < MAX_CHILD_LEVELS:
+                    errors.append(
+                        f"The bustard (letter suffix) is only allowed at child level "
+                        f"{MAX_CHILD_LEVELS}. Current depth: {len(children)}."
+                    )
+                return errors
+
+        # No matching range at all
+        prefixes = ", ".join(r.prefix for r in sorted(ranges, key=lambda r: r.sort_order))
         errors.append(
-            f"Account code starting with '{first}' must be type: {type_names}. "
-            f"Got: {account_type.value.replace('_', ' ').title()}."
+            f"Code '{code}' doesn't match any account range. "
+            f"Defined ranges: {prefixes}."
+        )
+        return errors
+
+    # Check account type against range
+    if account_type.value not in parsed.allowed_types:
+        type_names = ", ".join(
+            t.replace("_", " ").title() for t in sorted(parsed.allowed_types)
+        )
+        errors.append(
+            f"Range '{parsed.prefix}' ({parsed.range_label}) requires type: "
+            f"{type_names}. Got: {account_type.value.replace('_', ' ').title()}."
         )
 
     return errors
 
 
-def check_code_anomaly(code: str, account_type: AccountType) -> str | None:
+def check_code_anomaly(
+    code: str, account_type: AccountType, ranges: list[AccountRange]
+) -> str | None:
     """Check if an existing account's code doesn't match the expected type range.
 
     Returns a warning string if there's a mismatch, None otherwise.
-    Used for flagging seed data anomalies without blocking.
     """
-    if not code or not code.isdigit():
+    if not ranges:
         return None
-    first = code[0]
-    allowed = DIGIT_TO_TYPES.get(first)
-    if allowed and account_type not in allowed:
-        expected = ", ".join(sorted(t.value for t in allowed))
-        return f"Code {code} starts with '{first}' (expected {expected}) but is {account_type.value}"
+
+    parsed = parse_code(code, ranges)
+    if parsed is None:
+        return f"Code '{code}' doesn't match any defined range"
+
+    if account_type.value not in parsed.allowed_types:
+        return (
+            f"Range '{parsed.prefix}' ({parsed.range_label}) expects "
+            f"{', '.join(parsed.allowed_types)} but account is {account_type.value}"
+        )
     return None
 
 
@@ -109,10 +333,29 @@ async def find_parent(
     """Find the parent account by longest matching code prefix.
 
     For code "11111", tries "1111", "111", "11", "1" in order.
+    For bustard codes like "11111-a", tries "11111" first.
     Returns the first existing account that matches.
     """
-    for length in range(len(code) - 1, 0, -1):
-        prefix = code[:length]
+    # Strip bustard suffix for parent lookup
+    match = CODE_PATTERN.match(code)
+    if match and match.group(2):
+        # This is a bustard code — parent is the digits-only version
+        base = match.group(1)
+        result = await session.execute(
+            select(Account).where(
+                Account.company_id == company_id,
+                Account.code == base,
+                Account.archived_at.is_(None),
+            )
+        )
+        parent = result.scalars().first()
+        if parent is not None:
+            return parent
+
+    # Regular prefix walk
+    base_digits = match.group(1) if match else code
+    for length in range(len(base_digits) - 1, 0, -1):
+        prefix = base_digits[:length]
         result = await session.execute(
             select(Account).where(
                 Account.company_id == company_id,
@@ -124,14 +367,6 @@ async def find_parent(
         if parent is not None:
             return parent
     return None
-
-
-def indent_level(code: str, min_length: int = 1) -> int:
-    """Calculate the indent level for display.
-
-    Level 0 for single-digit codes (top headers), +1 per extra digit.
-    """
-    return max(0, len(code) - min_length)
 
 
 async def list_active(
@@ -164,7 +399,7 @@ async def create(
     code = code.strip()
 
     if not skip_validation:
-        errors = validate_code(code, account_type)
+        errors = await validate_code(session, company_id, code, account_type)
         if errors:
             raise ValueError("; ".join(errors))
 
@@ -207,7 +442,7 @@ async def update(
     new_type = account_type if account_type is not None else account.account_type
 
     if not skip_validation:
-        errors = validate_code(new_code, new_type)
+        errors = await validate_code(session, account.company_id, new_code, new_type)
         if errors:
             raise ValueError("; ".join(errors))
 
@@ -226,9 +461,7 @@ async def update(
 
     # Re-derive parent if code changed
     if code is not None:
-        parent = await find_parent(
-            session, account.company_id, new_code
-        )
+        parent = await find_parent(session, account.company_id, new_code)
         account.parent_id = parent.id if parent else None
 
     await session.commit()
@@ -333,7 +566,6 @@ async def check_dependencies(
     deps.child_accounts = list(children.scalars().all())
 
     # 4. Journal templates referencing this account in JSONB lines
-    # Scan all non-archived templates for account_id in their lines array
     acct_str = str(account_id)
     all_templates = await session.execute(
         select(JournalTemplate).where(JournalTemplate.archived_at.is_(None))
@@ -353,10 +585,7 @@ async def migrate_account(
     source_id: uuid.UUID,
     target_id: uuid.UUID,
 ) -> dict[str, int]:
-    """Move all references from source account to target account.
-
-    Returns counts of what was migrated.
-    """
+    """Move all references from source account to target account."""
     source = await session.get(Account, source_id)
     target = await session.get(Account, target_id)
     if source is None:
@@ -366,7 +595,6 @@ async def migrate_account(
 
     counts: dict[str, int] = {}
 
-    # 1. Journal lines
     result = await session.execute(
         sa_update(JournalLine)
         .where(JournalLine.account_id == source_id)
@@ -374,7 +602,6 @@ async def migrate_account(
     )
     counts["journal_lines"] = result.rowcount  # type: ignore[attr-defined]
 
-    # 2. Bank statement lines
     result = await session.execute(
         sa_update(BankStatementLine)
         .where(BankStatementLine.account_id == source_id)
@@ -382,7 +609,6 @@ async def migrate_account(
     )
     counts["bank_statement_lines"] = result.rowcount  # type: ignore[attr-defined]
 
-    # 3. Child accounts
     result = await session.execute(
         sa_update(Account)
         .where(Account.parent_id == source_id)
@@ -390,7 +616,6 @@ async def migrate_account(
     )
     counts["child_accounts"] = result.rowcount  # type: ignore[attr-defined]
 
-    # 4. Journal templates (JSONB — need to update in Python)
     source_str = str(source_id)
     target_str = str(target_id)
     all_templates = await session.execute(

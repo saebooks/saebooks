@@ -324,3 +324,8 @@ form.tc-form button[type="submit"] {
   border: 1px solid var(--rule);
 }
 .code-hint em { font-style: normal; color: var(--fg); }
+.bustard-tag {
+  display: inline-block; font-size: 9px; text-transform: uppercase;
+  letter-spacing: 0.05em; padding: 0.1rem 0.3rem; margin-left: 0.4rem;
+  background: #f0e6ff; color: #639; border-radius: 2px;
+}

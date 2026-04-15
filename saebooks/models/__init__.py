@@ -1,4 +1,5 @@
 from saebooks.models.account import Account, AccountType
+from saebooks.models.account_range import AccountRange
 from saebooks.models.bank_statement import BankStatementLine, StatementLineStatus
 from saebooks.models.company import Company
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine, PeriodLock
@@ -8,6 +9,7 @@ from saebooks.models.tax_code import TaxCode
 
 __all__ = [
     "Account",
+    "AccountRange",
     "AccountType",
     "BankStatementLine",
     "Company",

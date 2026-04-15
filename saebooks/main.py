@@ -12,6 +12,7 @@ from saebooks.routers import (
     admin,
     health,
     journal,
+    ranges,
     reconciliation,
     reports,
     tax_codes,
@@ -45,6 +46,7 @@ def create_app() -> FastAPI:
     app.include_router(journal.router)
     app.include_router(templates.router)
     app.include_router(tax_codes.router)
+    app.include_router(ranges.router)
     app.include_router(reports.router)
     app.include_router(reconciliation.router)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

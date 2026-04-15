@@ -9,6 +9,7 @@ from sqlalchemy import select
 from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
+from saebooks.models.account_range import AccountRange
 from saebooks.models.company import Company
 from saebooks.services import accounts as svc
 
@@ -31,38 +32,68 @@ async def _first_company() -> Company:
         return company
 
 
-def _build_hierarchy(accounts: list[Account]) -> list[dict[str, object]]:
-    """Group accounts by first digit, with indent levels.
+def _build_hierarchy(
+    accounts: list[Account],
+    ranges: list[AccountRange],
+) -> list[dict[str, object]]:
+    """Group accounts by matched range, with indent levels.
 
-    Returns list of {"digit": str, "label": str, "rows": [{account, indent, anomaly}]}
+    Accounts that don't match any range go into an "Unranged" group.
     """
-    by_digit: dict[str, list[Account]] = {}
+    # Build groups keyed by range prefix
+    groups_by_prefix: dict[str, list[Account]] = {}
+    unranged: list[Account] = []
+
     for a in accounts:
-        digit = a.code[0] if a.code else "?"
-        by_digit.setdefault(digit, []).append(a)
+        parsed = svc.parse_code(a.code, ranges)
+        if parsed:
+            groups_by_prefix.setdefault(parsed.prefix, []).append(a)
+        else:
+            unranged.append(a)
 
-    groups = []
-    for digit in sorted(by_digit.keys()):
-        accts = by_digit[digit]
-        label = svc.DIGIT_TO_LABEL.get(digit, f"Range {digit}xxx")
+    groups: list[dict[str, object]] = []
 
-        # Find the shortest code in this group for base indent
-        min_len = min(len(a.code) for a in accts)
+    for rng in sorted(ranges, key=lambda r: r.sort_order):
+        accts = groups_by_prefix.get(rng.prefix, [])
+        if not accts:
+            continue
 
         rows = []
         for a in accts:
-            anomaly = svc.check_code_anomaly(a.code, a.account_type)
+            parsed = svc.parse_code(a.code, ranges)
+            depth = parsed.depth if parsed else 0
+            anomaly = svc.check_code_anomaly(a.code, a.account_type, ranges)
             rows.append({
                 "account": a,
-                "indent": len(a.code) - min_len,
+                "indent": depth,
                 "anomaly": anomaly,
+                "bustard": parsed.bustard if parsed else "",
             })
 
         groups.append({
-            "digit": digit,
-            "label": label,
+            "prefix": rng.prefix,
+            "label": rng.label,
             "count": len(accts),
             "rows": rows,
+            "allowed_types": rng.account_types,
+        })
+
+    # Unranged accounts (legacy/seed data that doesn't match any range)
+    if unranged:
+        rows = []
+        for a in unranged:
+            rows.append({
+                "account": a,
+                "indent": 0,
+                "anomaly": f"Code '{a.code}' doesn't match any defined range",
+                "bustard": "",
+            })
+        groups.append({
+            "prefix": "?",
+            "label": "Unranged",
+            "count": len(unranged),
+            "rows": rows,
+            "allowed_types": [],
         })
 
     return groups
@@ -73,8 +104,14 @@ async def accounts_list(request: Request) -> HTMLResponse:
     company = await _first_company()
     async with AsyncSessionLocal() as session:
         accounts = await svc.list_active(session, company.id)
+        ranges = await svc.get_ranges(session, company.id)
 
-    groups = _build_hierarchy(accounts)
+        # Auto-seed default ranges if none exist yet
+        if not ranges:
+            await svc.seed_default_ranges(session, company.id)
+            ranges = await svc.get_ranges(session, company.id)
+
+    groups = _build_hierarchy(accounts, ranges)
 
     return templates.TemplateResponse(
         request,
@@ -84,9 +121,8 @@ async def accounts_list(request: Request) -> HTMLResponse:
             "company_name": company.name,
             "total": len(accounts),
             "groups": groups,
+            "ranges": ranges,
             "account_types": ACCOUNT_TYPE_CHOICES,
-            "digit_types": svc.DIGIT_TO_TYPES,
-            "digit_labels": svc.DIGIT_TO_LABEL,
         },
     )
 
@@ -115,10 +151,10 @@ async def accounts_create(
                 tax_code_default=tax_code_default or None,
             )
     except ValueError as exc:
-        # Validation error — re-render the page with the error
         async with AsyncSessionLocal() as session:
             accounts = await svc.list_active(session, company.id)
-        groups = _build_hierarchy(accounts)
+            ranges = await svc.get_ranges(session, company.id)
+        groups = _build_hierarchy(accounts, ranges)
         return templates.TemplateResponse(
             request,
             "accounts/list.html",
@@ -127,9 +163,8 @@ async def accounts_create(
                 "company_name": company.name,
                 "total": len(accounts),
                 "groups": groups,
+                "ranges": ranges,
                 "account_types": ACCOUNT_TYPE_CHOICES,
-                "digit_types": svc.DIGIT_TO_TYPES,
-                "digit_labels": svc.DIGIT_TO_LABEL,
                 "error": str(exc),
                 "form_code": code,
                 "form_name": name,
@@ -147,6 +182,7 @@ async def accounts_edit(request: Request, account_id: UUID) -> HTMLResponse:
         if account is None:
             raise HTTPException(404, "Account not found")
         company = await session.get(Company, account.company_id)
+        ranges = await svc.get_ranges(session, account.company_id)
     return templates.TemplateResponse(
         request,
         "accounts/edit.html",
@@ -155,7 +191,7 @@ async def accounts_edit(request: Request, account_id: UUID) -> HTMLResponse:
             "company_name": company.name if company else "",
             "account": account,
             "account_types": ACCOUNT_TYPE_CHOICES,
-            "digit_types": svc.DIGIT_TO_TYPES,
+            "ranges": ranges,
         },
     )
 
@@ -189,6 +225,7 @@ async def accounts_update(
             if account is None:
                 raise HTTPException(404, "Account not found") from exc
             company = await session.get(Company, account.company_id)
+            ranges = await svc.get_ranges(session, account.company_id)
         return templates.TemplateResponse(
             request,
             "accounts/edit.html",
@@ -197,7 +234,7 @@ async def accounts_update(
                 "company_name": company.name if company else "",
                 "account": account,
                 "account_types": ACCOUNT_TYPE_CHOICES,
-                "digit_types": svc.DIGIT_TO_TYPES,
+                "ranges": ranges,
                 "error": str(exc),
             },
             status_code=422,
@@ -214,12 +251,9 @@ async def accounts_archive(account_id: UUID) -> RedirectResponse:
 
 @router.get("/accounts/{account_id}/delete", response_class=HTMLResponse)
 async def accounts_delete_check(request: Request, account_id: UUID) -> HTMLResponse:
-    """Show dependency report before deletion."""
     company = await _first_company()
     async with AsyncSessionLocal() as session:
         deps = await svc.check_dependencies(session, account_id)
-
-        # Get candidate accounts for migration (same type, not archived, not self)
         all_accounts = await svc.list_active(session, company.id)
         candidates = [
             a for a in all_accounts
@@ -243,7 +277,6 @@ async def accounts_migrate(
     request: Request,
     account_id: UUID,
 ) -> RedirectResponse | HTMLResponse:
-    """Migrate all references to target account, then redirect to delete check."""
     form = await request.form()
     target_raw = str(form.get("target_id", ""))
     if not target_raw:
@@ -265,7 +298,6 @@ async def accounts_delete(
     request: Request,
     account_id: UUID,
 ) -> RedirectResponse | HTMLResponse:
-    """Hard-delete the account."""
     try:
         async with AsyncSessionLocal() as session:
             await svc.delete_account(session, account_id)
