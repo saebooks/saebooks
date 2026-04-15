@@ -14,10 +14,11 @@ async def test_accounts_list_renders(client: AsyncClient) -> None:
     assert "Liabilities" in body
 
 
-async def test_account_detail_stub(client: AsyncClient) -> None:
-    r = await client.get("/accounts/some-id")
+async def test_accounts_list_has_create_form(client: AsyncClient) -> None:
+    r = await client.get("/accounts")
     assert r.status_code == 200
-    assert "TODO" in r.text
+    assert "New account" in r.text
+    assert 'name="code"' in r.text
 
 
 async def test_admin_settings_page(client: AsyncClient) -> None:

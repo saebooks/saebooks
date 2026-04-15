@@ -11,7 +11,7 @@
   <h2>{{ group.label }} <span class="dim">· {{ group.accounts|length }}</span></h2>
   <table class="acct-table">
     <thead>
-      <tr><th class="code">Code</th><th>Name</th><th class="rec">Reconcile</th></tr>
+      <tr><th class="code">Code</th><th>Name</th><th class="rec">Reconcile</th><th class="actions"></th></tr>
     </thead>
     <tbody>
       {% for a in group.accounts %}
@@ -19,10 +19,42 @@
         <td class="code">{{ a.code }}</td>
         <td>{{ a.name }}</td>
         <td class="rec">{% if a.reconcile %}✓{% endif %}</td>
+        <td class="actions">
+          <a href="/accounts/{{ a.id }}/edit">edit</a>
+          <form method="post" action="/accounts/{{ a.id }}/archive" style="display:inline"
+                onsubmit="return confirm('Archive {{ a.code }} {{ a.name }}?')">
+            <button type="submit" class="linkish">archive</button>
+          </form>
+        </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
 </section>
 {% endfor %}
+
+<section class="new-form">
+  <h2>+ New account</h2>
+  <form method="post" action="/accounts" class="tc-form">
+    <label>Code <input name="code" required maxlength="32" placeholder="e.g. 61500"></label>
+    <label>Name <input name="name" required placeholder="e.g. Insurance expense"></label>
+    <label>Type
+      <select name="account_type">
+        {% for v, l in account_types %}<option value="{{ v }}">{{ l }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Reconcile
+      <select name="reconcile">
+        <option value="false">No</option><option value="true">Yes</option>
+      </select>
+    </label>
+    <label>Header
+      <select name="is_header">
+        <option value="false">No</option><option value="true">Yes</option>
+      </select>
+    </label>
+    <label>Default tax code <input name="tax_code_default" maxlength="16" placeholder="e.g. GST"></label>
+    <button type="submit">Create</button>
+  </form>
+</section>
 {% endblock %}
