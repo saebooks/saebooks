@@ -129,3 +129,75 @@ form.tc-form button[type="submit"] {
 .form-actions { grid-column: span 3; display: flex; gap: 1rem; align-items: center; }
 .form-actions a { color: var(--fg-dim); font-size: 12px; }
 .dim { color: var(--fg-dim); }
+
+/* Journal entry form */
+.je-header {
+  display: grid;
+  grid-template-columns: 8rem 10rem 1fr;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 1rem;
+  align-items: end;
+}
+.je-header label { display: flex; flex-direction: column; font-size: 11px;
+  color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.03em; }
+.je-header label.wide { grid-column: span 1; }
+.je-header input {
+  font: 14px/1.2 inherit; color: var(--fg); padding: 0.3rem 0.4rem;
+  border: 1px solid var(--rule); background: #fff;
+}
+.je-header input[readonly] { background: var(--bg); color: var(--fg-dim); }
+
+.je-grid { width: 100%; border-collapse: collapse; background: var(--panel);
+  border: 1px solid var(--rule); font-size: 13px; }
+.je-grid th, .je-grid td { padding: 0.2rem 0.3rem; border-bottom: 1px solid var(--rule); }
+.je-grid th { background: #f3f3ec; font-size: 11px; text-transform: uppercase;
+  color: var(--fg-dim); font-weight: 600; text-align: left; }
+.je-grid .ln { width: 2rem; text-align: center; color: var(--fg-dim); font-size: 11px; }
+.je-grid .acct { width: 22rem; }
+.je-grid .acct select { width: 100%; font: 13px/1.2 inherit; padding: 0.2rem; }
+.je-grid .num { width: 7rem; text-align: right; }
+.je-grid .num input { width: 100%; text-align: right; font: 13px/1.2 var(--mono);
+  padding: 0.2rem 0.3rem; border: 1px solid var(--rule); }
+.je-grid .tc { width: 5rem; }
+.je-grid .tc select { width: 100%; font: 13px/1.2 inherit; }
+.je-grid .rm { width: 2rem; text-align: center; }
+.je-grid td input { font: 13px/1.2 inherit; padding: 0.2rem 0.3rem;
+  border: 1px solid var(--rule); width: 100%; }
+.je-grid td input[readonly], .je-grid td select[disabled] {
+  background: var(--bg); color: var(--fg-dim); border-color: transparent; }
+.je-grid tfoot td { font-weight: 600; border-top: 2px solid var(--rule); }
+.je-grid tbody tr:hover { background: #f7f7f1; }
+
+.je-actions {
+  display: flex; gap: 0.75rem; align-items: center;
+  margin-top: 0.75rem; padding-top: 0.5rem;
+  border-top: 1px solid var(--rule);
+}
+.je-actions .spacer { flex: 1; }
+
+.btn, .btn-secondary, .btn-warn {
+  padding: 0.35rem 1rem; border: 0; cursor: pointer;
+  font: 13px/1.2 inherit; text-decoration: none;
+}
+.btn { background: var(--accent); color: #fff; }
+.btn-secondary { background: var(--rule); color: var(--fg); }
+.btn-warn { background: #c33; color: #fff; }
+
+.alert { padding: 0.5rem 0.75rem; margin-bottom: 1rem; border: 1px solid; }
+.alert-error { background: #fee; border-color: #c33; color: #900; }
+.alert-info { background: #eef; border-color: #66c; color: #336; }
+
+.status-filter { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+.status-filter a {
+  padding: 0.2rem 0.6rem; text-decoration: none; font-size: 12px;
+  border: 1px solid var(--rule); color: var(--fg-dim);
+}
+.status-filter a.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+.status-draft { color: #960; }
+.status-posted { color: var(--accent); }
+.status-reversed { color: #666; }
+
+.override-group label { font-size: 11px; display: flex; flex-direction: column;
+  color: var(--fg-dim); text-transform: uppercase; }
+.override-group input { font: 13px/1.2 inherit; padding: 0.3rem; border: 1px solid var(--rule); }

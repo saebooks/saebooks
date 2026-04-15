@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from saebooks.config import settings
-from saebooks.routers import accounts, admin, health, tax_codes
+from saebooks.routers import accounts, admin, health, journal, tax_codes
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -33,6 +33,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(admin.router)
     app.include_router(accounts.router)
+    app.include_router(journal.router)
     app.include_router(tax_codes.router)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     return app

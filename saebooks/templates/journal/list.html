@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Journal entries — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Journal entries</h1>
+  <div class="meta">{{ total }} entries · {{ company_name }}</div>
+  <a href="/journal/new" class="btn">+ New entry</a>
+</div>
+
+<nav class="status-filter">
+  <a href="/journal" class="{% if filter_status == 'all' %}active{% endif %}">All</a>
+  <a href="/journal?status=DRAFT" class="{% if filter_status == 'DRAFT' %}active{% endif %}">Drafts</a>
+  <a href="/journal?status=POSTED" class="{% if filter_status == 'POSTED' %}active{% endif %}">Posted</a>
+  <a href="/journal?status=REVERSED" class="{% if filter_status == 'REVERSED' %}active{% endif %}">Reversed</a>
+</nav>
+
+<table class="acct-table">
+  <thead>
+    <tr>
+      <th class="code">Ref</th>
+      <th>Date</th>
+      <th>Description</th>
+      <th>Lines</th>
+      <th class="rate">Total DR</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for e in entries %}
+    <tr>
+      <td class="code"><a href="/journal/{{ e.id }}">{{ e.ref }}</a></td>
+      <td>{{ e.entry_date }}</td>
+      <td>{{ e.description or "" }}</td>
+      <td>{{ e.lines|length }}</td>
+      <td class="rate">{{ "%.2f"|format(e.lines|map(attribute='debit')|sum) }}</td>
+      <td>
+        <span class="status-{{ e.status|lower }}">{{ e.status }}</span>
+      </td>
+    </tr>
+    {% endfor %}
+    {% if not entries %}
+    <tr><td colspan="6" class="dim" style="text-align:center;padding:1rem">No entries yet</td></tr>
+    {% endif %}
+  </tbody>
+</table>
+{% endblock %}
