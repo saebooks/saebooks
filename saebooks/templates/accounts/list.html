@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Accounts — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Chart of accounts</h1>
+  <div class="meta">{{ total }} accounts · {{ company_name }}</div>
+</div>
+
+{% for group in groups %}
+<section class="acct-group">
+  <h2>{{ group.label }} <span class="dim">· {{ group.accounts|length }}</span></h2>
+  <table class="acct-table">
+    <thead>
+      <tr><th class="code">Code</th><th>Name</th><th class="rec">Reconcile</th></tr>
+    </thead>
+    <tbody>
+      {% for a in group.accounts %}
+      <tr>
+        <td class="code">{{ a.code }}</td>
+        <td>{{ a.name }}</td>
+        <td class="rec">{% if a.reconcile %}✓{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endfor %}
+{% endblock %}
