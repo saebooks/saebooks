@@ -56,14 +56,18 @@ def upgrade() -> None:
     )
     op.create_index("ix_account_ranges_company_id", "account_ranges", ["company_id"])
 
-    # Add structured_numbering setting (default ON for new installs)
+    # Add settings (defaults for new installs)
     op.execute(
         "INSERT INTO settings (key, value) VALUES ('structured_numbering', 'true')"
+        " ON CONFLICT (key) DO NOTHING"
+    )
+    op.execute(
+        "INSERT INTO settings (key, value) VALUES ('prefix_mode', '\"classic\"')"
         " ON CONFLICT (key) DO NOTHING"
     )
 
 
 def downgrade() -> None:
-    op.execute("DELETE FROM settings WHERE key = 'structured_numbering'")
+    op.execute("DELETE FROM settings WHERE key IN ('structured_numbering', 'prefix_mode')")
     op.drop_index("ix_account_ranges_company_id", table_name="account_ranges")
     op.drop_table("account_ranges")

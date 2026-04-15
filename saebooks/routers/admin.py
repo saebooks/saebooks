@@ -46,6 +46,27 @@ SETTINGS_SCHEMA: list[dict[str, object]] = [
         ],
     },
     {
+        "group": "Chart of accounts",
+        "fields": [
+            {
+                "key": "prefix_mode",
+                "label": "Account numbering",
+                "type": "choice",
+                "choices": ["classic", "extended"],
+                "help": "Classic = single-digit prefixes (1-9, MYOB-style). "
+                        "Extended = multi-digit prefixes (10, 200, etc.).",
+            },
+            {
+                "key": "structured_numbering",
+                "label": "Enforce numbering structure",
+                "type": "choice",
+                "choices": ["true", "false"],
+                "help": "When on, account codes are validated against defined ranges. "
+                        "Turn off for freeform codes.",
+            },
+        ],
+    },
+    {
         "group": "Audit",
         "fields": [
             {

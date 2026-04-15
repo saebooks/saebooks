@@ -37,6 +37,7 @@ async def ranges_list(request: Request) -> HTMLResponse:
     company = await _first_company()
     async with AsyncSessionLocal() as session:
         ranges = await svc.get_ranges(session, company.id)
+        prefix_mode = await svc.get_prefix_mode(session)
     return templates.TemplateResponse(
         request,
         "admin/ranges.html",
@@ -45,6 +46,7 @@ async def ranges_list(request: Request) -> HTMLResponse:
             "company_name": company.name,
             "ranges": ranges,
             "account_types": ACCOUNT_TYPE_CHOICES,
+            "prefix_mode": prefix_mode,
         },
     )
 

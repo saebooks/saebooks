@@ -29,6 +29,7 @@ from saebooks.models.account_range import AccountRange
 from saebooks.models.bank_statement import BankStatementLine
 from saebooks.models.journal import JournalEntry, JournalLine
 from saebooks.models.journal_template import JournalTemplate
+from saebooks.services import settings as settings_svc
 
 # Max child levels (digits after prefix, before the bustard)
 MAX_CHILD_LEVELS = 5
@@ -120,6 +121,14 @@ async def get_ranges(
     return list(result.scalars().all())
 
 
+async def get_prefix_mode(session: AsyncSession) -> str:
+    """Get the current prefix mode: 'classic' (1-9) or 'extended' (any width)."""
+    val = await settings_svc.get(session, "prefix_mode")
+    if isinstance(val, str) and val in ("classic", "extended"):
+        return val
+    return "classic"
+
+
 async def create_range(
     session: AsyncSession,
     company_id: uuid.UUID,
@@ -133,6 +142,16 @@ async def create_range(
     prefix = prefix.strip()
     if not prefix.isdigit():
         raise ValueError("Range prefix must be numeric only.")
+
+    # Enforce prefix_mode setting
+    mode = await get_prefix_mode(session)
+    if mode == "classic" and len(prefix) != 1:
+        raise ValueError(
+            "Classic numbering mode is active — prefixes must be a single digit (1-9). "
+            "Switch to extended mode in Settings > Chart of accounts to use multi-digit prefixes."
+        )
+    if mode == "classic" and prefix == "0":
+        raise ValueError("Prefix '0' is not valid. Use digits 1-9.")
 
     # Check for prefix conflicts (one prefix can't be a prefix of another)
     existing = await get_ranges(session, company_id)

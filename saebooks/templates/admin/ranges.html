@@ -10,9 +10,17 @@
 <div class="alert alert-error">{{ error }}</div>
 {% endif %}
 
+<div class="alert alert-info" style="margin-bottom:1rem">
+  <strong>Mode: {{ prefix_mode|title }}</strong>
+  {% if prefix_mode == 'classic' %}
+  — Single-digit prefixes (1-9), MYOB-compatible.
+  <a href="/admin/settings">Change to extended in Settings</a> to unlock multi-digit prefixes.
+  {% else %}
+  — Multi-digit prefixes (1, 10, 200, etc.) for advanced chart structures.
+  {% endif %}
+</div>
 <p class="dim" style="margin-bottom:1rem">
   Ranges define the top-level prefixes for your chart of accounts.
-  Each prefix can be any length (1, 10, 200, etc.) and maps to one or more account types.
   After the prefix, accounts get up to 5 child digits, plus an optional letter suffix for one more level.
 </p>
 

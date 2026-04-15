@@ -20,7 +20,7 @@
       {% if item.type == 'choice' %}
       <select name="{{ item.key }}">
         {% for c in item.choices %}
-        <option value="{{ c }}" {% if current.get(item.key) == c %}selected{% endif %}>{{ c }}</option>
+        <option value="{{ c }}" {% if current.get(item.key)|string == c %}selected{% endif %}>{{ c }}</option>
         {% endfor %}
       </select>
       {% elif item.type == 'int' %}
@@ -28,6 +28,7 @@
       {% else %}
       <input name="{{ item.key }}" value="{{ current.get(item.key, '') }}">
       {% endif %}
+      {% if item.help %}<span class="setting-help">{{ item.help }}</span>{% endif %}
     </label>
     {% endfor %}
   </fieldset>
