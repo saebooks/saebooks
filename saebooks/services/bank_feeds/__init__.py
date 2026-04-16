@@ -1,0 +1,35 @@
+"""Bank feeds — SISS Data Services integration (v1.1).
+
+Public surface for the `bank_feeds` service module. Callers outside this
+package should import from here; the submodules are implementation detail
+and may be reorganised.
+
+Phase 1 (this module) provides the HTTP client foundation only:
+
+    from saebooks.services.bank_feeds import SissClient, SissError
+
+    client = SissClient.from_settings(settings)
+    async with client:
+        accounts = await client.get("/sds/clients/abc/accounts", scopes=["sds_clients"])
+
+Business-logic wrappers (onboarding, sync, health) land in later phases.
+"""
+from saebooks.services.bank_feeds.client import SissClient
+from saebooks.services.bank_feeds.errors import (
+    SissAuthError,
+    SissError,
+    SissRateLimitError,
+    SissScopeError,
+    SissValidationError,
+)
+from saebooks.services.bank_feeds.token import TokenCache
+
+__all__ = [
+    "SissAuthError",
+    "SissClient",
+    "SissError",
+    "SissRateLimitError",
+    "SissScopeError",
+    "SissValidationError",
+    "TokenCache",
+]

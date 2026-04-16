@@ -33,5 +33,26 @@ class Settings(BaseSettings):
         default=7, alias="SEED_COMPANY_FIN_YEAR_START_MONTH"
     )
 
+    # ---------------------------------------------------------------- #
+    # Bank feeds (SISS Data Services — v1.1 feature)                   #
+    # ---------------------------------------------------------------- #
+    # Defaults are empty / production values; the bank_feeds service
+    # raises on use if client_id / secret / subscription_key are unset.
+    # Set these via env or .env once SISS onboarding produces a real
+    # credential set. See acsiss/09-open-question-answers.md Q2 for why
+    # SISS_SANDBOX is a separate flag.
+    siss_client_id: str = Field(default="", alias="SISS_CLIENT_ID")
+    siss_client_secret: str = Field(default="", alias="SISS_CLIENT_SECRET")
+    siss_subscription_key: str = Field(default="", alias="SISS_SUBSCRIPTION_KEY")
+    siss_token_url: str = Field(
+        default="https://auth.sissdata.com.au/oauth/token",
+        alias="SISS_TOKEN_URL",
+    )
+    siss_api_base: str = Field(
+        default="https://api.sissdata.com.au/cdr-au/v1/",
+        alias="SISS_API_BASE",
+    )
+    siss_sandbox: bool = Field(default=False, alias="SISS_SANDBOX")
+
 
 settings = Settings()
