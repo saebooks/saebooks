@@ -118,7 +118,7 @@
   </section>
   {% elif deps.has_blockers and not candidates %}
   <div class="alert alert-error" style="margin-top:1rem">
-    No other {{ deps.account.account_type.value|replace('_',' ')|lower }} accounts available to migrate to.
+    No other {{ deps.account.account_type.value|replace('_',' ')|title }} accounts available to migrate to.
     Create one first, or manually reassign the journal entries above.
   </div>
   {% endif %}

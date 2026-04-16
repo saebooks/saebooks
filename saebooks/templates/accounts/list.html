@@ -4,6 +4,7 @@
 <div class="page-header">
   <h1>Chart of accounts</h1>
   <div class="meta">{{ total }} accounts · {{ company_name }}</div>
+  <button type="button" class="btn-secondary" onclick="toggleBulk()" id="bulk-toggle">Bulk edit</button>
 </div>
 
 {% if error %}
@@ -14,39 +15,93 @@
 <div class="alert alert-ok">Account deleted.</div>
 {% endif %}
 
+{% if request.query_params.get('error') == 'no_selection' %}
+<div class="alert alert-error">No accounts selected.</div>
+{% endif %}
+
+<div id="bulk-bar" class="bulk-bar" style="display:none">
+  <strong>Bulk edit:</strong>
+  <select id="bulk-action" onchange="bulkActionChanged()">
+    <option value="">Select action...</option>
+    <option value="tax_code">Set tax code</option>
+    <option value="reconcile">Set reconcile</option>
+  </select>
+  <span id="bulk-value-wrap">
+    <select id="bulk-value" name="bulk_value" form="bulk-form">
+      <option value="">— none —</option>
+      {% for tc in tax_codes %}
+      <option value="{{ tc.code }}">{{ tc.code }} — {{ tc.name }}</option>
+      {% endfor %}
+    </select>
+  </span>
+  <button type="submit" form="bulk-form" class="btn" id="bulk-apply" disabled>Apply</button>
+  <span class="dim" id="bulk-count">0 selected</span>
+</div>
+<form id="bulk-form" method="post" action="/accounts/bulk" style="display:none">
+  <input type="hidden" name="bulk_action" id="bulk-action-input">
+  <input type="hidden" name="bulk_value" id="bulk-value-input">
+</form>
+
 {% for group in groups %}
 <section class="acct-group">
-  <h2>{{ group.prefix }} — {{ group.label }} <span class="dim">· {{ group.count }}</span></h2>
+  <h2>{{ group.prefix }} — {{ group.label }}
+    <span class="dim">· {{ group.count }}</span>
+    {% if group.total and group.total != 0 %}
+    <span class="group-bal">{{ "%.2f"|format(group.total) }}</span>
+    {% endif %}
+  </h2>
   <table class="acct-table">
     <thead>
       <tr>
+        <th class="bulk-col" style="display:none"><input type="checkbox" class="sel-all" onchange="toggleGroupAll(this)"></th>
         <th class="code">Code</th>
         <th>Name</th>
         <th style="width:8rem;font-size:10px">Type</th>
+        <th class="tc-col">Tax code</th>
+        <th class="num">Balance</th>
         <th class="rec">Rec</th>
-        <th class="rec">Hdr</th>
         <th class="actions"></th>
       </tr>
     </thead>
     <tbody>
       {% for row in group.rows %}
-      <tr class="{{ 'acct-header-row' if row.account.is_header }}{{ ' acct-anomaly' if row.anomaly }}">
-        <td class="code">{{ row.account.code }}</td>
-        <td style="padding-left: {{ 0.5 + row.indent * 1.2 }}rem">
-          {% if row.account.is_header %}<strong>{{ row.account.name }}</strong>
-          {% else %}{{ row.account.name }}{% endif %}
-          {% if row.bustard %}<span class="bustard-tag">bustard</span>{% endif %}
+      <tr class="{{ 'acct-header-row' if row.account.is_header }}{{ ' acct-anomaly' if row.anomaly }}{{ ' acct-protected' if row.protected }}">
+        <td class="bulk-col" style="display:none">
+          {% if not row.account.is_header %}
+          <input type="checkbox" name="sel_{{ row.account.id }}" form="bulk-form" class="sel-acct" onchange="updateBulkCount()">
+          {% endif %}
         </td>
-        <td style="font-size:10px;color:var(--fg-dim)">{{ row.account.account_type.value|replace('_',' ')|lower }}</td>
+        <td class="code"><a href="/accounts/{{ row.account.id }}">{{ row.account.code }}</a></td>
+        <td style="padding-left: {{ 0.5 + row.indent * 1.2 }}rem">
+          {% if row.account.is_header %}<strong><a href="/accounts/{{ row.account.id }}">{{ row.account.name }}</a></strong>
+          {% else %}<a href="/accounts/{{ row.account.id }}">{{ row.account.name }}</a>{% endif %}
+          {% if row.bustard %}<span class="bustard-tag">bustard</span>{% endif %}
+          {% if row.account.system_managed %}<span class="acct-badge sys">sys</span>{% endif %}
+          {% if row.protected and not row.account.system_managed %}<span class="acct-badge protected">protected</span>{% endif %}
+        </td>
+        <td style="font-size:10px;color:var(--fg-dim)">{{ row.account.account_type.value|replace('_',' ')|title }}</td>
+        <td class="tc-col">
+          {% if not row.account.is_header %}
+          <span class="tc-display"
+                hx-get="/accounts/{{ row.account.id }}/tax-code/edit"
+                hx-swap="outerHTML" hx-trigger="click"
+                title="Click to change">
+            {{ row.account.tax_code_default or '<em class="dim">none</em>' }}
+          </span>
+          {% endif %}
+        </td>
+        <td class="num{% if row.balance < 0 %} balance-neg{% endif %}">
+          {% if row.balance != 0 %}{{ "%.2f"|format(row.balance) }}{% else %}<span class="dim">—</span>{% endif %}
+        </td>
         <td class="rec">{% if row.account.reconcile %}✓{% endif %}</td>
-        <td class="rec">{% if row.account.is_header %}H{% endif %}</td>
         <td class="actions">
+          {% if row.protected %}
+          <a href="/accounts/{{ row.account.id }}/edit" class="warn-link"
+             onclick="return confirm('This is a protected system account. Editing it incorrectly can corrupt your ledger. Are you sure?')">edit</a>
+          {% else %}
           <a href="/accounts/{{ row.account.id }}/edit">edit</a>
-          <a href="/accounts/{{ row.account.id }}/delete">delete</a>
-          <form method="post" action="/accounts/{{ row.account.id }}/archive" style="display:inline"
-                onsubmit="return confirm('Archive {{ row.account.code }} {{ row.account.name }}?')">
-            <button type="submit" class="linkish">archive</button>
-          </form>
+          {% endif %}
+          <a href="/accounts/{{ row.account.id }}/delete">del</a>
           {% if row.anomaly %}
           <span class="anomaly-flag" title="{{ row.anomaly }}">⚠</span>
           {% endif %}
@@ -62,8 +117,8 @@
   <h2>+ New account</h2>
   <div class="code-help">
     <strong>Code structure:</strong>
-    <code>{prefix}{child1-5}[-letter]</code>
-    — up to 5 child digits after the range prefix, then an optional letter suffix for one more level.
+    <code>{prefix}-{digits}[-letter]</code>
+    — prefix, hyphen, up to 5 child digits, then an optional letter suffix for one more level.
     <div style="margin-top:0.3rem">
       <strong>Ranges:</strong>
       {% for r in ranges %}
@@ -74,8 +129,8 @@
   </div>
   <form method="post" action="/accounts" class="tc-form">
     <label>Code <input name="code" required maxlength="32"
-      pattern="[0-9]+(-[a-zA-Z])?" title="Digits, optionally -letter suffix"
-      placeholder="e.g. 11111" value="{{ form_code or '' }}"></label>
+      pattern="\d+-\d+(-[a-zA-Z])?" title="Format: prefix-digits, e.g. 1-1234"
+      placeholder="e.g. 1-1110" value="{{ form_code or '' }}"></label>
     <label>Name <input name="name" required placeholder="e.g. Westpac Business Account"
       value="{{ form_name or '' }}"></label>
     <label>Type
@@ -95,7 +150,14 @@
         <option value="false">No</option><option value="true">Yes</option>
       </select>
     </label>
-    <label>Default tax code <input name="tax_code_default" maxlength="16" placeholder="e.g. GST"></label>
+    <label>Default tax code
+      <select name="tax_code_default">
+        <option value="">— none —</option>
+        {% for tc in tax_codes %}
+        <option value="{{ tc.code }}">{{ tc.code }} — {{ tc.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
     <button type="submit">Create</button>
   </form>
 </section>
@@ -106,20 +168,83 @@ const ranges = [
   {% for r in ranges %}
   {prefix: '{{ r.prefix }}', type: '{{ r.account_types[0] }}'},
   {% endfor %}
-].sort((a, b) => b.prefix.length - a.prefix.length);  // longest first
+];
 
 const codeInput = document.querySelector('input[name="code"]');
 const typeSelect = document.getElementById('new-acct-type');
 if (codeInput && typeSelect) {
   codeInput.addEventListener('input', function() {
-    const digits = this.value.trim().replace(/-[a-zA-Z]$/, '');
+    const val = this.value.trim();
+    const hyphen = val.indexOf('-');
+    if (hyphen < 1) return;
+    const prefix = val.substring(0, hyphen);
     for (const r of ranges) {
-      if (digits.startsWith(r.prefix)) {
+      if (prefix === r.prefix) {
         typeSelect.value = r.type;
         break;
       }
     }
   });
 }
+
+// Bulk edit mode
+let bulkMode = false;
+
+function toggleBulk() {
+  bulkMode = !bulkMode;
+  document.querySelectorAll('.bulk-col').forEach(el => {
+    el.style.display = bulkMode ? '' : 'none';
+  });
+  document.getElementById('bulk-bar').style.display = bulkMode ? 'flex' : 'none';
+  document.getElementById('bulk-toggle').textContent = bulkMode ? 'Done' : 'Bulk edit';
+  if (!bulkMode) {
+    document.querySelectorAll('.sel-acct').forEach(cb => cb.checked = false);
+    updateBulkCount();
+  }
+}
+
+function toggleGroupAll(master) {
+  const tbody = master.closest('table').querySelector('tbody');
+  tbody.querySelectorAll('.sel-acct').forEach(cb => cb.checked = master.checked);
+  updateBulkCount();
+}
+
+function updateBulkCount() {
+  const n = document.querySelectorAll('.sel-acct:checked').length;
+  document.getElementById('bulk-count').textContent = n + ' selected';
+  document.getElementById('bulk-apply').disabled = n === 0;
+}
+
+function bulkActionChanged() {
+  const action = document.getElementById('bulk-action').value;
+  const wrap = document.getElementById('bulk-value-wrap');
+
+  if (action === 'tax_code') {
+    wrap.innerHTML = `<select id="bulk-value">
+      <option value="">— none —</option>
+      {% for tc in tax_codes %}<option value="{{ tc.code }}">{{ tc.code }} — {{ tc.name }}</option>
+      {% endfor %}</select>`;
+  } else if (action === 'reconcile') {
+    wrap.innerHTML = `<select id="bulk-value">
+      <option value="true">Yes</option>
+      <option value="false">No</option>
+    </select>`;
+  } else {
+    wrap.innerHTML = '';
+  }
+}
+
+// Wire up bulk form submission
+document.getElementById('bulk-form').addEventListener('submit', function(e) {
+  document.getElementById('bulk-action-input').value = document.getElementById('bulk-action').value;
+  const valEl = document.getElementById('bulk-value');
+  document.getElementById('bulk-value-input').value = valEl ? valEl.value : '';
+  // Copy checked checkboxes into the form
+  document.querySelectorAll('.sel-acct:checked').forEach(cb => {
+    const h = document.createElement('input');
+    h.type = 'hidden'; h.name = cb.name; h.value = 'on';
+    this.appendChild(h);
+  });
+});
 </script>
 {% endblock %}

@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}{{ account.code }} {{ account.name }} — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Account detail</h1>
+  <div class="meta">
+    <a href="/accounts">Accounts</a> &rsaquo; {{ account.code }} {{ account.name }}
+  </div>
+</div>
+
+<div class="acct-card">
+  <div>
+    <div class="acct-title">
+      <span class="acct-code">{{ account.code }}</span>{{ account.name }}
+    </div>
+    <div class="acct-flags">
+      <span class="acct-badge type">{{ account.account_type.value|replace('_',' ')|title }}</span>
+      {% if account.reconcile %}<span class="acct-badge rec">reconcile</span>{% endif %}
+      {% if account.is_header %}<span class="acct-badge">header</span>{% endif %}
+      {% if account.system_managed %}<span class="acct-badge sys">system</span>{% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="acct-actions">
+  <a href="/accounts/{{ account.id }}/edit">Edit account</a>
+  <a href="/reports/trial-balance">Trial balance</a>
+  {% if account.account_type.value in ('ASSET', 'LIABILITY', 'EQUITY') %}
+  <a href="/reports/balance-sheet">Balance sheet</a>
+  {% else %}
+  <a href="/reports/profit-loss">Profit &amp; loss</a>
+  {% endif %}
+  <a class="future" title="Coming soon">Invoices</a>
+  <a class="future" title="Coming soon">Expenses</a>
+  <a class="future" title="Coming soon">Bank statements</a>
+</div>
+
+<form method="get" action="/accounts/{{ account.id }}" class="report-filter">
+  <label>From <input type="date" name="from" value="{{ from_date }}"></label>
+  <label>To <input type="date" name="to" value="{{ to_date }}"></label>
+  <button type="submit" class="btn-secondary">Filter</button>
+</form>
+
+{% if lines or has_from %}
+<table class="report-table">
+  <thead>
+    <tr>
+      <th>Date</th>
+      <th>Ref</th>
+      <th>Description</th>
+      <th class="num">Debit</th>
+      <th class="num">Credit</th>
+      <th class="num">Balance</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% if has_from %}
+    <tr class="opening-row">
+      <td colspan="3">Opening balance</td>
+      <td class="num"></td>
+      <td class="num"></td>
+      <td class="num running-bal{{ ' balance-neg' if opening_balance < 0 }}">{{ "%.2f"|format(opening_balance) }}</td>
+    </tr>
+    {% endif %}
+    {% for line in lines %}
+    <tr>
+      <td>{{ line.entry_date.isoformat() }}</td>
+      <td><a href="/journal/{{ line.entry_id }}">{{ line.ref }}</a></td>
+      <td>{{ line.description }}</td>
+      <td class="num">{% if line.debit %}{{ "%.2f"|format(line.debit) }}{% endif %}</td>
+      <td class="num">{% if line.credit %}{{ "%.2f"|format(line.credit) }}{% endif %}</td>
+      <td class="num running-bal{{ ' balance-neg' if line.balance < 0 }}">{{ "%.2f"|format(line.balance) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr>
+      <td colspan="3"><strong>Totals</strong></td>
+      <td class="num"><strong>{{ "%.2f"|format(total_debit) }}</strong></td>
+      <td class="num"><strong>{{ "%.2f"|format(total_credit) }}</strong></td>
+      <td class="num running-bal{{ ' balance-neg' if closing_balance < 0 }}"><strong>{{ "%.2f"|format(closing_balance) }}</strong></td>
+    </tr>
+  </tfoot>
+</table>
+{% else %}
+<p class="dim">No transactions recorded for this account.</p>
+{% endif %}
+
+{% endblock %}
