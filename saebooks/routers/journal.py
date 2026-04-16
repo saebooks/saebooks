@@ -192,6 +192,7 @@ async def journal_save(request: Request) -> RedirectResponse | HTMLResponse:
                     description=description or None,
                     ref=ref or None,
                     lines=lines,
+                    performed_by="web",
                 )
             else:
                 entry = await svc.create_draft(
@@ -243,5 +244,5 @@ async def journal_reverse(entry_id: uuid.UUID) -> RedirectResponse:
 @router.post("/{entry_id}/delete")
 async def journal_delete(entry_id: uuid.UUID) -> RedirectResponse:
     async with AsyncSessionLocal() as session:
-        await svc.delete(session, entry_id)
+        await svc.delete(session, entry_id, performed_by="web")
     return RedirectResponse("/journal", status_code=303)

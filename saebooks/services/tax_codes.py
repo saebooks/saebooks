@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.models.tax_code import TaxCode
+from saebooks.services import audit as audit_svc
 
 # Canonical AU GST starter set — users can edit or add more.
 AU_SEED: list[dict[str, object]] = [
@@ -121,10 +122,12 @@ async def update(
     tax_system: str | None = None,
     reporting_type: str | None = None,
     description: str | None = None,
+    performed_by: str | None = None,
 ) -> TaxCode:
     tax_code = await session.get(TaxCode, tax_code_id)
     if tax_code is None:
         raise ValueError(f"Tax code {tax_code_id} not found")
+    before = audit_svc.capture(tax_code)
     if code is not None:
         tax_code.code = code.strip()
     if name is not None:
@@ -137,14 +140,32 @@ async def update(
         tax_code.reporting_type = reporting_type
     if description is not None:
         tax_code.description = description or None
+    await audit_svc.snapshot_row(
+        session, tax_code,
+        action="update",
+        before_data=before,
+        performed_by=performed_by,
+    )
     await session.commit()
     await session.refresh(tax_code)
     return tax_code
 
 
-async def archive(session: AsyncSession, tax_code_id: uuid.UUID) -> None:
+async def archive(
+    session: AsyncSession,
+    tax_code_id: uuid.UUID,
+    *,
+    performed_by: str | None = None,
+) -> None:
     tax_code = await session.get(TaxCode, tax_code_id)
     if tax_code is None:
         return
+    before = audit_svc.capture(tax_code)
     tax_code.archived_at = datetime.now(UTC)
+    await audit_svc.snapshot_row(
+        session, tax_code,
+        action="archive",
+        before_data=before,
+        performed_by=performed_by,
+    )
     await session.commit()

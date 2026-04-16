@@ -10,7 +10,25 @@
 <div class="alert alert-error">{{ error }}</div>
 {% endif %}
 
-<form method="post" action="/accounts/{{ account.id }}" class="tc-form">
+{% if protected %}
+<div class="alert alert-warn">
+  <strong>Protected account.</strong> This is a system or structural account
+  ({{ account.code }} {{ account.name }}). Changing its type, code, or name
+  can corrupt your ledger and affect financial reports. Only proceed if you
+  understand double-entry accounting and the consequences of this change.
+</div>
+{% endif %}
+
+{% if account.system_managed %}
+<div class="alert alert-info" style="margin-bottom:0.5rem">
+  <strong>System-managed.</strong> This account is auto-posted by the GST engine.
+  Editing it may break automatic GST calculations. Consider turning off
+  <em>gst_auto_post</em> in <a href="/admin/settings">Settings</a> first.
+</div>
+{% endif %}
+
+<form method="post" action="/accounts/{{ account.id }}" class="tc-form"
+  {% if protected %}onsubmit="return confirm('You are about to modify a protected account. This can corrupt your ledger. Continue?')"{% endif %}>
   <label>Code <input name="code" required maxlength="32"
     pattern="\d+-\d+(-[a-zA-Z])?" title="Format: prefix-digits, e.g. 1-1234"
     value="{{ account.code }}"></label>

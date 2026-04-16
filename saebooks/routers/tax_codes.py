@@ -129,6 +129,7 @@ async def tax_codes_update(
             tax_system=tax_system,
             reporting_type=reporting_type,
             description=description,
+            performed_by="web",
         )
     return RedirectResponse("/admin/tax-codes", status_code=303)
 
@@ -136,5 +137,5 @@ async def tax_codes_update(
 @router.post("/{tax_code_id}/archive")
 async def tax_codes_archive(tax_code_id: UUID) -> RedirectResponse:
     async with AsyncSessionLocal() as session:
-        await svc.archive(session, tax_code_id)
+        await svc.archive(session, tax_code_id, performed_by="web")
     return RedirectResponse("/admin/tax-codes", status_code=303)

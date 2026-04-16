@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine, PeriodLock
+from saebooks.services import audit as audit_svc
 from saebooks.services import gst as gst_svc
 from saebooks.services import settings as settings_svc
 
@@ -112,12 +113,15 @@ async def update_draft(
     description: str | None = None,
     ref: str | None = None,
     lines: list[dict[str, object]] | None = None,
+    performed_by: str | None = None,
 ) -> JournalEntry:
     entry = await get(session, entry_id)
     if entry.status != EntryStatus.DRAFT:
         audit_mode = await settings_svc.get(session, "audit_mode", "immutable")
         if audit_mode == "immutable":
             raise PostingError("Cannot edit a posted entry in immutable mode — reverse instead")
+
+    before = audit_svc.capture(entry)
 
     if entry_date is not None:
         entry.entry_date = entry_date
@@ -145,6 +149,12 @@ async def update_draft(
                 )
             )
 
+    await audit_svc.snapshot_row(
+        session, entry,
+        action="update",
+        before_data=before,
+        performed_by=performed_by,
+    )
     await session.commit()
     return await get(session, entry_id)
 
@@ -235,6 +245,14 @@ async def reverse(
     if original.status != EntryStatus.POSTED:
         raise PostingError(f"Can only reverse posted entries (current: {original.status})")
 
+    # Snapshot the original before we flip its status to REVERSED.
+    await audit_svc.snapshot_row(
+        session, original,
+        action="reverse",
+        reason=f"Reversed by new entry (date={reversal_date or original.entry_date})",
+        performed_by=posted_by,
+    )
+
     rev_date = reversal_date or original.entry_date
     rev_ref = await next_ref(session)
 
@@ -280,9 +298,16 @@ async def reverse(
 async def delete(
     session: AsyncSession,
     entry_id: uuid.UUID,
+    *,
+    performed_by: str | None = None,
 ) -> None:
     """Delete a journal entry and its lines. Any status — MYOB-style."""
     entry = await get(session, entry_id)
+    await audit_svc.snapshot_row(
+        session, entry,
+        action="delete",
+        performed_by=performed_by,
+    )
     await session.delete(entry)
     await session.commit()
 

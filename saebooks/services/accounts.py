@@ -34,10 +34,14 @@ from saebooks.models.account_range import AccountRange
 from saebooks.models.bank_statement import BankStatementLine
 from saebooks.models.journal import JournalEntry, JournalLine
 from saebooks.models.journal_template import JournalTemplate
+from saebooks.services import audit as audit_svc
 from saebooks.services import settings as settings_svc
 
 # Max child levels (digits after prefix, before the bustard)
 MAX_CHILD_LEVELS = 5
+
+# Structural accounts that get auto-snapshotted before any edit
+_PROTECTED_CODES = {"3-8000", "3-9000", "3-9999"}
 
 # Regex: {prefix}-{children}[-{bustard}]
 # prefix = one or more digits, children = one or more digits, bustard = optional letter
@@ -469,6 +473,7 @@ async def update(
     is_header: bool | None = None,
     tax_code_default: str | None = None,
     skip_validation: bool = False,
+    performed_by: str | None = None,
 ) -> Account:
     account = await session.get(Account, account_id)
     if account is None:
@@ -481,6 +486,11 @@ async def update(
         errors = await validate_code(session, account.company_id, new_code, new_type)
         if errors:
             raise ValueError("; ".join(errors))
+
+    # Capture pre-mutation state for protected/system accounts so we can
+    # record a proper before→after audit snapshot.
+    should_snapshot = account.system_managed or account.code in _PROTECTED_CODES
+    before_data = audit_svc.capture(account) if should_snapshot else None
 
     if code is not None:
         account.code = new_code
@@ -499,6 +509,16 @@ async def update(
     if code is not None:
         parent = await find_parent(session, account.company_id, new_code)
         account.parent_id = parent.id if parent else None
+
+    # Snapshot AFTER mutation, pairing with the captured before-state, so the
+    # audit viewer can diff the fields that actually changed.
+    if should_snapshot:
+        await audit_svc.snapshot_row(
+            session, account,
+            action="update",
+            before_data=before_data,
+            performed_by=performed_by,
+        )
 
     await session.commit()
     await session.refresh(account)
@@ -620,6 +640,8 @@ async def migrate_account(
     session: AsyncSession,
     source_id: uuid.UUID,
     target_id: uuid.UUID,
+    *,
+    performed_by: str | None = None,
 ) -> dict[str, int]:
     """Move all references from source account to target account."""
     source = await session.get(Account, source_id)
@@ -628,6 +650,14 @@ async def migrate_account(
         raise ValueError(f"Source account {source_id} not found")
     if target is None:
         raise ValueError(f"Target account {target_id} not found")
+
+    # Snapshot source account before migration
+    await audit_svc.snapshot_row(
+        session, source,
+        action="migrate",
+        reason=f"Migrating all references to {target.code} {target.name}",
+        performed_by=performed_by,
+    )
 
     counts: dict[str, int] = {}
 
@@ -676,10 +706,21 @@ async def migrate_account(
     return counts
 
 
-async def delete_account(session: AsyncSession, account_id: uuid.UUID) -> None:
+async def delete_account(
+    session: AsyncSession,
+    account_id: uuid.UUID,
+    *,
+    performed_by: str | None = None,
+) -> None:
     """Hard-delete an account. Will fail if FK RESTRICT references still exist."""
     account = await session.get(Account, account_id)
     if account is None:
         raise ValueError(f"Account {account_id} not found")
+
+    # Always snapshot before deletion — this is the only way to recover
+    await audit_svc.snapshot_row(
+        session, account, action="delete", performed_by=performed_by,
+    )
+
     await session.delete(account)
     await session.commit()

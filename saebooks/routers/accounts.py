@@ -20,6 +20,14 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 ACCOUNT_TYPE_CHOICES = [(t.value, t.value.replace("_", " ").title()) for t in AccountType]
 
+# Accounts that are protected from casual editing — require confirmation
+# These are structural accounts that affect the integrity of the ledger
+_PROTECTED_CODES = {
+    "3-8000",  # Retained Earnings
+    "3-9000",  # Current Year Earnings
+    "3-9999",  # Historical Balancing
+}
+
 
 async def _first_company() -> Company:
     async with AsyncSessionLocal() as session:
@@ -183,6 +191,7 @@ async def accounts_edit(request: Request, account_id: UUID) -> HTMLResponse:
             raise HTTPException(404, "Account not found")
         company = await session.get(Company, account.company_id)
         ranges = await svc.get_ranges(session, account.company_id)
+    protected = account.code in _PROTECTED_CODES or account.system_managed
     return templates.TemplateResponse(
         request,
         "accounts/edit.html",
@@ -192,6 +201,7 @@ async def accounts_edit(request: Request, account_id: UUID) -> HTMLResponse:
             "account": account,
             "account_types": ACCOUNT_TYPE_CHOICES,
             "ranges": ranges,
+            "protected": protected,
         },
     )
 
@@ -218,6 +228,7 @@ async def accounts_update(
                 reconcile=reconcile,
                 is_header=is_header,
                 tax_code_default=tax_code_default,
+                performed_by="web",
             )
     except ValueError as exc:
         async with AsyncSessionLocal() as session:
@@ -284,7 +295,9 @@ async def accounts_migrate(
 
     target_id = UUID(target_raw)
     async with AsyncSessionLocal() as session:
-        counts = await svc.migrate_account(session, account_id, target_id)
+        counts = await svc.migrate_account(
+            session, account_id, target_id, performed_by="web"
+        )
 
     total = sum(counts.values())
     return RedirectResponse(
@@ -300,7 +313,7 @@ async def accounts_delete(
 ) -> RedirectResponse | HTMLResponse:
     try:
         async with AsyncSessionLocal() as session:
-            await svc.delete_account(session, account_id)
+            await svc.delete_account(session, account_id, performed_by="web")
     except Exception as exc:
         return RedirectResponse(
             f"/accounts/{account_id}/delete?error={exc}",
