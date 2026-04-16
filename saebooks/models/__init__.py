@@ -1,5 +1,11 @@
 from saebooks.models.account import Account, AccountType
 from saebooks.models.account_range import AccountRange
+from saebooks.models.bank_feed import (
+    BankFeedAccount,
+    BankFeedClient,
+    BankFeedIssue,
+    BankFeedIssueStatus,
+)
 from saebooks.models.bank_rule import BankRule, MatchType
 from saebooks.models.bank_statement import BankStatementLine, StatementLineStatus
 from saebooks.models.company import Company
@@ -14,6 +20,10 @@ __all__ = [
     "Account",
     "AccountRange",
     "AccountType",
+    "BankFeedAccount",
+    "BankFeedClient",
+    "BankFeedIssue",
+    "BankFeedIssueStatus",
     "BankRule",
     "BankStatementLine",
     "Company",

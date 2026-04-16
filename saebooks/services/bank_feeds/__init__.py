@@ -22,6 +22,13 @@ from saebooks.services.bank_feeds.errors import (
     SissScopeError,
     SissValidationError,
 )
+from saebooks.services.bank_feeds.repo import (
+    get_or_create_client,
+    insert_statement_lines,
+    update_sync_cursor,
+    upsert_bank_feed_account,
+    upsert_feed_issue,
+)
 from saebooks.services.bank_feeds.token import TokenCache
 
 __all__ = [
@@ -32,4 +39,9 @@ __all__ = [
     "SissScopeError",
     "SissValidationError",
     "TokenCache",
+    "get_or_create_client",
+    "insert_statement_lines",
+    "update_sync_cursor",
+    "upsert_bank_feed_account",
+    "upsert_feed_issue",
 ]

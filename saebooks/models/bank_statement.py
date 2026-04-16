@@ -53,6 +53,14 @@ class BankStatementLine(Base):
         UUID(as_uuid=True), ForeignKey("bank_rules.id", ondelete="SET NULL"),
         comment="The bank rule used to auto-match this line, if any",
     )
+    bank_feed_account_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("bank_feed_accounts.id", ondelete="SET NULL"),
+        comment="Source feed account, if this line came from a bank feed",
+    )
+    external_id: Mapped[str | None] = mapped_column(
+        String(255),
+        comment="Upstream transactionId — used to dedupe on resync",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
