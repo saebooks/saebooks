@@ -8,6 +8,7 @@ from fastapi.templating import Jinja2Templates
 from saebooks.config import settings as app_settings
 from saebooks.db import AsyncSessionLocal
 from saebooks.services import audit as audit_svc
+from saebooks.services import backups as backups_svc
 from saebooks.services import settings as svc
 from saebooks.services import sql_tool as sql_svc
 
@@ -358,6 +359,22 @@ async def sql_export(
         csv_text,
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": 'attachment; filename="query.csv"'},
+    )
+
+
+@router.get("/backups", response_class=HTMLResponse)
+async def backups_admin(request: Request) -> HTMLResponse:
+    """List pg_dump backups and recent backup/restore-test runs."""
+    return templates.TemplateResponse(
+        request,
+        "admin/backups.html",
+        {
+            "edition": app_settings.edition,
+            "summary": backups_svc.summary(),
+            "dumps": backups_svc.list_dumps(),
+            "runs": backups_svc.recent_backup_runs(limit=30),
+            "tests": backups_svc.recent_restore_tests(limit=20),
+        },
     )
 
 

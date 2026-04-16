@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% block title %}Backups — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Backups</h1>
+  <div class="meta">{{ summary.backup_dir }}</div>
+</div>
+
+<div class="backup-summary">
+  <div class="summary-card">
+    <div class="label">Dumps on disk</div>
+    <div class="value">{{ summary.dump_count }}</div>
+    <div class="sub">{{ summary.total_size_human }} total</div>
+  </div>
+
+  <div class="summary-card">
+    <div class="label">Latest backup</div>
+    {% if summary.last_run %}
+      <div class="value {% if summary.last_run.ok %}ok{% else %}fail{% endif %}">
+        {{ summary.last_run.status }}
+      </div>
+      <div class="sub">
+        {{ summary.last_run.ts.strftime('%Y-%m-%d %H:%M') }}
+        &middot; {{ summary.last_run.size_human }}
+        &middot; {{ summary.last_run.duration_s }}s
+      </div>
+      {% if not summary.last_run.ok and summary.last_run.error %}
+        <div class="error-detail">{{ summary.last_run.error }}</div>
+      {% endif %}
+    {% else %}
+      <div class="value dim">—</div>
+      <div class="sub dim">no runs recorded yet</div>
+    {% endif %}
+  </div>
+
+  <div class="summary-card">
+    <div class="label">Latest restore test</div>
+    {% if summary.last_test %}
+      <div class="value {% if summary.last_test.ok %}ok{% else %}fail{% endif %}">
+        {{ summary.last_test.status }}
+      </div>
+      <div class="sub">
+        {{ summary.last_test.ts.strftime('%Y-%m-%d %H:%M') }}
+        &middot; {{ summary.last_test.duration_s }}s
+      </div>
+      <div class="sub dim">{{ summary.last_test.details }}</div>
+    {% else %}
+      <div class="value dim">—</div>
+      <div class="sub dim">no tests run yet</div>
+    {% endif %}
+  </div>
+</div>
+
+<details class="backup-help">
+  <summary>How this works</summary>
+  <p>
+    A systemd user timer runs
+    <code>scripts/backup.sh</code> every night at 02:15 and writes a
+    gzipped <code>pg_dump</code> to
+    <code>{{ summary.backup_dir }}</code>. Retention: 7 daily + 4 weekly
+    (Sunday) + 12 monthly (1st-of-month).
+  </p>
+  <p>
+    A second timer runs <code>scripts/restore-test.sh</code> every
+    Sunday at 03:15 — it restores the latest dump into a scratch
+    database and asserts row counts against the live DB (±5% drift
+    tolerance). Failures fire a Telegram notification via
+    <code>claude-notify</code>.
+  </p>
+  <p>
+    Manual runs from the host:
+    <code>~/projects/saebooks/scripts/backup.sh</code>
+    or <code>...restore-test.sh</code>.
+  </p>
+</details>
+
+<h2>Dumps on disk</h2>
+{% if dumps %}
+<table class="acct-table">
+  <thead>
+    <tr>
+      <th>File</th>
+      <th class="num">Size</th>
+      <th>Modified</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for d in dumps %}
+    <tr>
+      <td class="code">{{ d.name }}</td>
+      <td class="num">{{ d.size_human }}</td>
+      <td>{{ d.mtime.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="dim">No dumps yet. The first one will appear after tonight's timer fires, or run <code>scripts/backup.sh</code> manually.</p>
+{% endif %}
+
+<h2>Recent backup runs</h2>
+{% if runs %}
+<table class="acct-table">
+  <thead>
+    <tr>
+      <th>When</th>
+      <th>Status</th>
+      <th>File</th>
+      <th class="num">Size</th>
+      <th class="num">Duration</th>
+      <th>Error</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in runs %}
+    <tr>
+      <td>{{ r.ts.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+      <td>
+        {% if r.ok %}
+          <span class="status-posted">OK</span>
+        {% else %}
+          <span class="status-error">{{ r.status }}</span>
+        {% endif %}
+      </td>
+      <td class="code">{{ r.file or '—' }}</td>
+      <td class="num">{{ r.size_human if r.size_bytes else '—' }}</td>
+      <td class="num">{{ r.duration_s }}s</td>
+      <td class="dim">{{ r.error }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="dim">No backup runs recorded. (Log at <code>{{ summary.backup_dir }}/backups.jsonl</code>.)</p>
+{% endif %}
+
+<h2>Restore tests</h2>
+{% if tests %}
+<table class="acct-table">
+  <thead>
+    <tr>
+      <th>When</th>
+      <th>Status</th>
+      <th>Dump tested</th>
+      <th class="num">Duration</th>
+      <th>Details</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for t in tests %}
+    <tr>
+      <td>{{ t.ts.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+      <td>
+        {% if t.ok %}
+          <span class="status-posted">OK</span>
+        {% else %}
+          <span class="status-error">{{ t.status }}</span>
+        {% endif %}
+      </td>
+      <td class="code">{{ t.dump or '—' }}</td>
+      <td class="num">{{ t.duration_s }}s</td>
+      <td class="dim">{{ t.details }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="dim">No restore tests recorded. (Log at <code>{{ summary.backup_dir }}/restore-tests.jsonl</code>.)</p>
+{% endif %}
+{% endblock %}

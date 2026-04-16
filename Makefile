@@ -1,4 +1,4 @@
-.PHONY: up down build migrate revision seed test lint typecheck shell logs psql
+.PHONY: up down build migrate revision seed test lint typecheck shell logs psql backup restore-test
 
 COMPOSE := docker compose
 APP := $(COMPOSE) exec app
@@ -38,3 +38,11 @@ logs:
 
 psql:
 	$(COMPOSE) exec db psql -U saebooks -d saebooks
+
+# Run a pg_dump backup right now (normally the systemd timer does this nightly).
+backup:
+	./scripts/backup.sh
+
+# Restore the latest dump into a scratch DB and verify row counts.
+restore-test:
+	./scripts/restore-test.sh

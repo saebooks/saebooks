@@ -27,6 +27,12 @@ services:
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini
       - ./tests:/app/tests
+      # Backup directory mounted read-only so /admin/backups can list
+      # dumps + parse the status log. The host path is whatever pg_dump
+      # writes to (defaults to $HOME/saebooks-backups in scripts/backup.sh).
+      - ${SAEBOOKS_BACKUP_DIR:-/home/sauer/saebooks-backups}:/app/backups:ro
+    environment:
+      SAEBOOKS_BACKUP_DIR_IN_CONTAINER: /app/backups
     ports:
       - "8042:8000"
 
