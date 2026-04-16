@@ -10,6 +10,7 @@ from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.bank_statement import BankStatementLine, StatementLineStatus
 from saebooks.routers.reports import _first_company
+from saebooks.services import bank_rules as rules_svc
 from saebooks.services import reconciliation as svc
 
 router = APIRouter(prefix="/reconciliation")
@@ -58,6 +59,22 @@ async def reconciliation_account(
             session, company.id, account_id, status=status
         )
 
+        # Build rule suggestions for unmatched lines
+        suggestions = await rules_svc.find_suggestions_for_lines(
+            session, company.id, lines
+        )
+
+        # Resolve account names for the suggested rules
+        suggested_acct_ids = {r.account_id for r in suggestions.values()}
+        sugg_accounts = {}
+        if suggested_acct_ids:
+            from sqlalchemy import select
+            from saebooks.models.account import Account
+            res = await session.execute(
+                select(Account).where(Account.id.in_(suggested_acct_ids))
+            )
+            sugg_accounts = {a.id: a for a in res.scalars().all()}
+
     return templates.TemplateResponse(
         request,
         "reconciliation/account.html",
@@ -66,7 +83,47 @@ async def reconciliation_account(
             "account": account,
             "lines": lines,
             "status_filter": status_filter or "all",
+            "suggestions": suggestions,
+            "sugg_accounts": sugg_accounts,
         },
+    )
+
+
+@router.post("/{account_id}/apply-rule/{line_id}/{rule_id}", response_model=None)
+async def apply_rule(
+    request: Request,
+    account_id: uuid.UUID,
+    line_id: uuid.UUID,
+    rule_id: uuid.UUID,
+) -> RedirectResponse:
+    """Apply a bank rule to a single line — creates and posts the journal."""
+    async with AsyncSessionLocal() as session:
+        try:
+            await rules_svc.apply_rule_to_line(
+                session, line_id, rule_id, posted_by="rule-suggested"
+            )
+        except Exception as exc:
+            return RedirectResponse(
+                f"/reconciliation/{account_id}?error={exc}",
+                status_code=303,
+            )
+    return RedirectResponse(f"/reconciliation/{account_id}", status_code=303)
+
+
+@router.post("/{account_id}/run-auto", response_model=None)
+async def run_auto_for_account(
+    request: Request,
+    account_id: uuid.UUID,
+) -> RedirectResponse:
+    """Apply all auto-create rules to unmatched lines for THIS bank account."""
+    company = await _first_company()
+    async with AsyncSessionLocal() as session:
+        counts = await rules_svc.auto_apply_rules(
+            session, company.id, only_account_id=account_id,
+        )
+    return RedirectResponse(
+        f"/reconciliation/{account_id}?ran={counts['created']}",
+        status_code=303,
     )
 
 

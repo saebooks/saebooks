@@ -49,6 +49,10 @@ class BankStatementLine(Base):
         UUID(as_uuid=True), ForeignKey("contacts.id", ondelete="SET NULL"),
         comment="Optional contact (customer/supplier) inferred from rule or manual",
     )
+    bank_rule_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("bank_rules.id", ondelete="SET NULL"),
+        comment="The bank rule used to auto-match this line, if any",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

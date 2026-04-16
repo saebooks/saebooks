@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Bank rules — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Bank rules</h1>
+  <div class="meta">{{ total }} rules · {{ company_name }}</div>
+  <a href="/bank-rules/new" class="btn">+ New rule</a>
+  <form method="post" action="/bank-rules/run-auto" style="display:inline;margin-left:0.5rem"
+        onsubmit="return confirm('Run all auto-create rules against unmatched bank lines? This will create journal entries.')">
+    <button type="submit" class="btn-secondary">Run auto-create</button>
+  </form>
+</div>
+
+{% if request.query_params.get('ran') %}
+<div class="alert alert-ok">Created {{ request.query_params.get('ran') }} entries · {{ request.query_params.get('skipped', 0) }} skipped.</div>
+{% endif %}
+
+{% if rules %}
+<table class="acct-table">
+  <thead>
+    <tr>
+      <th>Pri</th>
+      <th>Name</th>
+      <th>Match</th>
+      <th>Pattern</th>
+      <th>Account</th>
+      <th>Tax</th>
+      <th>Auto</th>
+      <th>Active</th>
+      <th class="actions"></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rules %}
+    <tr>
+      <td class="dim">{{ r.priority }}</td>
+      <td>{{ r.name }}</td>
+      <td class="dim">{{ r.match_type.value|lower|replace('_', ' ') }}</td>
+      <td><code>{{ r.match_pattern }}</code></td>
+      <td>
+        {% set acct = accounts.get(r.account_id) %}
+        {% if acct %}<code>{{ acct.code }}</code> {{ acct.name }}{% else %}<em class="dim">missing</em>{% endif %}
+      </td>
+      <td class="dim">{{ r.tax_code or '' }}</td>
+      <td>{% if r.auto_create %}<span style="color:var(--accent)">●</span>{% else %}<span class="dim">○</span>{% endif %}</td>
+      <td>{% if r.is_active %}<span style="color:var(--accent)">●</span>{% else %}<span class="dim">○</span>{% endif %}</td>
+      <td class="actions">
+        <a href="/bank-rules/{{ r.id }}/edit">edit</a>
+        <form method="post" action="/bank-rules/{{ r.id }}/delete" style="display:inline"
+              onsubmit="return confirm('Delete rule {{ r.name }}?')">
+          <button type="submit" class="linkish">del</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="dim">No bank rules yet. Create one to start auto-categorising imported bank transactions.</p>
+{% endif %}
+
+<div class="code-help" style="margin-top:1rem">
+  <strong>How it works:</strong>
+  Rules match against the description of imported bank statement lines. Highest priority matches first.
+  <br>
+  <span class="code-hint"><em>contains</em></span> case-insensitive substring match
+  <span class="code-hint"><em>starts with</em></span> description begins with the pattern
+  <span class="code-hint"><em>exact</em></span> description equals the pattern
+  <span class="code-hint"><em>regex</em></span> Python regex (case-insensitive)
+  <br>
+  <strong>Auto-create:</strong> when ON, matching bank lines are automatically converted to journal entries on import (or via "Run auto-create"). When OFF, the rule appears as a one-click suggestion on the reconciliation page.
+</div>
+{% endblock %}

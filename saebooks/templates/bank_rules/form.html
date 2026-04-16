@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if rule else 'New' }} bank rule — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{{ 'Edit' if rule else 'New' }} bank rule</h1>
+</div>
+
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
+<form method="post" action="{{ '/bank-rules/' + rule.id|string if rule else '/bank-rules' }}" class="tc-form" style="max-width:48rem">
+  <label class="wide">Name
+    <input name="name" required value="{{ rule.name if rule else '' }}" placeholder="e.g. Telstra monthly bill">
+  </label>
+
+  <label>Match type
+    <select name="match_type">
+      {% for mt in match_types %}
+      <option value="{{ mt }}" {{ 'selected' if rule and rule.match_type.value == mt }}>{{ mt|lower|replace('_', ' ')|title }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <label class="wide">Pattern
+    <input name="match_pattern" required value="{{ rule.match_pattern if rule else '' }}" placeholder="e.g. TELSTRA or TELSTRA.*BILL">
+  </label>
+
+  <label class="wide">Target account
+    <select name="account_id" required>
+      <option value="">— select —</option>
+      {% for a in accounts %}
+      <option value="{{ a.id }}" {{ 'selected' if rule and rule.account_id == a.id }}>{{ a.code }} {{ a.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <label>Tax code
+    <select name="tax_code">
+      <option value="">— none —</option>
+      {% for tc in tax_codes %}
+      <option value="{{ tc.code }}" {{ 'selected' if rule and rule.tax_code == tc.code }}>{{ tc.code }} — {{ tc.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <label>Contact
+    <select name="contact_id">
+      <option value="">— none —</option>
+      {% for c in contacts %}
+      <option value="{{ c.id }}" {{ 'selected' if rule and rule.contact_id == c.id }}>{{ c.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <label>Priority
+    <input name="priority" type="number" value="{{ rule.priority if rule else 0 }}">
+  </label>
+
+  <label class="wide">Description override
+    <input name="description_template" value="{{ rule.description_template if rule and rule.description_template else '' }}" placeholder="leave blank to use bank line description">
+  </label>
+
+  <label class="wide" style="flex-direction:row;gap:1rem;align-items:center">
+    <input name="auto_create" type="checkbox" value="true" {{ 'checked' if rule and rule.auto_create }}>
+    <span>Auto-create journal entries on match (otherwise just suggest)</span>
+  </label>
+
+  <label class="wide" style="flex-direction:row;gap:1rem;align-items:center">
+    <input name="is_active" type="checkbox" value="true" {{ 'checked' if not rule or rule.is_active }}>
+    <span>Active</span>
+  </label>
+
+  <div class="form-actions">
+    <button type="submit" class="btn">{{ 'Save' if rule else 'Create' }}</button>
+    <a href="/bank-rules">Cancel</a>
+  </div>
+</form>
+{% endblock %}

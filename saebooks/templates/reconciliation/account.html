@@ -8,6 +8,12 @@
 {% if request.query_params.get('imported') %}
 <div class="alert alert-info">Imported {{ request.query_params.get('imported') }} statement lines.</div>
 {% endif %}
+{% if request.query_params.get('ran') %}
+<div class="alert alert-ok">Auto-rules created {{ request.query_params.get('ran') }} journal entries.</div>
+{% endif %}
+{% if request.query_params.get('error') %}
+<div class="alert alert-error">{{ request.query_params.get('error') }}</div>
+{% endif %}
 
 <div class="recon-toolbar">
   <form method="post" action="/reconciliation/{{ account.id }}/import" enctype="multipart/form-data" class="import-form">
@@ -16,6 +22,13 @@
       <input type="file" name="file" accept=".csv" onchange="this.form.submit()" hidden>
     </label>
   </form>
+
+  <form method="post" action="/reconciliation/{{ account.id }}/run-auto" style="display:inline"
+        onsubmit="return confirm('Apply all auto-create bank rules to unmatched lines on this account?')">
+    <button type="submit" class="btn-secondary">Run auto-rules</button>
+  </form>
+
+  <a href="/bank-rules" class="btn-secondary" style="text-decoration:none">Manage rules</a>
 
   <div class="status-filter">
     <a href="/reconciliation/{{ account.id }}" class="{{ 'active' if status_filter == 'all' }}">All</a>
@@ -59,7 +72,17 @@
             <button type="submit" class="linkish">Unmatch</button>
           </form>
         {% else %}
-          <a href="/reconciliation/{{ account.id }}/match/{{ line.id }}">Match</a>
+          {% set sugg = suggestions.get(line.id) %}
+          {% if sugg %}
+            {% set sa = sugg_accounts.get(sugg.account_id) %}
+            <form method="post" action="/reconciliation/{{ account.id }}/apply-rule/{{ line.id }}/{{ sugg.id }}" style="display:inline"
+                  title="Apply rule '{{ sugg.name }}' → {{ sa.code if sa else '?' }} {{ sa.name if sa else '' }}">
+              <button type="submit" class="rule-suggest">→ {{ sa.code if sa else '' }} {{ sa.name if sa else sugg.name }}</button>
+            </form>
+            <a href="/reconciliation/{{ account.id }}/match/{{ line.id }}" class="dim">other</a>
+          {% else %}
+            <a href="/reconciliation/{{ account.id }}/match/{{ line.id }}">Match</a>
+          {% endif %}
         {% endif %}
       </td>
     </tr>

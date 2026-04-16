@@ -1,5 +1,6 @@
 from saebooks.models.account import Account, AccountType
 from saebooks.models.account_range import AccountRange
+from saebooks.models.bank_rule import BankRule, MatchType
 from saebooks.models.bank_statement import BankStatementLine, StatementLineStatus
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
@@ -12,6 +13,7 @@ __all__ = [
     "Account",
     "AccountRange",
     "AccountType",
+    "BankRule",
     "BankStatementLine",
     "Company",
     "Contact",
@@ -20,6 +22,7 @@ __all__ = [
     "JournalEntry",
     "JournalLine",
     "JournalTemplate",
+    "MatchType",
     "PeriodLock",
     "Setting",
     "StatementLineStatus",
