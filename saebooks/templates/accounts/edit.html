@@ -11,7 +11,8 @@
 {% endif %}
 
 <form method="post" action="/accounts/{{ account.id }}" class="tc-form">
-  <label>Code <input name="code" required maxlength="32" pattern="[0-9]+" title="Digits only"
+  <label>Code <input name="code" required maxlength="32"
+    pattern="\d+-\d+(-[a-zA-Z])?" title="Format: prefix-digits, e.g. 1-1234"
     value="{{ account.code }}"></label>
   <label>Name <input name="name" required value="{{ account.name }}"></label>
   <label>Type

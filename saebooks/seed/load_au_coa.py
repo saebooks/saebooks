@@ -44,6 +44,26 @@ ODOO_TYPE_MAP: dict[str, AccountType] = {
 }
 
 
+# Generic placeholder accounts from Odoo that add no value — skip on seed
+_SKIP_CODES = {"41110", "41120", "41130", "51110", "51120", "51130"}
+
+# Classic-mode prefix → first digit for hyphenation
+# Odoo CSV has flat codes like "11110"; we store as "1-1110"
+_CLASSIC_PREFIXES = ["1", "2", "3", "4", "5", "6", "7", "8", "9"]
+
+
+def _hyphenate_code(code: str) -> str:
+    """Convert flat Odoo code to hyphenated format.
+
+    Finds the range prefix (longest match from _CLASSIC_PREFIXES)
+    and inserts a hyphen. E.g. "11110" → "1-1110", "81000" → "8-1000".
+    """
+    for prefix in sorted(_CLASSIC_PREFIXES, key=len, reverse=True):
+        if code.startswith(prefix):
+            return f"{prefix}-{code[len(prefix):]}"
+    return code  # fallback — shouldn't happen
+
+
 def _parse_bool(val: str) -> bool:
     return val.strip().lower() in {"true", "1", "yes"}
 
@@ -59,7 +79,11 @@ async def _load_accounts(session: AsyncSession, company: Company) -> tuple[int, 
 
     with csv_path.open(newline="") as f:
         for row in csv.DictReader(f):
-            code = row["code"].strip()
+            raw_code = row["code"].strip()
+            if raw_code in _SKIP_CODES:
+                skipped += 1
+                continue
+            code = _hyphenate_code(raw_code)
             if code in existing_codes:
                 skipped += 1
                 continue

@@ -1,15 +1,20 @@
 """Account service — CRUD, dependency check, migrate, delete.
 
 Account code structure (structured numbering mode):
-  {prefix}{child1}{child2}{child3}{child4}{child5}[-{bustard}]
+  {prefix}-{children}[-{bustard}]
 
   - prefix:   registered range code (any width — 1, 10, 200, etc.)
-  - child1-5: one digit each, up to 5 levels of hierarchy
-  - bustard:  single letter after hyphen — the "come on you bastard,
-              just one more level" overflow when 5 isn't enough
+  - children: 1-5 digits defining the hierarchy within the range
+  - bustard:  single letter after second hyphen — the "come on you
+              bastard, just one more level" overflow when 5 isn't enough
 
-The prefix is matched against company-defined account_ranges using
-longest-prefix match. Each range defines allowed account types.
+The prefix is explicitly separated by the first hyphen, making range
+matching unambiguous. Examples:
+  1-0000    = Assets header
+  1-1110    = Bank account (prefix 1, children 1110)
+  2-1310    = GST Collected (prefix 2, children 1310)
+  10-110    = Extended-mode range (prefix 10, children 110)
+  1-1234-a  = Bustard overflow
 
 When structured_numbering is OFF (company setting), codes are freeform
 text — no validation, no auto-parent from prefix.
@@ -34,17 +39,20 @@ from saebooks.services import settings as settings_svc
 # Max child levels (digits after prefix, before the bustard)
 MAX_CHILD_LEVELS = 5
 
-# Regex: digits, optionally followed by -letter (the bustard)
-CODE_PATTERN = re.compile(r"^(\d+)(?:-([a-zA-Z]))?$")
+# Regex: {prefix}-{children}[-{bustard}]
+# prefix = one or more digits, children = one or more digits, bustard = optional letter
+CODE_PATTERN = re.compile(r"^(\d+)-(\d+)(?:-([a-zA-Z]))?$")
 
 # Default ranges seeded for new companies (Australian standard)
 DEFAULT_RANGES: list[dict[str, Any]] = [
-    {"prefix": "1", "label": "Assets", "account_types": ["ASSET"], "sort_order": 1},
-    {"prefix": "2", "label": "Liabilities", "account_types": ["LIABILITY"], "sort_order": 2},
-    {"prefix": "3", "label": "Equity", "account_types": ["EQUITY"], "sort_order": 3},
-    {"prefix": "4", "label": "Income", "account_types": ["INCOME", "OTHER_INCOME"], "sort_order": 4},
-    {"prefix": "5", "label": "Cost of sales", "account_types": ["COST_OF_SALES"], "sort_order": 5},
-    {"prefix": "6", "label": "Expenses", "account_types": ["EXPENSE"], "sort_order": 6},
+    {"prefix": "1", "label": "Assets", "account_types": ["ASSET"], "sort_order": 10},
+    {"prefix": "2", "label": "Liabilities", "account_types": ["LIABILITY", "ASSET"], "sort_order": 20},
+    {"prefix": "3", "label": "Equity", "account_types": ["EQUITY"], "sort_order": 30},
+    {"prefix": "4", "label": "Income", "account_types": ["INCOME", "OTHER_INCOME"], "sort_order": 40},
+    {"prefix": "5", "label": "Cost of sales", "account_types": ["COST_OF_SALES"], "sort_order": 50},
+    {"prefix": "6", "label": "Expenses", "account_types": ["EXPENSE", "OTHER_INCOME", "INCOME"], "sort_order": 60},
+    {"prefix": "8", "label": "Other income", "account_types": ["OTHER_INCOME", "INCOME"], "sort_order": 70},
+    {"prefix": "9", "label": "Other expenses", "account_types": ["EXPENSE", "OTHER_EXPENSE"], "sort_order": 80},
 ]
 
 
@@ -68,29 +76,30 @@ def parse_code(code: str, ranges: list[AccountRange]) -> ParsedCode | None:
     """Parse an account code against registered ranges.
 
     Returns None if the code doesn't match any range or is malformed.
-    Uses longest-prefix match against the numeric portion of the code.
+    The prefix is explicitly the part before the first hyphen.
     """
     match = CODE_PATTERN.match(code.strip())
     if not match:
         return None
 
-    digits = match.group(1)
-    bustard = match.group(2) or ""
+    prefix = match.group(1)
+    children = match.group(2)
+    bustard = match.group(3) or ""
 
-    # Sort ranges by prefix length descending for longest-match-first
-    sorted_ranges = sorted(ranges, key=lambda r: len(r.prefix), reverse=True)
+    if len(children) > MAX_CHILD_LEVELS:
+        return None  # too many child levels
 
-    for rng in sorted_ranges:
-        if digits.startswith(rng.prefix):
-            children = digits[len(rng.prefix):]
-            if len(children) > MAX_CHILD_LEVELS:
-                return None  # too many child levels
+    # Bustard is only valid at max child depth
+    if bustard and len(children) < MAX_CHILD_LEVELS:
+        return None  # bustard only allowed at the deepest child level
 
-            # Bustard is only valid at max child depth
-            if bustard and len(children) < MAX_CHILD_LEVELS:
-                return None  # bustard only allowed at the deepest child level
-
-            depth = len(children) + (1 if bustard else 0)
+    # Match prefix against ranges
+    for rng in ranges:
+        if rng.prefix == prefix:
+            # Depth = number of significant child digits (strip trailing zeros)
+            # "0000" → 0 (header), "1000" → 1, "1100" → 2, "1110" → 3, "1111" → 4
+            stripped = children.rstrip("0")
+            depth = len(stripped) + (1 if bustard else 0)
 
             return ParsedCode(
                 raw=code.strip(),
@@ -272,8 +281,8 @@ async def validate_code(
     match = CODE_PATTERN.match(code)
     if not match:
         errors.append(
-            "Account code must be digits, optionally followed by "
-            "a hyphen and single letter (the bustard)."
+            "Account code must be {prefix}-{digits} format, "
+            "optionally with a letter suffix e.g. 1-1234-a."
         )
         return errors
 
@@ -284,29 +293,28 @@ async def validate_code(
 
     parsed = parse_code(code, ranges)
     if parsed is None:
-        digits = match.group(1)
-        bustard = match.group(2) or ""
+        prefix = match.group(1)
+        children = match.group(2)
+        bustard = match.group(3) or ""
 
-        # Check if it's too deep
-        for rng in sorted(ranges, key=lambda r: len(r.prefix), reverse=True):
-            if digits.startswith(rng.prefix):
-                children = digits[len(rng.prefix):]
-                if len(children) > MAX_CHILD_LEVELS:
-                    errors.append(
-                        f"Too many child levels. Range '{rng.prefix}' ({rng.label}) "
-                        f"allows {MAX_CHILD_LEVELS} child digits, got {len(children)}."
-                    )
-                elif bustard and len(children) < MAX_CHILD_LEVELS:
-                    errors.append(
-                        f"The bustard (letter suffix) is only allowed at child level "
-                        f"{MAX_CHILD_LEVELS}. Current depth: {len(children)}."
-                    )
-                return errors
+        if len(children) > MAX_CHILD_LEVELS:
+            errors.append(
+                f"Too many child levels. Maximum is {MAX_CHILD_LEVELS} "
+                f"child digits, got {len(children)}."
+            )
+            return errors
 
-        # No matching range at all
+        if bustard and len(children) < MAX_CHILD_LEVELS:
+            errors.append(
+                f"The letter suffix is only allowed at child level "
+                f"{MAX_CHILD_LEVELS}. Current depth: {len(children)}."
+            )
+            return errors
+
+        # No matching range
         prefixes = ", ".join(r.prefix for r in sorted(ranges, key=lambda r: r.sort_order))
         errors.append(
-            f"Code '{code}' doesn't match any account range. "
+            f"Prefix '{prefix}' doesn't match any account range. "
             f"Defined ranges: {prefixes}."
         )
         return errors
@@ -349,21 +357,27 @@ def check_code_anomaly(
 async def find_parent(
     session: AsyncSession, company_id: uuid.UUID, code: str
 ) -> Account | None:
-    """Find the parent account by longest matching code prefix.
+    """Find the parent account by progressively shortening children digits.
 
-    For code "11111", tries "1111", "111", "11", "1" in order.
-    For bustard codes like "11111-a", tries "11111" first.
+    For code "1-1234", tries "1-1230", "1-1200", "1-1000", "1-0000" in order.
+    For bustard codes like "1-1234-a", tries "1-1234" first (without bustard).
     Returns the first existing account that matches.
     """
-    # Strip bustard suffix for parent lookup
     match = CODE_PATTERN.match(code)
-    if match and match.group(2):
-        # This is a bustard code — parent is the digits-only version
-        base = match.group(1)
+    if not match:
+        return None
+
+    prefix = match.group(1)
+    children = match.group(2)
+    bustard = match.group(3) or ""
+
+    # If bustard code, parent is the same code without bustard
+    if bustard:
+        candidate = f"{prefix}-{children}"
         result = await session.execute(
             select(Account).where(
                 Account.company_id == company_id,
-                Account.code == base,
+                Account.code == candidate,
                 Account.archived_at.is_(None),
             )
         )
@@ -371,20 +385,23 @@ async def find_parent(
         if parent is not None:
             return parent
 
-    # Regular prefix walk
-    base_digits = match.group(1) if match else code
-    for length in range(len(base_digits) - 1, 0, -1):
-        prefix = base_digits[:length]
+    # Walk children digits from right to left, zeroing each position
+    for i in range(len(children) - 1, -1, -1):
+        candidate_children = children[:i] + "0" * (len(children) - i)
+        candidate = f"{prefix}-{candidate_children}"
+        if candidate == code:
+            continue  # skip self
         result = await session.execute(
             select(Account).where(
                 Account.company_id == company_id,
-                Account.code == prefix,
+                Account.code == candidate,
                 Account.archived_at.is_(None),
             )
         )
         parent = result.scalars().first()
         if parent is not None:
             return parent
+
     return None
 
 
