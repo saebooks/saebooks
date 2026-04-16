@@ -15,6 +15,15 @@ Phase 1 (this module) provides the HTTP client foundation only:
 Business-logic wrappers (onboarding, sync, health) land in later phases.
 """
 from saebooks.services.bank_feeds.client import SissClient
+from saebooks.services.bank_feeds.endpoints import (
+    get_account_detail,
+    get_client,
+    iter_transactions,
+    list_accounts,
+    list_clients,
+    list_feed_issues,
+    list_transactions,
+)
 from saebooks.services.bank_feeds.errors import (
     SissAuthError,
     SissError,
@@ -39,8 +48,15 @@ __all__ = [
     "SissScopeError",
     "SissValidationError",
     "TokenCache",
+    "get_account_detail",
+    "get_client",
     "get_or_create_client",
     "insert_statement_lines",
+    "iter_transactions",
+    "list_accounts",
+    "list_clients",
+    "list_feed_issues",
+    "list_transactions",
     "update_sync_cursor",
     "upsert_bank_feed_account",
     "upsert_feed_issue",
