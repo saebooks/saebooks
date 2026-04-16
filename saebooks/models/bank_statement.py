@@ -45,6 +45,10 @@ class BankStatementLine(Base):
     )
     matched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     matched_by: Mapped[str | None] = mapped_column(String)
+    contact_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contacts.id", ondelete="SET NULL"),
+        comment="Optional contact (customer/supplier) inferred from rule or manual",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

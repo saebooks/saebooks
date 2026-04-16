@@ -11,6 +11,7 @@ from saebooks.config import settings
 from saebooks.routers import (
     accounts,
     admin,
+    contacts,
     health,
     journal,
     ranges,
@@ -54,6 +55,7 @@ def create_app() -> FastAPI:
     app.include_router(ranges.router)
     app.include_router(reports.router)
     app.include_router(reconciliation.router)
+    app.include_router(contacts.router)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     return app
 

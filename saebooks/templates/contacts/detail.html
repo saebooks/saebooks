@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}{{ contact.name }} — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Contact detail</h1>
+  <div class="meta">
+    <a href="/contacts">Contacts</a> &rsaquo; {{ contact.name }}
+  </div>
+</div>
+
+<div class="acct-card">
+  <div>
+    <div class="acct-title">{{ contact.name }}</div>
+    <div class="acct-flags">
+      <span class="acct-badge type">{{ contact.contact_type.value|lower|title }}</span>
+    </div>
+  </div>
+</div>
+
+<table class="detail-table" style="margin-top:1rem;border-collapse:collapse">
+  {% if contact.email %}
+  <tr><td class="dim" style="padding:0.25rem 1rem 0.25rem 0">Email</td><td>{{ contact.email }}</td></tr>
+  {% endif %}
+  {% if contact.phone %}
+  <tr><td class="dim" style="padding:0.25rem 1rem 0.25rem 0">Phone</td><td>{{ contact.phone }}</td></tr>
+  {% endif %}
+  {% if contact.abn %}
+  <tr><td class="dim" style="padding:0.25rem 1rem 0.25rem 0">ABN</td><td>{{ contact.abn }}</td></tr>
+  {% endif %}
+  {% if contact.address_line1 or contact.city or contact.state %}
+  <tr>
+    <td class="dim" style="padding:0.25rem 1rem 0.25rem 0;vertical-align:top">Address</td>
+    <td>
+      {% if contact.address_line1 %}{{ contact.address_line1 }}<br>{% endif %}
+      {% if contact.address_line2 %}{{ contact.address_line2 }}<br>{% endif %}
+      {% if contact.city %}{{ contact.city }}{% endif %}
+      {% if contact.state %} {{ contact.state }}{% endif %}
+      {% if contact.postcode %} {{ contact.postcode }}{% endif %}
+      {% if contact.country %}<br>{{ contact.country }}{% endif %}
+    </td>
+  </tr>
+  {% endif %}
+  {% if default_account %}
+  <tr><td class="dim" style="padding:0.25rem 1rem 0.25rem 0">Default account</td><td><a href="/accounts/{{ default_account.id }}">{{ default_account.code }} {{ default_account.name }}</a></td></tr>
+  {% endif %}
+  {% if contact.default_tax_code %}
+  <tr><td class="dim" style="padding:0.25rem 1rem 0.25rem 0">Default tax code</td><td>{{ contact.default_tax_code }}</td></tr>
+  {% endif %}
+  {% if contact.notes %}
+  <tr><td class="dim" style="padding:0.25rem 1rem 0.25rem 0;vertical-align:top">Notes</td><td style="white-space:pre-wrap">{{ contact.notes }}</td></tr>
+  {% endif %}
+</table>
+
+<div class="acct-actions" style="margin-top:1.5rem">
+  <a href="/contacts/{{ contact.id }}/edit">Edit contact</a>
+  <form method="post" action="/contacts/{{ contact.id }}/archive" style="display:inline"
+        onsubmit="return confirm('Archive this contact?')">
+    <button type="submit" class="btn-link" style="color:var(--danger,#c00)">Archive</button>
+  </form>
+</div>
+{% endblock %}

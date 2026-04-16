@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Contacts — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Contacts</h1>
+  <div class="meta">{{ total }} contacts · {{ company_name }}</div>
+  <a href="/contacts/new" class="btn">+ New</a>
+</div>
+
+<div class="contact-filter">
+  <div class="status-filter">
+    <a href="/contacts" class="{{ 'active' if type_filter == 'all' }}">All</a>
+    <a href="/contacts?type=CUSTOMER" class="{{ 'active' if type_filter == 'CUSTOMER' }}">Customers</a>
+    <a href="/contacts?type=SUPPLIER" class="{{ 'active' if type_filter == 'SUPPLIER' }}">Suppliers</a>
+  </div>
+  <form method="get" action="/contacts" style="display:inline">
+    {% if type_filter != 'all' %}<input type="hidden" name="type" value="{{ type_filter }}">{% endif %}
+    <input type="text" name="q" value="{{ search_q }}" placeholder="Search name or email..." style="font:14px/1.2 inherit;padding:0.3rem 0.4rem;border:1px solid var(--rule);width:16rem">
+    <button type="submit" class="btn-secondary">Search</button>
+  </form>
+</div>
+
+{% if contacts %}
+<table class="acct-table">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Type</th>
+      <th>Email</th>
+      <th>Phone</th>
+      <th class="actions"></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for c in contacts %}
+    <tr>
+      <td><a href="/contacts/{{ c.id }}">{{ c.name }}</a></td>
+      <td><span class="contact-type {{ c.contact_type.value|lower }}">{{ c.contact_type.value|lower|title }}</span></td>
+      <td class="dim">{{ c.email or '' }}</td>
+      <td class="dim">{{ c.phone or '' }}</td>
+      <td class="actions">
+        <a href="/contacts/{{ c.id }}/edit">edit</a>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="dim">No contacts found.</p>
+{% endif %}
+{% endblock %}

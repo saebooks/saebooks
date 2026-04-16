@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if contact else 'New' }} Contact — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{{ 'Edit' if contact else 'New' }} contact</h1>
+</div>
+
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
+<form method="post" action="{{ '/contacts/' + contact.id|string if contact else '/contacts' }}" class="tc-form" style="max-width:40rem">
+  <label>Name <input name="name" required value="{{ contact.name if contact else '' }}"></label>
+  <label>Type
+    <select name="contact_type">
+      <option value="CUSTOMER" {{ 'selected' if contact and contact.contact_type.value == 'CUSTOMER' }}>Customer</option>
+      <option value="SUPPLIER" {{ 'selected' if contact and contact.contact_type.value == 'SUPPLIER' }}>Supplier</option>
+      <option value="BOTH" {{ 'selected' if contact and contact.contact_type.value == 'BOTH' }}>Both</option>
+    </select>
+  </label>
+  <label>Email <input name="email" type="email" value="{{ contact.email if contact and contact.email else '' }}"></label>
+  <label>Phone <input name="phone" value="{{ contact.phone if contact and contact.phone else '' }}"></label>
+  <label>ABN <input name="abn" placeholder="xx xxx xxx xxx" value="{{ contact.abn if contact and contact.abn else '' }}"></label>
+  <label class="wide">Address line 1 <input name="address_line1" value="{{ contact.address_line1 if contact and contact.address_line1 else '' }}"></label>
+  <label class="wide">Address line 2 <input name="address_line2" value="{{ contact.address_line2 if contact and contact.address_line2 else '' }}"></label>
+  <label>City <input name="city" value="{{ contact.city if contact and contact.city else '' }}"></label>
+  <label>State
+    <select name="state">
+      <option value="">—</option>
+      {% for s in ['NSW','VIC','QLD','SA','WA','TAS','NT','ACT'] %}
+      <option value="{{ s }}" {{ 'selected' if contact and contact.state == s }}>{{ s }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Postcode <input name="postcode" maxlength="8" value="{{ contact.postcode if contact and contact.postcode else '' }}"></label>
+  <label>Default account
+    <select name="default_account_id">
+      <option value="">— none —</option>
+      {% for a in accounts %}
+      <option value="{{ a.id }}" {{ 'selected' if contact and contact.default_account_id == a.id }}>{{ a.code }} {{ a.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Default tax code
+    <select name="default_tax_code">
+      <option value="">— none —</option>
+      {% for tc in tax_codes %}
+      <option value="{{ tc.code }}" {{ 'selected' if contact and contact.default_tax_code == tc.code }}>{{ tc.code }} — {{ tc.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label class="wide">Notes <textarea name="notes" rows="3" style="font:14px/1.4 inherit;width:100%;padding:0.3rem;border:1px solid var(--rule)">{{ contact.notes if contact and contact.notes else '' }}</textarea></label>
+  <div class="form-actions">
+    <button type="submit" class="btn">{{ 'Save' if contact else 'Create' }}</button>
+    <a href="{{ '/contacts/' + contact.id|string if contact else '/contacts' }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}
