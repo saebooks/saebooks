@@ -26,6 +26,7 @@ __all__ = [
     "MatchType",
     "PeriodLock",
     "Setting",
+    "SqlQuery",
     "StatementLineStatus",
     "TaxCode",
 ]
