@@ -1,14 +1,15 @@
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, Form, Query, Request
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from saebooks.config import settings as app_settings
 from saebooks.db import AsyncSessionLocal
 from saebooks.services import audit as audit_svc
 from saebooks.services import settings as svc
+from saebooks.services import sql_tool as sql_svc
 
 router = APIRouter(prefix="/admin")
 
@@ -250,6 +251,113 @@ async def audit_revert(
     return RedirectResponse(
         f"/admin/audit/{snapshot_id}?reverted=1",
         status_code=303,
+    )
+
+
+# ---------------------------------------------------------------------------
+# SQL browser — read-only psql-in-browser
+# ---------------------------------------------------------------------------
+
+
+@router.get("/sql", response_class=HTMLResponse)
+async def sql_index(
+    request: Request,
+    q: str | None = Query(None),
+    rerun: str | None = Query(None),
+) -> HTMLResponse:
+    """SQL browser: form + optional query result + history + schema sidebar."""
+    async with AsyncSessionLocal() as session:
+        tables = await sql_svc.list_tables(session)
+        history = await sql_svc.recent_queries(session, limit=20)
+
+        result = None
+        error = None
+        if rerun:
+            try:
+                rerun_row = await sql_svc.get_query(
+                    session, uuid.UUID(rerun)
+                )
+                if rerun_row is not None:
+                    q = rerun_row.sql
+            except (ValueError, TypeError):
+                pass
+
+    return templates.TemplateResponse(
+        request,
+        "admin/sql.html",
+        {
+            "edition": app_settings.edition,
+            "tables": tables,
+            "history": history,
+            "sql": q or "",
+            "result": result,
+            "error": error,
+            "result_limit": sql_svc.RESULT_LIMIT,
+        },
+    )
+
+
+@router.post("/sql", response_class=HTMLResponse)
+async def sql_run(
+    request: Request,
+    sql: str = Form(...),
+) -> HTMLResponse:
+    """Execute a read-only query and render results."""
+    result = None
+    error = None
+    async with AsyncSessionLocal() as session:
+        try:
+            result = await sql_svc.run_query(
+                session, sql, performed_by="web"
+            )
+        except sql_svc.QueryError as exc:
+            error = str(exc)
+
+        tables = await sql_svc.list_tables(session)
+        history = await sql_svc.recent_queries(session, limit=20)
+
+    return templates.TemplateResponse(
+        request,
+        "admin/sql.html",
+        {
+            "edition": app_settings.edition,
+            "tables": tables,
+            "history": history,
+            "sql": sql,
+            "result": result,
+            "error": error,
+            "result_limit": sql_svc.RESULT_LIMIT,
+        },
+    )
+
+
+@router.post("/sql/export", response_class=PlainTextResponse)
+async def sql_export(
+    request: Request,
+    sql: str = Form(...),
+) -> PlainTextResponse:
+    """Run a query and return the whole result (no 500-row cap) as CSV.
+
+    The cap still applies here — CSV is generated from the same capped
+    result. If you need more rows than the cap, raise RESULT_LIMIT in the
+    service and re-run.
+    """
+    async with AsyncSessionLocal() as session:
+        try:
+            result = await sql_svc.run_query(
+                session, sql, performed_by="web-csv"
+            )
+        except sql_svc.QueryError as exc:
+            return PlainTextResponse(
+                f"Error: {exc}\n",
+                status_code=400,
+                media_type="text/plain; charset=utf-8",
+            )
+    csv_text = sql_svc.to_csv(result.columns, result.rows)
+    return PlainTextResponse(
+        csv_text,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="query.csv"'},
     )
 
 
