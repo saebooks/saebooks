@@ -197,17 +197,20 @@ async def post(
     if entry.status == EntryStatus.REVERSED:
         raise PostingError(f"Entry {entry.ref} has been reversed")
 
-    await _check_balance(entry)
     await _check_period_lock(session, entry.company_id, entry.entry_date, override_reason)
 
-    # Auto-generate GST account lines before final balance check
+    # Auto-generate GST account lines BEFORE balancing.
+    # Lines may carry `gst_amount` as the net/gross split metadata —
+    # the auto-poster adds the matching DR GST Paid / CR GST Collected
+    # line so the entry balances. Pre-checking balance here would reject
+    # legitimate net+gst entries (e.g. DR Telephone 100 [+gst 10] / CR Bank 110).
     gst_lines = await gst_svc.auto_post_gst_lines(session, entry)
     if gst_lines:
         await session.flush()
-        # Re-fetch to pick up the new lines
-        entry = await get(session, entry.id)
-        # Re-check balance with GST lines included
-        await _check_balance(entry)
+        # auto_post_gst_lines appends to entry.lines in-place, so no re-fetch needed.
+
+    # Final balance check — the entry must balance after GST has been posted.
+    await _check_balance(entry)
 
     entry.status = EntryStatus.POSTED
     entry.posted_at = datetime.now(UTC)

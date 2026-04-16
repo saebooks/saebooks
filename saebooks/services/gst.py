@@ -141,6 +141,10 @@ async def auto_post_gst_lines(
             continue
 
         session.add(gst_line)
+        # Also append to the entry's loaded relationship so callers iterating
+        # entry.lines see the new line without a re-fetch (avoids stale
+        # identity-map state after flush).
+        entry.lines.append(gst_line)
         new_lines.append(gst_line)
 
     return new_lines
