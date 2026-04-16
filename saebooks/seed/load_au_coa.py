@@ -68,6 +68,20 @@ def _parse_bool(val: str) -> bool:
     return val.strip().lower() in {"true", "1", "yes"}
 
 
+# Sub-header accounts to create before the CSV seed
+# These provide proper hierarchy grouping in the account list
+_SUB_HEADERS: list[tuple[str, str, AccountType]] = [
+    ("1-1000", "Current Assets", AccountType.ASSET),
+    ("1-1100", "Cash & Bank", AccountType.ASSET),
+    ("1-1200", "Receivables", AccountType.ASSET),
+    ("1-1300", "Inventory", AccountType.ASSET),
+    ("1-2000", "Prepayments & Deposits", AccountType.ASSET),
+    ("1-3000", "Property, Plant & Equipment", AccountType.ASSET),
+    ("2-1000", "Current Liabilities", AccountType.LIABILITY),
+    ("2-2000", "Non-Current Liabilities", AccountType.LIABILITY),
+]
+
+
 async def _load_accounts(session: AsyncSession, company: Company) -> tuple[int, int]:
     csv_path = SEED_DIR / "account.account-au.csv"
     inserted = skipped = 0
@@ -76,6 +90,22 @@ async def _load_accounts(session: AsyncSession, company: Company) -> tuple[int, 
         select(Account.code).where(Account.company_id == company.id)
     )
     existing_codes = {code for (code,) in existing.all()}
+
+    # Insert sub-header accounts first
+    for code, name, acct_type in _SUB_HEADERS:
+        if code in existing_codes:
+            continue
+        session.add(
+            Account(
+                company_id=company.id,
+                code=code,
+                name=name,
+                account_type=acct_type,
+                is_header=True,
+            )
+        )
+        existing_codes.add(code)
+        inserted += 1
 
     with csv_path.open(newline="") as f:
         for row in csv.DictReader(f):
