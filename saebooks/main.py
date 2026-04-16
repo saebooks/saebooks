@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from saebooks.config import settings
@@ -40,6 +41,10 @@ def create_app() -> FastAPI:
         description="Self-hosted double-entry accounting",
         lifespan=lifespan,
     )
+    @app.get("/")
+    async def root() -> RedirectResponse:
+        return RedirectResponse("/journal", status_code=302)
+
     app.include_router(health.router)
     app.include_router(admin.router)
     app.include_router(accounts.router)

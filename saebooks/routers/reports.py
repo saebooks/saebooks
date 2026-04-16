@@ -3,7 +3,7 @@ from datetime import date
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
@@ -11,6 +11,7 @@ from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 from saebooks.services import bas as bas_svc
+from saebooks.services import gst as gst_svc
 from saebooks.services import reports as svc
 
 router = APIRouter(prefix="/reports")
@@ -143,3 +144,37 @@ async def balance_sheet_report(
             "net_assets": net_assets,
         },
     )
+
+
+@router.post("/bas/settle", response_model=None)
+async def bas_settle(request: Request) -> RedirectResponse:
+    """Create a BAS settlement journal entry."""
+    company = await _first_company()
+    form = await request.form()
+    from_date = _parse_date(str(form.get("from", "")))
+    to_date = _parse_date(str(form.get("to", "")))
+    settlement_date_raw = str(form.get("settlement_date", ""))
+    settlement_date = _parse_date(settlement_date_raw)
+    if not settlement_date:
+        from datetime import date as date_cls
+        settlement_date = date_cls.today()
+
+    async with AsyncSessionLocal() as session:
+        entry = await gst_svc.settle_bas(
+            session,
+            company.id,
+            settlement_date=settlement_date,
+            from_date=from_date,
+            to_date=to_date,
+        )
+
+    if entry:
+        return RedirectResponse(f"/journal/{entry.id}", status_code=303)
+
+    # Nothing to settle — redirect back to BAS report
+    params = ""
+    if from_date:
+        params += f"from={from_date}&"
+    if to_date:
+        params += f"to={to_date}&"
+    return RedirectResponse(f"/reports/bas?{params}settled=empty", status_code=303)

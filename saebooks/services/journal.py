@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine, PeriodLock
+from saebooks.services import gst as gst_svc
 from saebooks.services import settings as settings_svc
 
 
@@ -198,6 +199,15 @@ async def post(
 
     await _check_balance(entry)
     await _check_period_lock(session, entry.company_id, entry.entry_date, override_reason)
+
+    # Auto-generate GST account lines before final balance check
+    gst_lines = await gst_svc.auto_post_gst_lines(session, entry)
+    if gst_lines:
+        await session.flush()
+        # Re-fetch to pick up the new lines
+        entry = await get(session, entry.id)
+        # Re-check balance with GST lines included
+        await _check_balance(entry)
 
     entry.status = EntryStatus.POSTED
     entry.posted_at = datetime.now(UTC)

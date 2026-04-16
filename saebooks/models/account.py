@@ -50,6 +50,10 @@ class Account(Base):
     tax_code_default: Mapped[str | None] = mapped_column(String)
     is_header: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     reconcile: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    system_managed: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False,
+        comment="System-managed accounts (GST, etc.) — auto-posted by the engine",
+    )
     extra: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

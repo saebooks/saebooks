@@ -12,6 +12,10 @@
   <button type="submit" class="btn-secondary">Run</button>
 </form>
 
+{% if request.query_params.get('settled') == 'empty' %}
+<div class="alert alert-info">Nothing to settle — GST accounts are already at zero.</div>
+{% endif %}
+
 <table class="report-table bas-table">
   <thead>
     <tr><th>Label</th><th>Description</th><th class="num">Amount</th></tr>
@@ -57,4 +61,20 @@
     </tr>
   </tfoot>
 </table>
+
+<div class="bas-actions" style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid var(--rule)">
+  <h3 style="font-size:13px;text-transform:uppercase;color:var(--fg-dim);margin:0 0 0.5rem">Lodge BAS</h3>
+  <p class="dim" style="margin-bottom:0.5rem">
+    Creates a settlement journal entry that zeroes GST Collected and GST Paid,
+    with the net amount going to GST Clearing. Review and post the entry, then
+    record the ATO payment from your bank account.
+  </p>
+  <form method="post" action="/reports/bas/settle" class="report-filter"
+        onsubmit="return confirm('Create BAS settlement journal entry?')">
+    <input type="hidden" name="from" value="{{ from_date }}">
+    <input type="hidden" name="to" value="{{ to_date }}">
+    <label>Settlement date <input name="settlement_date" type="date" value="{{ to_date }}"></label>
+    <button type="submit" class="btn">Create settlement entry</button>
+  </form>
+</div>
 {% endblock %}

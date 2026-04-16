@@ -46,6 +46,37 @@ SETTINGS_SCHEMA: list[dict[str, object]] = [
         ],
     },
     {
+        "group": "GST automation",
+        "fields": [
+            {
+                "key": "gst_auto_post",
+                "label": "Auto-post GST lines",
+                "type": "choice",
+                "choices": ["true", "false"],
+                "help": "When on, posting a journal entry auto-generates GST Collected/Paid "
+                        "lines. Turn off for full manual control.",
+            },
+            {
+                "key": "gst_collected_account_code",
+                "label": "GST Collected account code",
+                "type": "str",
+                "help": "Account code for GST Collected (liability). Default: 21310.",
+            },
+            {
+                "key": "gst_paid_account_code",
+                "label": "GST Paid account code",
+                "type": "str",
+                "help": "Account code for GST Paid (asset). Default: 21330.",
+            },
+            {
+                "key": "gst_clearing_account_code",
+                "label": "GST Clearing account code",
+                "type": "str",
+                "help": "Account code for BAS settlement clearing. Default: 21320.",
+            },
+        ],
+    },
+    {
         "group": "Chart of accounts",
         "fields": [
             {
