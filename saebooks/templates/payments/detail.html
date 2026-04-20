@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Payment {{ payment.number or '(draft)' }} — SAE Books{% endblock %}
+{% block content %}
+<h1>Payment {{ payment.number or '(draft)' }}</h1>
+<p>
+  {{ company_name }} —
+  <span class="badge badge-{{ payment.status|lower }}">{{ payment.status }}</span>
+  <span class="badge">{{ payment.direction.value }}</span>
+</p>
+
+<div class="toolbar">
+  {% if payment.status == 'DRAFT' %}
+    <form method="post" action="/payments/{{ payment.id }}/post" class="inline">
+      <button class="btn btn-primary">Post</button>
+    </form>
+    <form method="post" action="/payments/{{ payment.id }}/void" class="inline">
+      <button class="btn">Discard</button>
+    </form>
+  {% elif payment.status == 'POSTED' %}
+    <form method="post" action="/payments/{{ payment.id }}/void" class="inline">
+      <button class="btn btn-danger">Void</button>
+    </form>
+  {% endif %}
+  <form method="post" action="/payments/{{ payment.id }}/archive" class="inline">
+    <button class="btn btn-sm">Archive</button>
+  </form>
+  <a class="btn btn-sm" href="/payments">Back</a>
+</div>
+
+<table class="kv">
+  <tr><th>Contact</th><td>{{ contact.name if contact else '—' }}</td></tr>
+  <tr><th>Bank account</th><td>{{ bank.code }} — {{ bank.name }}</td></tr>
+  <tr><th>Method</th><td>{{ payment.method.value }}</td></tr>
+  <tr><th>Date</th><td>{{ payment.payment_date }}</td></tr>
+  <tr><th>Amount</th><td>${{ '{:,.2f}'.format(payment.amount) }}</td></tr>
+  <tr><th>Reference</th><td>{{ payment.reference or '—' }}</td></tr>
+  <tr><th>Notes</th><td>{{ payment.notes or '—' }}</td></tr>
+  {% if payment.journal_entry_id %}
+    <tr><th>Journal</th><td><a href="/journal/{{ payment.journal_entry_id }}">{{ payment.journal_entry_id }}</a></td></tr>
+  {% endif %}
+  {% if payment.void_journal_entry_id %}
+    <tr><th>Void journal</th><td><a href="/journal/{{ payment.void_journal_entry_id }}">{{ payment.void_journal_entry_id }}</a></td></tr>
+  {% endif %}
+</table>
+
+{% if payment.direction.value == 'INCOMING' and payment.status != 'VOIDED' %}
+<h2>Allocations</h2>
+<p>
+  Total allocated: <strong>${{ '{:,.2f}'.format(total_allocated) }}</strong>
+  &mdash; Remaining: <strong>${{ '{:,.2f}'.format(remaining) }}</strong>
+</p>
+
+<form method="post" action="/payments/{{ payment.id }}/allocate">
+  <table class="data">
+    <thead>
+      <tr>
+        <th>Invoice</th>
+        <th>Issued</th>
+        <th class="right">Total</th>
+        <th class="right">Paid</th>
+        <th class="right">Balance</th>
+        <th class="right">Allocate</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for inv in candidate_invoices %}
+      {% set already = allocated.get(inv.id) %}
+      <tr>
+        <td><a href="/invoices/{{ inv.id }}">{{ inv.number }}</a></td>
+        <td>{{ inv.issue_date }}</td>
+        <td class="right">${{ '{:,.2f}'.format(inv.total) }}</td>
+        <td class="right">${{ '{:,.2f}'.format(inv.amount_paid) }}</td>
+        <td class="right">${{ '{:,.2f}'.format(inv.total - inv.amount_paid) }}</td>
+        <td class="right">
+          <input type="number" step="0.01" min="0"
+                 name="allocate_{{ inv.id }}"
+                 value="{{ already if already else '' }}"
+                 style="max-width: 9em;" />
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="dim center">No open invoices for this contact.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if candidate_invoices %}
+    <div class="toolbar">
+      <button class="btn btn-primary" type="submit">Save allocations</button>
+    </div>
+  {% endif %}
+</form>
+{% endif %}
+{% endblock %}

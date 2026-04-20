@@ -1,0 +1,395 @@
+"""Credit-note service — create, post, void, allocate.
+
+Postings mirror ``invoices.post_invoice`` with signs reversed:
+
+    Dr Income ........................ line_subtotal (per line)
+    Cr AR Control (Trade Debtors) .... total
+    Dr GST Collected ................. line_tax (via reverse-sign gst flow)
+
+For the GST auto-poster to behave, we pass ``gst_amount`` with a
+negative sign on the line — the existing ``auto_post_gst_lines`` only
+uses ``abs(gst)`` so it still produces the right amount; we then
+manually swap the debit/credit by not trusting it for credit-notes.
+Simpler path: we post the credit-note GL directly rather than through
+the auto-poster, because the sign flip is the whole point.
+
+Allocation path: a posted credit note carries ``amount_allocated``
+which is bumped as ``PaymentAllocation`` rows with
+``credit_note_id=...`` are written against it. Allocating against an
+invoice reduces the invoice's ``amount_paid`` (because the credit is
+"paying" it, not receiving cash).
+"""
+from __future__ import annotations
+
+import uuid
+from dataclasses import dataclass
+from datetime import UTC, date, datetime
+from decimal import ROUND_HALF_UP, Decimal
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from saebooks.models.account import Account
+from saebooks.models.credit_note import CreditNote, CreditNoteLine, CreditNoteStatus
+from saebooks.models.tax_code import TaxCode
+from saebooks.services import journal as journal_svc
+from saebooks.services import numbering
+
+_TWOPLACES = Decimal("0.01")
+_AR_CODE = "1-1200"
+
+
+class CreditNoteError(ValueError):
+    """Raised on credit-note validation or state-transition failure."""
+
+
+def _q2(value: Decimal) -> Decimal:
+    return value.quantize(_TWOPLACES, rounding=ROUND_HALF_UP)
+
+
+@dataclass(frozen=True)
+class _LineInput:
+    description: str
+    account_id: uuid.UUID
+    tax_code_id: uuid.UUID | None
+    quantity: Decimal
+    unit_price: Decimal
+    discount_pct: Decimal
+
+
+def _compute_line_totals(
+    line: _LineInput, tax_rate: Decimal
+) -> tuple[Decimal, Decimal, Decimal]:
+    gross = line.quantity * line.unit_price
+    discount_factor = (Decimal("100") - line.discount_pct) / Decimal("100")
+    subtotal = _q2(gross * discount_factor)
+    tax = _q2(subtotal * tax_rate / Decimal("100"))
+    total = subtotal + tax
+    return subtotal, tax, total
+
+
+async def _resolve_tax_rate(
+    session: AsyncSession, tax_code_id: uuid.UUID | None
+) -> Decimal:
+    if tax_code_id is None:
+        return Decimal("0")
+    tc = await session.get(TaxCode, tax_code_id)
+    if tc is None:
+        raise CreditNoteError(f"Unknown tax code {tax_code_id}")
+    return Decimal(str(tc.rate or 0))
+
+
+def _as_uuid(value: object) -> uuid.UUID:
+    if isinstance(value, uuid.UUID):
+        return value
+    return uuid.UUID(str(value))
+
+
+async def _replace_lines(
+    session: AsyncSession, cn: CreditNote, lines: list[dict[str, object]]
+) -> None:
+    from sqlalchemy import delete as sa_delete
+    await session.execute(
+        sa_delete(CreditNoteLine).where(CreditNoteLine.credit_note_id == cn.id)
+    )
+    await session.flush()
+    session.expire(cn, ["lines"])
+
+    for i, raw in enumerate(lines, 1):
+        tax_code_id = raw.get("tax_code_id")
+        if isinstance(tax_code_id, str) and tax_code_id:
+            tax_code_id = uuid.UUID(tax_code_id)
+        elif not tax_code_id:
+            tax_code_id = None
+
+        line_input = _LineInput(
+            description=str(raw["description"]),
+            account_id=_as_uuid(raw["account_id"]),
+            tax_code_id=tax_code_id if isinstance(tax_code_id, uuid.UUID) else None,
+            quantity=Decimal(str(raw.get("quantity", 1))),
+            unit_price=Decimal(str(raw.get("unit_price", 0))),
+            discount_pct=Decimal(str(raw.get("discount_pct", 0))),
+        )
+        tax_rate = await _resolve_tax_rate(session, line_input.tax_code_id)
+        subtotal, tax, total = _compute_line_totals(line_input, tax_rate)
+        session.add(
+            CreditNoteLine(
+                credit_note_id=cn.id,
+                line_no=i,
+                description=line_input.description,
+                account_id=line_input.account_id,
+                tax_code_id=line_input.tax_code_id,
+                quantity=line_input.quantity,
+                unit_price=line_input.unit_price,
+                discount_pct=line_input.discount_pct,
+                line_subtotal=subtotal,
+                line_tax=tax,
+                line_total=total,
+            )
+        )
+    await session.flush()
+
+
+async def _recalc(session: AsyncSession, cn: CreditNote) -> None:
+    lines = (
+        await session.execute(
+            select(CreditNoteLine).where(CreditNoteLine.credit_note_id == cn.id)
+        )
+    ).scalars().all()
+    subtotal = sum((ln.line_subtotal for ln in lines), Decimal("0"))
+    tax = sum((ln.line_tax for ln in lines), Decimal("0"))
+    cn.subtotal = _q2(Decimal(subtotal))
+    cn.tax_total = _q2(Decimal(tax))
+    cn.total = cn.subtotal + cn.tax_total
+
+
+async def create_draft(
+    session: AsyncSession,
+    *,
+    company_id: uuid.UUID,
+    contact_id: uuid.UUID,
+    issue_date: date,
+    lines: list[dict[str, object]] | None = None,
+    original_invoice_id: uuid.UUID | None = None,
+    reason: str | None = None,
+    notes: str | None = None,
+) -> CreditNote:
+    cn = CreditNote(
+        company_id=company_id,
+        contact_id=contact_id,
+        issue_date=issue_date,
+        original_invoice_id=original_invoice_id,
+        reason=reason,
+        notes=notes,
+        status=CreditNoteStatus.DRAFT,
+    )
+    session.add(cn)
+    await session.flush()
+    if lines:
+        await _replace_lines(session, cn, lines)
+    await _recalc(session, cn)
+    await session.commit()
+    return await get(session, cn.id)
+
+
+async def get(session: AsyncSession, credit_note_id: uuid.UUID) -> CreditNote:
+    result = await session.execute(
+        select(CreditNote)
+        .options(selectinload(CreditNote.lines))
+        .where(CreditNote.id == credit_note_id)
+    )
+    cn = result.scalar_one_or_none()
+    if cn is None:
+        raise CreditNoteError(f"Credit note {credit_note_id} not found")
+    return cn
+
+
+async def list_credit_notes(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    *,
+    status: CreditNoteStatus | None = None,
+    contact_id: uuid.UUID | None = None,
+    include_archived: bool = False,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[CreditNote]:
+    stmt = (
+        select(CreditNote)
+        .options(selectinload(CreditNote.lines))
+        .where(CreditNote.company_id == company_id)
+    )
+    if not include_archived:
+        stmt = stmt.where(CreditNote.archived_at.is_(None))
+    if status is not None:
+        stmt = stmt.where(CreditNote.status == status)
+    if contact_id is not None:
+        stmt = stmt.where(CreditNote.contact_id == contact_id)
+    stmt = stmt.order_by(CreditNote.issue_date.desc(), CreditNote.created_at.desc())
+    stmt = stmt.limit(limit).offset(offset)
+    result = await session.execute(stmt)
+    return list(result.scalars().unique().all())
+
+
+async def update_draft(
+    session: AsyncSession,
+    credit_note_id: uuid.UUID,
+    *,
+    contact_id: uuid.UUID | None = None,
+    issue_date: date | None = None,
+    lines: list[dict[str, object]] | None = None,
+    reason: str | None = None,
+    notes: str | None = None,
+) -> CreditNote:
+    cn = await get(session, credit_note_id)
+    if cn.status != CreditNoteStatus.DRAFT:
+        raise CreditNoteError(
+            f"Cannot edit credit note in status {cn.status.value}"
+        )
+    if contact_id is not None:
+        cn.contact_id = contact_id
+    if issue_date is not None:
+        cn.issue_date = issue_date
+    if reason is not None:
+        cn.reason = reason
+    if notes is not None:
+        cn.notes = notes
+    if lines is not None:
+        await _replace_lines(session, cn, lines)
+    await _recalc(session, cn)
+    await session.commit()
+    return await get(session, cn.id)
+
+
+async def _get_ar_account(
+    session: AsyncSession, company_id: uuid.UUID
+) -> Account:
+    result = await session.execute(
+        select(Account).where(
+            Account.company_id == company_id,
+            Account.code == _AR_CODE,
+        )
+    )
+    acct = result.scalar_one_or_none()
+    if acct is None:
+        raise CreditNoteError(
+            "AR control account 1-1200 Trade Debtors is missing"
+        )
+    return acct
+
+
+async def _get_gst_collected_account(
+    session: AsyncSession, company_id: uuid.UUID
+) -> Account | None:
+    from saebooks.services import settings as settings_svc
+    code = await settings_svc.get(session, "gst_collected_account_code", "")
+    if not code:
+        return None
+    result = await session.execute(
+        select(Account).where(
+            Account.company_id == company_id,
+            Account.code == str(code),
+            Account.archived_at.is_(None),
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def post_credit_note(
+    session: AsyncSession,
+    credit_note_id: uuid.UUID,
+    *,
+    posted_by: str | None = None,
+    override_reason: str | None = None,
+) -> CreditNote:
+    cn = await get(session, credit_note_id)
+    if cn.status == CreditNoteStatus.POSTED:
+        raise CreditNoteError("Credit note is already posted")
+    if cn.status == CreditNoteStatus.VOIDED:
+        raise CreditNoteError("Credit note is voided")
+    if not cn.lines:
+        raise CreditNoteError("Cannot post credit note with no lines")
+    if cn.total <= Decimal("0"):
+        raise CreditNoteError("Cannot post credit note with non-positive total")
+
+    if not cn.number:
+        cn.number = await numbering.next_number(
+            session, cn.company_id, "credit_note"
+        )
+
+    ar_account = await _get_ar_account(session, cn.company_id)
+    gst_account = await _get_gst_collected_account(session, cn.company_id)
+
+    # Credit notes are the mirror of invoices:
+    #   Dr Income (per line)
+    #   Dr GST Collected (aggregate tax)
+    #   Cr AR control (total)
+    lines: list[dict[str, object]] = []
+    for line in cn.lines:
+        lines.append(
+            {
+                "account_id": line.account_id,
+                "description": f"{cn.number}: {line.description}",
+                "debit": line.line_subtotal,
+                "credit": Decimal("0"),
+            }
+        )
+    # GST handled manually (reverse-sign) so we can't lean on gst.py.
+    if cn.tax_total > Decimal("0") and gst_account is not None:
+        lines.append(
+            {
+                "account_id": gst_account.id,
+                "description": f"{cn.number}: GST reversal",
+                "debit": cn.tax_total,
+                "credit": Decimal("0"),
+            }
+        )
+    lines.append(
+        {
+            "account_id": ar_account.id,
+            "description": f"Credit note {cn.number}",
+            "debit": Decimal("0"),
+            "credit": cn.total,
+        }
+    )
+
+    entry = await journal_svc.create_draft(
+        session,
+        company_id=cn.company_id,
+        entry_date=cn.issue_date,
+        description=f"Credit note {cn.number}",
+        lines=lines,
+    )
+    posted = await journal_svc.post(
+        session, entry.id, posted_by=posted_by, override_reason=override_reason
+    )
+
+    cn.status = CreditNoteStatus.POSTED
+    cn.journal_entry_id = posted.id
+    cn.posted_at = datetime.now(UTC)
+    cn.posted_by = posted_by
+    await session.commit()
+    return await get(session, cn.id)
+
+
+async def void_credit_note(
+    session: AsyncSession,
+    credit_note_id: uuid.UUID,
+    *,
+    posted_by: str | None = None,
+    override_reason: str | None = None,
+) -> CreditNote:
+    cn = await get(session, credit_note_id)
+    if cn.status == CreditNoteStatus.VOIDED:
+        return cn
+    if cn.status == CreditNoteStatus.DRAFT:
+        cn.status = CreditNoteStatus.VOIDED
+        await session.commit()
+        return cn
+    if cn.amount_allocated > Decimal("0"):
+        raise CreditNoteError(
+            "Credit note has allocations — unallocate before voiding"
+        )
+    if cn.journal_entry_id is None:
+        raise CreditNoteError("Posted credit note has no journal entry id")
+
+    reversal = await journal_svc.reverse(
+        session,
+        cn.journal_entry_id,
+        posted_by=posted_by,
+        override_reason=override_reason or f"Void credit note {cn.number}",
+    )
+    cn.status = CreditNoteStatus.VOIDED
+    cn.void_journal_entry_id = reversal.id
+    await session.commit()
+    return cn
+
+
+async def archive(
+    session: AsyncSession, credit_note_id: uuid.UUID
+) -> CreditNote:
+    cn = await get(session, credit_note_id)
+    cn.archived_at = datetime.now(UTC)
+    await session.commit()
+    return cn

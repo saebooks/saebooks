@@ -15,9 +15,11 @@ from saebooks.routers import (
     bank_feeds,
     bank_rules,
     contacts,
+    credit_notes,
     health,
     invoices,
     journal,
+    payments,
     ranges,
     reconciliation,
     reports,
@@ -61,6 +63,8 @@ def create_app() -> FastAPI:
     app.include_router(reconciliation.router)
     app.include_router(contacts.router)
     app.include_router(invoices.router)
+    app.include_router(credit_notes.router)
+    app.include_router(payments.router)
     app.include_router(assets.router)
     app.include_router(bank_feeds.router)
     app.include_router(bank_rules.router)

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if credit_note else 'New' }} credit note — SAE Books{% endblock %}
+{% block content %}
+<h1>{{ 'Edit credit note ' + (credit_note.number or '(draft)') if credit_note else 'New credit note' }}</h1>
+<p>{{ company_name }}</p>
+
+{% if error %}<div class="error">{{ error }}</div>{% endif %}
+
+<form method="post" action="{{ '/credit-notes/' + credit_note.id|string if credit_note else '/credit-notes' }}">
+  <fieldset>
+    <legend>Header</legend>
+    <label>Customer
+      <select name="contact_id" required>
+        <option value="">—</option>
+        {% for c in contacts %}
+        <option value="{{ c.id }}" {{ 'selected' if credit_note and credit_note.contact_id == c.id }}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Issue date <input type="date" name="issue_date" required
+      value="{{ credit_note.issue_date if credit_note else today }}" /></label>
+    <label>Reason
+      <input name="reason" value="{{ credit_note.reason or '' if credit_note else '' }}"
+             placeholder="e.g. returned goods, price adjustment" />
+    </label>
+    <p class="dim">Next number: <code>{{ preview_number }}</code> (allocated on post)</p>
+  </fieldset>
+
+  <fieldset>
+    <legend>Lines</legend>
+    <table class="lines">
+      <thead><tr>
+        <th>Description</th><th>Account</th><th>Tax</th>
+        <th>Qty</th><th>Unit price</th><th>Disc %</th>
+      </tr></thead>
+      <tbody>
+        {% set existing_lines = credit_note.lines if credit_note else [] %}
+        {% set line_count = (existing_lines|length) + 5 %}
+        {% for i in range(line_count) %}
+        {% set ln = existing_lines[i] if i < existing_lines|length else None %}
+        <tr>
+          <td><input name="line_{{ i }}_description" value="{{ ln.description if ln else '' }}" /></td>
+          <td><select name="line_{{ i }}_account_id">
+            <option value=""></option>
+            {% for a in income_accounts %}
+            <option value="{{ a.id }}" {{ 'selected' if ln and ln.account_id == a.id }}>{{ a.code }} {{ a.name }}</option>
+            {% endfor %}
+          </select></td>
+          <td><select name="line_{{ i }}_tax_code_id">
+            <option value="">—</option>
+            {% for t in tax_codes %}
+            <option value="{{ t.id }}" {{ 'selected' if ln and ln.tax_code_id == t.id }}>{{ t.code }}</option>
+            {% endfor %}
+          </select></td>
+          <td><input name="line_{{ i }}_quantity" size="4"
+            value="{{ ln.quantity if ln else '1' }}" /></td>
+          <td><input name="line_{{ i }}_unit_price" size="8"
+            value="{{ ln.unit_price if ln else '0.00' }}" /></td>
+          <td><input name="line_{{ i }}_discount_pct" size="4"
+            value="{{ ln.discount_pct if ln else '0' }}" /></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </fieldset>
+
+  <fieldset>
+    <legend>Notes</legend>
+    <label>Notes <textarea name="notes" rows="3">{{ credit_note.notes or '' if credit_note else '' }}</textarea></label>
+  </fieldset>
+
+  <div class="toolbar">
+    <button type="submit" class="btn btn-primary">Save draft</button>
+    <a href="/credit-notes" class="btn">Cancel</a>
+  </div>
+</form>
+{% endblock %}
