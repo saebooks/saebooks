@@ -10,6 +10,8 @@ from saebooks.models.bank_rule import BankRule, MatchType
 from saebooks.models.bank_statement import BankStatementLine, StatementLineStatus
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
+from saebooks.models.depreciation_model import DepreciationModel
+from saebooks.models.fixed_asset import FixedAsset
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine, PeriodLock
 from saebooks.models.journal_template import JournalTemplate
 from saebooks.models.settings import Setting
@@ -29,7 +31,9 @@ __all__ = [
     "Company",
     "Contact",
     "ContactType",
+    "DepreciationModel",
     "EntryStatus",
+    "FixedAsset",
     "JournalEntry",
     "JournalLine",
     "JournalTemplate",

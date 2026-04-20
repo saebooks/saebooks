@@ -171,6 +171,49 @@ async def _load_raw(session: AsyncSession, table: str, csv_name: str) -> int:
     return n
 
 
+async def _load_depreciation_models(session: AsyncSession) -> int:
+    """Populate the ``depreciation_models`` catalogue from the AU CSV.
+
+    This is the proper typed table (one row per schedule), not the raw
+    JSONB shadow. Idempotent via ``ON CONFLICT (id) DO NOTHING`` — slugs
+    are stable, so re-running the seed is a no-op.
+    """
+    from sqlalchemy import text
+
+    path = SEED_DIR / "account.depreciation.model-au.csv"
+    if not path.exists():
+        return 0
+
+    n = 0
+    with path.open(newline="") as f:
+        for row in csv.DictReader(f):
+            slug = row.get("id", "").strip()
+            if not slug:
+                continue
+            method = row.get("method", "").strip()
+            method_number = int(row.get("method_number", "0") or "0")
+            method_period = int(row.get("method_period", "0") or "0")
+            raw_factor = row.get("method_progress_factor", "").strip()
+            progress_factor = raw_factor if raw_factor else None
+            await session.execute(
+                text(
+                    "INSERT INTO depreciation_models ("
+                    "id, method, method_number, method_period, method_progress_factor"
+                    ") VALUES (:id, :method, :mnum, :mper, :mpf) "
+                    "ON CONFLICT (id) DO NOTHING"
+                ).bindparams(
+                    id=slug,
+                    method=method,
+                    mnum=method_number,
+                    mper=method_period,
+                    mpf=progress_factor,
+                ),
+            )
+            n += 1
+    await session.commit()
+    return n
+
+
 async def main() -> None:
     logging.basicConfig(level=logging.INFO)
     async with AsyncSessionLocal() as session:
@@ -192,6 +235,9 @@ async def main() -> None:
         for table, name in raw_sources:
             n = await _load_raw(session, table, name)
             logger.info("  %s: %d rows", table, n)
+
+        dep_models = await _load_depreciation_models(session)
+        logger.info("  depreciation_models (typed): %d rows", dep_models)
 
 
 if __name__ == "__main__":
