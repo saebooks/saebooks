@@ -27,6 +27,7 @@ from saebooks.routers import (
     reconciliation,
     recurring_invoices,
     reports,
+    search,
     tax_codes,
     templates,
 )
@@ -87,6 +88,10 @@ def create_app() -> FastAPI:
     app.include_router(assets.router)
     app.include_router(bank_feeds.router)
     app.include_router(bank_rules.router)
+    # Global search + /help/shortcuts. No prefix; exposes /search and
+    # /help/shortcuts at the top level so the Cmd-K palette fetch call
+    # can stay short.
+    app.include_router(search.router)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
     # Prometheus /metrics + per-request latency histogram. Install last

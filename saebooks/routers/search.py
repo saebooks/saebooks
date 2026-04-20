@@ -1,0 +1,75 @@
+"""Global search + keyboard-shortcut help pages.
+
+Two routes:
+
+* ``GET /search`` — returns an HTMX fragment (``search/_results.html``)
+  when the ``HX-Request`` header is set, else the full page. The Cmd-K
+  palette injects itself into a ``<dialog>`` and swaps the results
+  fragment on every keystroke.
+* ``GET /help/shortcuts`` — static page listing the shortcuts. Lives
+  under this router because it documents the same feature.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
+from sqlalchemy import select
+
+from saebooks.config import settings
+from saebooks.db import AsyncSessionLocal
+from saebooks.models.company import Company
+from saebooks.services import search as svc
+
+router = APIRouter()
+
+TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+
+async def _first_company() -> Company:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Company).where(Company.archived_at.is_(None)).order_by(Company.created_at)
+        )
+        company = result.scalars().first()
+        if company is None:
+            raise HTTPException(500, "No active company")
+        return company
+
+
+@router.get("/search", response_class=HTMLResponse)
+async def search_page(
+    request: Request,
+    q: str = Query(""),
+) -> HTMLResponse:
+    """Full-page search, or HTMX fragment when the header is set."""
+    company = await _first_company()
+    async with AsyncSessionLocal() as session:
+        hits = await svc.search_all(session, company.id, q)
+
+    template_name = (
+        "search/_results.html"
+        if request.headers.get("hx-request") == "true"
+        else "search/index.html"
+    )
+    return templates.TemplateResponse(
+        request,
+        template_name,
+        {
+            "edition": settings.edition,
+            "q": q,
+            "hits": hits,
+        },
+    )
+
+
+@router.get("/help/shortcuts", response_class=HTMLResponse)
+async def shortcuts_help(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "help/shortcuts.html",
+        {"edition": settings.edition},
+    )

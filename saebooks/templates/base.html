@@ -33,11 +33,143 @@
       <a href="/admin/sql">SQL</a>
       <a href="/admin/settings">Settings</a>
       <a href="/admin/license">Licence</a>
+      <a href="#" id="open-palette" title="Search (Ctrl+K or /)">Search</a>
     </nav>
     <div class="edition">{{ edition }}</div>
   </header>
   <main>
     {% block content %}{% endblock %}
   </main>
+
+  <dialog id="search-palette" class="search-palette">
+    <form method="dialog" class="search-palette-form">
+      <input
+        type="search"
+        id="palette-input"
+        name="q"
+        placeholder="Search contacts, invoices, bills, accounts…"
+        autocomplete="off"
+        hx-get="/search"
+        hx-trigger="keyup changed delay:150ms"
+        hx-target="#palette-results"
+        hx-swap="innerHTML"
+      >
+      <button type="submit" class="palette-close">Esc</button>
+    </form>
+    <div id="palette-results" class="palette-results"></div>
+  </dialog>
+
+  <script>
+    // Vanilla keyboard-shortcut driver. No framework: just a keydown
+    // listener + a tiny state machine for two-key "g" sequences.
+    (function () {
+      const palette = document.getElementById("search-palette");
+      const paletteInput = document.getElementById("palette-input");
+      const paletteResults = document.getElementById("palette-results");
+      const openBtn = document.getElementById("open-palette");
+
+      function openPalette() {
+        if (!palette) return;
+        if (!palette.open) palette.showModal();
+        paletteInput.value = "";
+        paletteResults.innerHTML = "";
+        setTimeout(() => paletteInput.focus(), 0);
+      }
+
+      function closePalette() {
+        if (palette && palette.open) palette.close();
+      }
+
+      if (openBtn) {
+        openBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          openPalette();
+        });
+      }
+
+      // Two-key "g" sequences. Cleared after 1.2s if second key doesn't arrive.
+      let gTimer = null;
+      let gArmed = false;
+
+      const gMap = {
+        d: "/dashboard",
+        j: "/journal",
+        i: "/invoices",
+        b: "/bills",
+        c: "/contacts",
+        a: "/accounts",
+        r: "/reports",
+        p: "/payments",
+      };
+
+      function isTypingTarget(el) {
+        if (!el) return false;
+        const tag = el.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+        if (el.isContentEditable) return true;
+        return false;
+      }
+
+      document.addEventListener("keydown", function (evt) {
+        // Esc always closes the palette (even when input focused inside).
+        if (evt.key === "Escape" && palette && palette.open) {
+          closePalette();
+          return;
+        }
+
+        // If the user is typing in a real form control, shortcuts are off
+        // — except Ctrl+K which is a universal open.
+        const typing = isTypingTarget(document.activeElement);
+
+        if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === "k") {
+          evt.preventDefault();
+          openPalette();
+          return;
+        }
+
+        if (typing) return;
+
+        // "/" opens palette.
+        if (evt.key === "/") {
+          evt.preventDefault();
+          openPalette();
+          return;
+        }
+
+        // "g" arms the two-key nav sequence.
+        if (evt.key === "g") {
+          gArmed = true;
+          clearTimeout(gTimer);
+          gTimer = setTimeout(() => { gArmed = false; }, 1200);
+          return;
+        }
+
+        if (gArmed && gMap[evt.key]) {
+          gArmed = false;
+          clearTimeout(gTimer);
+          window.location.assign(gMap[evt.key]);
+          return;
+        }
+
+        // "n" = new-on-current-list (best-effort: click the first
+        // anchor whose href ends with /new). Individual list pages may
+        // mark their preferred target with `data-new-action`.
+        if (evt.key === "n") {
+          const preferred = document.querySelector("[data-new-action]");
+          if (preferred) {
+            evt.preventDefault();
+            window.location.assign(preferred.getAttribute("data-new-action"));
+            return;
+          }
+          const candidate = Array.from(document.querySelectorAll("a"))
+            .find((a) => (a.getAttribute("href") || "").endsWith("/new"));
+          if (candidate) {
+            evt.preventDefault();
+            window.location.assign(candidate.getAttribute("href"));
+          }
+        }
+      });
+    })();
+  </script>
 </body>
 </html>
