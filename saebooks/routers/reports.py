@@ -1,9 +1,9 @@
-"""Report routes — trial balance, P&L, balance sheet."""
+"""Report routes — trial balance, P&L, balance sheet, aged debtors."""
 from datetime import date
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
@@ -142,6 +142,42 @@ async def balance_sheet_report(
             "sections": sections,
             "as_of": as_of or "",
             "net_assets": net_assets,
+        },
+    )
+
+
+@router.get("/aged-ar", response_class=HTMLResponse)
+async def aged_ar_report(
+    request: Request,
+    as_at: str | None = Query(None),
+    format: str = Query("html"),
+) -> Response:
+    company = await _first_company()
+    cutoff = _parse_date(as_at) or date.today()
+    async with AsyncSessionLocal() as session:
+        report = await svc.aged_ar(session, company.id, as_at=cutoff)
+
+    if format == "csv":
+        csv_text = svc.aged_ar_csv(report)
+        filename = f"aged-ar-{cutoff.isoformat()}.csv"
+        return Response(
+            content=csv_text,
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
+        )
+
+    return templates.TemplateResponse(
+        request,
+        "reports/aged_ar.html",
+        {
+            "edition": settings.edition,
+            "company_name": company.name,
+            "report": report,
+            "bucket_keys": svc.BUCKET_KEYS,
+            "bucket_labels": svc.BUCKET_LABELS,
+            "as_at": cutoff.isoformat(),
         },
     )
 
