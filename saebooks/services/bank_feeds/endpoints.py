@@ -14,9 +14,7 @@ Response shape is the open-standard CDR envelope::
     }
 
 We return the parsed body *as-is* rather than unwrapping ``data`` so
-callers can see pagination links/metadata if they want. Helper
-``_data_collection`` exists for the common case of pulling a specific
-key out of ``data``.
+callers can see pagination links/metadata if they want.
 
 All filter parameters map straight through to the upstream API using the
 kebab-case names that the spec defines (``product-category``,
