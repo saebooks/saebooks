@@ -1,0 +1,39 @@
+{# Bank balances widget — list every reconcile-type asset account with GL balance #}
+<section class="widget widget-bank-balances">
+  <header>
+    <h2>Bank balances</h2>
+    <a href="/reconciliation" class="subtle">Reconcile &rarr;</a>
+  </header>
+  {% if dashboard.bank_balances %}
+  <table class="widget-table">
+    <thead>
+      <tr><th>Account</th><th class="num">Balance</th></tr>
+    </thead>
+    <tbody>
+      {% for b in dashboard.bank_balances %}
+      <tr>
+        <td>
+          <span class="code">{{ b.code }}</span>
+          {{ b.name }}
+        </td>
+        <td class="num">{{ "%.2f"|format(b.balance) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr>
+        <th>Total</th>
+        <th class="num">
+          {{ "%.2f"|format(dashboard.bank_balances|sum(attribute="balance")) }}
+        </th>
+      </tr>
+    </tfoot>
+  </table>
+  {% else %}
+  <p class="empty-state">
+    No reconcile-type accounts yet. Mark a bank or cash account as
+    reconcilable in <a href="/accounts">Accounts</a> and it will
+    appear here.
+  </p>
+  {% endif %}
+</section>

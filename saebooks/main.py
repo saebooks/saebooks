@@ -17,6 +17,7 @@ from saebooks.routers import (
     bills,
     contacts,
     credit_notes,
+    dashboard,
     health,
     invoices,
     journal,
@@ -53,10 +54,11 @@ def create_app() -> FastAPI:
     )
     @app.get("/")
     async def root() -> RedirectResponse:
-        return RedirectResponse("/journal", status_code=302)
+        return RedirectResponse("/dashboard", status_code=302)
 
     app.include_router(health.router)
     app.include_router(admin.router)
+    app.include_router(dashboard.router)
     app.include_router(accounts.router)
     app.include_router(journal.router)
     app.include_router(templates.router)

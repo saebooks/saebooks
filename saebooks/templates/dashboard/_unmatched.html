@@ -1,0 +1,19 @@
+{# Unmatched bank statement lines — a single count with a link. #}
+<section class="widget widget-unmatched">
+  <header>
+    <h2>Unmatched lines</h2>
+    <a href="/reconciliation" class="subtle">Reconcile &rarr;</a>
+  </header>
+  {% if dashboard.unmatched_count > 0 %}
+  <p class="big-number {{ 'danger' if dashboard.unmatched_count >= 20 else '' }}">
+    {{ dashboard.unmatched_count }}
+  </p>
+  <p class="subtle">
+    bank-statement line{{ '' if dashboard.unmatched_count == 1 else 's' }}
+    waiting to be matched to a journal entry.
+  </p>
+  {% else %}
+  <p class="big-number">0</p>
+  <p class="subtle">Everything's reconciled.</p>
+  {% endif %}
+</section>

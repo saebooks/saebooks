@@ -1,0 +1,33 @@
+{# Aged-AR snapshot — grand totals only. Full report at /reports/aged-ar. #}
+<section class="widget widget-aged-ar">
+  <header>
+    <h2>Aged debtors</h2>
+    <a href="/reports/aged-ar" class="subtle">Full report &rarr;</a>
+  </header>
+  <table class="widget-table">
+    <tbody>
+      <tr><td>Current (not overdue)</td>
+          <td class="num">{{ "%.2f"|format(dashboard.aged_ar.current) }}</td></tr>
+      <tr><td>1-30 days overdue</td>
+          <td class="num">{{ "%.2f"|format(dashboard.aged_ar.d1_30) }}</td></tr>
+      <tr><td>31-60 days overdue</td>
+          <td class="num">{{ "%.2f"|format(dashboard.aged_ar.d31_60) }}</td></tr>
+      <tr><td>61-90 days overdue</td>
+          <td class="num">{{ "%.2f"|format(dashboard.aged_ar.d61_90) }}</td></tr>
+      <tr class="danger"><td>90+ days overdue</td>
+          <td class="num">{{ "%.2f"|format(dashboard.aged_ar.d90_plus) }}</td></tr>
+    </tbody>
+    <tfoot>
+      <tr>
+        <th>Total owed</th>
+        <th class="num">{{ "%.2f"|format(dashboard.aged_ar.total) }}</th>
+      </tr>
+      {% if dashboard.aged_ar.overdue > 0 %}
+      <tr class="danger">
+        <th>Overdue</th>
+        <th class="num">{{ "%.2f"|format(dashboard.aged_ar.overdue) }}</th>
+      </tr>
+      {% endif %}
+    </tfoot>
+  </table>
+</section>
