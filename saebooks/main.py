@@ -8,6 +8,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from saebooks.config import settings
+from saebooks.services import metrics as metrics_svc
 from saebooks.routers import (
     accounts,
     admin,
@@ -81,6 +82,11 @@ def create_app() -> FastAPI:
     app.include_router(bank_feeds.router)
     app.include_router(bank_rules.router)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+    # Prometheus /metrics + per-request latency histogram. Install last
+    # so the middleware sits outside every router + mount, capturing
+    # real wall-clock latency including static files.
+    metrics_svc.install(app)
     return app
 
 

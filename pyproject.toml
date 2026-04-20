@@ -20,6 +20,7 @@ dependencies = [
     "apscheduler>=3.10",
     "reportlab>=4.2",
     "aiosmtplib>=3.0",
+    "prometheus-client>=0.21",
 ]
 
 [project.optional-dependencies]
