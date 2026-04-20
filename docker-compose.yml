@@ -35,6 +35,18 @@ services:
       SAEBOOKS_BACKUP_DIR_IN_CONTAINER: /app/backups
     ports:
       - "8042:8000"
+    networks:
+      - default
+      - revproxy
+
+networks:
+  # 'default' stays on the compose-managed bridge so app↔db keeps
+  # working; revproxy is the external shared network Caddy + Authentik
+  # use so books.sauer.com.au can forward-auth to authentik-server and
+  # reverse-proxy to this container by its compose name.
+  default:
+  revproxy:
+    external: true
 
 volumes:
   saebooks_db:

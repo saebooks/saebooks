@@ -66,5 +66,28 @@ class Settings(BaseSettings):
         alias="ABR_API_BASE",
     )
 
+    # ---------------------------------------------------------------- #
+    # Outbound email (Batch Q)                                         #
+    # ---------------------------------------------------------------- #
+    # When SMTP_HOST is empty, ``saebooks.services.mailer`` drops
+    # messages into ``mail_outbox_dir`` (default /app/mail-outbox) as
+    # .eml files — same pattern as Mailpit for local dev. Production
+    # sets SMTP_HOST + creds.
+    smtp_host: str = Field(default="", alias="SMTP_HOST")
+    smtp_port: int = Field(default=587, alias="SMTP_PORT")
+    smtp_user: str = Field(default="", alias="SMTP_USER")
+    smtp_password: str = Field(default="", alias="SMTP_PASSWORD")
+    smtp_from: str = Field(default="books@sauer.com.au", alias="SMTP_FROM")
+    smtp_tls: bool = Field(default=True, alias="SMTP_TLS")
+    mail_outbox_dir: str = Field(
+        default="/app/mail-outbox", alias="SAEBOOKS_MAIL_OUTBOX_DIR"
+    )
+
+    # ---------------------------------------------------------------- #
+    # Observability (Batch Z)                                          #
+    # ---------------------------------------------------------------- #
+    sentry_dsn: str = Field(default="", alias="SENTRY_DSN")
+    log_json: bool = Field(default=False, alias="SAEBOOKS_LOG_JSON")
+
 
 settings = Settings()
