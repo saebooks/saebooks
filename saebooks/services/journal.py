@@ -277,7 +277,11 @@ async def reverse(
                 debit=line.credit,
                 credit=line.debit,
                 tax_code_id=line.tax_code_id,
-                gst_amount=-line.gst_amount if line.gst_amount else None,
+                # Do NOT carry gst_amount onto the reversal — the original
+                # GST Collected/Paid line has already been copied (with
+                # debit/credit swapped). Passing gst_amount would cause
+                # auto_post_gst_lines to add a duplicate GST line on post().
+                gst_amount=None,
             )
         )
 

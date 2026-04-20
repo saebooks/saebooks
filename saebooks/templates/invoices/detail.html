@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Invoice {{ invoice.number or '(draft)' }} — SAE Books{% endblock %}
+{% block content %}
+<h1>Invoice {{ invoice.number or '(draft)' }}</h1>
+<p>
+  {{ company_name }} →
+  <strong>{{ contact.name if contact else '—' }}</strong>
+  <span class="badge badge-{{ invoice.status|lower }}">{{ invoice.status }}</span>
+</p>
+
+<div class="toolbar">
+  {% if invoice.status == 'DRAFT' %}
+    <a class="btn" href="/invoices/{{ invoice.id }}/edit">Edit</a>
+    <form method="post" action="/invoices/{{ invoice.id }}/post" class="inline">
+      <button class="btn btn-primary" type="submit">Post</button>
+    </form>
+    <form method="post" action="/invoices/{{ invoice.id }}/void" class="inline">
+      <button class="btn" type="submit">Discard</button>
+    </form>
+  {% elif invoice.status == 'POSTED' %}
+    <a class="btn" href="/invoices/{{ invoice.id }}.pdf" target="_blank">PDF</a>
+    <form method="post" action="/invoices/{{ invoice.id }}/email" class="inline">
+      <input type="email" name="to" placeholder="{{ contact.email or 'recipient@example.com' }}" />
+      <button class="btn btn-primary" type="submit">Email invoice</button>
+    </form>
+    <form method="post" action="/invoices/{{ invoice.id }}/sent" class="inline">
+      <button class="btn btn-sm" type="submit">Mark sent</button>
+    </form>
+    <form method="post" action="/invoices/{{ invoice.id }}/void" class="inline">
+      <button class="btn btn-sm" type="submit"
+              onclick="return confirm('Void {{ invoice.number }}? This posts a reversing journal.');">
+        Void
+      </button>
+    </form>
+  {% endif %}
+  <form method="post" action="/invoices/{{ invoice.id }}/archive" class="inline">
+    <button class="btn btn-sm" type="submit">Archive</button>
+  </form>
+</div>
+
+<section>
+  <h2>Details</h2>
+  <dl class="kv">
+    <dt>Issue date</dt><dd>{{ invoice.issue_date }}</dd>
+    <dt>Due date</dt><dd>{{ invoice.due_date }}</dd>
+    {% if invoice.sent_at %}<dt>Sent</dt><dd>{{ invoice.sent_at.strftime('%Y-%m-%d %H:%M') }}</dd>{% endif %}
+    {% if invoice.posted_at %}<dt>Posted</dt><dd>{{ invoice.posted_at.strftime('%Y-%m-%d %H:%M') }}</dd>{% endif %}
+    {% if invoice.journal_entry_id %}
+      <dt>Journal</dt>
+      <dd><a href="/journal/{{ invoice.journal_entry_id }}">View GL entry</a></dd>
+    {% endif %}
+    {% if invoice.payment_terms %}<dt>Terms</dt><dd>{{ invoice.payment_terms }}</dd>{% endif %}
+  </dl>
+</section>
+
+<section>
+  <h2>Lines</h2>
+  <table class="data">
+    <thead><tr>
+      <th>#</th><th>Description</th><th>Account</th><th>Tax</th>
+      <th class="right">Qty</th><th class="right">Unit</th>
+      <th class="right">Disc</th><th class="right">Subtotal</th>
+      <th class="right">Tax</th><th class="right">Total</th>
+    </tr></thead>
+    <tbody>
+      {% for ln in invoice.lines %}
+      <tr>
+        <td>{{ ln.line_no }}</td>
+        <td>{{ ln.description }}</td>
+        <td>{{ account_map.get(ln.account_id).code if account_map.get(ln.account_id) else '—' }}</td>
+        <td>{{ tax_map.get(ln.tax_code_id).code if tax_map.get(ln.tax_code_id) else '—' }}</td>
+        <td class="right">{{ '{:g}'.format(ln.quantity) }}</td>
+        <td class="right">{{ '{:,.2f}'.format(ln.unit_price) }}</td>
+        <td class="right">{{ '{:g}'.format(ln.discount_pct) }}%</td>
+        <td class="right">{{ '{:,.2f}'.format(ln.line_subtotal) }}</td>
+        <td class="right">{{ '{:,.2f}'.format(ln.line_tax) }}</td>
+        <td class="right">{{ '{:,.2f}'.format(ln.line_total) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr><th colspan="9" class="right">Subtotal</th><th class="right">{{ '{:,.2f}'.format(invoice.subtotal) }}</th></tr>
+      <tr><th colspan="9" class="right">Tax</th><th class="right">{{ '{:,.2f}'.format(invoice.tax_total) }}</th></tr>
+      <tr><th colspan="9" class="right">Total</th><th class="right"><strong>{{ '{:,.2f}'.format(invoice.total) }}</strong></th></tr>
+      {% if invoice.amount_paid > 0 %}
+      <tr><th colspan="9" class="right">Paid</th><th class="right">{{ '{:,.2f}'.format(invoice.amount_paid) }}</th></tr>
+      <tr><th colspan="9" class="right">Balance due</th><th class="right">{{ '{:,.2f}'.format(invoice.total - invoice.amount_paid) }}</th></tr>
+      {% endif %}
+    </tfoot>
+  </table>
+</section>
+
+{% if invoice.notes %}
+<section>
+  <h2>Notes</h2>
+  <p>{{ invoice.notes | replace('\n', '<br>') | safe }}</p>
+</section>
+{% endif %}
+{% endblock %}
