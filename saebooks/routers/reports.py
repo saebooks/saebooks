@@ -1,4 +1,6 @@
 """Report routes — trial balance, P&L, balance sheet, aged debtors."""
+import uuid
+from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
 
@@ -9,9 +11,11 @@ from sqlalchemy import select
 
 from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
+from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.services import bas as bas_svc
 from saebooks.services import gst as gst_svc
+from saebooks.services import period_close as period_close_svc
 from saebooks.services import reports as svc
 
 router = APIRouter(prefix="/reports")
@@ -216,6 +220,132 @@ async def aged_ap_report(
             "as_at": cutoff.isoformat(),
         },
     )
+
+
+@router.get("/close-year", response_class=HTMLResponse)
+async def close_year_form(
+    request: Request,
+    through: str | None = Query(None),
+    retained_earnings_account_id: str | None = Query(None),
+) -> HTMLResponse:
+    """Preview the year-end close. No state change here.
+
+    Defaults:
+    - ``through`` — last financial-year-end; for AU that's the most
+      recent 30 June. Fallback to today when a company's FY dates
+      aren't configured.
+    - ``retained_earnings_account_id`` — first EQUITY account with
+      "retained earnings" in its name (the AU seed ships one as
+      ``3-8000 Retained Earnings``).
+    """
+    company = await _first_company()
+    through_date = _parse_date(through) or _default_fy_end(company)
+
+    async with AsyncSessionLocal() as session:
+        equity_accounts = (
+            await session.execute(
+                select(Account)
+                .where(
+                    Account.company_id == company.id,
+                    Account.account_type == AccountType.EQUITY,
+                    Account.archived_at.is_(None),
+                )
+                .order_by(Account.code)
+            )
+        ).scalars().all()
+
+        retained_id = (
+            _uuid_or_none(retained_earnings_account_id)
+            or _default_retained_earnings(equity_accounts)
+        )
+
+        preview = None
+        if retained_id is not None:
+            preview = await period_close_svc.preview_close(
+                session,
+                company.id,
+                through_date=through_date,
+                retained_earnings_account_id=retained_id,
+            )
+
+    return templates.TemplateResponse(
+        request,
+        "reports/close_year.html",
+        {
+            "edition": settings.edition,
+            "company_name": company.name,
+            "through": through_date.isoformat(),
+            "equity_accounts": equity_accounts,
+            "retained_earnings_id": str(retained_id) if retained_id else "",
+            "preview": preview,
+        },
+    )
+
+
+@router.post("/close-year", response_model=None)
+async def close_year_submit(request: Request) -> RedirectResponse:
+    """Post the year-end close journal, then lock the period."""
+    company = await _first_company()
+    form = await request.form()
+    through_date = _parse_date(str(form.get("through", "")))
+    retained_id_raw = str(form.get("retained_earnings_account_id", ""))
+    retained_id = _uuid_or_none(retained_id_raw)
+    if through_date is None or retained_id is None:
+        raise HTTPException(
+            400, "Both 'through' date and retained-earnings account are required"
+        )
+    posted_by = request.headers.get("remote-user") or None
+
+    async with AsyncSessionLocal() as session:
+        entry = await period_close_svc.close_year(
+            session,
+            company.id,
+            through_date=through_date,
+            retained_earnings_account_id=retained_id,
+            posted_by=posted_by,
+        )
+
+    if entry is None:
+        return RedirectResponse(
+            f"/reports/close-year?through={through_date.isoformat()}&closed=empty",
+            status_code=303,
+        )
+    return RedirectResponse(f"/journal/{entry.id}", status_code=303)
+
+
+def _default_fy_end(company: Company) -> date:
+    """Return the most recent FY-end date for the company.
+
+    AU default: 30 June. If today is 2026-04-21 we return 2025-06-30.
+    """
+    today = date.today()
+    fy_month = company.fin_year_start_month or 7
+    # FY ends the day before fy_month starts. E.g. fy_month=7 → 30 June.
+    end_month = 12 if fy_month == 1 else fy_month - 1
+    import calendar
+    end_day = calendar.monthrange(today.year, end_month)[1]
+    candidate = date(today.year, end_month, end_day)
+    if candidate <= today:
+        return candidate
+    return date(today.year - 1, end_month, end_day)
+
+
+def _default_retained_earnings(accounts: Sequence[Account]) -> uuid.UUID | None:
+    """Pick the first equity account that looks like retained earnings."""
+    for a in accounts:
+        if "retained earnings" in a.name.lower():
+            return a.id
+    # Fallback: first equity account at all
+    return accounts[0].id if accounts else None
+
+
+def _uuid_or_none(raw: str | None) -> uuid.UUID | None:
+    if not raw:
+        return None
+    try:
+        return uuid.UUID(raw)
+    except ValueError:
+        return None
 
 
 @router.post("/bas/settle", response_model=None)

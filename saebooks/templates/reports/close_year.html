@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Close year — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Close year</h1>
+  <div class="meta">{{ company_name }}</div>
+</div>
+
+<p class="muted">
+  Zeros every income, expense, cost-of-sales and other-expense account
+  into the retained-earnings account, then locks the period so no
+  back-dated journal lands in a closed year.
+</p>
+
+<form class="report-filter" method="get">
+  <label>Through <input name="through" type="date" value="{{ through }}" required></label>
+  <label>Retained earnings
+    <select name="retained_earnings_account_id">
+      {% for a in equity_accounts %}
+      <option value="{{ a.id }}" {% if retained_earnings_id == a.id|string %}selected{% endif %}>
+        {{ a.code }} — {{ a.name }}
+      </option>
+      {% endfor %}
+    </select>
+  </label>
+  <button type="submit" class="btn-secondary">Preview</button>
+</form>
+
+{% if request.query_params.get('closed') == 'empty' %}
+<div class="notice">Nothing to close — every P&amp;L account is already zero for that period.</div>
+{% endif %}
+
+{% if preview %}
+  {% if preview.has_anything_to_close %}
+  <table class="report-table">
+    <thead>
+      <tr>
+        <th>Account</th>
+        <th class="num">Debit</th>
+        <th class="num">Credit</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for line in preview.lines %}
+      <tr>
+        <td>{{ line.description }}</td>
+        <td class="num">{% if line.debit %}{{ "%.2f"|format(line.debit) }}{% endif %}</td>
+        <td class="num">{% if line.credit %}{{ "%.2f"|format(line.credit) }}{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr class="grand-total">
+        <td><strong>Net profit</strong></td>
+        <td class="num">{% if preview.net_profit < 0 %}{{ "%.2f"|format(-preview.net_profit) }}{% endif %}</td>
+        <td class="num">{% if preview.net_profit > 0 %}{{ "%.2f"|format(preview.net_profit) }}{% endif %}</td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <form method="post" class="form-actions" onsubmit="return confirm('Post the close-year journal and lock the period through {{ through }}? This cannot be undone without posting a manual adjustment with override reason.');">
+    <input type="hidden" name="through" value="{{ through }}">
+    <input type="hidden" name="retained_earnings_account_id" value="{{ retained_earnings_id }}">
+    <button type="submit" class="btn-primary">Post close-year journal</button>
+  </form>
+  {% else %}
+  <div class="empty-state">
+    Nothing to close through {{ through }} — every P&amp;L account is zero.
+  </div>
+  {% endif %}
+{% endif %}
+{% endblock %}
