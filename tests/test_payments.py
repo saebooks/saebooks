@@ -20,11 +20,13 @@ from sqlalchemy import select
 
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account
+from saebooks.models.bill import BillStatus
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
 from saebooks.models.invoice import InvoiceStatus
 from saebooks.models.payment import PaymentDirection, PaymentStatus
 from saebooks.models.tax_code import TaxCode
+from saebooks.services import bills as bill_svc
 from saebooks.services import invoices as inv_svc
 from saebooks.services import payments as svc
 
@@ -252,3 +254,141 @@ async def test_void_draft_flips_status_without_journal() -> None:
         voided = await svc.void_payment(session, pay.id)
     assert voided.status == PaymentStatus.VOIDED
     assert voided.void_journal_entry_id is None
+
+
+# ---------------------------------------------------------------------- #
+# Bill allocation (OUTGOING leg)                                          #
+# ---------------------------------------------------------------------- #
+
+
+async def _post_bill(
+    company_id: uuid.UUID,
+    contact_id: uuid.UUID,
+    expense: uuid.UUID,
+    gst: uuid.UUID,
+    amount: Decimal,
+) -> uuid.UUID:
+    today = date(2026, 4, 20)
+    async with AsyncSessionLocal() as session:
+        bill = await bill_svc.create_draft(
+            session,
+            company_id=company_id,
+            contact_id=contact_id,
+            issue_date=today,
+            due_date=today + timedelta(days=30),
+            lines=[
+                {
+                    "description": "Bill line",
+                    "account_id": expense,
+                    "tax_code_id": gst,
+                    "quantity": Decimal("1"),
+                    "unit_price": amount,
+                    "discount_pct": Decimal("0"),
+                }
+            ],
+        )
+    async with AsyncSessionLocal() as session:
+        await bill_svc.post_bill(session, bill.id, posted_by="test")
+    return bill.id
+
+
+async def _expense_account(company_id: uuid.UUID) -> uuid.UUID:
+    async with AsyncSessionLocal() as session:
+        acct = (
+            await session.execute(
+                select(Account).where(
+                    Account.company_id == company_id,
+                    Account.code == "6-1000",
+                )
+            )
+        ).scalar_one()
+        return acct.id
+
+
+@pytest.mark.asyncio
+async def test_bill_allocation_updates_bill_amount_paid() -> None:
+    cid, contact, bank, _income, gst = await _ctx()
+    expense = await _expense_account(cid)
+    bill_id = await _post_bill(cid, contact, expense, gst, Decimal("300.00"))
+
+    async with AsyncSessionLocal() as session:
+        pay = await svc.create_draft(
+            session,
+            company_id=cid,
+            contact_id=contact,
+            bank_account_id=bank,
+            payment_date=date(2026, 4, 21),
+            amount=Decimal("150.00"),
+            direction=PaymentDirection.OUTGOING,
+        )
+    async with AsyncSessionLocal() as session:
+        await svc.post_payment(session, pay.id, posted_by="test")
+    async with AsyncSessionLocal() as session:
+        await svc.allocate(
+            session,
+            pay.id,
+            bill_allocations=[(bill_id, Decimal("150.00"))],
+        )
+
+    async with AsyncSessionLocal() as session:
+        bill = await bill_svc.get(session, bill_id)
+        assert bill.amount_paid == Decimal("150.00")
+        assert bill.status == BillStatus.POSTED
+
+
+@pytest.mark.asyncio
+async def test_incoming_payment_cannot_allocate_to_bill() -> None:
+    cid, contact, bank, _income, gst = await _ctx()
+    expense = await _expense_account(cid)
+    bill_id = await _post_bill(cid, contact, expense, gst, Decimal("100.00"))
+
+    async with AsyncSessionLocal() as session:
+        pay = await svc.create_draft(
+            session,
+            company_id=cid,
+            contact_id=contact,
+            bank_account_id=bank,
+            payment_date=date(2026, 4, 21),
+            amount=Decimal("50.00"),
+            direction=PaymentDirection.INCOMING,
+        )
+    async with AsyncSessionLocal() as session:
+        await svc.post_payment(session, pay.id, posted_by="test")
+
+    with pytest.raises(svc.PaymentError, match="OUTGOING"):
+        async with AsyncSessionLocal() as session:
+            await svc.allocate(
+                session,
+                pay.id,
+                bill_allocations=[(bill_id, Decimal("50.00"))],
+            )
+
+
+@pytest.mark.asyncio
+async def test_cannot_mix_invoice_and_bill_allocations() -> None:
+    cid, contact, bank, income, gst = await _ctx()
+    expense = await _expense_account(cid)
+    inv_id = await _post_invoice(cid, contact, income, gst, Decimal("100.00"))
+    bill_id = await _post_bill(cid, contact, expense, gst, Decimal("100.00"))
+
+    async with AsyncSessionLocal() as session:
+        pay = await svc.create_draft(
+            session,
+            company_id=cid,
+            contact_id=contact,
+            bank_account_id=bank,
+            payment_date=date(2026, 4, 21),
+            amount=Decimal("50.00"),
+            direction=PaymentDirection.INCOMING,
+        )
+    async with AsyncSessionLocal() as session:
+        await svc.post_payment(session, pay.id, posted_by="test")
+
+    with pytest.raises(svc.PaymentError, match="both invoices and bills"):
+        async with AsyncSessionLocal() as session:
+            await svc.allocate(
+                session,
+                pay.id,
+                invoice_allocations=[(inv_id, Decimal("10.00"))],
+                bill_allocations=[(bill_id, Decimal("10.00"))],
+            )

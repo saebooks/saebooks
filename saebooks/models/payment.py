@@ -152,6 +152,10 @@ class PaymentAllocation(Base):
         UUID(as_uuid=True),
         ForeignKey("credit_notes.id", ondelete="RESTRICT"),
     )
+    bill_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("bills.id", ondelete="RESTRICT"),
+    )
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

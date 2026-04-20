@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Bills — SAE Books{% endblock %}
+{% block content %}
+<h1>Bills</h1>
+<p>{{ company_name }} — {{ total }} bill{{ '' if total == 1 else 's' }}</p>
+
+<div class="toolbar">
+  <a class="btn btn-primary" href="/bills/new">+ New bill</a>
+  <form method="get" action="/bills" class="inline">
+    <label>Status
+      <select name="status" onchange="this.form.submit()">
+        <option value="all"      {{ 'selected' if status_filter == 'all'    }}>All</option>
+        <option value="DRAFT"    {{ 'selected' if status_filter == 'DRAFT'  }}>Draft</option>
+        <option value="POSTED"   {{ 'selected' if status_filter == 'POSTED' }}>Posted</option>
+        <option value="VOIDED"   {{ 'selected' if status_filter == 'VOIDED' }}>Voided</option>
+        <option value="archived" {{ 'selected' if status_filter == 'archived' }}>Archived</option>
+      </select>
+    </label>
+    <label>Search <input name="q" value="{{ search_q }}" placeholder="number, supplier ref or contact" /></label>
+    <button type="submit" class="btn btn-sm">Filter</button>
+  </form>
+</div>
+
+<table class="data">
+  <thead>
+    <tr>
+      <th>Number</th>
+      <th>Supplier</th>
+      <th>Supplier ref</th>
+      <th>Issued</th>
+      <th>Due</th>
+      <th>Status</th>
+      <th class="right">Total</th>
+      <th class="right">Balance</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for b in bills %}
+    <tr>
+      <td><a href="/bills/{{ b.id }}">{{ b.number or '(draft)' }}</a></td>
+      <td>{{ contact_map.get(b.contact_id, '—') }}</td>
+      <td>{{ b.supplier_reference or '—' }}</td>
+      <td>{{ b.issue_date }}</td>
+      <td>{{ b.due_date }}</td>
+      <td><span class="badge badge-{{ b.status|lower }}">{{ b.status }}</span></td>
+      <td class="right">${{ '{:,.2f}'.format(b.total) }}</td>
+      <td class="right">${{ '{:,.2f}'.format(b.total - b.amount_paid) }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="8" class="dim center">No bills match the filter.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

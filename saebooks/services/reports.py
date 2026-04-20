@@ -14,6 +14,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.models.account import Account, AccountType
+from saebooks.models.bill import Bill, BillStatus
 from saebooks.models.contact import Contact
 from saebooks.models.invoice import Invoice, InvoiceStatus
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
@@ -417,6 +418,116 @@ def aged_ar_csv(report: AgedReport) -> str:
                     f"{inv.balance_due:.2f}",
                     inv.days_overdue,
                     BUCKET_LABELS[inv.bucket],
+                ]
+            )
+    return buf.getvalue()
+
+
+# ---------------------------------------------------------------------- #
+# Aged AP (creditors)                                                     #
+# ---------------------------------------------------------------------- #
+#
+# Symmetric to Aged AR. Walks POSTED, non-archived bills with a
+# balance_due > 0 (i.e. ``total > amount_paid``). Issued-date filter is
+# ``issue_date <= as_at`` so future-dated bills don't appear. Voided
+# and archived bills are excluded. Bucketing code
+# (``BUCKET_KEYS``/``_bucket_for_age``) and the ``AgedInvoiceRow``/
+# ``AgedContactGroup``/``AgedReport`` dataclasses are re-used verbatim
+# — an "invoice number" on an AP report is just the bill number.
+
+
+async def aged_ap(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    *,
+    as_at: date | None = None,
+) -> AgedReport:
+    """Return the aged-creditors report as at ``as_at`` (default today)."""
+    cutoff = as_at or date.today()
+    stmt = (
+        select(Bill, Contact.name)
+        .join(Contact, Bill.contact_id == Contact.id)
+        .where(
+            Bill.company_id == company_id,
+            Bill.status == BillStatus.POSTED,
+            Bill.archived_at.is_(None),
+            Bill.issue_date <= cutoff,
+            Bill.total > Bill.amount_paid,
+        )
+        .order_by(Contact.name, Bill.due_date)
+    )
+    rows = (await session.execute(stmt)).all()
+
+    groups: dict[uuid.UUID, AgedContactGroup] = {}
+    for bill, contact_name in rows:
+        days_overdue = (cutoff - bill.due_date).days
+        row = AgedInvoiceRow(
+            invoice_id=bill.id,
+            number=bill.number or "(draft)",
+            issue_date=bill.issue_date,
+            due_date=bill.due_date,
+            total=bill.total,
+            amount_paid=bill.amount_paid,
+            days_overdue=days_overdue,
+        )
+        group = groups.get(bill.contact_id)
+        if group is None:
+            group = AgedContactGroup(
+                contact_id=bill.contact_id,
+                contact_name=contact_name,
+            )
+            groups[bill.contact_id] = group
+        group.invoices.append(row)
+        group.buckets[row.bucket] += row.balance_due
+
+    report = AgedReport(as_at=cutoff)
+    # Sort groups by descending total so the biggest creditors are on top.
+    report.groups = sorted(
+        groups.values(), key=lambda g: g.total, reverse=True
+    )
+    for group in report.groups:
+        for key in BUCKET_KEYS:
+            report.grand_totals[key] += group.buckets[key]
+    return report
+
+
+def aged_ap_csv(report: AgedReport) -> str:
+    """Render an aged-AP report as RFC 4180 CSV (one row per bill).
+
+    Columns: ``contact,bill_number,issue_date,due_date,total,paid,
+    balance_due,days_overdue,bucket``.
+    """
+    import csv
+    from io import StringIO
+
+    buf = StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(
+        [
+            "contact",
+            "bill_number",
+            "issue_date",
+            "due_date",
+            "total",
+            "paid",
+            "balance_due",
+            "days_overdue",
+            "bucket",
+        ]
+    )
+    for group in report.groups:
+        for bill in group.invoices:
+            writer.writerow(
+                [
+                    group.contact_name,
+                    bill.number,
+                    bill.issue_date.isoformat(),
+                    bill.due_date.isoformat(),
+                    f"{bill.total:.2f}",
+                    f"{bill.amount_paid:.2f}",
+                    f"{bill.balance_due:.2f}",
+                    bill.days_overdue,
+                    BUCKET_LABELS[bill.bucket],
                 ]
             )
     return buf.getvalue()

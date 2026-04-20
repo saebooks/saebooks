@@ -14,6 +14,7 @@ from saebooks.routers import (
     assets,
     bank_feeds,
     bank_rules,
+    bills,
     contacts,
     credit_notes,
     health,
@@ -69,6 +70,7 @@ def create_app() -> FastAPI:
     # coercion of the literal "recurring").
     app.include_router(recurring_invoices.router)
     app.include_router(invoices.router)
+    app.include_router(bills.router)
     app.include_router(credit_notes.router)
     app.include_router(payments.router)
     app.include_router(assets.router)

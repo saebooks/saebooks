@@ -182,6 +182,42 @@ async def aged_ar_report(
     )
 
 
+@router.get("/aged-ap", response_class=HTMLResponse)
+async def aged_ap_report(
+    request: Request,
+    as_at: str | None = Query(None),
+    format: str = Query("html"),
+) -> Response:
+    company = await _first_company()
+    cutoff = _parse_date(as_at) or date.today()
+    async with AsyncSessionLocal() as session:
+        report = await svc.aged_ap(session, company.id, as_at=cutoff)
+
+    if format == "csv":
+        csv_text = svc.aged_ap_csv(report)
+        filename = f"aged-ap-{cutoff.isoformat()}.csv"
+        return Response(
+            content=csv_text,
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
+        )
+
+    return templates.TemplateResponse(
+        request,
+        "reports/aged_ap.html",
+        {
+            "edition": settings.edition,
+            "company_name": company.name,
+            "report": report,
+            "bucket_keys": svc.BUCKET_KEYS,
+            "bucket_labels": svc.BUCKET_LABELS,
+            "as_at": cutoff.isoformat(),
+        },
+    )
+
+
 @router.post("/bas/settle", response_model=None)
 async def bas_settle(request: Request) -> RedirectResponse:
     """Create a BAS settlement journal entry."""

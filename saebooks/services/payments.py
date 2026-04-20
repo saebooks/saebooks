@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from saebooks.models.account import Account
+from saebooks.models.bill import Bill, BillStatus
 from saebooks.models.credit_note import CreditNote, CreditNoteStatus
 from saebooks.models.invoice import Invoice, InvoiceStatus
 from saebooks.models.payment import (
@@ -139,13 +140,16 @@ async def allocate(
     payment_id: uuid.UUID,
     *,
     invoice_allocations: list[tuple[uuid.UUID, Decimal]] | None = None,
+    bill_allocations: list[tuple[uuid.UUID, Decimal]] | None = None,
 ) -> Payment:
-    """Attach invoice allocations to a payment. Idempotent-style:
+    """Attach invoice or bill allocations to a payment. Idempotent-style:
     replaces existing allocations with the given set.
 
-    Each allocation: (invoice_id, amount). Sum must not exceed the
-    payment amount. Invoice's ``amount_paid`` is recomputed from its
-    full allocation history after this call so repeated allocations
+    INCOMING payments expect ``invoice_allocations``; OUTGOING payments
+    expect ``bill_allocations``. Mixing the two raises. Each allocation
+    is ``(target_id, amount)``; the sum must not exceed the payment
+    amount. The target document's ``amount_paid`` is recomputed from
+    its full allocation history after this call so repeated allocations
     don't double-count.
     """
     pay = await get(session, payment_id)
@@ -153,13 +157,33 @@ async def allocate(
         raise PaymentError("Cannot allocate a voided payment")
 
     invoice_allocations = invoice_allocations or []
-    total_requested = sum((a for _, a in invoice_allocations), Decimal("0"))
+    bill_allocations = bill_allocations or []
+    if invoice_allocations and bill_allocations:
+        raise PaymentError(
+            "A single payment cannot allocate to both invoices and bills"
+        )
+    if invoice_allocations and pay.direction != PaymentDirection.INCOMING:
+        raise PaymentError(
+            "Only INCOMING payments may allocate to invoices"
+        )
+    if bill_allocations and pay.direction != PaymentDirection.OUTGOING:
+        raise PaymentError(
+            "Only OUTGOING payments may allocate to bills"
+        )
+
+    total_requested = sum(
+        (a for _, a in invoice_allocations + bill_allocations),
+        Decimal("0"),
+    )
     if total_requested > pay.amount:
         raise PaymentError(
             f"Total allocated ({total_requested}) exceeds payment amount "
             f"({pay.amount})"
         )
-    if any(a <= Decimal("0") for _, a in invoice_allocations):
+    if any(
+        a <= Decimal("0")
+        for _, a in invoice_allocations + bill_allocations
+    ):
         raise PaymentError("Allocation amounts must be positive")
 
     # Replace existing allocations wholesale so re-submitting the
@@ -174,6 +198,7 @@ async def allocate(
     session.expire(pay, ["allocations"])
 
     touched_invoice_ids: set[uuid.UUID] = set()
+    touched_bill_ids: set[uuid.UUID] = set()
     for inv_id, amt in invoice_allocations:
         # Verify invoice belongs to this company + is posted.
         inv = await session.get(Invoice, inv_id)
@@ -192,13 +217,32 @@ async def allocate(
             )
         )
         touched_invoice_ids.add(inv_id)
+    for bill_id, amt in bill_allocations:
+        bill = await session.get(Bill, bill_id)
+        if bill is None or bill.company_id != pay.company_id:
+            raise PaymentError(f"Bill {bill_id} not found for this company")
+        if bill.status != BillStatus.POSTED:
+            raise PaymentError(
+                f"Bill {bill.number or bill.id} is not POSTED "
+                f"(status={bill.status.value})"
+            )
+        session.add(
+            PaymentAllocation(
+                payment_id=pay.id,
+                bill_id=bill_id,
+                amount=amt,
+            )
+        )
+        touched_bill_ids.add(bill_id)
     await session.flush()
 
-    # Recompute amount_paid for each touched invoice from the FULL
+    # Recompute amount_paid for each touched target from the FULL
     # allocation history. This gives us the true paid total even if
     # allocations came from multiple payments.
     for inv_id in touched_invoice_ids:
         await _refresh_invoice_amount_paid(session, inv_id)
+    for bill_id in touched_bill_ids:
+        await _refresh_bill_amount_paid(session, bill_id)
 
     await session.commit()
     return await get(session, pay.id)
@@ -220,6 +264,25 @@ async def _refresh_invoice_amount_paid(
     inv = await session.get(Invoice, invoice_id)
     if inv is not None:
         inv.amount_paid = total
+    await session.flush()
+
+
+async def _refresh_bill_amount_paid(
+    session: AsyncSession, bill_id: uuid.UUID
+) -> None:
+    from sqlalchemy import func
+    result = await session.execute(
+        select(func.coalesce(func.sum(PaymentAllocation.amount), 0))
+        .join(Payment, PaymentAllocation.payment_id == Payment.id)
+        .where(
+            PaymentAllocation.bill_id == bill_id,
+            Payment.status == PaymentStatus.POSTED,
+        )
+    )
+    total = Decimal(str(result.scalar_one() or 0))
+    bill = await session.get(Bill, bill_id)
+    if bill is not None:
+        bill.amount_paid = total
     await session.flush()
 
 
@@ -295,13 +358,16 @@ async def post_payment(
     pay.posted_by = posted_by
     await session.commit()
 
-    # Refresh allocated invoices' amount_paid now that the payment is POSTED.
+    # Refresh allocated targets' amount_paid now that the payment is POSTED.
     invoice_ids = {
         a.invoice_id for a in pay.allocations if a.invoice_id is not None
     }
+    bill_ids = {a.bill_id for a in pay.allocations if a.bill_id is not None}
     for inv_id in invoice_ids:
         await _refresh_invoice_amount_paid(session, inv_id)
-    if invoice_ids:
+    for bill_id in bill_ids:
+        await _refresh_bill_amount_paid(session, bill_id)
+    if invoice_ids or bill_ids:
         await session.commit()
 
     return await get(session, pay.id)
@@ -334,14 +400,17 @@ async def void_payment(
     pay.void_journal_entry_id = reversal.id
     await session.commit()
 
-    # Zero allocations against the voided payment so downstream invoice
+    # Zero allocations against the voided payment so downstream
     # ``amount_paid`` recalc treats it as un-allocated.
     invoice_ids = {
         a.invoice_id for a in pay.allocations if a.invoice_id is not None
     }
+    bill_ids = {a.bill_id for a in pay.allocations if a.bill_id is not None}
     for inv_id in invoice_ids:
         await _refresh_invoice_amount_paid(session, inv_id)
-    if invoice_ids:
+    for bill_id in bill_ids:
+        await _refresh_bill_amount_paid(session, bill_id)
+    if invoice_ids or bill_ids:
         await session.commit()
 
     return pay
