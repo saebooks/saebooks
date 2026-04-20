@@ -8,7 +8,6 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from saebooks.config import settings
-from saebooks.services import metrics as metrics_svc
 from saebooks.routers import (
     accounts,
     admin,
@@ -31,11 +30,18 @@ from saebooks.routers import (
     tax_codes,
     templates,
 )
+from saebooks.services import metrics as metrics_svc
+from saebooks.services import observability
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 logging.basicConfig(level=settings.log_level)
 logger = logging.getLogger("saebooks")
+
+# Swap to JSON formatting + init Sentry if enabled via env (SAEBOOKS_LOG_JSON,
+# SENTRY_DSN). Both are no-ops when their respective env vars are unset,
+# so Community builds stay on plain-text logs and never call home.
+observability.configure(settings)
 
 
 @asynccontextmanager

@@ -21,6 +21,8 @@ dependencies = [
     "reportlab>=4.2",
     "aiosmtplib>=3.0",
     "prometheus-client>=0.21",
+    "sentry-sdk[fastapi]>=2.18",
+    "python-json-logger>=2.0",
 ]
 
 [project.optional-dependencies]
