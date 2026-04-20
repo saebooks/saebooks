@@ -9,6 +9,7 @@ from saebooks.config import settings as app_settings
 from saebooks.db import AsyncSessionLocal
 from saebooks.services import audit as audit_svc
 from saebooks.services import backups as backups_svc
+from saebooks.services import features as features_svc
 from saebooks.services import settings as svc
 from saebooks.services import sql_tool as sql_svc
 
@@ -359,6 +360,23 @@ async def sql_export(
         csv_text,
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": 'attachment; filename="query.csv"'},
+    )
+
+
+@router.get("/license", response_class=HTMLResponse)
+async def license_admin(request: Request) -> HTMLResponse:
+    """Show the active edition and the per-feature flag matrix.
+
+    Read-only for now — future batches may add a paste-in licence-key
+    box when we introduce JWT-backed flags.
+    """
+    return templates.TemplateResponse(
+        request,
+        "admin/license.html",
+        {
+            "edition": app_settings.edition,
+            "flags": features_svc.active_flags(),
+        },
     )
 
 

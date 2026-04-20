@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Licence — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Licence</h1>
+  <div class="meta">{{ edition }}</div>
+</div>
+
+<p>
+  This build is running the <strong>{{ edition }}</strong> edition.
+  The feature matrix below reflects what the current licence enables.
+  Enterprise features are built into the code but gated off in
+  Community builds; flip the <code>SAEBOOKS_EDITION</code> environment
+  variable to enable them (requires a commercial licence — see
+  <a href="https://saebooks.com.au/licence">saebooks.com.au/licence</a>).
+</p>
+
+<table class="features">
+  <thead>
+    <tr>
+      <th>Feature</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for flag, enabled in flags.items() %}
+    <tr>
+      <td><code>{{ flag }}</code></td>
+      <td>
+        {% if enabled %}
+        <span class="flag-on">enabled</span>
+        {% else %}
+        <span class="flag-off">disabled</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
