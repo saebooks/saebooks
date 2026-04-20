@@ -46,6 +46,17 @@ class Contact(Base):
         UUID(as_uuid=True), ForeignKey("accounts.id", ondelete="SET NULL")
     )
     default_tax_code: Mapped[str | None] = mapped_column(String(16))
+    # ABA / Direct Entry — payee side. Used when the contact is a
+    # supplier that we pay via Direct Entry bank file. All three must
+    # be set for the contact to appear as an ABA-eligible payee in
+    # the pay-run UI.
+    bank_bsb: Mapped[str | None] = mapped_column(
+        String(7), comment="BSB formatted 'xxx-xxx' (ABA payee)"
+    )
+    bank_account_number: Mapped[str | None] = mapped_column(String(9))
+    bank_account_title: Mapped[str | None] = mapped_column(
+        String(32), comment="Name on the payee's bank account (ABA field)"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

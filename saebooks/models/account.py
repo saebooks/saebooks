@@ -54,6 +54,22 @@ class Account(Base):
         Boolean, default=False, nullable=False,
         comment="System-managed accounts (GST, etc.) — auto-posted by the engine",
     )
+    # ABA / Direct Entry — populated only on bank accounts. Remitter
+    # side of the APCA agreement: BSB + account + account title, plus
+    # the sponsor bank's 6-digit User ID and 3-letter abbreviation.
+    bsb: Mapped[str | None] = mapped_column(
+        String(7), comment="BSB formatted 'xxx-xxx' (ABA remitter)"
+    )
+    bank_account_number: Mapped[str | None] = mapped_column(String(9))
+    bank_account_title: Mapped[str | None] = mapped_column(
+        String(32), comment="Account title on the bank statement (ABA field)"
+    )
+    apca_user_id: Mapped[str | None] = mapped_column(
+        String(6), comment="6-digit Direct Entry User ID from sponsor bank"
+    )
+    bank_abbreviation: Mapped[str | None] = mapped_column(
+        String(3), comment="3-letter ABA bank code — CBA, ANZ, NAB, WBC, …"
+    )
     extra: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
