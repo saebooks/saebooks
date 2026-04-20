@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Assets — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Fixed assets</h1>
+  <div class="meta">{{ total }} {{ status_filter }} · {{ company_name }}</div>
+  <a href="/assets/new" class="btn">+ New</a>
+</div>
+
+<div class="contact-filter">
+  <div class="status-filter">
+    <a href="/assets?status=active" class="{{ 'active' if status_filter == 'active' }}">Active</a>
+    <a href="/assets?status=disposed" class="{{ 'active' if status_filter == 'disposed' }}">Disposed</a>
+    <a href="/assets?status=archived" class="{{ 'active' if status_filter == 'archived' }}">Archived</a>
+  </div>
+</div>
+
+{% if assets %}
+<table class="acct-table">
+  <thead>
+    <tr>
+      <th>Code</th>
+      <th>Name</th>
+      <th>Cost</th>
+      <th>Residual</th>
+      <th>Purchased</th>
+      <th>Last dep'd</th>
+      <th>Status</th>
+      <th class="actions"></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for a in assets %}
+    <tr>
+      <td><a href="/assets/{{ a.id }}">{{ a.code }}</a></td>
+      <td><a href="/assets/{{ a.id }}">{{ a.name }}</a></td>
+      <td>{{ '%.2f'|format(a.cost) }}</td>
+      <td class="dim">{{ '%.2f'|format(a.residual_value) }}</td>
+      <td class="dim">{{ a.purchase_date.isoformat() }}</td>
+      <td class="dim">{{ a.last_depreciation_posted_through.isoformat() if a.last_depreciation_posted_through else '—' }}</td>
+      <td><span class="contact-type {{ a.status }}">{{ a.status|title }}</span></td>
+      <td class="actions">
+        {% if a.status == 'active' %}
+        <a href="/assets/{{ a.id }}/edit">edit</a>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="dim">No {{ status_filter }} assets.</p>
+{% endif %}
+{% endblock %}
