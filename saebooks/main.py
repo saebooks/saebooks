@@ -22,6 +22,7 @@ from saebooks.routers import (
     payments,
     ranges,
     reconciliation,
+    recurring_invoices,
     reports,
     tax_codes,
     templates,
@@ -62,6 +63,11 @@ def create_app() -> FastAPI:
     app.include_router(reports.router)
     app.include_router(reconciliation.router)
     app.include_router(contacts.router)
+    # recurring_invoices mounts at /invoices/recurring — must register
+    # BEFORE invoices.router so `/invoices/recurring` beats the catch-all
+    # `/invoices/{invoice_id}` path (which would otherwise 422 on UUID
+    # coercion of the literal "recurring").
+    app.include_router(recurring_invoices.router)
     app.include_router(invoices.router)
     app.include_router(credit_notes.router)
     app.include_router(payments.router)

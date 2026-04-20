@@ -5,6 +5,8 @@ Invoked like::
     python -m saebooks.cli sync-feeds
     python -m saebooks.cli refresh-feed-issues
     python -m saebooks.cli sync-feeds --company-id <uuid>
+    python -m saebooks.cli generate-recurring
+    python -m saebooks.cli generate-recurring --company-id <uuid>
 
 Designed to be kicked by plain cron — no long-running worker, no queue
 runtime. Exits 0 on success, 1 on total failure; per-account errors are
@@ -18,9 +20,11 @@ import asyncio
 import logging
 import sys
 import uuid
+from datetime import date
 
 from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
+from saebooks.services import recurrence
 from saebooks.services.bank_feeds import health, onboarding
 
 logger = logging.getLogger("saebooks.cli")
@@ -56,6 +60,32 @@ async def _sync_feeds(company_id: str | None) -> int:
             outcome.transactions_seen,
             outcome.lines_inserted,
             outcome.cursor_advanced_to or "(unchanged)",
+        )
+    return 0
+
+
+async def _generate_recurring(
+    company_id: str | None, as_of: str | None
+) -> int:
+    """Materialise every due RecurringInvoice; return exit code."""
+    cid = uuid.UUID(company_id) if company_id else None
+    as_of_date = date.fromisoformat(as_of) if as_of else None
+    async with AsyncSessionLocal() as session:
+        invoices = await recurrence.run_due(
+            session, as_of=as_of_date, company_id=cid
+        )
+    logger.info(
+        "generate-recurring: materialised %d invoice(s) as of %s",
+        len(invoices),
+        (as_of_date or date.today()).isoformat(),
+    )
+    for inv in invoices:
+        logger.info(
+            "  invoice=%s contact=%s total=%s status=%s",
+            inv.id,
+            inv.contact_id,
+            inv.total,
+            inv.status.value,
         )
     return 0
 
@@ -97,6 +127,21 @@ def main(argv: list[str] | None = None) -> int:
         help="Cache /sds/feedissues into bank_feed_issues.",
     )
 
+    gen = sub.add_parser(
+        "generate-recurring",
+        help="Materialise every due RecurringInvoice as a DRAFT (or POSTED if auto_post).",
+    )
+    gen.add_argument(
+        "--company-id",
+        default=None,
+        help="Limit to one company's templates. Default: all companies.",
+    )
+    gen.add_argument(
+        "--as-of",
+        default=None,
+        help="Override today's date (ISO-format) — useful for catch-up runs.",
+    )
+
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -108,6 +153,10 @@ def main(argv: list[str] | None = None) -> int:
         return asyncio.run(_sync_feeds(args.company_id))
     if args.command == "refresh-feed-issues":
         return asyncio.run(_refresh_feed_issues())
+    if args.command == "generate-recurring":
+        return asyncio.run(
+            _generate_recurring(args.company_id, args.as_of)
+        )
     parser.print_help()
     return 2
 
