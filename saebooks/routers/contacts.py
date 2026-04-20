@@ -3,7 +3,7 @@ import uuid
 from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Form, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
@@ -12,9 +12,11 @@ from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account
 from saebooks.models.company import Company
-from saebooks.models.contact import Contact, ContactType
+from saebooks.models.contact import ContactType
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import contacts as svc
+from saebooks.services.abr import AbrError, AbrNotConfiguredError, lookup_abn
+from saebooks.services.features import FLAG_ABR_LOOKUP, is_enabled, require_feature
 
 router = APIRouter(prefix="/contacts")
 
@@ -150,6 +152,7 @@ async def contacts_new(request: Request) -> HTMLResponse:
             "accounts": accounts,
             "tax_codes": tax_codes,
             "error": None,
+            "abr_enabled": is_enabled(FLAG_ABR_LOOKUP),
         },
     )
 
@@ -193,6 +196,7 @@ async def contacts_create(
                 "accounts": accounts,
                 "tax_codes": tax_codes,
                 "error": str(exc),
+                "abr_enabled": is_enabled(FLAG_ABR_LOOKUP),
             },
             status_code=422,
         )
@@ -218,6 +222,107 @@ async def contacts_search(
         for c in results
     )
     return HTMLResponse(f"<ul class='ac-results'>{items}</ul>" if items else "")
+
+
+# ---------------------------------------------------------------------------
+# ABR lookup (Enterprise — FLAG_ABR_LOOKUP). Registered ABOVE /{contact_id}
+# so FastAPI matches the literal paths first (otherwise "abr-lookup" hits
+# the UUID path matcher on /{contact_id} and 422s).
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/abr-lookup",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_feature(FLAG_ABR_LOOKUP))],
+)
+async def contacts_abr_lookup(
+    request: Request,
+    abn: str = Form(...),
+) -> HTMLResponse:
+    """HTMX target: look up an ABN and render a preview fragment.
+
+    Used from the /contacts/new form where there's no contact row yet
+    to apply against. The fragment is display-only; the user edits
+    the form fields by hand after reviewing.
+    """
+    try:
+        result = await lookup_abn(abn, settings=settings)
+    except AbrNotConfiguredError:
+        return templates.TemplateResponse(
+            request,
+            "contacts/_abr_error.html",
+            {"message": "ABR API is not configured. Set ABR_API_GUID."},
+            status_code=502,
+        )
+    except AbrError as exc:
+        return templates.TemplateResponse(
+            request,
+            "contacts/_abr_error.html",
+            {"message": str(exc)},
+            status_code=400,
+        )
+    return templates.TemplateResponse(
+        request,
+        "contacts/_abr_result.html",
+        {"result": result},
+    )
+
+
+@router.post(
+    "/{contact_id}/abr-apply",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_feature(FLAG_ABR_LOOKUP))],
+)
+async def contacts_abr_apply(
+    request: Request,
+    contact_id: UUID,
+    abn: str = Form(...),
+    overwrite: str = Form(""),
+) -> HTMLResponse:
+    """Fetch ABR and merge into the live Contact row.
+
+    Returns an HTMX fragment summarising the fields that changed. The
+    merge is conservative by default — only empty fields are filled.
+    Passing ``overwrite=on`` replaces populated fields too.
+    """
+    try:
+        lookup = await lookup_abn(abn, settings=settings)
+    except AbrNotConfiguredError:
+        return templates.TemplateResponse(
+            request,
+            "contacts/_abr_error.html",
+            {"message": "ABR API is not configured. Set ABR_API_GUID."},
+            status_code=502,
+        )
+    except AbrError as exc:
+        return templates.TemplateResponse(
+            request,
+            "contacts/_abr_error.html",
+            {"message": str(exc)},
+            status_code=400,
+        )
+
+    async with AsyncSessionLocal() as session:
+        contact = await svc.get(session, contact_id)
+        if contact is None:
+            raise HTTPException(404, "Contact not found")
+        from saebooks.services.abr import apply_to_contact
+
+        changed = apply_to_contact(
+            contact, lookup, overwrite=overwrite.lower() in {"1", "true", "on"}
+        )
+        await session.commit()
+
+    return templates.TemplateResponse(
+        request,
+        "contacts/_abr_applied.html",
+        {
+            "result": lookup,
+            "changed": changed,
+            "contact_id": contact_id,
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +379,7 @@ async def contacts_edit(request: Request, contact_id: UUID) -> HTMLResponse:
             "accounts": accounts,
             "tax_codes": tax_codes,
             "error": None,
+            "abr_enabled": is_enabled(FLAG_ABR_LOOKUP),
         },
     )
 
@@ -321,6 +427,7 @@ async def contacts_update(
                 "accounts": accounts,
                 "tax_codes": tax_codes,
                 "error": str(exc),
+                "abr_enabled": is_enabled(FLAG_ABR_LOOKUP),
             },
             status_code=422,
         )

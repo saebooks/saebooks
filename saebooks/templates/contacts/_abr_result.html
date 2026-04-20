@@ -1,0 +1,23 @@
+<div class="abr-panel" id="abr-panel" style="border:1px solid var(--rule); padding:0.75rem; margin-top:0.75rem; background:#f8fafc">
+  <h3 style="margin:0 0 0.5rem 0; font-size:1rem">ABR match</h3>
+  <dl style="display:grid; grid-template-columns: max-content 1fr; gap:0.25rem 1rem; margin:0">
+    <dt>ABN</dt><dd>{{ result.abn }}</dd>
+    <dt>Status</dt><dd>{{ result.abn_status or '—' }}</dd>
+    {% if result.acn %}<dt>ACN</dt><dd>{{ result.acn }}</dd>{% endif %}
+    <dt>Entity name</dt><dd>{{ result.entity_name or '—' }}</dd>
+    {% if result.entity_type_name %}
+    <dt>Entity type</dt><dd>{{ result.entity_type_name }} ({{ result.entity_type_code }})</dd>
+    {% endif %}
+    {% if result.business_names %}
+    <dt>Business names</dt><dd>{{ result.business_names|join(', ') }}</dd>
+    {% endif %}
+    {% if result.trading_names %}
+    <dt>Trading names</dt><dd>{{ result.trading_names|join(', ') }}</dd>
+    {% endif %}
+    <dt>State / postcode</dt><dd>{{ result.address_state or '—' }} {{ result.address_postcode or '' }}</dd>
+    <dt>GST registered</dt><dd>{% if result.gst_registered %}Yes (from {{ result.gst_from }}){% else %}No{% endif %}</dd>
+  </dl>
+  <div style="margin-top:0.75rem; color:var(--muted); font-size:0.9rem">
+    Save the contact to apply these values, or edit the fields above first.
+  </div>
+</div>

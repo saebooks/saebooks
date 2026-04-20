@@ -20,7 +20,19 @@
   </label>
   <label>Email <input name="email" type="email" value="{{ contact.email if contact and contact.email else '' }}"></label>
   <label>Phone <input name="phone" value="{{ contact.phone if contact and contact.phone else '' }}"></label>
-  <label>ABN <input name="abn" placeholder="xx xxx xxx xxx" value="{{ contact.abn if contact and contact.abn else '' }}"></label>
+  <label>ABN
+    <span style="display:flex; gap:0.25rem">
+      <input name="abn" id="abn-input" placeholder="xx xxx xxx xxx" value="{{ contact.abn if contact and contact.abn else '' }}" style="flex:1">
+      {% if abr_enabled %}
+      <button type="button" class="btn btn-sm"
+              hx-post="{{ '/contacts/' + contact.id|string + '/abr-apply' if contact else '/contacts/abr-lookup' }}"
+              hx-include="[name='abn']"
+              hx-target="#abr-panel"
+              hx-swap="outerHTML">Lookup</button>
+      {% endif %}
+    </span>
+  </label>
+  <div id="abr-panel"></div>
   <label class="wide">Address line 1 <input name="address_line1" value="{{ contact.address_line1 if contact and contact.address_line1 else '' }}"></label>
   <label class="wide">Address line 2 <input name="address_line2" value="{{ contact.address_line2 if contact and contact.address_line2 else '' }}"></label>
   <label>City <input name="city" value="{{ contact.city if contact and contact.city else '' }}"></label>

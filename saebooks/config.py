@@ -54,5 +54,17 @@ class Settings(BaseSettings):
     )
     siss_sandbox: bool = Field(default=False, alias="SISS_SANDBOX")
 
+    # ---------------------------------------------------------------- #
+    # ABR lookup (Australian Business Register — v1.1 feature)         #
+    # ---------------------------------------------------------------- #
+    # The ABR SearchByABN JSON API needs a "GUID" (API key) issued by
+    # abr.business.gov.au. Empty by default; the abr service raises on
+    # use when unset so Community builds never hit the upstream.
+    abr_api_guid: str = Field(default="", alias="ABR_API_GUID")
+    abr_api_base: str = Field(
+        default="https://abr.business.gov.au/json",
+        alias="ABR_API_BASE",
+    )
+
 
 settings = Settings()

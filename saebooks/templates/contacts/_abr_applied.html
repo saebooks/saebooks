@@ -1,0 +1,17 @@
+<div class="alert alert-success" id="abr-panel" style="border:1px solid #10b981; padding:0.75rem; margin-top:0.75rem; background:#ecfdf5">
+  <h3 style="margin:0 0 0.5rem 0; font-size:1rem">ABR applied</h3>
+  {% if changed %}
+  <p style="margin:0">Updated {{ changed|length }} field(s):</p>
+  <ul style="margin:0.25rem 0 0 1.25rem">
+    {% for field in changed %}
+    <li><code>{{ field }}</code></li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p style="margin:0">No fields changed — everything already matched.</p>
+  {% endif %}
+  <div style="margin-top:0.75rem; color:var(--muted); font-size:0.9rem">
+    Save the form to persist the changes.
+    <a href="/contacts/{{ contact_id }}/edit">Reload the edit page</a> to see new values.
+  </div>
+</div>
