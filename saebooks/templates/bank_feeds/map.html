@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Map accounts — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Map accounts to the chart of accounts</h1>
+  <div class="meta">{{ company_name }} · consent {{ consent_id or '—' }}</div>
+</div>
+
+<p class="dim">
+  We discovered {{ feed_accounts|length }} account(s) at SISS. Choose
+  which ledger (CoA) account each one posts statement lines to. You
+  can change these later from the main Bank feeds page.
+</p>
+
+<form method="post" action="/admin/bank-feeds/link">
+  <table class="ledger">
+    <thead>
+      <tr>
+        <th>Display</th>
+        <th>Masked number</th>
+        <th>Institution</th>
+        <th>CoA account</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for a in feed_accounts %}
+      <tr>
+        <td>{{ a.display_name or '—' }}</td>
+        <td>{{ a.masked_number or '—' }}</td>
+        <td><code>{{ a.sds_institution_id }}</code></td>
+        <td>
+          <select name="ledger_account_id__{{ a.id }}" required>
+            {% for led in ledger_accounts %}
+            <option value="{{ led.id }}" {% if led.id == a.ledger_account_id %}selected{% endif %}>
+              {{ led.code }} {{ led.name }}
+            </option>
+            {% endfor %}
+          </select>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="form-actions">
+    <button type="submit" class="btn">Save mappings</button>
+    <a href="/admin/bank-feeds">Skip — map later</a>
+  </div>
+</form>
+{% endblock %}

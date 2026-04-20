@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Offboard company — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Offboard bank feeds</h1>
+  <div class="meta">{{ company_name }}</div>
+</div>
+
+<div class="alert alert-warning">
+  This stops daily syncs and optionally deletes the aggregator-side
+  client. Local statement lines are preserved. By default this is a
+  soft-revoke only — tick "Delete upstream" to hard-delete the SISS
+  client.
+</div>
+
+<p class="dim">
+  Before changing anything, we'll write a CDR-compliant JSON export of
+  every stored bank-feed artefact for this company so you have a
+  verifiable copy of your data. The file is written to
+  <code>/tmp/saebooks-cdr-exports/</code> by default.
+</p>
+
+<p>
+  {% if bank_feed_client %}
+  Upstream client: <code>{{ bank_feed_client.sds_client_id }}</code>
+  ({{ 'active' if bank_feed_client.active else 'inactive' }})
+  · {{ feed_accounts|length }} account(s) linked.
+  {% else %}
+  <span class="dim">No aggregator client linked — nothing upstream to delete.</span>
+  {% endif %}
+</p>
+
+<form method="post" action="/admin/bank-feeds/offboard" class="tc-form" style="max-width:36rem"
+      onsubmit="return confirm('Proceed with offboarding?');">
+  <label>
+    <input type="checkbox" name="export" value="1" checked> Write CDR JSON export
+  </label>
+  <label>
+    <input type="checkbox" name="hard_delete" value="1">
+    Delete upstream SISS client (not just soft-revoke)
+  </label>
+  <div class="form-actions">
+    <button type="submit" class="btn">Offboard</button>
+    <a href="/admin/bank-feeds">Cancel</a>
+  </div>
+</form>
+{% endblock %}

@@ -222,6 +222,97 @@ async def list_feed_issues(
 
 
 # ---------------------------------------------------------------------- #
+# /sds/account-access-consents — consent initiation + revocation         #
+# ---------------------------------------------------------------------- #
+
+
+async def initiate_consumer_consent(
+    client: SissClient,
+    *,
+    institution_id: str,
+    redirect_uri: str,
+    scopes: list[str] | None = None,
+    permissions: list[str] | None = None,
+    sds_client_id: str | None = None,
+) -> dict[str, Any]:
+    """POST ``/sds/account-access-consents/consumerconsent`` (MyData / CDR flow).
+
+    Returns the upstream envelope; the caller should extract
+    ``data.redirectUrl`` (where to send the end user's browser) and
+    ``data.consentId`` (to correlate the callback). ``sds_client_id`` may be
+    passed when re-consenting an existing client; omit on first connect
+    (SISS allocates one and returns it in the callback).
+    """
+    body: dict[str, Any] = {
+        "institutionId": institution_id,
+        "redirectUri": redirect_uri,
+    }
+    if scopes:
+        body["scopes"] = scopes
+    if permissions:
+        body["permissions"] = permissions
+    if sds_client_id:
+        body["sdsClientId"] = sds_client_id
+    return _as_envelope(
+        await client.post("sds/account-access-consents/consumerconsent", json=body)
+    )
+
+
+async def initiate_caf_consent(
+    client: SissClient,
+    *,
+    institution_id: str,
+    redirect_uri: str,
+    scopes: list[str] | None = None,
+    sds_client_id: str | None = None,
+) -> dict[str, Any]:
+    """POST ``/sds/account-access-consents/authorise`` (direct-data / CAF flow).
+
+    CAF ("Customer Authorisation Form") is the PDF-signed fallback used
+    by institutions that haven't implemented MyData OAuth. The shape is
+    the same as consumer consent; SISS just issues a different hosted
+    flow at the returned ``redirectUrl``.
+    """
+    body: dict[str, Any] = {
+        "institutionId": institution_id,
+        "redirectUri": redirect_uri,
+    }
+    if scopes:
+        body["scopes"] = scopes
+    if sds_client_id:
+        body["sdsClientId"] = sds_client_id
+    return _as_envelope(
+        await client.post("sds/account-access-consents/authorise", json=body)
+    )
+
+
+async def revoke_account(
+    client: SissClient,
+    *,
+    account_id: str,
+) -> None:
+    """DELETE ``/sds/account-access-consents/revoke/{accountId}``.
+
+    Revokes consent for a single aggregator account. Returns ``None``
+    on success; non-2xx responses raise ``SissError``.
+    """
+    await client.delete(f"sds/account-access-consents/revoke/{account_id}")
+
+
+async def delete_client(
+    client: SissClient,
+    *,
+    sds_client_id: str,
+) -> None:
+    """DELETE ``/sds/clients/{sdsClientId}``.
+
+    Hard-delete of an aggregator-side client. Used by the
+    company-offboarding flow (Batch K). Returns ``None`` on success.
+    """
+    await client.delete(f"sds/clients/{sds_client_id}")
+
+
+# ---------------------------------------------------------------------- #
 # Helpers                                                                #
 # ---------------------------------------------------------------------- #
 

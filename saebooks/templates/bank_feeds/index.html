@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Bank feeds — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Bank feeds</h1>
+  <div class="meta">{{ company_name }}</div>
+</div>
+
+{% if not siss_configured %}
+<div class="alert alert-warning">
+  SISS credentials aren't configured. Set
+  <code>SISS_CLIENT_ID</code>, <code>SISS_CLIENT_SECRET</code>, and
+  <code>SISS_SUBSCRIPTION_KEY</code> in the environment (or
+  <code>.env</code>) and restart the app. Without them the consent + sync
+  actions below will fail at runtime — local browsing still works.
+</div>
+{% endif %}
+
+{% if message %}<div class="alert alert-success">{{ message }}</div>{% endif %}
+{% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+
+{% if bank_feed_client %}
+<section>
+  <h3>Aggregator link</h3>
+  <table class="acct-table" style="max-width:48rem">
+    <tr>
+      <td>Upstream client id</td>
+      <td><code>{{ bank_feed_client.sds_client_id }}</code></td>
+    </tr>
+    <tr>
+      <td>Status</td>
+      <td>{{ 'active' if bank_feed_client.active else 'inactive' }}</td>
+    </tr>
+    <tr>
+      <td>Last sync</td>
+      <td class="dim">
+        {{ bank_feed_client.last_sync_at.isoformat() if bank_feed_client.last_sync_at else '— never —' }}
+      </td>
+    </tr>
+  </table>
+</section>
+{% endif %}
+
+<section>
+  <h3>Connected accounts</h3>
+  {% if feed_accounts %}
+  <form method="post" action="/admin/bank-feeds/link">
+    <table class="ledger">
+      <thead>
+        <tr>
+          <th>Institution</th>
+          <th>Display</th>
+          <th>Masked number</th>
+          <th>Mapped to (CoA)</th>
+          <th>Cursor</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in feed_accounts %}
+        <tr{% if a.revoked_at %} class="dim"{% endif %}>
+          <td><code>{{ a.sds_institution_id }}</code></td>
+          <td>{{ a.display_name or '—' }}</td>
+          <td>{{ a.masked_number or '—' }}</td>
+          <td>
+            <select name="ledger_account_id__{{ a.id }}">
+              {% for led in ledger_by_id.values() %}
+              <option value="{{ led.id }}" {% if led.id == a.ledger_account_id %}selected{% endif %}>
+                {{ led.code }} {{ led.name }}
+              </option>
+              {% endfor %}
+            </select>
+          </td>
+          <td class="dim">{{ a.last_transaction_posted_id or '—' }}</td>
+          <td>
+            {% if a.revoked_at %}revoked{% else %}{{ a.processing_status or 'active' }}{% endif %}
+          </td>
+          <td>
+            {% if not a.revoked_at %}
+            <form method="post" action="/admin/bank-feeds/{{ a.id }}/revoke" style="display:inline" onsubmit="return confirm('Revoke this account upstream?');">
+              <button class="btn-secondary" type="submit">Revoke</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="form-actions">
+      <button type="submit" class="btn">Save CoA mappings</button>
+    </div>
+  </form>
+  {% else %}
+  <p class="dim">No feed accounts yet.</p>
+  {% endif %}
+</section>
+
+<section>
+  <h3>Actions</h3>
+  <a href="/admin/bank-feeds/connect" class="btn">+ Connect a bank</a>
+  <form method="post" action="/admin/bank-feeds/sync" style="display:inline">
+    <button class="btn-secondary" type="submit">Sync now</button>
+  </form>
+  <form method="post" action="/admin/bank-feeds/refresh-issues" style="display:inline">
+    <button class="btn-secondary" type="submit">Refresh feed issues</button>
+  </form>
+  {% if bank_feed_client %}
+  <a href="/admin/bank-feeds/offboard" class="btn-secondary">Offboard company…</a>
+  {% endif %}
+</section>
+{% endblock %}

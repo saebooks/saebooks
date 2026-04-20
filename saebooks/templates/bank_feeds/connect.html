@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Connect a bank — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Connect a bank</h1>
+  <div class="meta">{{ company_name }}</div>
+</div>
+
+{% if not siss_configured %}
+<div class="alert alert-warning">
+  SISS credentials aren't set — initiating consent will fail until the
+  three <code>SISS_*</code> env vars are populated.
+</div>
+{% endif %}
+
+{% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+
+<p class="dim">
+  Initiating consent asks SISS to generate a hosted consent URL.
+  You'll be given the URL to visit; complete the bank's auth flow, and
+  SISS will redirect you back to <code>{{ redirect_uri }}</code>.
+</p>
+
+<form method="post" action="/admin/bank-feeds/connect" class="tc-form" style="max-width:36rem">
+  <label>Institution id
+    <input name="institution_id" type="text" required placeholder="e.g. CBA, ANZ, NAB (per SISS catalogue)">
+  </label>
+  <label>Consent variant
+    <select name="variant">
+      <option value="consumer" selected>Consumer (MyData / CDR OAuth)</option>
+      <option value="caf">CAF (PDF-signed fallback)</option>
+    </select>
+  </label>
+  <div class="form-actions">
+    <button type="submit" class="btn">Initiate consent</button>
+    <a href="/admin/bank-feeds">Cancel</a>
+  </div>
+</form>
+{% endblock %}

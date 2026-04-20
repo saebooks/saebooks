@@ -16,13 +16,17 @@ Business-logic wrappers (onboarding, sync, health) land in later phases.
 """
 from saebooks.services.bank_feeds.client import SissClient
 from saebooks.services.bank_feeds.endpoints import (
+    delete_client,
     get_account_detail,
     get_client,
+    initiate_caf_consent,
+    initiate_consumer_consent,
     iter_transactions,
     list_accounts,
     list_clients,
     list_feed_issues,
     list_transactions,
+    revoke_account,
 )
 from saebooks.services.bank_feeds.errors import (
     SissAuthError,
@@ -48,15 +52,19 @@ __all__ = [
     "SissScopeError",
     "SissValidationError",
     "TokenCache",
+    "delete_client",
     "get_account_detail",
     "get_client",
     "get_or_create_client",
+    "initiate_caf_consent",
+    "initiate_consumer_consent",
     "insert_statement_lines",
     "iter_transactions",
     "list_accounts",
     "list_clients",
     "list_feed_issues",
     "list_transactions",
+    "revoke_account",
     "update_sync_cursor",
     "upsert_bank_feed_account",
     "upsert_feed_issue",

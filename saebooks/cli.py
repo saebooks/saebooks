@@ -1,0 +1,116 @@
+"""Command-line entry points for SAE Books background jobs.
+
+Invoked like::
+
+    python -m saebooks.cli sync-feeds
+    python -m saebooks.cli refresh-feed-issues
+    python -m saebooks.cli sync-feeds --company-id <uuid>
+
+Designed to be kicked by plain cron — no long-running worker, no queue
+runtime. Exits 0 on success, 1 on total failure; per-account errors are
+logged but don't kill the whole run (so one flakey bank doesn't stop
+the others from syncing).
+"""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import logging
+import sys
+import uuid
+
+from saebooks.config import settings
+from saebooks.db import AsyncSessionLocal
+from saebooks.services.bank_feeds import health, onboarding
+
+logger = logging.getLogger("saebooks.cli")
+
+
+async def _sync_feeds(company_id: str | None) -> int:
+    """Run sync_all_active; return exit code."""
+    cid = uuid.UUID(company_id) if company_id else None
+    try:
+        async with AsyncSessionLocal() as session:
+            outcomes = await onboarding.sync_all_active(
+                session,
+                company_id=cid,
+                settings=settings,
+            )
+            await session.commit()
+    except onboarding.SissNotConfiguredError as exc:
+        logger.error("sync-feeds: %s", exc)
+        return 1
+
+    total_new = sum(o.lines_inserted for o in outcomes)
+    total_seen = sum(o.transactions_seen for o in outcomes)
+    logger.info(
+        "sync-feeds: %d account(s), %d txns seen, %d new lines",
+        len(outcomes),
+        total_seen,
+        total_new,
+    )
+    for outcome in outcomes:
+        logger.info(
+            "  account=%s seen=%d new=%d cursor=%s",
+            outcome.bank_feed_account_id,
+            outcome.transactions_seen,
+            outcome.lines_inserted,
+            outcome.cursor_advanced_to or "(unchanged)",
+        )
+    return 0
+
+
+async def _refresh_feed_issues() -> int:
+    try:
+        result = await health.refresh_feed_issues(settings=settings)
+    except onboarding.SissNotConfiguredError as exc:
+        logger.error("refresh-feed-issues: %s", exc)
+        return 1
+    logger.info(
+        "refresh-feed-issues: fetched=%d cached=%d as_of=%s",
+        result.fetched,
+        result.cached,
+        result.as_of.isoformat(),
+    )
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="saebooks.cli",
+        description="SAE Books background-job entry points.",
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    sync = sub.add_parser(
+        "sync-feeds",
+        help="Pull new transactions for every active BankFeedAccount.",
+    )
+    sync.add_argument(
+        "--company-id",
+        default=None,
+        help="Limit to one company's feeds. Default: all active feeds.",
+    )
+
+    sub.add_parser(
+        "refresh-feed-issues",
+        help="Cache /sds/feedissues into bank_feed_issues.",
+    )
+
+    args = parser.parse_args(argv)
+
+    logging.basicConfig(
+        level=settings.log_level,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
+    if args.command == "sync-feeds":
+        return asyncio.run(_sync_feeds(args.company_id))
+    if args.command == "refresh-feed-issues":
+        return asyncio.run(_refresh_feed_issues())
+    parser.print_help()
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
