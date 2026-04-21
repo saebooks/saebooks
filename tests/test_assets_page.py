@@ -378,7 +378,9 @@ async def test_assets_import_preview_flags_invalid_rows(client: AsyncClient) -> 
 async def test_assets_import_apply_redirects_with_counts(
     client: AsyncClient,
 ) -> None:
-    code = f"FA-SMOKE-IMPAPPLY-{uuid.uuid4().hex[:8]}"
+    # Prefix sorts into the first 200 of list_assets (which orders by code,
+    # limit 200) so the visibility assertion below survives a populated dev DB.
+    code = f"FA-AAAA-SMOKE-IMPAPPLY-{uuid.uuid4().hex[:8]}"
     raw = (
         "code,name,purchase_date,cost,depreciation_model_id,"
         "cost_account_code,accum_dep_account_code\n"

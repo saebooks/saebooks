@@ -16,6 +16,8 @@ from saebooks.services import bas as bas_svc
 from saebooks.services import gst as gst_svc
 from saebooks.services import period_close as period_close_svc
 from saebooks.services import reports as svc
+from saebooks.services.fx import rates as fx_rates_svc
+from saebooks.services.fx import reval as fx_reval_svc
 from saebooks.web import templates
 
 router = APIRouter(prefix="/reports")
@@ -477,6 +479,78 @@ async def depreciation_schedule_report(
             "as_at": cutoff.isoformat(),
             "include_disposed": include_disposed,
         },
+    )
+
+
+@router.get("/fx-revalue", response_class=HTMLResponse)
+async def fx_revalue_form(
+    request: Request,
+    through: str | None = Query(None),
+) -> HTMLResponse:
+    """Preview open foreign-currency AR/AP + the revalued base position.
+
+    No state change — the form posts to ``/reports/fx-revalue`` to
+    actually run ``revalue_company``. An ``FxRateError`` (no rate, no
+    registered fetcher) is caught and surfaced inline so the user
+    understands they need to seed a rate manually.
+    """
+    company = await _first_company()
+    through_date = _parse_date(through) or date.today()
+
+    preview: list[fx_reval_svc.CurrencyReval] = []
+    rate_error: str | None = None
+    async with AsyncSessionLocal() as session:
+        try:
+            preview = await fx_reval_svc.preview_company(
+                session,
+                company_id=company.id,
+                through_date=through_date,
+            )
+        except fx_rates_svc.FxRateError as exc:
+            rate_error = str(exc)
+
+    return templates.TemplateResponse(
+        request,
+        "reports/fx_revalue.html",
+        {
+            "edition": settings.edition,
+            "company_name": company.name,
+            "through": through_date.isoformat(),
+            "preview": preview,
+            "rate_error": rate_error,
+        },
+    )
+
+
+@router.post("/fx-revalue", response_model=None)
+async def fx_revalue_submit(request: Request) -> RedirectResponse:
+    """Post the adjusting + reversing pair per foreign currency."""
+    company = await _first_company()
+    form = await request.form()
+    through_date = _parse_date(str(form.get("through", "")))
+    if through_date is None:
+        raise HTTPException(400, "'through' date is required")
+    posted_by = request.headers.get("remote-user") or None
+
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await fx_reval_svc.revalue_company(
+                session,
+                company_id=company.id,
+                through_date=through_date,
+                posted_by=posted_by,
+            )
+    except (fx_rates_svc.FxRateError, fx_reval_svc.FxRevalError) as exc:
+        return RedirectResponse(
+            f"/reports/fx-revalue?through={through_date.isoformat()}"
+            f"&error={exc.__class__.__name__}",
+            status_code=303,
+        )
+
+    return RedirectResponse(
+        f"/reports/fx-revalue?through={through_date.isoformat()}"
+        f"&posted={result.posted_count}",
+        status_code=303,
     )
 
 

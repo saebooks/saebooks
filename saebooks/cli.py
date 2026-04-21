@@ -9,6 +9,9 @@ Invoked like::
     python -m saebooks.cli generate-recurring --company-id <uuid>
     python -m saebooks.cli reconcile-feeds
     python -m saebooks.cli reconcile-feeds --company-id <uuid>
+    python -m saebooks.cli fx-revalue
+    python -m saebooks.cli fx-revalue --through 2026-03-31
+    python -m saebooks.cli fx-revalue --company-id <uuid> --through 2026-03-31
 
 Designed to be kicked by plain cron — no long-running worker, no queue
 runtime. Exits 0 on success, 1 on total failure; per-account errors are
@@ -30,6 +33,7 @@ from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
 from saebooks.services import recurrence
 from saebooks.services.bank_feeds import health, onboarding, reconcile
+from saebooks.services.fx import reval as fx_reval
 
 logger = logging.getLogger("saebooks.cli")
 
@@ -126,6 +130,55 @@ async def _reconcile_feeds(company_id: str | None) -> int:
     return 1 if worst == "error" else 0
 
 
+async def _fx_revalue(company_id: str | None, through: str | None) -> int:
+    """Run ``revalue_company`` (or all companies) — return exit code.
+
+    Logs a per-company summary: how many adjustment/reversal pairs
+    posted, which currencies skipped (idempotent re-run), which zeroed.
+    Exits 0 on success — FxRateError (no fetcher) exits 1 so cron can
+    alert. Per-company failures in the ``--no-company-id`` multi-company
+    path are logged + swallowed by ``revalue_all_companies`` so one bad
+    tenant doesn't abort the cron.
+    """
+    cid = uuid.UUID(company_id) if company_id else None
+    through_date = date.fromisoformat(through) if through else date.today()
+    try:
+        async with AsyncSessionLocal() as session:
+            if cid is not None:
+                results: dict[uuid.UUID, fx_reval.RevalResult] = {
+                    cid: await fx_reval.revalue_company(
+                        session,
+                        company_id=cid,
+                        through_date=through_date,
+                    )
+                }
+            else:
+                results = await fx_reval.revalue_all_companies(
+                    session, through_date=through_date
+                )
+            await session.commit()
+    except fx_reval.FxRevalError as exc:
+        logger.error("fx-revalue: %s", exc)
+        return 1
+
+    total_posted = sum(r.posted_count for r in results.values())
+    logger.info(
+        "fx-revalue: %d company/ies, %d adjustment pair(s) posted through %s",
+        len(results),
+        total_posted,
+        through_date.isoformat(),
+    )
+    for company_id_, result in results.items():
+        logger.info(
+            "  company=%s posted=%d skipped=%s zero=%s",
+            company_id_,
+            result.posted_count,
+            result.skipped_currencies or "-",
+            result.zero_currencies or "-",
+        )
+    return 0
+
+
 async def _refresh_feed_issues() -> int:
     try:
         result = await health.refresh_feed_issues(settings=settings)
@@ -189,6 +242,22 @@ def main(argv: list[str] | None = None) -> int:
         help="Override today's date (ISO-format) — useful for catch-up runs.",
     )
 
+    fx = sub.add_parser(
+        "fx-revalue",
+        help="Post month-end FX revaluation (adjusting + reversing pair per "
+        "foreign currency with open AR/AP).",
+    )
+    fx.add_argument(
+        "--company-id",
+        default=None,
+        help="Limit to one company. Default: all active companies.",
+    )
+    fx.add_argument(
+        "--through",
+        default=None,
+        help="Revaluation date (ISO-format). Default: today.",
+    )
+
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -206,6 +275,8 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.command == "reconcile-feeds":
         return asyncio.run(_reconcile_feeds(args.company_id))
+    if args.command == "fx-revalue":
+        return asyncio.run(_fx_revalue(args.company_id, args.through))
     parser.print_help()
     return 2
 
