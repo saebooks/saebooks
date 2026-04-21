@@ -24,7 +24,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Form, HTTPException, Query, Request
+from fastapi import APIRouter, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,6 +36,7 @@ from saebooks.models.company import Company
 from saebooks.models.contact import Contact
 from saebooks.models.depreciation_model import DepreciationModel
 from saebooks.services import assets as svc
+from saebooks.services import assets_import as imp_svc
 from saebooks.web import templates
 
 router = APIRouter(prefix="/assets")
@@ -286,6 +287,71 @@ async def assets_create(
             status_code=422,
         )
     return RedirectResponse(f"/assets/{asset.id}", status_code=303)
+
+
+# ---------------------------------------------------------------------- #
+# CSV bulk import (preview → apply)                                      #
+# ---------------------------------------------------------------------- #
+#
+# Routes MUST be registered before ``/{asset_id}`` — otherwise
+# FastAPI's UUID coercion on the catch-all matcher 422s on the
+# literal "import" path segment.
+
+
+@router.get("/import", response_class=HTMLResponse)
+async def assets_import_form(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "assets/import.html",
+        {"edition": settings.edition, "error": None},
+    )
+
+
+@router.post("/import/preview", response_class=HTMLResponse)
+async def assets_import_preview(
+    request: Request,
+    file: UploadFile = Form(...),  # noqa: B008
+) -> HTMLResponse:
+    company = await _first_company()
+    raw = (await file.read()).decode("utf-8-sig", errors="replace")
+    try:
+        rows = imp_svc.parse_assets_csv(raw)
+    except imp_svc.AssetImportError as exc:
+        return templates.TemplateResponse(
+            request,
+            "assets/import.html",
+            {"edition": settings.edition, "error": str(exc)},
+            status_code=400,
+        )
+    async with AsyncSessionLocal() as session:
+        plan = await imp_svc.classify_rows(session, company.id, rows)
+    return templates.TemplateResponse(
+        request,
+        "assets/import_preview.html",
+        {
+            "edition": settings.edition,
+            "plan": plan,
+            "raw": raw,
+        },
+    )
+
+
+@router.post("/import/apply", response_model=None)
+async def assets_import_apply(
+    raw: str = Form(...),
+) -> RedirectResponse:
+    company = await _first_company()
+    rows = imp_svc.parse_assets_csv(raw)
+    async with AsyncSessionLocal() as session:
+        plan = await imp_svc.classify_rows(session, company.id, rows)
+        written = await imp_svc.apply_import(session, company.id, plan)
+        await session.commit()
+    skipped = len(plan.skip)
+    invalid = len(plan.invalid)
+    return RedirectResponse(
+        f"/assets?imported={written}&skipped={skipped}&invalid={invalid}",
+        status_code=303,
+    )
 
 
 # ---------------------------------------------------------------------- #

@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Asset import preview — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Import preview</h1>
+  <p class="muted">
+    {{ plan.create|length }} to create ·
+    {{ plan.skip|length }} skipped (already exist) ·
+    {{ plan.invalid|length }} invalid
+  </p>
+</div>
+
+{% if plan.invalid %}
+<h2>Invalid ({{ plan.invalid|length }})</h2>
+<table class="report-table">
+  <thead>
+    <tr><th>Line</th><th>Code</th><th>Name</th><th>Errors</th></tr>
+  </thead>
+  <tbody>
+    {% for r in plan.invalid %}
+      <tr>
+        <td class="dim">{{ r.lineno }}</td>
+        <td>{{ r.code or '—' }}</td>
+        <td>{{ r.name or '—' }}</td>
+        <td class="error-cell">{{ '; '.join(r.errors) }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if plan.skip %}
+<h2>Skipped ({{ plan.skip|length }})</h2>
+<p class="muted">These codes already exist in the register — re-running is a no-op.</p>
+<table class="report-table">
+  <thead>
+    <tr><th>Line</th><th>Code</th><th>Name</th></tr>
+  </thead>
+  <tbody>
+    {% for r in plan.skip %}
+      <tr>
+        <td class="dim">{{ r.lineno }}</td>
+        <td>{{ r.code }}</td>
+        <td>{{ r.name }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if plan.create %}
+<h2>To create ({{ plan.create|length }})</h2>
+<table class="report-table">
+  <thead>
+    <tr>
+      <th>Line</th><th>Code</th><th>Name</th><th>Purchased</th>
+      <th>Cost</th><th>Model</th><th>Cost a/c</th><th>Accum dep a/c</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in plan.create %}
+      <tr>
+        <td class="dim">{{ r.lineno }}</td>
+        <td>{{ r.code }}</td>
+        <td>{{ r.name }}</td>
+        <td class="dim">{{ r.purchase_date.isoformat() if r.purchase_date else '—' }}</td>
+        <td class="amount">{{ '%.2f'|format(r.cost) if r.cost is not none else '—' }}</td>
+        <td class="dim">{{ r.depreciation_model_id }}</td>
+        <td class="dim">{{ r.cost_account_code }}</td>
+        <td class="dim">{{ r.accum_dep_account_code }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<form method="post" action="/assets/import/apply" class="stacked-form">
+  <textarea name="raw" hidden>{{ raw }}</textarea>
+  <div class="form-actions">
+    <a class="btn-secondary" href="/assets/import">Cancel</a>
+    {% if plan.create %}
+      <button type="submit" class="btn-primary">Create {{ plan.create|length }} asset(s)</button>
+    {% else %}
+      <button type="submit" class="btn-primary" disabled>Nothing to create</button>
+    {% endif %}
+  </div>
+</form>
+{% endblock %}

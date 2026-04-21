@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Import assets — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Bulk import fixed assets</h1>
+  <p class="muted">Upload a CSV to preview + create assets in bulk. Re-running the same file is idempotent — rows with a matching <code>code</code> are skipped.</p>
+</div>
+
+{% if error %}<div class="error">{{ error }}</div>{% endif %}
+
+<form method="post" action="/assets/import/preview" enctype="multipart/form-data" class="stacked-form">
+  <label>
+    CSV file
+    <input type="file" name="file" accept=".csv" required>
+  </label>
+  <button type="submit" class="btn-primary">Preview</button>
+  <a class="btn-secondary" href="/assets">Cancel</a>
+</form>
+
+<h2>Columns</h2>
+<p class="muted">Header row is required. Column names are case-insensitive.</p>
+<h3>Required</h3>
+<ul class="muted">
+  <li><code>code</code> — short code, unique within the company (e.g. <code>FA-0001</code>)</li>
+  <li><code>name</code></li>
+  <li><code>purchase_date</code> — ISO (<code>2026-04-01</code>) or AU (<code>01/04/2026</code>)</li>
+  <li><code>cost</code> — positive decimal</li>
+  <li><code>depreciation_model_id</code> — slug from the catalogue (<code>asset_5_year_linear</code>, <code>asset_dv_30</code>, …)</li>
+  <li><code>cost_account_code</code> — e.g. <code>1-3310</code></li>
+  <li><code>accum_dep_account_code</code> — e.g. <code>1-3320</code></li>
+</ul>
+<h3>Optional</h3>
+<ul class="muted">
+  <li><code>in_service_date</code> — defaults to <code>purchase_date</code></li>
+  <li><code>residual_value</code> — defaults to <code>0</code></li>
+  <li><code>dep_expense_account_code</code> — defaults to <code>6-1500</code></li>
+  <li><code>description</code>, <code>serial_number</code>, <code>manufacturer</code>, <code>model_number</code>, <code>location</code>, <code>custody_person</code>, <code>warranty_end</code></li>
+</ul>
+{% endblock %}

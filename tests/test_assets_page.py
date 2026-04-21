@@ -205,3 +205,72 @@ async def test_dispose_flow(client: AsyncClient) -> None:
     detail = await client.get(f"/assets/{asset_id}")
     assert "Disposal" in detail.text
     assert "800.00" in detail.text
+
+
+# ---------------------------------------------------------------------- #
+# CSV bulk import (MM/2)                                                 #
+# ---------------------------------------------------------------------- #
+
+
+async def test_assets_import_form_renders(client: AsyncClient) -> None:
+    r = await client.get("/assets/import")
+    assert r.status_code == 200
+    assert "Bulk import" in r.text
+    assert 'name="file"' in r.text
+    # Literal path must win over the /{asset_id} UUID matcher.
+
+
+async def test_assets_import_preview_happy_path(client: AsyncClient) -> None:
+    code = f"FA-SMOKE-IMP-{uuid.uuid4().hex[:8]}"
+    raw = (
+        "code,name,purchase_date,cost,depreciation_model_id,"
+        "cost_account_code,accum_dep_account_code\n"
+        f"{code},Smoke import asset,2026-04-01,1200.00,asset_3_year_linear,"
+        "1-3310,1-3320\n"
+    ).encode()
+    r = await client.post(
+        "/assets/import/preview",
+        files={"file": ("assets.csv", raw, "text/csv")},
+    )
+    assert r.status_code == 200
+    # The preview page shows the proposed code in the "to create" table.
+    assert code in r.text
+    assert "To create (1)" in r.text
+
+
+async def test_assets_import_preview_flags_invalid_rows(client: AsyncClient) -> None:
+    raw = (
+        b"code,name,purchase_date,cost,depreciation_model_id,"
+        b"cost_account_code,accum_dep_account_code\n"
+        # Missing code + name + bad date — a per-row invalid.
+        b",,not-a-date,0,asset_3_year_linear,9-9999,1-3320\n"
+    )
+    r = await client.post(
+        "/assets/import/preview",
+        files={"file": ("bad.csv", raw, "text/csv")},
+    )
+    assert r.status_code == 200
+    assert "Invalid (1)" in r.text
+
+
+async def test_assets_import_apply_redirects_with_counts(
+    client: AsyncClient,
+) -> None:
+    code = f"FA-SMOKE-IMPAPPLY-{uuid.uuid4().hex[:8]}"
+    raw = (
+        "code,name,purchase_date,cost,depreciation_model_id,"
+        "cost_account_code,accum_dep_account_code\n"
+        f"{code},Smoke apply asset,2026-04-01,900.00,asset_3_year_linear,"
+        "1-3310,1-3320\n"
+    )
+    r = await client.post(
+        "/assets/import/apply",
+        data={"raw": raw},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert "/assets?imported=1" in r.headers["location"]
+
+    # Asset is now visible on the list.
+    listing = await client.get("/assets")
+    assert code in listing.text
