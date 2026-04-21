@@ -19,6 +19,7 @@ from saebooks.routers import (
     credit_notes,
     dashboard,
     health,
+    imports,
     invoices,
     journal,
     pay_run,
@@ -88,6 +89,7 @@ def create_app() -> FastAPI:
     app.include_router(assets.router)
     app.include_router(bank_feeds.router)
     app.include_router(bank_rules.router)
+    app.include_router(imports.router)
     # Global search + /help/shortcuts. No prefix; exposes /search and
     # /help/shortcuts at the top level so the Cmd-K palette fetch call
     # can stay short.

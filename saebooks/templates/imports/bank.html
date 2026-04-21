@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Import bank statement — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Import bank statement</h1>
+  <p class="muted">CSV (CBA, ANZ, NAB, Westpac or generic) or OFX 1.x / 2.x.</p>
+</div>
+
+{% if error %}<div class="error">{{ error }}</div>{% endif %}
+
+<form method="post" action="/admin/imports/bank/preview" enctype="multipart/form-data" class="stacked-form">
+  <label>
+    Destination bank account
+    <select name="account_id" required>
+      {% for a in accounts %}
+        <option value="{{ a.id }}">{{ a.code }} — {{ a.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>
+    CSV or OFX file
+    <input type="file" name="file" accept=".csv,.ofx,.qfx" required>
+  </label>
+  <button type="submit" class="btn-primary">Preview</button>
+</form>
+
+{% if not accounts %}
+  <p class="muted">No bank accounts flagged for reconciliation yet. Mark an asset account as “reconcilable” on the Accounts page first.</p>
+{% endif %}
+{% endblock %}

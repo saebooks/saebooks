@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Import complete — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Bank statement imported</h1>
+</div>
+
+<p>
+  {{ inserted }} new statement line(s) inserted;
+  {{ total - inserted }} duplicate(s) skipped (by content hash).
+</p>
+
+<p>
+  <a class="btn-primary" href="/reconciliation/{{ account_id }}">Reconcile now</a>
+  <a class="btn-secondary" href="/admin/imports">Back to imports</a>
+</p>
+{% endblock %}
