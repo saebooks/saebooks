@@ -5,6 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}SAE Books{% endblock %}</title>
   <link rel="stylesheet" href="/static/app.css">
+  {% block theme_assets %}
+    {% set _theme = theme_for_request(request) %}
+    {% if _theme and _theme != "default" %}
+    <link rel="stylesheet" href="/static/themes/{{ _theme }}/app.css">
+    {% endif %}
+  {% endblock %}
   <script src="https://unpkg.com/htmx.org@2.0.3" defer></script>
 </head>
 <body>
@@ -40,6 +46,7 @@
       <a href="/admin/sql">SQL</a>
       <a href="/admin/settings">Settings</a>
       <a href="/admin/license">Licence</a>
+      <a href="/admin/theme">Theme</a>
       <a href="#" id="open-palette" title="Search (Ctrl+K or /)">Search</a>
     </nav>
     <div class="edition">{{ edition }}</div>

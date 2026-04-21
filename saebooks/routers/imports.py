@@ -18,11 +18,9 @@ lets the user bail at the preview with zero side effects.
 from __future__ import annotations
 
 import uuid
-from pathlib import Path
 
 from fastapi import APIRouter, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
 from saebooks.config import settings
@@ -45,11 +43,9 @@ from saebooks.services.imports import (
 from saebooks.services.imports import (
     qbo as qbo_svc,
 )
+from saebooks.web import templates
 
 router = APIRouter(prefix="/admin/imports")
-
-TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 async def _first_company() -> Company:

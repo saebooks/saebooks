@@ -21,7 +21,6 @@ Three separate surfaces:
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -34,7 +33,6 @@ from fastapi import (
     status,
 )
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
-from fastapi.templating import Jinja2Templates
 
 from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
@@ -59,12 +57,10 @@ from saebooks.services.integrations import (
     verify_signature,
 )
 from saebooks.services.integrations.stripe import parse_event
+from saebooks.web import templates
 
 logger = logging.getLogger("saebooks.integrations")
 router = APIRouter()
-
-TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 # ---------------------------------------------------------------------------

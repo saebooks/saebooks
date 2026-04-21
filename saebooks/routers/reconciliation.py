@@ -1,10 +1,8 @@
 """Bank reconciliation routes."""
 import uuid
-from pathlib import Path
 
 from fastapi import APIRouter, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 
 from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
@@ -12,11 +10,9 @@ from saebooks.models.bank_statement import BankStatementLine, StatementLineStatu
 from saebooks.routers.reports import _first_company
 from saebooks.services import bank_rules as rules_svc
 from saebooks.services import reconciliation as svc
+from saebooks.web import templates
 
 router = APIRouter(prefix="/reconciliation")
-
-TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 @router.get("", response_class=HTMLResponse)
@@ -69,6 +65,7 @@ async def reconciliation_account(
         sugg_accounts = {}
         if suggested_acct_ids:
             from sqlalchemy import select
+
             from saebooks.models.account import Account
             res = await session.execute(
                 select(Account).where(Account.id.in_(suggested_acct_ids))

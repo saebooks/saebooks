@@ -9,12 +9,10 @@ from __future__ import annotations
 import uuid
 from datetime import date
 from decimal import Decimal, InvalidOperation
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
 from saebooks.config import settings
@@ -22,11 +20,10 @@ from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.services import budgets as svc
+from saebooks.web import templates
 
 router = APIRouter(prefix="/budgets")
 
-TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 # Account types that are legitimate budget targets — P&L side plus
 # capex asset accounts. Balance-sheet control accounts (AR/AP/Bank) are

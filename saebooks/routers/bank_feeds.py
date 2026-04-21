@@ -25,12 +25,10 @@ the admin explore the UI before credentials land.
 from __future__ import annotations
 
 import uuid
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,14 +40,12 @@ from saebooks.models.company import Company
 from saebooks.services.bank_feeds import onboarding
 from saebooks.services.bank_feeds.errors import SissError
 from saebooks.services.features import FLAG_BANK_FEEDS, require_feature
+from saebooks.web import templates
 
 router = APIRouter(
     prefix="/admin/bank-feeds",
     dependencies=[Depends(require_feature(FLAG_BANK_FEEDS))],
 )
-
-TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 # ---------------------------------------------------------------------- #

@@ -11,22 +11,17 @@ Two routes:
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
 from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 from saebooks.services import search as svc
+from saebooks.web import templates
 
 router = APIRouter()
-
-TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 async def _first_company() -> Company:

@@ -2,11 +2,9 @@
 import uuid
 from collections.abc import Sequence
 from datetime import date
-from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
 from saebooks.config import settings
@@ -17,11 +15,9 @@ from saebooks.services import bas as bas_svc
 from saebooks.services import gst as gst_svc
 from saebooks.services import period_close as period_close_svc
 from saebooks.services import reports as svc
+from saebooks.web import templates
 
 router = APIRouter(prefix="/reports")
-
-TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 async def _first_company() -> Company:

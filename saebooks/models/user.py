@@ -79,6 +79,10 @@ class User(Base):
         server_default=UserRole.READONLY.value,
     )
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Per-user theme override (QQ). Null = inherit the server-wide
+    # theme (SAEBOOKS_FRONTEND env or the ``theme`` row in ``settings``).
+    # Only gates the CSS bundle, not the template tree.
+    preferred_theme: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

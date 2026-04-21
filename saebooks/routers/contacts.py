@@ -1,11 +1,9 @@
 """Contact management routes."""
 import uuid
-from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
 from saebooks.config import settings
@@ -17,11 +15,9 @@ from saebooks.models.tax_code import TaxCode
 from saebooks.services import contacts as svc
 from saebooks.services.abr import AbrError, AbrNotConfiguredError, lookup_abn
 from saebooks.services.features import FLAG_ABR_LOOKUP, is_enabled, require_feature
+from saebooks.web import templates
 
 router = APIRouter(prefix="/contacts")
-
-TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 async def _first_company() -> Company:

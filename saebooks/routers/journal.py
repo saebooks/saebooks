@@ -2,11 +2,9 @@
 import uuid
 from datetime import date
 from decimal import Decimal, InvalidOperation
-from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 
 from saebooks.config import settings
@@ -18,11 +16,9 @@ from saebooks.models.project import Project, ProjectStatus
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import journal as svc
 from saebooks.services.journal import PostingError
+from saebooks.web import templates
 
 router = APIRouter(prefix="/journal")
-
-TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 async def _first_company() -> Company:

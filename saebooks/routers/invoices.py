@@ -19,13 +19,11 @@ import contextlib
 import uuid
 from datetime import date
 from decimal import Decimal, InvalidOperation
-from pathlib import Path
 from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,11 +39,9 @@ from saebooks.services import invoices as svc
 from saebooks.services import mailer as mailer_svc
 from saebooks.services import numbering
 from saebooks.services import pdf as pdf_svc
+from saebooks.web import templates
 
 router = APIRouter(prefix="/invoices")
-
-TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 # ---------------------------------------------------------------------- #

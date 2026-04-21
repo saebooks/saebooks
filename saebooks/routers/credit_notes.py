@@ -21,13 +21,11 @@ from __future__ import annotations
 import uuid
 from datetime import date
 from decimal import Decimal, InvalidOperation
-from pathlib import Path
 from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,11 +38,9 @@ from saebooks.models.credit_note import CreditNoteStatus
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import credit_notes as svc
 from saebooks.services import numbering
+from saebooks.web import templates
 
 router = APIRouter(prefix="/credit-notes")
-
-TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 # ---------------------------------------------------------------------- #

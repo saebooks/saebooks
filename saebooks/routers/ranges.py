@@ -1,10 +1,8 @@
 """Account ranges admin routes."""
-from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
 from saebooks.config import settings
@@ -12,11 +10,10 @@ from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import AccountType
 from saebooks.models.company import Company
 from saebooks.services import accounts as svc
+from saebooks.web import templates
 
 router = APIRouter(prefix="/admin/ranges")
 
-TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 ACCOUNT_TYPE_CHOICES = [(t.value, t.value.replace("_", " ").title()) for t in AccountType]
 

@@ -9,12 +9,10 @@ plus a negative-then-positive receipt if needed).
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
-from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
 from saebooks.config import settings
@@ -23,11 +21,9 @@ from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.models.item import CostMethod
 from saebooks.services import items as svc
+from saebooks.web import templates
 
 router = APIRouter(prefix="/items")
-
-TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 async def _first_company() -> Company:

@@ -1,10 +1,8 @@
 """Journal template routes — list, create, use, delete."""
 import uuid
-from pathlib import Path
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
 from saebooks.config import settings
@@ -14,11 +12,9 @@ from saebooks.models.company import Company
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import journal as journal_svc
 from saebooks.services import journal_templates as svc
+from saebooks.web import templates
 
 router = APIRouter(prefix="/templates")
-
-TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 async def _first_company() -> Company:

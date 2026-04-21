@@ -1,10 +1,8 @@
 import uuid
 from datetime import datetime
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
 from saebooks.config import settings as app_settings
@@ -16,13 +14,13 @@ from saebooks.services import backups as backups_svc
 from saebooks.services import features as features_svc
 from saebooks.services import settings as svc
 from saebooks.services import sql_tool as sql_svc
+from saebooks.services import theme as theme_svc
 from saebooks.services.authz import require_role, require_user
 from saebooks.services.exports.company import build_company_export
+from saebooks.web import templates
 
 router = APIRouter(prefix="/admin")
 
-TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 # Settings that the admin screen exposes, grouped for display.
 SETTINGS_SCHEMA: list[dict[str, object]] = [
@@ -434,6 +432,72 @@ async def license_admin(request: Request) -> HTMLResponse:
             "flags": features_svc.active_flags(),
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Theme selector (Batch QQ)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/theme", response_class=HTMLResponse)
+async def theme_admin(
+    request: Request,
+    _admin: User = Depends(require_role(UserRole.ADMIN)),  # noqa: B008
+    saved: str | None = Query(default=None),
+    err: str | None = Query(default=None),
+) -> HTMLResponse:
+    """Show the active theme + radio-list of themes an admin can pick.
+
+    The selection here is the *company-wide* theme — what every
+    anonymous request + every user without a ``preferred_theme`` sees.
+    A restart is required for the Jinja ``ChoiceLoader`` to pick up the
+    change (the CSS bundle switches immediately, but any theme-level
+    template override only takes effect after app reload).
+    """
+    async with AsyncSessionLocal() as session:
+        db_setting = await svc.get(session, "theme")
+    db_theme = db_setting.get("name") if isinstance(db_setting, dict) else None
+    active = theme_svc.resolve_theme(
+        app_settings, db_setting=db_theme
+    )
+    return templates.TemplateResponse(
+        request,
+        "admin/theme.html",
+        {
+            "edition": app_settings.edition,
+            "active": active,
+            "themes": sorted(theme_svc.ACTIVE_THEMES),
+            "env_override": bool(app_settings.frontend and app_settings.frontend != theme_svc.DEFAULT_THEME),
+            "saved": saved,
+            "err": err,
+        },
+    )
+
+
+@router.post("/theme")
+async def theme_admin_save(
+    request: Request,
+    theme: str = Form(...),
+    user: User = Depends(require_role(UserRole.ADMIN)),  # noqa: B008
+) -> RedirectResponse:
+    """Persist the chosen theme in the ``settings`` table.
+
+    Validates against :data:`services.theme.ACTIVE_THEMES` up front so
+    the form can never poison the DB with a typo. Needs an app restart
+    to flip the Jinja loader chain.
+    """
+    try:
+        canonical = theme_svc.validate_startup_theme(theme)
+    except theme_svc.ThemeError:
+        return RedirectResponse("/admin/theme?err=bad_theme", status_code=303)
+    async with AsyncSessionLocal() as session:
+        await svc.set(
+            session,
+            "theme",
+            {"name": canonical},
+            updated_by=user.username,
+        )
+    return RedirectResponse("/admin/theme?saved=1", status_code=303)
 
 
 @router.get("/backups", response_class=HTMLResponse)

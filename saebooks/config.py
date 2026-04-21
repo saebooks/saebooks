@@ -109,6 +109,22 @@ class Settings(BaseSettings):
         alias="LEI_API_BASE",
     )
 
+    # ---------------------------------------------------------------- #
+    # Frontend theme (Batch QQ)                                        #
+    # ---------------------------------------------------------------- #
+    # Which Jinja theme layer is active. ``default`` is the stock flat
+    # ``saebooks/templates/`` tree; ``classic`` loads the MYOB Classic
+    # (AccountRight-style) overrides under ``templates/themes/classic/``.
+    # Validated by ``services.theme.validate_startup_theme`` at app boot
+    # so a typo fails loudly rather than silently falling back.
+    # Per-company override is persisted as a Setting row (key ``theme``)
+    # from /admin/theme; per-user override is the ``preferred_theme``
+    # column on users.
+    # Empty string means "unset" — the resolver treats it as a fall-through
+    # so a per-company DB setting can win over the env when env is absent.
+    # ``validate_startup_theme`` coerces "" back to ``DEFAULT_THEME`` at boot.
+    frontend: str = Field(default="", alias="SAEBOOKS_FRONTEND")
+
     # Stripe webhook — public /webhooks/stripe endpoint. When
     # STRIPE_WEBHOOK_SECRET is empty the webhook handler returns 503
     # so an unconfigured instance doesn't silently accept forged
