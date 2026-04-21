@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if item else 'New' }} item — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{{ 'Edit item ' + item.sku if item else 'New item' }}</h1>
+  <div class="meta">{{ company_name }}</div>
+</div>
+
+{% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+
+<form method="post" action="{{ '/items/' + item.id|string if item else '/items' }}" class="tc-form" style="max-width:46rem">
+  <label>SKU <input name="sku" required maxlength="64" value="{{ item.sku if item else '' }}" placeholder="WIDGET-001"></label>
+  <label>Name <input name="name" required maxlength="255" value="{{ item.name if item else '' }}"></label>
+  <label class="wide">Description <textarea name="description" rows="2" style="font:14px/1.4 inherit;width:100%;padding:0.3rem;border:1px solid var(--rule)">{{ item.description if item and item.description else '' }}</textarea></label>
+
+  <label>Inventory asset account
+    <select name="inventory_account_id" required>
+      {% for a in inventory_accounts %}
+      <option value="{{ a.id }}" {{ 'selected' if item and item.inventory_account_id == a.id }}>{{ a.code }} — {{ a.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Cost of goods sold account
+    <select name="cogs_account_id" required>
+      {% for a in cogs_accounts %}
+      <option value="{{ a.id }}" {{ 'selected' if item and item.cogs_account_id == a.id }}>{{ a.code }} — {{ a.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Income (sales) account
+    <select name="income_account_id" required>
+      {% for a in income_accounts %}
+      <option value="{{ a.id }}" {{ 'selected' if item and item.income_account_id == a.id }}>{{ a.code }} — {{ a.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <label>Default sale price (ex-GST)
+    <input name="default_sale_price" type="number" step="0.0001" min="0" value="{{ '%.4f'|format(item.default_sale_price) if item else '0.0000' }}">
+  </label>
+
+  {% if not item %}
+  <fieldset class="form-fieldset" style="grid-column:1/-1;border:1px dashed var(--rule);padding:0.6rem 0.8rem;margin-top:0.5rem">
+    <legend class="dim" style="padding:0 0.3rem">Opening balance (optional — leave zero if receiving stock via a bill)</legend>
+    <label>On-hand qty <input name="on_hand_qty" type="number" step="0.0001" min="0" value="0.0000"></label>
+    <label>WAC cost per unit <input name="wac_cost" type="number" step="0.0001" min="0" value="0.0000"></label>
+  </fieldset>
+  {% else %}
+  <div class="dim" style="grid-column:1/-1">
+    On-hand {{ '%.4f'|format(item.on_hand_qty) }} @ WAC {{ '%.4f'|format(item.wac_cost) }}.
+    Quantity and WAC change only via bills (receive stock) and invoices (issue stock).
+  </div>
+  {% endif %}
+
+  <div class="form-actions">
+    <button type="submit" class="btn">{{ 'Save' if item else 'Create' }}</button>
+    <a href="{{ '/items/' + item.id|string if item else '/items' }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

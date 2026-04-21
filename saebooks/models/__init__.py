@@ -13,6 +13,7 @@ from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
 from saebooks.models.depreciation_model import DepreciationModel
 from saebooks.models.fixed_asset import FixedAsset
+from saebooks.models.item import CostMethod, Item
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine, PeriodLock
 from saebooks.models.journal_template import JournalTemplate
 from saebooks.models.project import Project, ProjectStatus
@@ -35,9 +36,11 @@ __all__ = [
     "Company",
     "Contact",
     "ContactType",
+    "CostMethod",
     "DepreciationModel",
     "EntryStatus",
     "FixedAsset",
+    "Item",
     "JournalEntry",
     "JournalLine",
     "JournalTemplate",

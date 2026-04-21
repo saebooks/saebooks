@@ -188,5 +188,15 @@ class InvoiceLine(Base):
         UUID(as_uuid=True),
         ForeignKey("projects.id", ondelete="SET NULL"),
     )
+    # Optional inventory item — when set, posting this line issues
+    # stock: Dr COGS / Cr Inventory at WAC (in addition to the normal
+    # Dr AR / Cr Income). ``account_id`` is overridden to the item's
+    # ``income_account_id`` at ``_replace_lines`` time so GL stays
+    # consistent with the stock movement. SET NULL on delete mirrors
+    # the project_id FK.
+    item_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("items.id", ondelete="SET NULL"),
+    )
 
     invoice: Mapped[Invoice] = relationship(back_populates="lines")

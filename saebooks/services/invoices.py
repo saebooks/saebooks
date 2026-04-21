@@ -30,7 +30,9 @@ from sqlalchemy.orm import selectinload
 
 from saebooks.models.account import Account
 from saebooks.models.invoice import Invoice, InvoiceLine, InvoiceStatus
+from saebooks.models.item import Item
 from saebooks.models.tax_code import TaxCode
+from saebooks.services import items as items_svc
 from saebooks.services import journal as journal_svc
 from saebooks.services import numbering
 
@@ -59,6 +61,7 @@ class _LineInput:
     unit_price: Decimal
     discount_pct: Decimal
     project_id: uuid.UUID | None
+    item_id: uuid.UUID | None
 
 
 def _compute_line_totals(
@@ -150,14 +153,32 @@ async def _replace_lines(
         elif not project_id:
             project_id = None
 
+        item_id = raw.get("item_id")
+        if isinstance(item_id, str) and item_id:
+            item_id = uuid.UUID(item_id)
+        elif not item_id:
+            item_id = None
+
+        account_id = _as_uuid(raw["account_id"])
+        # If this line is an item sale, force account_id to the item's
+        # income_account_id — otherwise an operator could pick an
+        # unrelated account on the form and the GL would not match
+        # the inventory ledger. Silently corrective.
+        if isinstance(item_id, uuid.UUID):
+            item = await session.get(Item, item_id)
+            if item is None:
+                raise InvoiceError(f"Unknown item {item_id}")
+            account_id = item.income_account_id
+
         line_input = _LineInput(
             description=str(raw["description"]),
-            account_id=_as_uuid(raw["account_id"]),
+            account_id=account_id,
             tax_code_id=tax_code_id if isinstance(tax_code_id, uuid.UUID) else None,
             quantity=Decimal(str(raw.get("quantity", 1))),
             unit_price=Decimal(str(raw.get("unit_price", 0))),
             discount_pct=Decimal(str(raw.get("discount_pct", 0))),
             project_id=project_id if isinstance(project_id, uuid.UUID) else None,
+            item_id=item_id if isinstance(item_id, uuid.UUID) else None,
         )
         tax_rate = await _resolve_tax_rate(session, line_input.tax_code_id)
         subtotal, tax, total = _compute_line_totals(line_input, tax_rate)
@@ -175,6 +196,7 @@ async def _replace_lines(
                 line_tax=tax,
                 line_total=total,
                 project_id=line_input.project_id,
+                item_id=line_input.item_id,
             )
         )
     await session.flush()
@@ -362,6 +384,9 @@ async def post_invoice(
     # One Cr line per income account per invoice line; GST auto-poster
     # appends the matching Cr GST Collected. project_id is carried
     # through so the GL can drive P&L-by-project reports directly.
+    # For item lines we also issue stock (which reads WAC) and append
+    # the paired Dr COGS / Cr Inventory lines at WAC — the sale line
+    # stays at sale price, the cost line moves at cost.
     for line in inv.lines:
         line_base_subtotal = _q2(line.line_subtotal * rate)
         line_base_tax = (
@@ -378,6 +403,37 @@ async def post_invoice(
                 "project_id": line.project_id,
             }
         )
+        # Inventory: Dr COGS / Cr Inventory at WAC. issue_stock also
+        # decrements on_hand_qty + raises if over-issuing. Runs inside
+        # the same transaction as the journal post, so a raise here
+        # rolls back both the stock mutation and the journal draft.
+        if line.item_id is not None and line.quantity > Decimal("0"):
+            item = await session.get(Item, line.item_id)
+            if item is None:  # pragma: no cover — FK guarantees exists
+                raise InvoiceError(f"Invoice line item {line.item_id} not found")
+            cogs_value = await items_svc.issue_stock(
+                session, line.item_id, qty=line.quantity
+            )
+            if cogs_value > Decimal("0"):
+                cogs_value_2dp = _q2(cogs_value)
+                journal_lines.append(
+                    {
+                        "account_id": item.cogs_account_id,
+                        "description": f"{inv.number}: COGS {line.description}",
+                        "debit": cogs_value_2dp,
+                        "credit": Decimal("0"),
+                        "project_id": line.project_id,
+                    }
+                )
+                journal_lines.append(
+                    {
+                        "account_id": item.inventory_account_id,
+                        "description": f"{inv.number}: stock out {line.description}",
+                        "debit": Decimal("0"),
+                        "credit": cogs_value_2dp,
+                        "project_id": line.project_id,
+                    }
+                )
 
     entry = await journal_svc.create_draft(
         session,

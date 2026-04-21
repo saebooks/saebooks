@@ -26,11 +26,14 @@ from sqlalchemy.orm import selectinload
 
 from saebooks.models.account import Account
 from saebooks.models.bill import Bill, BillLine, BillStatus
+from saebooks.models.item import Item
 from saebooks.models.tax_code import TaxCode
+from saebooks.services import items as items_svc
 from saebooks.services import journal as journal_svc
 from saebooks.services import numbering
 
 _TWOPLACES = Decimal("0.01")
+_FOURPLACES = Decimal("0.0001")
 
 
 class BillError(ValueError):
@@ -46,6 +49,10 @@ def _q2(value: Decimal) -> Decimal:
     return value.quantize(_TWOPLACES, rounding=ROUND_HALF_UP)
 
 
+def _q4(value: Decimal) -> Decimal:
+    return value.quantize(_FOURPLACES, rounding=ROUND_HALF_UP)
+
+
 @dataclass(frozen=True)
 class _LineInput:
     description: str
@@ -55,6 +62,7 @@ class _LineInput:
     unit_price: Decimal
     discount_pct: Decimal
     project_id: uuid.UUID | None
+    item_id: uuid.UUID | None
 
 
 def _compute_line_totals(
@@ -150,14 +158,33 @@ async def _replace_lines(
         elif not project_id:
             project_id = None
 
+        item_id = raw.get("item_id")
+        if isinstance(item_id, str) and item_id:
+            item_id = uuid.UUID(item_id)
+        elif not item_id:
+            item_id = None
+
+        account_id = _as_uuid(raw["account_id"])
+        # If this line is an item receipt, the GL account MUST be the
+        # item's inventory_account_id — otherwise the stock movement
+        # and the journal fall out of sync. Force-override silently so
+        # a user who picks the "wrong" account on the form still gets
+        # a consistent post.
+        if isinstance(item_id, uuid.UUID):
+            item = await session.get(Item, item_id)
+            if item is None:
+                raise BillError(f"Unknown item {item_id}")
+            account_id = item.inventory_account_id
+
         line_input = _LineInput(
             description=str(raw["description"]),
-            account_id=_as_uuid(raw["account_id"]),
+            account_id=account_id,
             tax_code_id=tax_code_id if isinstance(tax_code_id, uuid.UUID) else None,
             quantity=Decimal(str(raw.get("quantity", 1))),
             unit_price=Decimal(str(raw.get("unit_price", 0))),
             discount_pct=Decimal(str(raw.get("discount_pct", 0))),
             project_id=project_id if isinstance(project_id, uuid.UUID) else None,
+            item_id=item_id if isinstance(item_id, uuid.UUID) else None,
         )
         tax_rate = await _resolve_tax_rate(session, line_input.tax_code_id)
         subtotal, tax, total = _compute_line_totals(line_input, tax_rate)
@@ -175,6 +202,7 @@ async def _replace_lines(
                 line_tax=tax,
                 line_total=total,
                 project_id=line_input.project_id,
+                item_id=line_input.item_id,
             )
         )
     await session.flush()
@@ -379,6 +407,26 @@ async def post_bill(
     posted = await journal_svc.post(
         session, entry.id, posted_by=posted_by, override_reason=override_reason
     )
+
+    # Inventory stock movement: for every line with item_id, bump
+    # on_hand_qty and re-blend WAC. Unit cost is the base-currency
+    # line subtotal divided by quantity — GST is excluded (stays on
+    # the Dr GST Paid asset line), FX is already applied at _recalc.
+    # Runs AFTER the journal posts so a failed journal doesn't mutate
+    # stock.
+    for line in bill.lines:
+        if line.item_id is None:
+            continue
+        if line.quantity <= Decimal("0"):
+            continue
+        line_base_subtotal = _q2(line.line_subtotal * rate)
+        unit_cost = _q4(line_base_subtotal / line.quantity)
+        await items_svc.receive_stock(
+            session,
+            line.item_id,
+            qty=line.quantity,
+            unit_cost=unit_cost,
+        )
 
     bill.status = BillStatus.POSTED
     bill.journal_entry_id = posted.id
