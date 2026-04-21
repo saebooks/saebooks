@@ -496,3 +496,34 @@ def _as_dict(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
     return {}
+
+
+# ---------------------------------------------------------------------- #
+# Reconciliation sweep (Batch HH)                                        #
+# ---------------------------------------------------------------------- #
+
+
+@router.get("/health", response_class=HTMLResponse)
+async def bank_feeds_health(request: Request) -> HTMLResponse:
+    """Per-account staleness + variance table.
+
+    Read-only: renders the result of :func:`reconcile.sweep` for the
+    active company. No SISS network — everything comes from the
+    statement-line + journal-line tables.
+    """
+    from saebooks.services.bank_feeds import reconcile
+
+    company = await _first_company()
+    async with AsyncSessionLocal() as session:
+        report = await reconcile.sweep(session, company_id=company.id)
+
+    return templates.TemplateResponse(
+        request,
+        "bank_feeds/health.html",
+        {
+            "edition": settings.edition,
+            "company_name": company.name,
+            "report": report,
+            "stale_cutoff": reconcile.stale_cutoff(report.through_date),
+        },
+    )

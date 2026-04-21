@@ -7,11 +7,15 @@ Invoked like::
     python -m saebooks.cli sync-feeds --company-id <uuid>
     python -m saebooks.cli generate-recurring
     python -m saebooks.cli generate-recurring --company-id <uuid>
+    python -m saebooks.cli reconcile-feeds
+    python -m saebooks.cli reconcile-feeds --company-id <uuid>
 
 Designed to be kicked by plain cron — no long-running worker, no queue
 runtime. Exits 0 on success, 1 on total failure; per-account errors are
 logged but don't kill the whole run (so one flakey bank doesn't stop
-the others from syncing).
+the others from syncing). ``reconcile-feeds`` is an exception: it exits
+non-zero if any account's variance exceeds :data:`.reconcile.VARIANCE_TOLERANCE`
+so cron alerting can page when feeds drift from the GL.
 """
 from __future__ import annotations
 
@@ -25,7 +29,7 @@ from datetime import date
 from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
 from saebooks.services import recurrence
-from saebooks.services.bank_feeds import health, onboarding
+from saebooks.services.bank_feeds import health, onboarding, reconcile
 
 logger = logging.getLogger("saebooks.cli")
 
@@ -90,6 +94,38 @@ async def _generate_recurring(
     return 0
 
 
+async def _reconcile_feeds(company_id: str | None) -> int:
+    """Walk every active BankFeedAccount and log health per account.
+
+    Exits 1 if any account has a variance >$0.01 or is stale — so cron
+    can alert on feed drift. Per-company errors don't abort the loop.
+    """
+
+    cid = uuid.UUID(company_id) if company_id else None
+    worst = "ok"
+    async with AsyncSessionLocal() as session:
+        if cid is not None:
+            reports = [await reconcile.sweep(session, company_id=cid)]
+        else:
+            reports = await reconcile.sweep_all_companies(session)
+
+    total_accounts = sum(len(r.accounts) for r in reports)
+    logger.info(
+        "reconcile-feeds: %d company/ies, %d feed account(s)",
+        len(reports),
+        total_accounts,
+    )
+    for r in reports:
+        for a in r.accounts:
+            log = logger.error if a.severity == "error" else logger.info
+            log("  company=%s %s", r.company_id, reconcile._fmt_report_line(a))
+            if a.severity == "error":
+                worst = "error"
+            elif a.severity == "warn" and worst == "ok":
+                worst = "warn"
+    return 1 if worst == "error" else 0
+
+
 async def _refresh_feed_issues() -> int:
     try:
         result = await health.refresh_feed_issues(settings=settings)
@@ -127,6 +163,17 @@ def main(argv: list[str] | None = None) -> int:
         help="Cache /sds/feedissues into bank_feed_issues.",
     )
 
+    rec = sub.add_parser(
+        "reconcile-feeds",
+        help="Walk active feeds, flag stale accounts + GL variance. "
+        "Exits 1 if any account has variance >$0.01.",
+    )
+    rec.add_argument(
+        "--company-id",
+        default=None,
+        help="Limit to one company. Default: all active feeds.",
+    )
+
     gen = sub.add_parser(
         "generate-recurring",
         help="Materialise every due RecurringInvoice as a DRAFT (or POSTED if auto_post).",
@@ -157,6 +204,8 @@ def main(argv: list[str] | None = None) -> int:
         return asyncio.run(
             _generate_recurring(args.company_id, args.as_of)
         )
+    if args.command == "reconcile-feeds":
+        return asyncio.run(_reconcile_feeds(args.company_id))
     parser.print_help()
     return 2
 

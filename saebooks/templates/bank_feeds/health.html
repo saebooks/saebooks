@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}Bank feed health — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Bank feed health</h1>
+  <div class="meta">
+    {{ company_name }} · as of {{ report.through_date.isoformat() }}
+  </div>
+</div>
+
+<p class="dim">
+  Read-only sweep. Compares what the feed has posted (statement lines)
+  to the linked ledger account's posted GL movement. Anything stale
+  (last txn older than {{ stale_cutoff.isoformat() }}) or drifting by
+  more than $0.01 is flagged.
+</p>
+
+<section>
+  <div class="toolbar">
+    <a href="/admin/bank-feeds" class="btn-secondary">&larr; Back to feeds</a>
+    <form method="post" action="/admin/bank-feeds/sync" style="display:inline">
+      <button class="btn-secondary" type="submit">Sync now</button>
+    </form>
+    <form method="post" action="/admin/bank-feeds/refresh-issues" style="display:inline">
+      <button class="btn-secondary" type="submit">Refresh feed issues</button>
+    </form>
+  </div>
+</section>
+
+{% if not report.accounts %}
+<section>
+  <p class="dim">No linked feed accounts to sweep.</p>
+</section>
+{% else %}
+
+{% if report.worst_severity == "error" %}
+<div class="alert alert-error">
+  At least one account is stale or diverging from the GL. Review the
+  red rows below.
+</div>
+{% elif report.worst_severity == "warn" %}
+<div class="alert alert-warning">
+  Unmatched statement lines pending. See the amber rows below.
+</div>
+{% else %}
+<div class="alert alert-success">
+  All feeds look healthy.
+</div>
+{% endif %}
+
+<section>
+  <table class="ledger">
+    <thead>
+      <tr>
+        <th>Ledger account</th>
+        <th>Feed</th>
+        <th>Last txn</th>
+        <th style="text-align:right">Feed total</th>
+        <th style="text-align:right">GL total</th>
+        <th style="text-align:right">Variance</th>
+        <th style="text-align:right">Unmatched</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for a in report.accounts %}
+      <tr class="health-{{ a.severity }}">
+        <td>
+          <code>{{ a.ledger_account_code }}</code> {{ a.ledger_account_name }}
+        </td>
+        <td>
+          {{ a.display_name or '—' }}
+          {% if a.masked_number %}<div class="dim">{{ a.masked_number }}</div>{% endif %}
+        </td>
+        <td>
+          {% if a.last_statement_date %}
+            {{ a.last_statement_date.isoformat() }}
+            <div class="dim">{{ a.days_since_last_statement }} day(s) ago</div>
+          {% else %}
+            <span class="dim">— never —</span>
+          {% endif %}
+        </td>
+        <td style="text-align:right">{{ a.feed_total }}</td>
+        <td style="text-align:right">{{ a.gl_total }}</td>
+        <td style="text-align:right">
+          {% if a.has_variance %}<strong>{{ a.variance }}</strong>
+          {% else %}{{ a.variance }}{% endif %}
+        </td>
+        <td style="text-align:right">{{ a.unmatched_count }}</td>
+        <td>
+          {% if a.severity == "error" %}
+            <span class="badge badge-error">
+              {% if a.stale %}STALE{% else %}VARIANCE{% endif %}
+            </span>
+          {% elif a.severity == "warn" %}
+            <span class="badge badge-warn">UNMATCHED</span>
+          {% else %}
+            <span class="badge badge-ok">OK</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="5" style="text-align:right" class="dim">Total variance</td>
+        <td style="text-align:right"><strong>{{ report.total_variance }}</strong></td>
+        <td colspan="2"></td>
+      </tr>
+    </tfoot>
+  </table>
+</section>
+{% endif %}
+
+<section>
+  <p class="dim">
+    <strong>Feed total</strong> — sum of every imported statement line
+    for this feed account (positive = money in, negative = money out).
+    <br>
+    <strong>GL total</strong> — sum of posted journal-line movement on
+    the linked ledger account (debit − credit).
+    <br>
+    <strong>Variance</strong> — feed total minus GL total. A non-zero
+    variance means either a manual journal hit this account that the
+    feed didn't produce, or statement lines exist that haven't been
+    posted to the GL yet.
+  </p>
+</section>
+{% endblock %}

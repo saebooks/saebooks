@@ -185,7 +185,26 @@ form.tc-form button[type="submit"] {
 
 .alert { padding: 0.5rem 0.75rem; margin-bottom: 1rem; border: 1px solid; }
 .alert-error { background: #fee; border-color: #c33; color: #900; }
+.alert-warning { background: #ffefc3; border-color: #d29b00; color: #704c00; }
+.alert-success { background: #e3f7e3; border-color: #2d6a4f; color: #145a32; }
 .alert-info { background: #eef; border-color: #66c; color: #336; }
+
+/* Badges used in reconciliation health + elsewhere */
+.badge {
+  display: inline-block; padding: 0.1rem 0.45rem; font-size: 11px;
+  font-weight: 600; letter-spacing: 0.02em; border-radius: 3px;
+  border: 1px solid;
+}
+.badge-ok { background: #e3f7e3; border-color: #2d6a4f; color: #145a32; }
+.badge-warn { background: #ffefc3; border-color: #d29b00; color: #704c00; }
+.badge-error { background: #fee; border-color: #c33; color: #900; }
+
+/* Reconciliation-row row-tint: subtle left-border strip so a wall of
+   data doesn't read as homogeneous. */
+tr.health-error td { border-left-color: #c33; }
+tr.health-error td:first-child { border-left: 3px solid #c33; }
+tr.health-warn td:first-child { border-left: 3px solid #d29b00; }
+tr.health-ok td:first-child { border-left: 3px solid #2d6a4f; }
 
 /* Audit: revert button row */
 .revert-form {
@@ -867,3 +886,21 @@ html[data-theme="dark"] .acct-actions a { color: var(--fg-dim); background: var(
 html[data-theme="dark"] .acct-actions a:hover { color: var(--accent); border-color: var(--accent); }
 
 /* Journal / page-header .dim utility already uses --fg-dim — OK */
+
+/* Dark-mode softening for the warning/success/badge palette so the
+   solid-colour chips don't glow against the charcoal background. */
+html[data-theme="dark"] .alert-warning {
+  background: #3a2f00; border-color: #7a5a00; color: #f5d978;
+}
+html[data-theme="dark"] .alert-success {
+  background: #0e2a1a; border-color: #2d6a4f; color: #a5e1bd;
+}
+html[data-theme="dark"] .badge-ok {
+  background: #0e2a1a; border-color: #2d6a4f; color: #a5e1bd;
+}
+html[data-theme="dark"] .badge-warn {
+  background: #3a2f00; border-color: #7a5a00; color: #f5d978;
+}
+html[data-theme="dark"] .badge-error {
+  background: #3a0b0b; border-color: #7a1f1f; color: #f3b2b2;
+}

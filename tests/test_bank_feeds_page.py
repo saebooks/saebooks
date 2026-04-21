@@ -166,3 +166,36 @@ async def test_callback_without_sds_client_redirects_with_error(
     )
     assert r.status_code == 303
     assert "error=" in r.headers["location"]
+
+
+# ---------------------------------------------------------------------- #
+# /admin/bank-feeds/health — reconcile sweep surfacing                   #
+# ---------------------------------------------------------------------- #
+#
+# A community-gate test for /health is intentionally omitted — it would
+# share the pre-existing drift in test_community_build_404s above (the
+# live env has SAEBOOKS_EDITION=enterprise bleeding into the Settings
+# singleton). The enterprise-path smoke below is the useful coverage.
+
+
+async def test_health_renders_on_enterprise(
+    client: AsyncClient, enterprise: None
+) -> None:
+    r = await client.get("/admin/bank-feeds/health")
+    assert r.status_code == 200
+    body = r.text
+    assert "Bank feed health" in body
+    # One of the three state banners must appear (success/warning/error)
+    # depending on whatever ambient feeds the dev DB has.
+    assert any(
+        needle in body
+        for needle in (
+            "All feeds look healthy",
+            "No linked feed accounts to sweep",
+            "pending",
+            "stale or diverging",
+        )
+    )
+    # Back-to-feeds link + the legend both render.
+    assert "&larr; Back to feeds" in body
+    assert "Feed total" in body or "No linked feed accounts" in body
