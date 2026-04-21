@@ -24,6 +24,18 @@ class Company(Base):
     base_currency: Mapped[str] = mapped_column(String(3), default="AUD", nullable=False)
     fin_year_start_month: Mapped[int] = mapped_column(Integer, default=7, nullable=False)
     audit_mode: Mapped[str] = mapped_column(String, default="immutable", nullable=False)
+
+    # Per-company SISS credentials (Batch II, Enterprise-gated via
+    # FLAG_PER_COMPANY_SISS). NULL on any field = fall back to env-var
+    # creds (pre-Batch-II behaviour). ``*_encrypted`` columns are Fernet
+    # ciphertext produced by ``saebooks.services.crypto.encrypt_field`` —
+    # never persist plaintext here. ``siss_environment`` is free-text
+    # (``production`` / ``sandbox``) routed by the resolver.
+    siss_client_id: Mapped[str | None] = mapped_column(String(128))
+    siss_client_secret_encrypted: Mapped[str | None] = mapped_column(String)
+    siss_subscription_key_encrypted: Mapped[str | None] = mapped_column(String)
+    siss_environment: Mapped[str | None] = mapped_column(String(32))
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

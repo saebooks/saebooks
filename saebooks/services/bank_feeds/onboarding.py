@@ -59,6 +59,111 @@ def siss_configured(settings: Settings | None = None) -> bool:
     return bool(s.siss_client_id and s.siss_client_secret and s.siss_subscription_key)
 
 
+@dataclass(frozen=True)
+class ResolvedSissCreds:
+    """Effective SISS creds for a context, plus where they came from.
+
+    ``source`` is ``"company"`` when Batch-II per-company creds applied,
+    ``"env"`` otherwise. UI layers surface this on the credentials page
+    so an admin can see at a glance which set the router is using.
+    """
+
+    client_id: str
+    client_secret: str
+    subscription_key: str
+    token_url: str
+    api_base: str
+    environment: str
+    source: str  # "company" | "env"
+
+
+async def resolve_company_siss_creds(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    *,
+    settings: Settings | None = None,
+) -> ResolvedSissCreds:
+    """Pick per-company creds when FLAG_PER_COMPANY_SISS + company row both have them,
+    otherwise fall back to env-var creds. Raises ``SissNotConfiguredError``
+    when neither source yields a complete set.
+
+    Importing ``features`` and ``crypto`` inside the function dodges
+    the import cycle — ``features`` imports ``config`` which imports
+    nothing from this module, but keeping the lazy import pins the
+    dependency direction.
+    """
+    from saebooks.models.company import Company
+    from saebooks.services import crypto as crypto_svc
+    from saebooks.services import features as features_svc
+
+    s = settings or default_settings
+    per_company_flag_on = features_svc.is_enabled(
+        features_svc.FLAG_PER_COMPANY_SISS, settings=s
+    )
+
+    if per_company_flag_on:
+        company = await session.get(Company, company_id)
+        if company is not None and company.siss_client_id:
+            # Refuse to use per-company creds if the encryption key is
+            # absent — decrypting a ciphertext without a key is meaningless,
+            # and silently falling through to env would be surprising.
+            try:
+                client_secret = crypto_svc.decrypt_field(
+                    company.siss_client_secret_encrypted or "", settings=s
+                )
+                subscription_key = crypto_svc.decrypt_field(
+                    company.siss_subscription_key_encrypted or "", settings=s
+                )
+            except crypto_svc.FieldEncryptionError as exc:
+                raise SissNotConfiguredError(
+                    f"Per-company SISS creds present but undecryptable: {exc}"
+                ) from exc
+            if client_secret and subscription_key:
+                # Environment picker — sandbox flips the api_base only
+                # when SISS eventually ships a distinct sandbox host.
+                # Today both environments share the env-configured URLs.
+                env = (company.siss_environment or "production").lower()
+                return ResolvedSissCreds(
+                    client_id=company.siss_client_id,
+                    client_secret=client_secret,
+                    subscription_key=subscription_key,
+                    token_url=s.siss_token_url,
+                    api_base=s.siss_api_base,
+                    environment=env,
+                    source="company",
+                )
+
+    # Env fall-through.
+    if not siss_configured(s):
+        raise SissNotConfiguredError(
+            "SISS not configured — set SISS_CLIENT_ID, SISS_CLIENT_SECRET "
+            "and SISS_SUBSCRIPTION_KEY via env or .env, or configure "
+            "per-company credentials under /admin/bank-feeds/credentials."
+        )
+    return ResolvedSissCreds(
+        client_id=s.siss_client_id,
+        client_secret=s.siss_client_secret,
+        subscription_key=s.siss_subscription_key,
+        token_url=s.siss_token_url,
+        api_base=s.siss_api_base,
+        environment="sandbox" if s.siss_sandbox else "production",
+        source="env",
+    )
+
+
+def _client_from_creds(creds: ResolvedSissCreds) -> SissClient:
+    cache = TokenCache(
+        client_id=creds.client_id,
+        client_secret=creds.client_secret,
+        token_url=creds.token_url,
+    )
+    return SissClient(
+        api_base=creds.api_base,
+        subscription_key=creds.subscription_key,
+        token_cache=cache,
+    )
+
+
 @asynccontextmanager
 async def siss_client(settings: Settings | None = None) -> AsyncIterator[SissClient]:
     """Build a configured ``SissClient`` from ``Settings`` and clean it up.
@@ -83,6 +188,26 @@ async def siss_client(settings: Settings | None = None) -> AsyncIterator[SissCli
         subscription_key=s.siss_subscription_key,
         token_cache=cache,
     )
+    async with client:
+        yield client
+
+
+@asynccontextmanager
+async def siss_client_for_company(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    *,
+    settings: Settings | None = None,
+) -> AsyncIterator[SissClient]:
+    """``siss_client``'s per-company cousin (Batch II).
+
+    When ``FLAG_PER_COMPANY_SISS`` is on and the company has stored creds
+    the returned client is driven by those; otherwise falls back to env.
+    Callers that only need per-company creds in one place can use this
+    directly; the rest of the codebase is gradually migrated.
+    """
+    creds = await resolve_company_siss_creds(session, company_id, settings=settings)
+    client = _client_from_creds(creds)
     async with client:
         yield client
 

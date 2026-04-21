@@ -106,6 +106,9 @@
     <button class="btn-secondary" type="submit">Refresh feed issues</button>
   </form>
   <a href="/admin/bank-feeds/health" class="btn-secondary">Feed health&hellip;</a>
+  {% if per_company_creds_enabled %}
+  <a href="/admin/bank-feeds/credentials" class="btn-secondary">Credentials&hellip;</a>
+  {% endif %}
   {% if bank_feed_client %}
   <a href="/admin/bank-feeds/offboard" class="btn-secondary">Offboard company…</a>
   {% endif %}

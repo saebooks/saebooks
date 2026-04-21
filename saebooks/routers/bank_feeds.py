@@ -37,9 +37,16 @@ from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account
 from saebooks.models.bank_feed import BankFeedAccount, BankFeedClient
 from saebooks.models.company import Company
+from saebooks.services import crypto as crypto_svc
 from saebooks.services.bank_feeds import onboarding
 from saebooks.services.bank_feeds.errors import SissError
-from saebooks.services.features import FLAG_BANK_FEEDS, require_feature
+from saebooks.services.bank_feeds.token import TokenCache
+from saebooks.services.features import (
+    FLAG_BANK_FEEDS,
+    FLAG_PER_COMPANY_SISS,
+    is_enabled,
+    require_feature,
+)
 from saebooks.web import templates
 
 router = APIRouter(
@@ -140,6 +147,9 @@ async def bank_feeds_index(
             "edition": settings.edition,
             "company_name": company.name,
             "siss_configured": onboarding.siss_configured(settings),
+            "per_company_creds_enabled": is_enabled(
+                FLAG_PER_COMPANY_SISS, settings=settings
+            ),
             "bank_feed_client": client,
             "feed_accounts": feed_accounts,
             "ledger_by_id": ledger_by_id,
@@ -526,4 +536,194 @@ async def bank_feeds_health(request: Request) -> HTMLResponse:
             "report": report,
             "stale_cutoff": reconcile.stale_cutoff(report.through_date),
         },
+    )
+
+
+# ---------------------------------------------------------------------- #
+# Per-company credentials (Batch II — FLAG_PER_COMPANY_SISS gated)       #
+# ---------------------------------------------------------------------- #
+#
+# Lets an Enterprise admin paste SISS CDR creds directly into the DB
+# rather than shipping them via env. Secrets are Fernet-encrypted at
+# rest (see ``services/crypto.py``). The form also offers a smoke-test
+# button that exchanges the creds for an OAuth bearer token — cheap,
+# side-effect-free, confirms the creds actually work before the user
+# walks through the consent flow with a real bank.
+#
+# Both the form and the smoke-test require FLAG_PER_COMPANY_SISS *and*
+# SAEBOOKS_FIELD_ENCRYPTION_KEY. We surface both states distinctly on
+# the form so a partial install shows exactly what's missing.
+
+
+async def _redact_secret(ciphertext: str | None) -> str:
+    """Return a human-readable badge for a stored secret without leaking it."""
+    if not ciphertext:
+        return "— not set —"
+    return "set (••••••••)"
+
+
+@router.get(
+    "/credentials",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_feature(FLAG_PER_COMPANY_SISS))],
+)
+async def bank_feeds_credentials_form(
+    request: Request,
+    message: str | None = Query(None),
+    error: str | None = Query(None),
+    test: str | None = Query(None),
+) -> HTMLResponse:
+    company = await _first_company()
+    async with AsyncSessionLocal() as session:
+        fresh = await session.get(Company, company.id)
+    assert fresh is not None  # _first_company guaranteed one
+    return templates.TemplateResponse(
+        request,
+        "bank_feeds/credentials.html",
+        {
+            "edition": settings.edition,
+            "company_name": fresh.name,
+            "company": fresh,
+            "encryption_configured": crypto_svc.is_configured(settings),
+            "env_fallback_configured": onboarding.siss_configured(settings),
+            "client_secret_status": await _redact_secret(
+                fresh.siss_client_secret_encrypted
+            ),
+            "subscription_key_status": await _redact_secret(
+                fresh.siss_subscription_key_encrypted
+            ),
+            "message": message,
+            "error": error,
+            "test_result": test,
+        },
+    )
+
+
+@router.post(
+    "/credentials",
+    dependencies=[Depends(require_feature(FLAG_PER_COMPANY_SISS))],
+)
+async def bank_feeds_credentials_save(
+    client_id: str = Form(""),
+    client_secret: str = Form(""),
+    subscription_key: str = Form(""),
+    environment: str = Form("production"),
+) -> RedirectResponse:
+    """Persist per-company creds. Empty secret fields mean "leave unchanged".
+
+    This is the one place client_secret / subscription_key are accepted
+    as plaintext. ``encrypt_field`` refuses to run when the Fernet key
+    is absent, so a misconfigured install bounces with an error rather
+    than silently storing plaintext in the "encrypted" column.
+    """
+    if not crypto_svc.is_configured(settings):
+        return RedirectResponse(
+            "/admin/bank-feeds/credentials?error=encryption+not+configured",
+            status_code=303,
+        )
+    company = await _first_company()
+    env_norm = environment.strip().lower() or "production"
+    if env_norm not in ("production", "sandbox"):
+        return RedirectResponse(
+            "/admin/bank-feeds/credentials?error=invalid+environment",
+            status_code=303,
+        )
+    try:
+        new_secret_ct = (
+            crypto_svc.encrypt_field(client_secret, settings=settings)
+            if client_secret
+            else None
+        )
+        new_subkey_ct = (
+            crypto_svc.encrypt_field(subscription_key, settings=settings)
+            if subscription_key
+            else None
+        )
+    except crypto_svc.FieldEncryptionError as exc:
+        return RedirectResponse(
+            f"/admin/bank-feeds/credentials?error={str(exc)[:140]}",
+            status_code=303,
+        )
+
+    async with AsyncSessionLocal() as session:
+        row = await session.get(Company, company.id)
+        assert row is not None
+        row.siss_client_id = client_id.strip() or None
+        if new_secret_ct is not None:
+            row.siss_client_secret_encrypted = new_secret_ct
+        if new_subkey_ct is not None:
+            row.siss_subscription_key_encrypted = new_subkey_ct
+        row.siss_environment = env_norm
+        await session.commit()
+
+    return RedirectResponse(
+        "/admin/bank-feeds/credentials?message=credentials+saved",
+        status_code=303,
+    )
+
+
+@router.post(
+    "/credentials/clear",
+    dependencies=[Depends(require_feature(FLAG_PER_COMPANY_SISS))],
+)
+async def bank_feeds_credentials_clear() -> RedirectResponse:
+    """Drop per-company creds — resolver will fall back to env vars."""
+    company = await _first_company()
+    async with AsyncSessionLocal() as session:
+        row = await session.get(Company, company.id)
+        assert row is not None
+        row.siss_client_id = None
+        row.siss_client_secret_encrypted = None
+        row.siss_subscription_key_encrypted = None
+        row.siss_environment = None
+        await session.commit()
+    return RedirectResponse(
+        "/admin/bank-feeds/credentials?message=credentials+cleared",
+        status_code=303,
+    )
+
+
+@router.post(
+    "/credentials/test",
+    dependencies=[Depends(require_feature(FLAG_PER_COMPANY_SISS))],
+)
+async def bank_feeds_credentials_test() -> RedirectResponse:
+    """Smoke-test: try to fetch an OAuth bearer token with stored creds.
+
+    Side-effect-free — doesn't touch SISS's data endpoints, just the
+    ``/oauth/token`` endpoint with client-credentials grant. Success
+    confirms the creds are actually valid before the admin walks through
+    a real consent flow.
+    """
+    company = await _first_company()
+    async with AsyncSessionLocal() as session:
+        try:
+            creds = await onboarding.resolve_company_siss_creds(
+                session, company.id, settings=settings
+            )
+        except onboarding.SissNotConfiguredError as exc:
+            return RedirectResponse(
+                f"/admin/bank-feeds/credentials?test=fail&error={str(exc)[:140]}",
+                status_code=303,
+            )
+
+    cache = TokenCache(
+        client_id=creds.client_id,
+        client_secret=creds.client_secret,
+        token_url=creds.token_url,
+    )
+    try:
+        token = await cache.get()
+    except Exception as exc:
+        return RedirectResponse(
+            f"/admin/bank-feeds/credentials?test=fail&error={str(exc)[:140]}",
+            status_code=303,
+        )
+    finally:
+        await cache.aclose()
+
+    badge = "ok" if token else "fail"
+    return RedirectResponse(
+        f"/admin/bank-feeds/credentials?test={badge}&message=token+fetched+%28source%3A{creds.source}%29",
+        status_code=303,
     )

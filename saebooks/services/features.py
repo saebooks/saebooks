@@ -48,6 +48,7 @@ FLAG_LEI_LOOKUP = "lei_lookup"
 FLAG_COMPANIES_HOUSE = "companies_house"
 FLAG_MULTI_COMPANY = "multi_company"
 FLAG_EXTENDED_AUDIT_MODES = "extended_audit_modes"
+FLAG_PER_COMPANY_SISS = "per_company_siss"
 
 ALL_FLAGS: tuple[str, ...] = (
     FLAG_BANK_FEEDS,
@@ -56,6 +57,7 @@ ALL_FLAGS: tuple[str, ...] = (
     FLAG_COMPANIES_HOUSE,
     FLAG_MULTI_COMPANY,
     FLAG_EXTENDED_AUDIT_MODES,
+    FLAG_PER_COMPANY_SISS,
 )
 
 # Every flag defined above is currently Enterprise-only. Community gets

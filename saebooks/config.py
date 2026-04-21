@@ -55,6 +55,18 @@ class Settings(BaseSettings):
     siss_sandbox: bool = Field(default=False, alias="SISS_SANDBOX")
 
     # ---------------------------------------------------------------- #
+    # Field-level encryption (Batch II)                                #
+    # ---------------------------------------------------------------- #
+    # Fernet key used by ``saebooks.services.crypto`` to encrypt secret
+    # fields at rest (first user: per-company SISS credentials). Empty
+    # means "encryption disabled" — callers that try to encrypt/decrypt
+    # raise ``FieldEncryptionNotConfiguredError`` so we never silently
+    # persist a plaintext secret into a column the schema promised was
+    # ciphertext. Generate with ``cryptography.fernet.Fernet.generate_key()``
+    # and store as URL-safe base64 in the env.
+    field_encryption_key: str = Field(default="", alias="SAEBOOKS_FIELD_ENCRYPTION_KEY")
+
+    # ---------------------------------------------------------------- #
     # ABR lookup (Australian Business Register — v1.1 feature)         #
     # ---------------------------------------------------------------- #
     # The ABR SearchByABN JSON API needs a "GUID" (API key) issued by

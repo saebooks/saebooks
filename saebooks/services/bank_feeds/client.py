@@ -19,7 +19,7 @@ import logging
 import time
 import uuid
 from types import TracebackType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
@@ -28,6 +28,11 @@ from saebooks.services.bank_feeds.errors import (
     SissRateLimitError,
 )
 from saebooks.services.bank_feeds.token import TokenCache
+
+if TYPE_CHECKING:  # pragma: no cover — avoid import cycle at runtime
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from saebooks.config import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +76,39 @@ class SissClient:
         self._token_cache = token_cache
         self._http = http_client or httpx.AsyncClient(timeout=timeout_seconds)
         self._owns_http = http_client is None
+
+    # ------------------------------------------------------------------ #
+    # Constructors                                                       #
+    # ------------------------------------------------------------------ #
+
+    @classmethod
+    async def from_company(
+        cls,
+        session: AsyncSession,
+        company_id: uuid.UUID,
+        *,
+        settings: Settings | None = None,
+    ) -> SissClient:
+        """Build a client driven by per-company creds (Batch II).
+
+        Falls back to env-var creds when ``FLAG_PER_COMPANY_SISS`` is off
+        or the company row has no stored creds. Raises
+        ``SissNotConfiguredError`` when neither source is usable.
+
+        The returned client is not yet entered as a context manager —
+        the caller is responsible for ``async with``. Implementation is
+        lazy-imported from ``onboarding`` to avoid a circular import
+        (onboarding imports this module).
+        """
+        from saebooks.services.bank_feeds.onboarding import (
+            _client_from_creds,
+            resolve_company_siss_creds,
+        )
+
+        creds = await resolve_company_siss_creds(
+            session, company_id, settings=settings
+        )
+        return _client_from_creds(creds)
 
     # ------------------------------------------------------------------ #
     # Context manager                                                    #
