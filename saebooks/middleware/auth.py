@@ -1,13 +1,21 @@
-"""Forward-auth middleware — read ``Remote-User`` from Caddy/Authentik.
+"""Forward-auth middleware — read user identity from Caddy/Authentik.
 
 SAE Books sits behind Caddy + Authentik forward-auth
-(``https://books.sauer.com.au``). Authentik sets a ``Remote-User``
-header (plus ``Remote-Email`` and ``Remote-Name``) on every proxied
-request once the SSO check passes.
+(``https://books.sauer.com.au``). Authentik's outpost forwards identity
+under two naming schemes:
+
+* ``Remote-User`` / ``Remote-Email`` / ``Remote-Name`` — only when the
+  proxy provider's "Return the user as Remote-User header" is enabled.
+* ``X-authentik-username`` / ``X-authentik-email`` / ``X-authentik-name``
+  — emitted unconditionally on every outpost response.
+
+We accept both. ``Remote-*`` wins when present (explicit opt-in);
+``X-authentik-*`` is the fallback. Mirrors the ``copy_headers`` list
+in the Caddy ``(authentik)`` snippet.
 
 This middleware:
 
-* reads the three headers
+* reads either header set
 * upserts a row in ``users`` (keyed on username) so the admin UI can
   see every human who's ever reached the app
 * stamps ``request.state.user`` (``User`` ORM row) and
@@ -44,9 +52,23 @@ from saebooks.models.user import VALID_ROLES, User, UserRole
 
 logger = logging.getLogger("saebooks.auth")
 
+# Authentik outpost forwards user identity under TWO naming schemes
+# depending on configuration. The ``Remote-*`` headers are the
+# traditional forward-auth shape (what most docs assume) — Authentik
+# only emits those when the proxy provider is configured with
+# "Return the user as Remote-User header" turned on. The ``X-authentik-*``
+# variants are emitted unconditionally by every Authentik outpost.
+#
+# We accept both so the middleware Just Works whether the outpost is
+# in default mode or the Remote-User-returning mode. When both are
+# present (rare), Remote-User wins because it's the one the admin
+# explicitly opted into.
 REMOTE_USER_HEADER = "remote-user"
 REMOTE_EMAIL_HEADER = "remote-email"
 REMOTE_NAME_HEADER = "remote-name"
+AUTHENTIK_USERNAME_HEADER = "x-authentik-username"
+AUTHENTIK_EMAIL_HEADER = "x-authentik-email"
+AUTHENTIK_NAME_HEADER = "x-authentik-name"
 
 
 def _bootstrap_admins() -> frozenset[str]:
@@ -190,9 +212,24 @@ class ForwardAuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         dev_user, dev_role = _dev_override()
-        username = dev_user or request.headers.get(REMOTE_USER_HEADER)
-        email = request.headers.get(REMOTE_EMAIL_HEADER)
-        display = request.headers.get(REMOTE_NAME_HEADER)
+        # Prefer Remote-User (explicit forward-auth opt-in), fall back
+        # to X-authentik-username (what Authentik outposts emit by
+        # default). Same fallback for email + name so the /admin/users
+        # list shows the display name even when only the X-authentik-*
+        # headers are coming through.
+        username = (
+            dev_user
+            or request.headers.get(REMOTE_USER_HEADER)
+            or request.headers.get(AUTHENTIK_USERNAME_HEADER)
+        )
+        email = (
+            request.headers.get(REMOTE_EMAIL_HEADER)
+            or request.headers.get(AUTHENTIK_EMAIL_HEADER)
+        )
+        display = (
+            request.headers.get(REMOTE_NAME_HEADER)
+            or request.headers.get(AUTHENTIK_NAME_HEADER)
+        )
 
         if username:
             user = await _upsert_user(
@@ -212,15 +249,16 @@ class ForwardAuthMiddleware(BaseHTTPMiddleware):
                 # racing with an in-flight request.
                 request.state.username = user.username
         else:
-            # No Remote-User header and no dev override. Most of the
-            # time this is an anonymous healthcheck-ish request from
-            # inside the docker network — harmless. But if this fires
-            # for a browser hitting an admin page we want to see the
-            # header names Caddy actually sent so we can debug forward-
-            # auth without guessing. Logs at DEBUG (not INFO) so the
-            # default INFO level stays quiet in production.
-            logger.debug(
-                "No Remote-User on %s; saw headers: %s",
+            # No identity headers at all — neither Remote-User nor
+            # X-authentik-username. Most of the time this is an
+            # anonymous healthcheck-ish request from inside the docker
+            # network. On /admin/* paths it means forward-auth isn't
+            # wired up right; log at INFO so the misconfig is visible
+            # without flipping the global level.
+            level = logging.INFO if request.url.path.startswith("/admin/") else logging.DEBUG
+            logger.log(
+                level,
+                "No user identity on %s; saw headers: %s",
                 request.url.path,
                 sorted(request.headers.keys()),
             )
