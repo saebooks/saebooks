@@ -35,6 +35,7 @@ from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact
 from saebooks.models.invoice import InvoiceStatus
+from saebooks.models.project import Project, ProjectStatus
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import invoices as svc
 from saebooks.services import mailer as mailer_svc
@@ -102,10 +103,22 @@ async def _form_dropdowns(
             .order_by(TaxCode.code)
         )
     ).scalars().all()
+    projects = (
+        await session.execute(
+            select(Project)
+            .where(
+                Project.company_id == company_id,
+                Project.archived_at.is_(None),
+                Project.status == ProjectStatus.ACTIVE,
+            )
+            .order_by(Project.code)
+        )
+    ).scalars().all()
     return {
         "contacts": contacts,
         "income_accounts": income_accounts,
         "tax_codes": tax_codes,
+        "projects": projects,
     }
 
 
@@ -152,6 +165,9 @@ def _parse_lines_from_form(form: dict[str, Any]) -> list[dict[str, object]]:
                 "quantity": _parse_decimal(raw.get("quantity", "1"), "quantity"),
                 "unit_price": _parse_decimal(raw.get("unit_price", "0"), "unit_price"),
                 "discount_pct": _parse_decimal(raw.get("discount_pct", "0"), "discount"),
+                "project_id": uuid.UUID(raw["project_id"])
+                if raw.get("project_id")
+                else None,
             }
         )
     return lines

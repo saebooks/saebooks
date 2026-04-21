@@ -14,6 +14,7 @@ from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account
 from saebooks.models.company import Company
 from saebooks.models.journal import EntryStatus, JournalEntry
+from saebooks.models.project import Project, ProjectStatus
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import journal as svc
 from saebooks.services.journal import PostingError
@@ -37,7 +38,7 @@ async def _first_company() -> Company:
 
 async def _accounts_and_tax_codes(
     company_id: uuid.UUID,
-) -> tuple[list[Account], list[TaxCode]]:
+) -> tuple[list[Account], list[TaxCode], list[Project]]:
     async with AsyncSessionLocal() as session:
         accts = await session.execute(
             select(Account)
@@ -49,7 +50,20 @@ async def _accounts_and_tax_codes(
             .where(TaxCode.company_id == company_id, TaxCode.archived_at.is_(None))
             .order_by(TaxCode.code)
         )
-        return list(accts.scalars().all()), list(tcs.scalars().all())
+        projs = await session.execute(
+            select(Project)
+            .where(
+                Project.company_id == company_id,
+                Project.archived_at.is_(None),
+                Project.status == ProjectStatus.ACTIVE,
+            )
+            .order_by(Project.code)
+        )
+        return (
+            list(accts.scalars().all()),
+            list(tcs.scalars().all()),
+            list(projs.scalars().all()),
+        )
 
 
 @router.get("", response_class=HTMLResponse)
@@ -83,7 +97,7 @@ async def journal_list(
 @router.get("/new", response_class=HTMLResponse)
 async def journal_new(request: Request) -> HTMLResponse:
     company = await _first_company()
-    accounts, tax_codes = await _accounts_and_tax_codes(company.id)
+    accounts, tax_codes, projects = await _accounts_and_tax_codes(company.id)
     async with AsyncSessionLocal() as session:
         ref = await svc.next_ref(session)
     return templates.TemplateResponse(
@@ -96,6 +110,7 @@ async def journal_new(request: Request) -> HTMLResponse:
             "ref": ref,
             "accounts": accounts,
             "tax_codes": tax_codes,
+            "projects": projects,
             "error": None,
         },
     )
@@ -104,7 +119,7 @@ async def journal_new(request: Request) -> HTMLResponse:
 @router.get("/{entry_id}", response_class=HTMLResponse)
 async def journal_detail(request: Request, entry_id: uuid.UUID) -> HTMLResponse:
     company = await _first_company()
-    accounts, tax_codes = await _accounts_and_tax_codes(company.id)
+    accounts, tax_codes, projects = await _accounts_and_tax_codes(company.id)
     async with AsyncSessionLocal() as session:
         entry = await svc.get(session, entry_id)
     return templates.TemplateResponse(
@@ -117,6 +132,7 @@ async def journal_detail(request: Request, entry_id: uuid.UUID) -> HTMLResponse:
             "ref": entry.ref,
             "accounts": accounts,
             "tax_codes": tax_codes,
+            "projects": projects,
             "error": None,
         },
     )
@@ -136,6 +152,7 @@ def _parse_lines(form: dict[str, object]) -> list[dict[str, object]]:
         credit_raw = str(form.get(f"line_{i}_credit", "0")) or "0"
         gst_raw = str(form.get(f"line_{i}_gst_amount", ""))
         tc_raw = str(form.get(f"line_{i}_tax_code_id", ""))
+        proj_raw = str(form.get(f"line_{i}_project_id", ""))
 
         try:
             debit = Decimal(debit_raw)
@@ -157,6 +174,7 @@ def _parse_lines(form: dict[str, object]) -> list[dict[str, object]]:
             "credit": credit,
             "tax_code_id": uuid.UUID(tc_raw) if tc_raw else None,
             "gst_amount": gst_amount,
+            "project_id": uuid.UUID(proj_raw) if proj_raw.strip() else None,
         }
         lines.append(line)
         i += 1
@@ -212,7 +230,7 @@ async def journal_save(request: Request) -> RedirectResponse | HTMLResponse:
 
         except PostingError as exc:
             error = str(exc)
-            accounts, tax_codes = await _accounts_and_tax_codes(company.id)
+            accounts, tax_codes, projects = await _accounts_and_tax_codes(company.id)
             return templates.TemplateResponse(
                 request,
                 "journal/form.html",
@@ -223,6 +241,7 @@ async def journal_save(request: Request) -> RedirectResponse | HTMLResponse:
                     "ref": ref,
                     "accounts": accounts,
                     "tax_codes": tax_codes,
+                    "projects": projects,
                     "error": error,
                 },
                 status_code=422,

@@ -54,6 +54,7 @@ class _LineInput:
     quantity: Decimal
     unit_price: Decimal
     discount_pct: Decimal
+    project_id: uuid.UUID | None
 
 
 def _compute_line_totals(
@@ -139,6 +140,12 @@ async def _replace_lines(
         elif not tax_code_id:
             tax_code_id = None
 
+        project_id = raw.get("project_id")
+        if isinstance(project_id, str) and project_id:
+            project_id = uuid.UUID(project_id)
+        elif not project_id:
+            project_id = None
+
         line_input = _LineInput(
             description=str(raw["description"]),
             account_id=_as_uuid(raw["account_id"]),
@@ -146,6 +153,7 @@ async def _replace_lines(
             quantity=Decimal(str(raw.get("quantity", 1))),
             unit_price=Decimal(str(raw.get("unit_price", 0))),
             discount_pct=Decimal(str(raw.get("discount_pct", 0))),
+            project_id=project_id if isinstance(project_id, uuid.UUID) else None,
         )
         tax_rate = await _resolve_tax_rate(session, line_input.tax_code_id)
         subtotal, tax, total = _compute_line_totals(line_input, tax_rate)
@@ -162,6 +170,7 @@ async def _replace_lines(
                 line_subtotal=subtotal,
                 line_tax=tax,
                 line_total=total,
+                project_id=line_input.project_id,
             )
         )
     await session.flush()
@@ -304,7 +313,8 @@ async def post_bill(
 
     journal_lines: list[dict[str, object]] = []
     # One Dr line per expense/asset account per bill line; GST
-    # auto-poster appends the matching Dr GST Paid.
+    # auto-poster appends the matching Dr GST Paid. project_id rides
+    # through so P&L-by-project can pick up cost-side postings.
     for line in bill.lines:
         journal_lines.append(
             {
@@ -314,6 +324,7 @@ async def post_bill(
                 "credit": Decimal("0"),
                 "tax_code_id": line.tax_code_id,
                 "gst_amount": line.line_tax if line.line_tax > 0 else None,
+                "project_id": line.project_id,
             }
         )
     # Cr Trade Creditors for the total.

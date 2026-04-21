@@ -8,12 +8,14 @@ from saebooks.models.bank_feed import (
 )
 from saebooks.models.bank_rule import BankRule, MatchType
 from saebooks.models.bank_statement import BankStatementLine, StatementLineStatus
+from saebooks.models.budget import Budget
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
 from saebooks.models.depreciation_model import DepreciationModel
 from saebooks.models.fixed_asset import FixedAsset
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine, PeriodLock
 from saebooks.models.journal_template import JournalTemplate
+from saebooks.models.project import Project, ProjectStatus
 from saebooks.models.settings import Setting
 from saebooks.models.sql_query import SqlQuery
 from saebooks.models.tax_code import TaxCode
@@ -29,6 +31,7 @@ __all__ = [
     "BankFeedIssueStatus",
     "BankRule",
     "BankStatementLine",
+    "Budget",
     "Company",
     "Contact",
     "ContactType",
@@ -40,6 +43,8 @@ __all__ = [
     "JournalTemplate",
     "MatchType",
     "PeriodLock",
+    "Project",
+    "ProjectStatus",
     "Setting",
     "SqlQuery",
     "StatementLineStatus",

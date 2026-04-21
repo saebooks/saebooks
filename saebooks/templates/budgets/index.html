@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Budgets — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Budgets · {{ year }}</h1>
+  <div class="meta">{{ company_name }}</div>
+</div>
+
+<div class="contact-filter">
+  <form method="get" action="/budgets" style="display:inline">
+    <label>Year
+      <select name="year" onchange="this.form.submit()">
+        {% for y in years %}
+        <option value="{{ y }}" {{ 'selected' if y == year }}>{{ y }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </form>
+  <form method="get" action="/budgets/edit" style="display:inline;margin-left:1rem">
+    <input type="hidden" name="year" value="{{ year }}">
+    <label>Edit account
+      <select name="account_id" required>
+        <option value="">— pick an account —</option>
+        {% for a in accounts %}
+        <option value="{{ a.id }}">{{ a.code }} · {{ a.name }} ({{ a.account_type.value|lower|replace('_', ' ')|title }})</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit" class="btn">Edit grid</button>
+  </form>
+</div>
+
+{% if account_summaries %}
+<table class="acct-table">
+  <thead>
+    <tr>
+      <th>Code</th>
+      <th>Account</th>
+      {% for lbl in month_labels %}<th class="num">{{ lbl }}</th>{% endfor %}
+      <th class="num">Total</th>
+      <th class="actions"></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in account_summaries %}
+    <tr>
+      <td><code>{{ row.account.code }}</code></td>
+      <td>{{ row.account.name }}</td>
+      {% for m in range(1, 13) %}
+      <td class="num dim">{% if row.months.get(m) %}{{ '%.2f'|format(row.months[m]) }}{% else %}—{% endif %}</td>
+      {% endfor %}
+      <td class="num"><strong>{{ '%.2f'|format(row.total) }}</strong></td>
+      <td class="actions"><a href="/budgets/edit?account_id={{ row.account.id }}&amp;year={{ year }}">edit</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr>
+      <td colspan="14"><strong>Grand total</strong></td>
+      <td class="num"><strong>{{ '%.2f'|format(grand_total) }}</strong></td>
+      <td></td>
+    </tr>
+  </tfoot>
+</table>
+{% else %}
+<p class="dim">No budgets set for {{ year }}. Pick an account above and hit <em>Edit grid</em> to enter twelve monthly targets.</p>
+{% endif %}
+
+<p class="dim" style="margin-top:2rem">Budgets are a pure reporting overlay — they never post to the GL. The <a href="/reports/budget-vs-actual?year={{ year }}">budget vs actual</a> report compares these numbers to your posted ledger.</p>
+{% endblock %}

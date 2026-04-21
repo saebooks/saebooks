@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Budget: {{ account.code }} {{ year }} — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Budget · {{ account.code }} {{ account.name }}</h1>
+  <div class="meta">Year {{ year }} · {{ company_name }}</div>
+</div>
+
+{% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+
+<form method="post" action="/budgets/save" class="budget-form">
+  <input type="hidden" name="account_id" value="{{ account.id }}">
+  <input type="hidden" name="year" value="{{ year }}">
+
+  <table class="acct-table">
+    <thead>
+      <tr>
+        <th>Month</th>
+        <th class="num">Amount</th>
+        <th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for m in monthly %}
+      <tr>
+        <td>{{ m.label }} {{ year }}</td>
+        <td class="num">
+          <input type="number" step="0.01" name="month_{{ m.month }}_amount"
+                 value="{{ '%.2f'|format(m.amount) }}"
+                 class="budget-amount" style="width:9rem;text-align:right">
+        </td>
+        <td>
+          <input type="text" name="month_{{ m.month }}_notes"
+                 value="{{ m.notes or '' }}"
+                 maxlength="256"
+                 style="width:100%">
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td><strong>Total</strong></td>
+        <td class="num"><strong id="budget-total">{{ '%.2f'|format(total) }}</strong></td>
+        <td></td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <div class="form-actions" style="margin-top:1rem">
+    <button type="submit" class="btn">Save</button>
+    <a href="/budgets?year={{ year }}">Cancel</a>
+  </div>
+</form>
+
+<p class="dim" style="margin-top:1rem">Tip: set any cell to <code>0</code> to clear that month. Budgets never post to the GL — they're only used by the <a href="/reports/budget-vs-actual?year={{ year }}">budget vs actual report</a>.</p>
+
+<script>
+  // Live total as the user types — no form framework, plain JS.
+  (function () {
+    const inputs = document.querySelectorAll(".budget-amount");
+    const totalEl = document.getElementById("budget-total");
+    function recompute() {
+      let sum = 0;
+      inputs.forEach(el => { sum += parseFloat(el.value || "0") || 0; });
+      totalEl.textContent = sum.toFixed(2);
+    }
+    inputs.forEach(el => el.addEventListener("input", recompute));
+  })();
+</script>
+{% endblock %}

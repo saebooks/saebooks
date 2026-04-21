@@ -157,5 +157,10 @@ class InvoiceLine(Base):
     line_total: Mapped[Decimal] = mapped_column(
         Numeric(18, 2), nullable=False, default=Decimal("0")
     )
+    # Optional project tag for P&L-by-project / job-costing reports.
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="SET NULL"),
+    )
 
     invoice: Mapped[Invoice] = relationship(back_populates="lines")

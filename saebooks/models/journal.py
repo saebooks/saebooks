@@ -90,6 +90,11 @@ class JournalLine(Base):
         UUID(as_uuid=True), ForeignKey("tax_codes.id", ondelete="SET NULL")
     )
     gst_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    # Optional project tag for P&L-by-project reporting. SET NULL on
+    # project delete so archiving a project never destroys GL history.
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL")
+    )
 
     entry: Mapped[JournalEntry] = relationship(back_populates="lines")
 

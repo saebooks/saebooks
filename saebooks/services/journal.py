@@ -65,6 +65,7 @@ async def create_draft(
                     credit=Decimal(str(line_data.get("credit", 0))),
                     tax_code_id=line_data.get("tax_code_id"),
                     gst_amount=line_data.get("gst_amount"),
+                    project_id=line_data.get("project_id"),
                 )
             )
 
@@ -146,6 +147,7 @@ async def update_draft(
                     credit=Decimal(str(line_data.get("credit", 0))),
                     tax_code_id=line_data.get("tax_code_id"),
                     gst_amount=line_data.get("gst_amount"),
+                    project_id=line_data.get("project_id"),
                 )
             )
 
@@ -282,6 +284,7 @@ async def reverse(
                 # debit/credit swapped). Passing gst_amount would cause
                 # auto_post_gst_lines to add a duplicate GST line on post().
                 gst_amount=None,
+                project_id=line.project_id,
             )
         )
 

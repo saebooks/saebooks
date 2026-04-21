@@ -152,5 +152,10 @@ class BillLine(Base):
     line_total: Mapped[Decimal] = mapped_column(
         Numeric(18, 2), nullable=False, default=Decimal("0")
     )
+    # Optional project tag for cost-by-project / job-costing reports.
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="SET NULL"),
+    )
 
     bill: Mapped[Bill] = relationship(back_populates="lines")

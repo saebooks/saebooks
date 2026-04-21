@@ -32,7 +32,7 @@
     <table class="lines">
       <thead><tr>
         <th>Description</th><th>Account</th><th>Tax</th>
-        <th>Qty</th><th>Unit price</th><th>Disc %</th>
+        <th>Qty</th><th>Unit price</th><th>Disc %</th><th>Project</th>
       </tr></thead>
       <tbody>
         {% set existing_lines = bill.lines if bill else [] %}
@@ -59,6 +59,12 @@
             value="{{ ln.unit_price if ln else '0.00' }}" /></td>
           <td><input name="line_{{ i }}_discount_pct" size="4"
             value="{{ ln.discount_pct if ln else '0' }}" /></td>
+          <td><select name="line_{{ i }}_project_id">
+            <option value="">—</option>
+            {% for p in projects %}
+            <option value="{{ p.id }}" {{ 'selected' if ln and ln.project_id == p.id }}>{{ p.code }} {{ p.name }}</option>
+            {% endfor %}
+          </select></td>
         </tr>
         {% endfor %}
       </tbody>
