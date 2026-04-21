@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Journal entries — SAE Books Classic{% endblock %}
+{% block content %}
+<div class="page-header" data-new-action="/journal/new">
+  <h1>Journal entries</h1>
+  <div class="meta">{{ total }} entries · {{ company_name }}</div>
+</div>
+
+<div class="toolbar">
+  <a class="btn btn-primary" href="/journal/new">+ New entry <span class="dim">(F2)</span></a>
+  <a href="/journal" class="btn btn-sm {{ 'btn-primary' if filter_status == 'all' }}">All</a>
+  <a href="/journal?status=DRAFT" class="btn btn-sm {{ 'btn-primary' if filter_status == 'DRAFT' }}">Drafts</a>
+  <a href="/journal?status=POSTED" class="btn btn-sm {{ 'btn-primary' if filter_status == 'POSTED' }}">Posted</a>
+  <a href="/journal?status=REVERSED" class="btn btn-sm {{ 'btn-primary' if filter_status == 'REVERSED' }}">Reversed</a>
+</div>
+
+<table class="classic-grid">
+  <thead>
+    <tr>
+      <th>Ref</th>
+      <th>Date</th>
+      <th>Description</th>
+      <th class="right">Lines</th>
+      <th class="right">Total DR</th>
+      <th>Status</th>
+      <th class="right">Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for e in entries %}
+    <tr>
+      <td><a href="/journal/{{ e.id }}">{{ e.ref }}</a></td>
+      <td>{{ e.entry_date }}</td>
+      <td>{{ e.description or "" }}</td>
+      <td class="right">{{ e.lines|length }}</td>
+      <td class="right">{{ "%.2f"|format(e.lines|map(attribute='debit')|sum) }}</td>
+      <td><span class="badge badge-{{ e.status|lower }}">{{ e.status }}</span></td>
+      <td class="right">
+        <form method="post" action="/journal/{{ e.id }}/delete" style="display:inline"
+              onsubmit="return confirm('Delete {{ e.ref }}?')">
+          <button type="submit" class="btn btn-sm">delete</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7" class="dim center">No entries yet. <kbd>F2</kbd> to create one.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

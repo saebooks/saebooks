@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Invoices — SAE Books Classic{% endblock %}
+{% block content %}
+<div class="page-header" data-new-action="/invoices/new">
+  <h1>Invoices</h1>
+  <div class="meta">{{ company_name }} · {{ total }} invoice{{ '' if total == 1 else 's' }}</div>
+</div>
+
+<div class="toolbar">
+  <a class="btn btn-primary" href="/invoices/new">+ New invoice <span class="dim">(F2)</span></a>
+  <form method="get" action="/invoices" class="inline">
+    <label>Status
+      <select name="status" onchange="this.form.submit()">
+        <option value="all"      {{ 'selected' if status_filter == 'all'    }}>All</option>
+        <option value="DRAFT"    {{ 'selected' if status_filter == 'DRAFT'  }}>Draft</option>
+        <option value="POSTED"   {{ 'selected' if status_filter == 'POSTED' }}>Posted</option>
+        <option value="VOIDED"   {{ 'selected' if status_filter == 'VOIDED' }}>Voided</option>
+        <option value="archived" {{ 'selected' if status_filter == 'archived' }}>Archived</option>
+      </select>
+    </label>
+    <label>Search <input name="q" value="{{ search_q }}" placeholder="number or customer" /></label>
+    <button type="submit" class="btn btn-sm">Filter</button>
+  </form>
+</div>
+
+<table class="classic-grid">
+  <thead>
+    <tr>
+      <th>Number</th>
+      <th>Customer</th>
+      <th>Issued</th>
+      <th>Due</th>
+      <th>Status</th>
+      <th class="right">Total</th>
+      <th class="right">Balance</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for inv in invoices %}
+    <tr>
+      <td><a href="/invoices/{{ inv.id }}">{{ inv.number or '(draft)' }}</a></td>
+      <td>{{ contact_map.get(inv.contact_id, '—') }}</td>
+      <td>{{ inv.issue_date }}</td>
+      <td>{{ inv.due_date }}</td>
+      <td><span class="badge badge-{{ inv.status|lower }}">{{ inv.status }}</span></td>
+      <td class="right">${{ '{:,.2f}'.format(inv.total) }}</td>
+      <td class="right">${{ '{:,.2f}'.format(inv.total - inv.amount_paid) }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7" class="dim center">No invoices match the filter. <kbd>F2</kbd> to create one.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — SAE Books Classic{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Dashboard</h1>
+  <div class="meta">{{ company_name }} · {{ today.isoformat() }}</div>
+</div>
+
+<div class="dashboard-grid">
+  {% include "dashboard/_bank_balances.html" %}
+  {% include "dashboard/_aged_ar.html" %}
+  {% include "dashboard/_unmatched.html" %}
+  {% include "dashboard/_cashflow.html" %}
+  {% include "dashboard/_upcoming_recurring.html" %}
+</div>
+{% endblock %}

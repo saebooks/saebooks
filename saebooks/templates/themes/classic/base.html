@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en" class="theme-classic">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}SAE Books{% endblock %}</title>
+  {# Default bundle first so non-overridden pages (e.g. /accounts with
+     .acct-table) still get baseline typography/colour; classic.css
+     follows to override every shared selector with denser MYOB chrome.
+     The shared {% block theme_assets %} slot stays intact so a
+     per-user preferred_theme downgrade still works consistently. #}
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/themes/classic/app.css">
+  {% block theme_assets %}
+    {% set _theme = theme_for_request(request) %}
+    {# Slot left in place so downstream themes can opt in; classic is
+       already loaded above so the per-user resolver is mostly a hint
+       for the default-theme CSS bundle. #}
+  {% endblock %}
+  <script src="https://unpkg.com/htmx.org@2.0.3" defer></script>
+</head>
+<body>
+  <div class="classic-layout">
+    <aside class="classic-sidebar" aria-label="primary">
+      <div class="brand">SAE Books</div>
+
+      <div class="sidebar-group">Workspace</div>
+      <a href="/dashboard"{% if request.url.path.startswith('/dashboard') %} class="active"{% endif %}>Dashboard</a>
+
+      <div class="sidebar-group">Sales</div>
+      <a href="/invoices"{% if request.url.path == '/invoices' or request.url.path.startswith('/invoices/') and not request.url.path.startswith('/invoices/recurring') %} class="active"{% endif %}>Invoices</a>
+      <a href="/invoices/recurring"{% if request.url.path.startswith('/invoices/recurring') %} class="active"{% endif %}>Recurring</a>
+      <a href="/credit-notes"{% if request.url.path.startswith('/credit-notes') %} class="active"{% endif %}>Credit notes</a>
+      <a href="/payments"{% if request.url.path.startswith('/payments') %} class="active"{% endif %}>Payments</a>
+
+      <div class="sidebar-group">Purchases</div>
+      <a href="/bills"{% if request.url.path.startswith('/bills') %} class="active"{% endif %}>Bills</a>
+      <a href="/pay-run"{% if request.url.path.startswith('/pay-run') %} class="active"{% endif %}>Pay run</a>
+
+      <div class="sidebar-group">Contacts &amp; items</div>
+      <a href="/contacts"{% if request.url.path.startswith('/contacts') %} class="active"{% endif %}>Contacts</a>
+      <a href="/items"{% if request.url.path.startswith('/items') %} class="active"{% endif %}>Items</a>
+      <a href="/assets"{% if request.url.path.startswith('/assets') %} class="active"{% endif %}>Assets</a>
+
+      <div class="sidebar-group">Banking</div>
+      <a href="/admin/bank-feeds"{% if request.url.path.startswith('/admin/bank-feeds') %} class="active"{% endif %}>Feeds</a>
+      <a href="/reconciliation"{% if request.url.path.startswith('/reconciliation') %} class="active"{% endif %}>Reconcile</a>
+      <a href="/bank-rules"{% if request.url.path.startswith('/bank-rules') %} class="active"{% endif %}>Rules</a>
+
+      <div class="sidebar-group">Accounting</div>
+      <a href="/journal"{% if request.url.path.startswith('/journal') %} class="active"{% endif %}>Journal</a>
+      <a href="/accounts"{% if request.url.path.startswith('/accounts') %} class="active"{% endif %}>Accounts</a>
+      <a href="/templates"{% if request.url.path == '/templates' or request.url.path.startswith('/templates/') %} class="active"{% endif %}>Templates</a>
+      <a href="/projects"{% if request.url.path.startswith('/projects') %} class="active"{% endif %}>Projects</a>
+      <a href="/budgets"{% if request.url.path.startswith('/budgets') %} class="active"{% endif %}>Budgets</a>
+      <a href="/reports"{% if request.url.path.startswith('/reports') %} class="active"{% endif %}>Reports</a>
+      <a href="/admin/tax-codes"{% if request.url.path.startswith('/admin/tax-codes') %} class="active"{% endif %}>Tax codes</a>
+
+      <div class="sidebar-group">Admin</div>
+      <a href="/admin/imports"{% if request.url.path.startswith('/admin/imports') %} class="active"{% endif %}>Imports</a>
+      <a href="/admin/integrations"{% if request.url.path.startswith('/admin/integrations') %} class="active"{% endif %}>Integrations</a>
+      <a href="/admin/backups"{% if request.url.path.startswith('/admin/backups') %} class="active"{% endif %}>Backups</a>
+      <a href="/admin/audit"{% if request.url.path.startswith('/admin/audit') %} class="active"{% endif %}>Audit</a>
+      <a href="/admin/users"{% if request.url.path.startswith('/admin/users') %} class="active"{% endif %}>Users</a>
+      <a href="/admin/company/export"{% if request.url.path.startswith('/admin/company/export') %} class="active"{% endif %}>Export</a>
+      <a href="/admin/sql"{% if request.url.path.startswith('/admin/sql') %} class="active"{% endif %}>SQL</a>
+      <a href="/admin/settings"{% if request.url.path.startswith('/admin/settings') %} class="active"{% endif %}>Settings</a>
+      <a href="/admin/license"{% if request.url.path.startswith('/admin/license') %} class="active"{% endif %}>Licence</a>
+      <a href="/admin/theme"{% if request.url.path.startswith('/admin/theme') %} class="active"{% endif %}>Theme</a>
+      <div class="sidebar-gap"></div>
+    </aside>
+
+    <header class="classic-header" aria-label="breadcrumb">
+      <div class="breadcrumb">
+        {# Breadcrumb is best-effort: first segment is the area, rest
+           of the path shows as the current item. Pages that care can
+           override {% block breadcrumb %}. #}
+        {% block breadcrumb %}
+          <a href="/dashboard">Home</a>
+          {% set _path = request.url.path.strip('/').split('/') %}
+          {% if _path and _path[0] %}
+            <span class="sep">›</span>
+            <span class="current">{{ _path[0]|replace('-', ' ')|title }}</span>
+          {% endif %}
+        {% endblock %}
+      </div>
+      <div class="header-actions">
+        <a href="#" id="open-palette" title="Search (Ctrl+K, /, or F3)">Search</a>
+        <a href="/help/shortcuts" title="Keyboard shortcuts (F1)">Help</a>
+      </div>
+    </header>
+
+    <main class="classic-main">
+      {% block content %}{% endblock %}
+    </main>
+
+    <footer class="classic-statusbar" aria-label="status">
+      <span>{{ company_name or "SAE Books" }}</span>
+      <span class="sep">|</span>
+      <span>{{ edition or "community" }}</span>
+      <span class="sep">|</span>
+      {% if request.state.username is defined and request.state.username %}
+      <span>user: {{ request.state.username }}</span>
+      <span class="sep">|</span>
+      {% endif %}
+      <span>
+        <kbd>Ctrl</kbd>+<kbd>K</kbd> search
+        · <kbd>F1</kbd> help
+        · <kbd>F2</kbd> new
+        · <kbd>F9</kbd> post
+        · <kbd>g</kbd> nav
+      </span>
+    </footer>
+  </div>
+
+  <dialog id="search-palette" class="search-palette">
+    <form method="dialog" class="search-palette-form">
+      <input
+        type="search"
+        id="palette-input"
+        name="q"
+        placeholder="Search contacts, invoices, bills, accounts…"
+        autocomplete="off"
+        hx-get="/search"
+        hx-trigger="keyup changed delay:150ms"
+        hx-target="#palette-results"
+        hx-swap="innerHTML"
+      >
+      <button type="submit" class="palette-close">Esc</button>
+    </form>
+    <div id="palette-results" class="palette-results"></div>
+  </dialog>
+
+  {# HTMX modal slot — list pages that use hx-target="#classic-modal"
+     get modal editing "for free". See invoices/list.html (RR2). #}
+  <dialog id="classic-modal" class="classic-modal">
+    <div id="classic-modal-content"></div>
+  </dialog>
+
+  <script>
+    // Classic theme keyboard driver — extends the default theme with
+    // F-key bindings. F1=help, F2=new-on-list, F3=search, F5=refresh,
+    // F9=post (submit any form#post-action), F12=save-draft
+    // (submit any form#save-draft or fall back to the active form).
+    // All F-keys are preventDefaulted so the browser doesn't open its
+    // own help / find / etc. Non-F shortcuts (g-nav, /, Ctrl+K, n)
+    // mirror the default theme.
+    (function () {
+      const palette = document.getElementById("search-palette");
+      const paletteInput = document.getElementById("palette-input");
+      const paletteResults = document.getElementById("palette-results");
+      const openBtn = document.getElementById("open-palette");
+      const modal = document.getElementById("classic-modal");
+
+      function openPalette() {
+        if (!palette) return;
+        if (!palette.open) palette.showModal();
+        paletteInput.value = "";
+        paletteResults.innerHTML = "";
+        setTimeout(() => paletteInput.focus(), 0);
+      }
+      function closePalette() {
+        if (palette && palette.open) palette.close();
+      }
+      if (openBtn) {
+        openBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          openPalette();
+        });
+      }
+
+      // HTMX modal: any list page can set hx-target="#classic-modal"
+      // + hx-swap="innerHTML" on its row links; we auto-open the
+      // dialog when content lands, auto-close on Esc (handled by
+      // browser dialog default).
+      document.body.addEventListener("htmx:afterSwap", (evt) => {
+        if (modal && evt.detail && evt.detail.target && evt.detail.target.id === "classic-modal") {
+          if (!modal.open) modal.showModal();
+        }
+      });
+
+      function isTypingTarget(el) {
+        if (!el) return false;
+        const tag = el.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+        if (el.isContentEditable) return true;
+        return false;
+      }
+
+      // Grid keyboard navigation: j/k moves row-selected within the
+      // first table.classic-grid / table.data on the page; Enter
+      // follows the first anchor in the selected row.
+      function activeGrid() {
+        return document.querySelector("table.classic-grid, table.data");
+      }
+      function selectedRow(grid) {
+        return grid.querySelector("tbody tr[aria-selected='true']");
+      }
+      function rowsOf(grid) {
+        return Array.from(grid.querySelectorAll("tbody tr"))
+          .filter(r => r.querySelector("td"));
+      }
+      function selectRow(grid, idx) {
+        const rows = rowsOf(grid);
+        if (!rows.length) return;
+        idx = Math.max(0, Math.min(rows.length - 1, idx));
+        rows.forEach(r => r.removeAttribute("aria-selected"));
+        rows[idx].setAttribute("aria-selected", "true");
+        rows[idx].scrollIntoView({ block: "nearest" });
+      }
+      function moveSelection(delta) {
+        const grid = activeGrid();
+        if (!grid) return false;
+        const rows = rowsOf(grid);
+        if (!rows.length) return false;
+        const cur = selectedRow(grid);
+        const idx = cur ? rows.indexOf(cur) : -1;
+        selectRow(grid, idx + delta);
+        return true;
+      }
+      function openSelection() {
+        const grid = activeGrid();
+        if (!grid) return false;
+        const row = selectedRow(grid);
+        if (!row) return false;
+        const link = row.querySelector("a[href]");
+        if (!link) return false;
+        window.location.assign(link.getAttribute("href"));
+        return true;
+      }
+
+      // Two-key "g" sequences (same as default theme).
+      let gTimer = null;
+      let gArmed = false;
+      const gMap = {
+        d: "/dashboard",
+        j: "/journal",
+        i: "/invoices",
+        b: "/bills",
+        c: "/contacts",
+        a: "/accounts",
+        r: "/reports",
+        p: "/payments",
+      };
+
+      document.addEventListener("keydown", function (evt) {
+        // Esc closes modal / palette.
+        if (evt.key === "Escape") {
+          if (palette && palette.open) { closePalette(); return; }
+          if (modal && modal.open) { modal.close(); return; }
+        }
+
+        // F-key bindings — always prevent default so the browser
+        // doesn't swallow them.
+        if (evt.key === "F1") {
+          evt.preventDefault();
+          window.location.assign("/help/shortcuts");
+          return;
+        }
+        if (evt.key === "F3") {
+          evt.preventDefault();
+          openPalette();
+          return;
+        }
+        if (evt.key === "F5") {
+          // Let Ctrl+F5 do its full-reload thing; bare F5 stays a
+          // standard refresh — no preventDefault.
+          return;
+        }
+        if (evt.key === "F2") {
+          evt.preventDefault();
+          const preferred = document.querySelector("[data-new-action]");
+          if (preferred) {
+            window.location.assign(preferred.getAttribute("data-new-action"));
+            return;
+          }
+          const candidate = Array.from(document.querySelectorAll("a"))
+            .find(a => (a.getAttribute("href") || "").endsWith("/new"));
+          if (candidate) window.location.assign(candidate.getAttribute("href"));
+          return;
+        }
+        if (evt.key === "F9") {
+          // Submit the page's primary post-action form, if any.
+          const form = document.querySelector("form#post-action")
+            || document.querySelector("form[data-post-action]");
+          if (form) { evt.preventDefault(); form.submit(); }
+          return;
+        }
+        if (evt.key === "F12") {
+          const form = document.querySelector("form#save-draft")
+            || document.querySelector("form[data-save-draft]");
+          if (form) { evt.preventDefault(); form.submit(); }
+          return;
+        }
+
+        // Ctrl+K / Cmd+K universal palette opener.
+        if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === "k") {
+          evt.preventDefault();
+          openPalette();
+          return;
+        }
+
+        // Everything else gates on "not typing".
+        if (isTypingTarget(document.activeElement)) return;
+
+        if (evt.key === "/") {
+          evt.preventDefault();
+          openPalette();
+          return;
+        }
+
+        // Grid j/k navigation + Enter-to-open.
+        if (evt.key === "j") { if (moveSelection(1)) { evt.preventDefault(); return; } }
+        if (evt.key === "k") { if (moveSelection(-1)) { evt.preventDefault(); return; } }
+        if (evt.key === "Enter") { if (openSelection()) { evt.preventDefault(); return; } }
+
+        // "g" arms the two-key nav sequence.
+        if (evt.key === "g") {
+          gArmed = true;
+          clearTimeout(gTimer);
+          gTimer = setTimeout(() => { gArmed = false; }, 1200);
+          return;
+        }
+        if (gArmed && gMap[evt.key]) {
+          gArmed = false;
+          clearTimeout(gTimer);
+          window.location.assign(gMap[evt.key]);
+          return;
+        }
+
+        // "n" = new-on-current-list (same behaviour as F2 so muscle
+        // memory from default theme + from MYOB both work).
+        if (evt.key === "n") {
+          const preferred = document.querySelector("[data-new-action]");
+          if (preferred) {
+            evt.preventDefault();
+            window.location.assign(preferred.getAttribute("data-new-action"));
+            return;
+          }
+          const candidate = Array.from(document.querySelectorAll("a"))
+            .find(a => (a.getAttribute("href") || "").endsWith("/new"));
+          if (candidate) {
+            evt.preventDefault();
+            window.location.assign(candidate.getAttribute("href"));
+          }
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
