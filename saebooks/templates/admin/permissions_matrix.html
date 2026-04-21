@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Permissions — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Permissions matrix</h1>
+  <div class="meta">{{ edition }}</div>
+</div>
+
+<p>
+  Every capability code lives in the catalogue below. Role grants
+  cover the happy path — tick a cell to grant the code to that role,
+  untick to revoke. Per-user overrides sit on top: a user can be
+  granted a code their role doesn't carry, or revoked a code their
+  role would otherwise grant. Archived users collapse to an empty
+  permission set (every gate 403s).
+</p>
+
+{% if request.query_params.get("saved") %}
+<div class="alert alert-success">Saved grants for role <code>{{ request.query_params.get("saved") }}</code>.</div>
+{% endif %}
+{% if request.query_params.get("user_saved") %}
+<div class="alert alert-success">Per-user override saved.</div>
+{% endif %}
+{% if request.query_params.get("err") %}
+<div class="alert alert-error">Error: <code>{{ request.query_params.get("err") }}</code></div>
+{% endif %}
+
+<h2>Role grants</h2>
+
+<p>
+  Each role has its own <code>Save</code> button — submitting updates
+  the full grant-set for that role (unticked codes are dropped).
+</p>
+
+<table class="permissions-matrix">
+  <thead>
+    <tr>
+      <th>Permission</th>
+      <th>Description</th>
+      {% for role in roles %}
+      <th>{{ role }}</th>
+      {% endfor %}
+    </tr>
+  </thead>
+  <tbody>
+    {% for code, description in permissions %}
+    <tr>
+      <td><code>{{ code }}</code></td>
+      <td>{{ description }}</td>
+      {% for role in roles %}
+      <td class="cell-check">
+        <input
+          type="checkbox"
+          form="role-form-{{ role }}"
+          name="code"
+          value="{{ code }}"
+          {% if code in grants[role] %}checked{% endif %}
+        />
+      </td>
+      {% endfor %}
+    </tr>
+    {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr>
+      <td></td>
+      <td></td>
+      {% for role in roles %}
+      <td>
+        <form id="role-form-{{ role }}" method="post" action="/admin/permissions/role">
+          <input type="hidden" name="role" value="{{ role }}" />
+          <button type="submit">Save {{ role }}</button>
+        </form>
+      </td>
+      {% endfor %}
+    </tr>
+  </tfoot>
+</table>
+
+<h2>Per-user overrides</h2>
+
+<p>
+  Grant = add the permission on top of the user's role grants.
+  Revoke = block the permission even if the role grants it. Clear =
+  remove the override entirely (user falls back to role).
+</p>
+
+<form method="post" action="/admin/permissions/user" class="user-override-form">
+  <label>
+    User
+    <select name="user_id" required>
+      <option value="">— pick a user —</option>
+      {% for u in users %}
+      <option value="{{ u.id }}">{{ u.username }} ({{ u.role }})</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>
+    Permission
+    <select name="code" required>
+      {% for code, description in permissions %}
+      <option value="{{ code }}">{{ code }} — {{ description }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>
+    Action
+    <select name="action" required>
+      <option value="grant">Grant (add for this user)</option>
+      <option value="revoke">Revoke (block for this user)</option>
+      <option value="clear">Clear (fall back to role)</option>
+    </select>
+  </label>
+  <button type="submit">Apply override</button>
+</form>
+{% endblock %}

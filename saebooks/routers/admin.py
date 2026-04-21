@@ -12,6 +12,7 @@ from saebooks.models.user import VALID_ROLES, User, UserRole
 from saebooks.services import audit as audit_svc
 from saebooks.services import backups as backups_svc
 from saebooks.services import features as features_svc
+from saebooks.services import permissions as perm_svc
 from saebooks.services import settings as svc
 from saebooks.services import sql_tool as sql_svc
 from saebooks.services import theme as theme_svc
@@ -588,6 +589,111 @@ async def users_unarchive(
         user.archived_at = None
         await session.commit()
     return RedirectResponse("/admin/users?unarchived=1", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Permissions matrix (admin-only)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/permissions", response_class=HTMLResponse)
+async def permissions_matrix(
+    request: Request,
+    _admin: User = Depends(require_role(UserRole.ADMIN)),  # noqa: B008
+) -> HTMLResponse:
+    """Render the role x permission matrix + per-user overrides.
+
+    Admin ticks/unticks cells, POSTs back to /admin/permissions/role to
+    update grants. Same page also lets admin set a per-user override.
+    """
+    async with AsyncSessionLocal() as session:
+        all_perms = await perm_svc.all_permissions(session)
+        grants: dict[str, frozenset[str]] = {}
+        for role in sorted(VALID_ROLES):
+            grants[role] = await perm_svc.role_grants(session, role)
+        users = (
+            await session.execute(
+                select(User)
+                .where(User.archived_at.is_(None))
+                .order_by(User.username)
+            )
+        ).scalars().all()
+    return templates.TemplateResponse(
+        request,
+        "admin/permissions_matrix.html",
+        {
+            "edition": app_settings.edition,
+            "permissions": all_perms,
+            "roles": sorted(VALID_ROLES),
+            "grants": grants,
+            "users": users,
+        },
+    )
+
+
+@router.post("/permissions/role")
+async def permissions_set_role(
+    request: Request,
+    role: str = Form(...),
+    _admin: User = Depends(require_role(UserRole.ADMIN)),  # noqa: B008
+) -> RedirectResponse:
+    """Replace the grant-set for ``role`` with the checked codes.
+
+    Form shape: any number of ``code=<slug>`` fields. Codes not
+    present in the form are dropped from the role.
+    """
+    if role not in VALID_ROLES:
+        return RedirectResponse(
+            "/admin/permissions?err=bad_role", status_code=303
+        )
+    form = await request.form()
+    codes = [str(v) for v in form.getlist("code")]
+    async with AsyncSessionLocal() as session:
+        await perm_svc.set_role_grants(session, role, codes)
+    return RedirectResponse(
+        f"/admin/permissions?saved={role}", status_code=303
+    )
+
+
+@router.post("/permissions/user")
+async def permissions_user_override(
+    user_id: uuid.UUID = Form(...),  # noqa: B008
+    code: str = Form(...),
+    action: str = Form(...),
+    admin: User = Depends(require_role(UserRole.ADMIN)),  # noqa: B008
+) -> RedirectResponse:
+    """Grant / revoke / clear a per-user override.
+
+    ``action`` ∈ {``grant``, ``revoke``, ``clear``}. Grant and revoke
+    upsert into ``user_permissions`` with the appropriate boolean; clear
+    deletes the row so the user falls back to the role grant.
+    """
+    async with AsyncSessionLocal() as session:
+        if action == "clear":
+            await perm_svc.revoke_user_override(session, user_id, code)
+        elif action == "grant":
+            await perm_svc.grant_user_permission(
+                session,
+                user_id,
+                code,
+                granted=True,
+                granted_by=admin.username,
+            )
+        elif action == "revoke":
+            await perm_svc.grant_user_permission(
+                session,
+                user_id,
+                code,
+                granted=False,
+                granted_by=admin.username,
+            )
+        else:
+            return RedirectResponse(
+                "/admin/permissions?err=bad_action", status_code=303
+            )
+    return RedirectResponse(
+        f"/admin/permissions?user_saved={user_id}", status_code=303
+    )
 
 
 # ---------------------------------------------------------------------------
