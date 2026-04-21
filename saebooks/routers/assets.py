@@ -589,6 +589,84 @@ async def assets_dispose(
 
 
 # ---------------------------------------------------------------------- #
+# Partial disposal (MM/3)                                                #
+# ---------------------------------------------------------------------- #
+
+
+@router.get("/{asset_id}/dispose-partial", response_class=HTMLResponse)
+async def assets_dispose_partial_form(
+    request: Request, asset_id: UUID
+) -> HTMLResponse:
+    async with AsyncSessionLocal() as session:
+        asset = await svc.get(session, asset_id)
+        if asset is None:
+            raise HTTPException(404, "Asset not found")
+        if asset.status != "active":
+            raise HTTPException(
+                400,
+                f"Cannot partially dispose — asset status is {asset.status!r}",
+            )
+        company = await session.get(Company, asset.company_id)
+        dropdowns = await _form_dropdowns(session, asset.company_id)
+    return templates.TemplateResponse(
+        request,
+        "assets/dispose_partial.html",
+        {
+            "edition": settings.edition,
+            "company_name": company.name if company else "",
+            "asset": asset,
+            "cash_accounts": dropdowns["cash_accounts"],
+            "today": date.today(),
+            "error": None,
+        },
+    )
+
+
+@router.post("/{asset_id}/dispose-partial", response_model=None)
+async def assets_dispose_partial(
+    request: Request,
+    asset_id: UUID,
+    fraction: str = Form(...),
+    disposal_date: str = Form(...),
+    proceeds: str = Form(...),
+    cash_account_id: str = Form(...),
+) -> RedirectResponse | HTMLResponse:
+    try:
+        async with AsyncSessionLocal() as session:
+            parent, _child, _gl = await svc.dispose_partial(
+                session,
+                asset_id,
+                fraction=_parse_decimal(fraction, "fraction"),
+                disposal_date=_parse_date(disposal_date, "disposal_date"),
+                proceeds=_parse_decimal(proceeds, "proceeds"),
+                cash_account_id=uuid.UUID(cash_account_id),
+                posted_by="web",
+            )
+    except ValueError as exc:
+        async with AsyncSessionLocal() as session:
+            asset = await svc.get(session, asset_id)
+            if asset is None:
+                raise HTTPException(404, "Asset not found") from exc
+            company = await session.get(Company, asset.company_id)
+            dropdowns = await _form_dropdowns(session, asset.company_id)
+        return templates.TemplateResponse(
+            request,
+            "assets/dispose_partial.html",
+            {
+                "edition": settings.edition,
+                "company_name": company.name if company else "",
+                "asset": asset,
+                "cash_accounts": dropdowns["cash_accounts"],
+                "today": date.today(),
+                "error": str(exc),
+            },
+            status_code=422,
+        )
+    # Redirect back to the parent — the child row is visible on the list.
+    return RedirectResponse(f"/assets/{parent.id}", status_code=303)
+
+
+# ---------------------------------------------------------------------- #
 # Archive                                                                #
 # ---------------------------------------------------------------------- #
 

@@ -47,6 +47,16 @@
   </table>
 </section>
 
+{% if asset.parent_asset_id %}
+<section>
+  <h3>Partial-disposal child</h3>
+  <p class="dim">
+    This row is the disposed-fraction child of
+    <a href="/assets/{{ asset.parent_asset_id }}">the parent asset</a>.
+  </p>
+</section>
+{% endif %}
+
 {% if asset.status == 'disposed' %}
 <section>
   <h3>Disposal</h3>
@@ -71,6 +81,8 @@
   </form>
 
   <a href="/assets/{{ asset.id }}/dispose" class="btn-secondary">Dispose…</a>
+
+  <a href="/assets/{{ asset.id }}/dispose-partial" class="btn-secondary">Partial dispose…</a>
 
   <form method="post" action="/assets/{{ asset.id }}/archive" style="display:inline-block;margin-left:1rem" onsubmit="return confirm('Archive this asset?')">
     <button type="submit" class="btn-secondary">Archive</button>

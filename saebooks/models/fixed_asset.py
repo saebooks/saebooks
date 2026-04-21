@@ -143,6 +143,14 @@ class FixedAsset(CompanyScoped, Base):
         UUID(as_uuid=True),
         ForeignKey("journal_entries.id", ondelete="SET NULL"),
     )
+    parent_asset_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("fixed_assets.id", ondelete="SET NULL"),
+        comment=(
+            "Self-ref: points at the original asset when this row is the "
+            "disposed-fraction child from a partial disposal."
+        ),
+    )
 
     # ---- Physical tracking ------------------------------------------ #
     serial_number: Mapped[str | None] = mapped_column(String)

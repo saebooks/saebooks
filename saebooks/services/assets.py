@@ -629,3 +629,135 @@ async def dispose_asset(
     await session.commit()
     await session.refresh(asset)
     return asset, gain_loss
+
+
+# ---------------------------------------------------------------------- #
+# Partial disposal (Batch MM/3)                                          #
+# ---------------------------------------------------------------------- #
+
+
+async def dispose_partial(
+    session: AsyncSession,
+    asset_id: uuid.UUID,
+    *,
+    fraction: Decimal,
+    disposal_date: date,
+    proceeds: Decimal,
+    cash_account_id: uuid.UUID,
+    posted_by: str | None = None,
+) -> tuple[FixedAsset, FixedAsset, Decimal]:
+    """Dispose a fraction (0 < f < 1) of an active asset.
+
+    Splits the original row:
+
+    * **Parent** (the row pointed at by ``asset_id``) has its ``cost``
+      and ``residual_value`` reduced by the disposed share. Remains
+      ``active`` — future depreciation naturally computes on the
+      reduced cost from ``disposal_date`` onward.
+    * **Child** is a fresh ``FixedAsset`` row pinned to the parent via
+      ``parent_asset_id``. It carries the disposed share of cost and
+      residual, uses the same accounts + model, inherits
+      ``in_service_date`` + ``purchase_date`` from the parent, and
+      has its ``last_depreciation_posted_through`` fast-forwarded to
+      ``disposal_date`` so the downstream ``dispose_asset`` call
+      short-circuits the catch-up pass.
+
+    ``dispose_asset`` then runs against the child — posting the usual
+    DR cash / DR accum_dep / CR cost / plug-gain-or-loss journal on
+    just the disposed fraction. The parent's cost and accum_dep are
+    untouched on the GL (the share that stays with the parent).
+
+    Returns ``(parent, child, gain_loss)`` — same gain_loss convention
+    as ``dispose_asset`` (positive = gain, negative = loss).
+
+    Validation:
+
+    * ``0 < fraction < 1`` — use ``dispose_asset`` for a full disposal.
+    * Asset must be ``active``.
+    * Depreciation is caught up on the parent before the split so the
+      shares are computed against a current NBV.
+    """
+    fraction = Decimal(fraction)
+    if fraction <= 0 or fraction >= 1:
+        raise ValueError(
+            f"fraction must be in (0, 1); got {fraction} — "
+            "use dispose_asset() for full disposal"
+        )
+
+    asset = await get(session, asset_id)
+    if asset is None:
+        raise ValueError(f"Fixed asset {asset_id} not found")
+    if asset.status != "active":
+        raise ValueError(
+            f"Cannot partially dispose asset in status {asset.status!r} "
+            "— must be active"
+        )
+
+    # Step 1: bring depreciation current on the parent so shares are
+    # computed against the right NBV.
+    await post_depreciation(
+        session, asset_id, disposal_date, posted_by=posted_by
+    )
+    asset = await get(session, asset_id)
+    assert asset is not None  # reload — same PK, cannot disappear
+
+    # Step 2: compute the disposed-fraction shares. Round both to the
+    # cent so the remainder that stays with the parent is an exact
+    # subtraction (cent-balanced).
+    child_cost = (asset.cost * fraction).quantize(_CENT)
+    child_residual = (asset.residual_value * fraction).quantize(_CENT)
+    if child_cost <= 0:
+        raise ValueError(
+            f"fraction {fraction} too small — disposed cost rounds to zero"
+        )
+    parent_new_cost = (asset.cost - child_cost).quantize(_CENT)
+    parent_new_residual = (
+        asset.residual_value - child_residual
+    ).quantize(_CENT)
+
+    # Step 3: create the child row. Copies GL coords + model + dates
+    # from the parent; the dep cursor fast-forwards to disposal_date
+    # so dispose_asset's internal post_depreciation catch-up is a no-op.
+    child_code = f"{asset.code}-P{datetime.now(UTC).strftime('%H%M%S')}"
+    child = FixedAsset(
+        company_id=asset.company_id,
+        code=child_code,
+        name=f"{asset.name} (disposed portion)",
+        description=asset.description,
+        cost_account_id=asset.cost_account_id,
+        accum_dep_account_id=asset.accum_dep_account_id,
+        dep_expense_account_id=asset.dep_expense_account_id,
+        depreciation_model_id=asset.depreciation_model_id,
+        purchase_date=asset.purchase_date,
+        in_service_date=asset.in_service_date,
+        cost=child_cost,
+        residual_value=child_residual,
+        last_depreciation_posted_through=disposal_date,
+        parent_asset_id=asset.id,
+        status="active",
+    )
+    session.add(child)
+    await session.flush()  # get child.id for the dispose call
+
+    # Step 4: reduce parent's cost + residual by the disposed share.
+    asset.cost = parent_new_cost
+    asset.residual_value = parent_new_residual
+    await session.commit()
+    await session.refresh(asset)
+    await session.refresh(child)
+
+    # Step 5: dispose the child — posts the closeout journal for just
+    # the disposed share.
+    disposed_child, gain_loss = await dispose_asset(
+        session,
+        child.id,
+        disposal_date=disposal_date,
+        proceeds=proceeds,
+        cash_account_id=cash_account_id,
+        posted_by=posted_by,
+    )
+
+    # Reload parent one more time — the dispose_asset call may have
+    # expired the session's view of it.
+    await session.refresh(asset)
+    return asset, disposed_child, gain_loss

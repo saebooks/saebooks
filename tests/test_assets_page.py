@@ -208,6 +208,128 @@ async def test_dispose_flow(client: AsyncClient) -> None:
 
 
 # ---------------------------------------------------------------------- #
+# Partial disposal (MM/3)                                                #
+# ---------------------------------------------------------------------- #
+
+
+async def test_dispose_partial_form_renders(client: AsyncClient) -> None:
+    asset_id = await _create_asset_via_http(
+        client,
+        name="Smoke partial form",
+        cost="5000.00",
+        model="asset_no_depreciation",
+    )
+    r = await client.get(f"/assets/{asset_id}/dispose-partial")
+    assert r.status_code == 200
+    assert "Partial disposal" in r.text
+    assert 'name="fraction"' in r.text
+    assert 'name="cash_account_id"' in r.text
+
+
+async def test_dispose_partial_happy_path_redirects_to_parent(
+    client: AsyncClient,
+) -> None:
+    asset_id = await _create_asset_via_http(
+        client,
+        name="Smoke partial dispose",
+        cost="10000.00",
+        model="asset_no_depreciation",
+    )
+    # Grab a cash-account UUID from the form.
+    form = await client.get(f"/assets/{asset_id}/dispose-partial")
+    body = form.text
+    idx = body.index('name="cash_account_id"')
+    start = body.index('<option value="', idx) + len('<option value="')
+    end = body.index('"', start)
+    cash_id = body[start:end]
+
+    post = await client.post(
+        f"/assets/{asset_id}/dispose-partial",
+        data={
+            "fraction": "0.3",
+            "disposal_date": "2026-06-15",
+            "proceeds": "3200",
+            "cash_account_id": cash_id,
+        },
+        follow_redirects=False,
+    )
+    assert post.status_code == 303, (post.status_code, post.text[:400])
+    # Redirect back to the PARENT (same asset_id) — child is spawned but
+    # the user came from the parent detail page.
+    assert post.headers["location"].endswith(f"/assets/{asset_id}")
+
+    # Parent still active, cost reduced to 7000.
+    detail = await client.get(f"/assets/{asset_id}")
+    assert detail.status_code == 200
+    assert "7000.00" in detail.text
+
+
+async def test_dispose_partial_rejects_out_of_range_fraction(
+    client: AsyncClient,
+) -> None:
+    asset_id = await _create_asset_via_http(
+        client,
+        name="Smoke partial reject",
+        cost="4000.00",
+        model="asset_no_depreciation",
+    )
+    form = await client.get(f"/assets/{asset_id}/dispose-partial")
+    body = form.text
+    idx = body.index('name="cash_account_id"')
+    start = body.index('<option value="', idx) + len('<option value="')
+    end = body.index('"', start)
+    cash_id = body[start:end]
+
+    # fraction=1 is out of range (use full dispose).
+    post = await client.post(
+        f"/assets/{asset_id}/dispose-partial",
+        data={
+            "fraction": "1",
+            "disposal_date": "2026-06-15",
+            "proceeds": "4000",
+            "cash_account_id": cash_id,
+        },
+        follow_redirects=False,
+    )
+    assert post.status_code == 422
+    assert "fraction must be in" in post.text
+
+
+async def test_dispose_partial_not_allowed_on_disposed_asset(
+    client: AsyncClient,
+) -> None:
+    asset_id = await _create_asset_via_http(
+        client,
+        name="Smoke can't partial-dispose disposed",
+        cost="1000.00",
+        model="asset_no_depreciation",
+    )
+    # Grab cash_id
+    form = await client.get(f"/assets/{asset_id}/dispose")
+    body = form.text
+    idx = body.index('name="cash_account_id"')
+    start = body.index('<option value="', idx) + len('<option value="')
+    end = body.index('"', start)
+    cash_id = body[start:end]
+
+    # Fully dispose first
+    full = await client.post(
+        f"/assets/{asset_id}/dispose",
+        data={
+            "disposal_date": "2026-06-01",
+            "proceeds": "800",
+            "cash_account_id": cash_id,
+        },
+        follow_redirects=False,
+    )
+    assert full.status_code == 303
+
+    # Now the partial form should 400.
+    r = await client.get(f"/assets/{asset_id}/dispose-partial")
+    assert r.status_code == 400
+
+
+# ---------------------------------------------------------------------- #
 # CSV bulk import (MM/2)                                                 #
 # ---------------------------------------------------------------------- #
 
