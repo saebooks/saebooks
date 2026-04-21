@@ -24,6 +24,8 @@ from saebooks.config import settings as app_settings
 
 SECRET = "whsec_testsecret"
 LEI_BASE = "https://lei.example/api/v1"
+CH_BASE = "https://ch.example/api"
+CH_NUMBER = "00000006"
 
 
 @pytest.fixture
@@ -37,6 +39,12 @@ def configured_lei(monkeypatch: pytest.MonkeyPatch, enterprise: None) -> None:
 
 
 @pytest.fixture
+def configured_ch(monkeypatch: pytest.MonkeyPatch, enterprise: None) -> None:
+    monkeypatch.setattr(app_settings, "ch_api_key", "test-ch-key")
+    monkeypatch.setattr(app_settings, "ch_api_base", CH_BASE)
+
+
+@pytest.fixture
 def stripe_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(app_settings, "stripe_webhook_secret", SECRET)
 
@@ -47,6 +55,7 @@ async def test_integrations_index_renders(client: AsyncClient) -> None:
     body = r.text
     assert "Paperless" in body
     assert "LEI" in body or "GLEIF" in body
+    assert "Companies House" in body
     assert "Stripe" in body
     assert "ATO" in body
 
@@ -62,6 +71,7 @@ async def test_integrations_healthz_is_plain_text(client: AsyncClient) -> None:
     assert "text/plain" in r.headers["content-type"]
     # community default — lei off, stripe off, paperless off, ato off
     assert "lei=" in r.text
+    assert "companies_house=" in r.text
     assert "stripe=" in r.text
     assert "paperless=" in r.text
     assert "ato_prefill=" in r.text
@@ -188,6 +198,86 @@ async def test_lei_lookup_404_fragment_on_not_found(
     )
     assert r.status_code == 404
     assert "GLEIF lookup failed" in r.text
+
+
+# ----- Companies House lookup (feature-gated) ----- #
+
+
+async def test_ch_lookup_404_in_community(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(app_settings, "edition", "community")
+    r = await client.post(
+        "/contacts/ch-lookup",
+        data={"company_number": CH_NUMBER},
+    )
+    assert r.status_code == 404
+
+
+async def test_ch_apply_404_in_community(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(app_settings, "edition", "community")
+    r = await client.post(
+        f"/contacts/{uuid.uuid4()}/ch-apply",
+        data={"company_number": CH_NUMBER},
+    )
+    assert r.status_code == 404
+
+
+@respx.mock
+async def test_ch_lookup_returns_fragment_in_enterprise(
+    client: AsyncClient, configured_ch: None
+) -> None:
+    payload = {
+        "company_name": "ACME WIDGETS LIMITED",
+        "company_number": CH_NUMBER,
+        "company_status": "active",
+        "company_type": "ltd",
+        "registered_office_address": {
+            "locality": "London",
+            "country": "United Kingdom",
+        },
+    }
+    respx.get(f"{CH_BASE}/company/{CH_NUMBER}").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+    r = await client.post(
+        "/contacts/ch-lookup",
+        data={"company_number": CH_NUMBER},
+    )
+    assert r.status_code == 200
+    assert "Companies House match" in r.text
+    assert "ACME WIDGETS LIMITED" in r.text
+
+
+@respx.mock
+async def test_ch_lookup_404_fragment_on_not_found(
+    client: AsyncClient, configured_ch: None
+) -> None:
+    respx.get(f"{CH_BASE}/company/{CH_NUMBER}").mock(
+        return_value=httpx.Response(404, text="")
+    )
+    r = await client.post(
+        "/contacts/ch-lookup",
+        data={"company_number": CH_NUMBER},
+    )
+    assert r.status_code == 404
+    assert "Companies House lookup failed" in r.text
+
+
+async def test_ch_lookup_503_when_unconfigured(
+    client: AsyncClient, enterprise: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Enterprise edition but no API key — gate opens, client raises
+    # CompaniesHouseNotConfiguredError, router returns 503.
+    monkeypatch.setattr(app_settings, "ch_api_key", "")
+    r = await client.post(
+        "/contacts/ch-lookup",
+        data={"company_number": CH_NUMBER},
+    )
+    assert r.status_code == 503
+    assert "not configured" in r.text
 
 
 # ----- ATO prefill stub ----- #

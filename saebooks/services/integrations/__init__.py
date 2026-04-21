@@ -18,6 +18,17 @@ from saebooks.services.integrations.ato_prefill import (
     AtoPrefillNotImplementedError,
     prefill_bas,
 )
+from saebooks.services.integrations.companies_house import (
+    CompaniesHouseError,
+    CompaniesHouseLookup,
+    CompaniesHouseNotConfiguredError,
+    CompaniesHouseNotFoundError,
+    lookup_company,
+    parse_company_response,
+)
+from saebooks.services.integrations.companies_house import (
+    apply_to_contact as apply_ch_to_contact,
+)
 from saebooks.services.integrations.lei import (
     LeiError,
     LeiLookup,
@@ -45,6 +56,10 @@ from saebooks.services.integrations.stripe import (
 __all__ = [
     "AtoPrefillError",
     "AtoPrefillNotImplementedError",
+    "CompaniesHouseError",
+    "CompaniesHouseLookup",
+    "CompaniesHouseNotConfiguredError",
+    "CompaniesHouseNotFoundError",
     "LeiError",
     "LeiLookup",
     "LeiNotFoundError",
@@ -55,11 +70,14 @@ __all__ = [
     "StripeError",
     "StripeNotConfiguredError",
     "StripeSignatureError",
+    "apply_ch_to_contact",
     "apply_to_contact",
     "attach_to_journal",
     "build_browser_url",
     "handle_payment_intent_succeeded",
+    "lookup_company",
     "lookup_lei",
+    "parse_company_response",
     "parse_lei_response",
     "prefill_bas",
     "verify_signature",

@@ -41,6 +41,24 @@
   </article>
 
   <article class="card">
+    <h2>Companies House lookup</h2>
+    <p class="muted">Enrich UK Contact records with Companies House register data.</p>
+    <p>
+      Status:
+      {% if statuses.companies_house %}
+        <strong class="ok">enabled (Enterprise)</strong>
+      {% elif companies_house_enabled %}
+        <strong class="off">unconfigured</strong> &mdash; set <code>CH_API_KEY</code> from <code>developer.company-information.service.gov.uk</code>.
+      {% else %}
+        <strong class="off">disabled</strong> &mdash; Enterprise edition only.
+      {% endif %}
+    </p>
+    {% if companies_house_enabled %}
+    <p><em>Look-up widget ships with the Contact form.</em></p>
+    {% endif %}
+  </article>
+
+  <article class="card">
     <h2>Stripe webhook</h2>
     <p class="muted">Accept <code>payment_intent.succeeded</code> events and create Payment rows.</p>
     <p>

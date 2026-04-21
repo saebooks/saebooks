@@ -1,0 +1,50 @@
+<div class="ch-panel" id="ch-panel" style="border:1px solid var(--rule); padding:0.75rem; margin-top:0.75rem; background:#f8fafc">
+  <h3 style="margin:0 0 0.5rem 0; font-size:1rem">Companies House match</h3>
+  <dl style="display:grid; grid-template-columns: max-content 1fr; gap:0.25rem 1rem; margin:0">
+    <dt>Company number</dt><dd>{{ result.company_number }}</dd>
+    <dt>Company name</dt><dd>{{ result.company_name or '—' }}</dd>
+    {% if result.company_status %}
+    <dt>Status</dt><dd>{{ result.company_status }}</dd>
+    {% endif %}
+    {% if result.company_type %}
+    <dt>Type</dt><dd>{{ result.company_type }}</dd>
+    {% endif %}
+    {% if result.jurisdiction %}
+    <dt>Jurisdiction</dt><dd>{{ result.jurisdiction }}</dd>
+    {% endif %}
+    {% if result.date_of_creation %}
+    <dt>Incorporated</dt><dd>{{ result.date_of_creation }}</dd>
+    {% endif %}
+    {% if result.date_of_cessation %}
+    <dt>Ceased</dt><dd>{{ result.date_of_cessation }}</dd>
+    {% endif %}
+    {% if result.address_line1 %}
+    <dt>Address line 1</dt><dd>{{ result.address_line1 }}</dd>
+    {% endif %}
+    {% if result.address_line2 %}
+    <dt>Address line 2</dt><dd>{{ result.address_line2 }}</dd>
+    {% endif %}
+    <dt>City / country</dt><dd>{{ result.address_city or '—' }}{% if result.address_country %}, {{ result.address_country }}{% endif %}</dd>
+    {% if result.address_state %}
+    <dt>Region</dt><dd>{{ result.address_state }}</dd>
+    {% endif %}
+    {% if result.address_postcode %}
+    <dt>Postcode</dt><dd>{{ result.address_postcode }}</dd>
+    {% endif %}
+    {% if result.sic_codes %}
+    <dt>SIC codes</dt><dd>{{ result.sic_codes|join(', ') }}</dd>
+    {% endif %}
+    {% if result.previous_names %}
+    <dt>Previous names</dt><dd>{{ result.previous_names|join(', ') }}</dd>
+    {% endif %}
+    {% if result.accounts_next_due %}
+    <dt>Accounts next due</dt><dd>{{ result.accounts_next_due }}</dd>
+    {% endif %}
+    {% if result.accounts_last_made_up_to %}
+    <dt>Accounts last made up to</dt><dd>{{ result.accounts_last_made_up_to }}</dd>
+    {% endif %}
+  </dl>
+  <div style="margin-top:0.75rem; color:var(--muted); font-size:0.9rem">
+    Save the contact to apply these values, or edit the fields above first.
+  </div>
+</div>

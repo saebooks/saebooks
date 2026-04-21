@@ -38,11 +38,15 @@ from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
 from saebooks.services import contacts as contacts_svc
 from saebooks.services.features import (
+    FLAG_COMPANIES_HOUSE,
     FLAG_LEI_LOOKUP,
     is_enabled,
     require_feature,
 )
 from saebooks.services.integrations import (
+    CompaniesHouseError,
+    CompaniesHouseNotConfiguredError,
+    CompaniesHouseNotFoundError,
     LeiError,
     LeiNotFoundError,
     PaperlessClient,
@@ -50,9 +54,11 @@ from saebooks.services.integrations import (
     PaperlessNotConfiguredError,
     StripeError,
     StripeSignatureError,
+    apply_ch_to_contact,
     apply_to_contact,
     attach_to_journal,
     handle_payment_intent_succeeded,
+    lookup_company,
     lookup_lei,
     verify_signature,
 )
@@ -156,6 +162,111 @@ async def contacts_lei_apply(
 
 
 # ---------------------------------------------------------------------------
+# Companies House lookup (Enterprise — FLAG_COMPANIES_HOUSE).
+# Same shape as LEI; lives under /contacts/ so the existing contact-form
+# UX can host an HTMX preview fragment. Needs a free API key from
+# developer.company-information.service.gov.uk (sent as Basic-auth
+# username with empty password — quirk of the CH API, not a mistake).
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/contacts/ch-lookup",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_feature(FLAG_COMPANIES_HOUSE))],
+)
+async def contacts_ch_lookup(
+    request: Request,
+    company_number: str = Form(...),
+) -> HTMLResponse:
+    """HTMX: look up a UK company number and render the preview fragment."""
+    try:
+        result = await lookup_company(company_number, settings=settings)
+    except CompaniesHouseNotConfiguredError as exc:
+        return templates.TemplateResponse(
+            request,
+            "integrations/_ch_error.html",
+            {"message": str(exc)},
+            status_code=503,
+        )
+    except CompaniesHouseNotFoundError as exc:
+        return templates.TemplateResponse(
+            request,
+            "integrations/_ch_error.html",
+            {"message": str(exc)},
+            status_code=404,
+        )
+    except CompaniesHouseError as exc:
+        return templates.TemplateResponse(
+            request,
+            "integrations/_ch_error.html",
+            {"message": str(exc)},
+            status_code=400,
+        )
+    return templates.TemplateResponse(
+        request,
+        "integrations/_ch_result.html",
+        {"result": result},
+    )
+
+
+@router.post(
+    "/contacts/{contact_id}/ch-apply",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_feature(FLAG_COMPANIES_HOUSE))],
+)
+async def contacts_ch_apply(
+    request: Request,
+    contact_id: UUID,
+    company_number: str = Form(...),
+    overwrite: str = Form(""),
+) -> HTMLResponse:
+    """Fetch Companies House and merge into the live Contact row."""
+    try:
+        result = await lookup_company(company_number, settings=settings)
+    except CompaniesHouseNotConfiguredError as exc:
+        return templates.TemplateResponse(
+            request,
+            "integrations/_ch_error.html",
+            {"message": str(exc)},
+            status_code=503,
+        )
+    except CompaniesHouseNotFoundError as exc:
+        return templates.TemplateResponse(
+            request,
+            "integrations/_ch_error.html",
+            {"message": str(exc)},
+            status_code=404,
+        )
+    except CompaniesHouseError as exc:
+        return templates.TemplateResponse(
+            request,
+            "integrations/_ch_error.html",
+            {"message": str(exc)},
+            status_code=400,
+        )
+
+    async with AsyncSessionLocal() as session:
+        contact = await contacts_svc.get(session, contact_id)
+        if contact is None:
+            raise HTTPException(404, "Contact not found")
+        changed = apply_ch_to_contact(
+            contact, result, overwrite=overwrite.lower() in {"1", "true", "on"}
+        )
+        await session.commit()
+
+    return templates.TemplateResponse(
+        request,
+        "integrations/_ch_applied.html",
+        {
+            "result": result,
+            "changed": changed,
+            "contact_id": contact_id,
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
 # Stripe webhook (public — auth is HMAC signature verification).
 # ---------------------------------------------------------------------------
 
@@ -232,6 +343,9 @@ async def integrations_index(request: Request) -> HTMLResponse:
             and (settings.paperless_api_url or settings.paperless_url)
         ),
         "lei": is_enabled(FLAG_LEI_LOOKUP),
+        "companies_house": (
+            is_enabled(FLAG_COMPANIES_HOUSE) and bool(settings.ch_api_key)
+        ),
         "stripe": bool(settings.stripe_webhook_secret),
         "ato_prefill": False,  # Batch KK — not wired
     }
@@ -242,6 +356,7 @@ async def integrations_index(request: Request) -> HTMLResponse:
             "edition": settings.edition,
             "statuses": statuses,
             "lei_enabled": is_enabled(FLAG_LEI_LOOKUP),
+            "companies_house_enabled": is_enabled(FLAG_COMPANIES_HOUSE),
         },
     )
 
@@ -314,6 +429,9 @@ async def integrations_healthz() -> PlainTextResponse:
     flags: dict[str, Any] = {
         "paperless": bool(settings.paperless_api_token),
         "lei": is_enabled(FLAG_LEI_LOOKUP),
+        "companies_house": (
+            is_enabled(FLAG_COMPANIES_HOUSE) and bool(settings.ch_api_key)
+        ),
         "stripe": bool(settings.stripe_webhook_secret),
         "ato_prefill": False,
     }

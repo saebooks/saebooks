@@ -45,6 +45,7 @@ from saebooks.config import settings as _default_settings
 FLAG_BANK_FEEDS = "bank_feeds"
 FLAG_ABR_LOOKUP = "abr_lookup"
 FLAG_LEI_LOOKUP = "lei_lookup"
+FLAG_COMPANIES_HOUSE = "companies_house"
 FLAG_MULTI_COMPANY = "multi_company"
 FLAG_EXTENDED_AUDIT_MODES = "extended_audit_modes"
 
@@ -52,6 +53,7 @@ ALL_FLAGS: tuple[str, ...] = (
     FLAG_BANK_FEEDS,
     FLAG_ABR_LOOKUP,
     FLAG_LEI_LOOKUP,
+    FLAG_COMPANIES_HOUSE,
     FLAG_MULTI_COMPANY,
     FLAG_EXTENDED_AUDIT_MODES,
 )

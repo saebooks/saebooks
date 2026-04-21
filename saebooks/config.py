@@ -109,6 +109,17 @@ class Settings(BaseSettings):
         alias="LEI_API_BASE",
     )
 
+    # Companies House (UK) — Enterprise-only (see FLAG_COMPANIES_HOUSE).
+    # Needs a free API key from https://developer.company-information.service.gov.uk/.
+    # Key is sent as HTTP Basic-auth username with an empty password —
+    # quirk of the CH API. When CH_API_KEY is empty the module raises
+    # ``CompaniesHouseNotConfiguredError`` on use.
+    ch_api_key: str = Field(default="", alias="CH_API_KEY")
+    ch_api_base: str = Field(
+        default="https://api.company-information.service.gov.uk",
+        alias="CH_API_BASE",
+    )
+
     # ---------------------------------------------------------------- #
     # Frontend theme (Batch QQ)                                        #
     # ---------------------------------------------------------------- #
