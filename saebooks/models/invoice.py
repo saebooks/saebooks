@@ -39,6 +39,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from saebooks.db import Base
+from saebooks.models._scope import CompanyScoped
 
 
 class InvoiceStatus(enum.StrEnum):
@@ -47,7 +48,7 @@ class InvoiceStatus(enum.StrEnum):
     VOIDED = "VOIDED"
 
 
-class Invoice(Base):
+class Invoice(CompanyScoped, Base):
     __tablename__ = "invoices"
     __table_args__ = (
         UniqueConstraint("company_id", "number", name="uq_invoices_company_number"),

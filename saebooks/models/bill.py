@@ -35,6 +35,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from saebooks.db import Base
+from saebooks.models._scope import CompanyScoped
 
 
 class BillStatus(enum.StrEnum):
@@ -43,7 +44,7 @@ class BillStatus(enum.StrEnum):
     VOIDED = "VOIDED"
 
 
-class Bill(Base):
+class Bill(CompanyScoped, Base):
     __tablename__ = "bills"
     __table_args__ = (
         UniqueConstraint("company_id", "number", name="uq_bills_company_number"),

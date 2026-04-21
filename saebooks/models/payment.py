@@ -36,6 +36,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from saebooks.db import Base
+from saebooks.models._scope import CompanyScoped
 
 
 class PaymentStatus(enum.StrEnum):
@@ -58,7 +59,7 @@ class PaymentMethod(enum.StrEnum):
     OTHER = "other"
 
 
-class Payment(Base):
+class Payment(CompanyScoped, Base):
     __tablename__ = "payments"
     __table_args__ = (
         UniqueConstraint("company_id", "number", name="uq_payments_company_number"),

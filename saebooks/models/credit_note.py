@@ -31,6 +31,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from saebooks.db import Base
+from saebooks.models._scope import CompanyScoped
 
 
 class CreditNoteStatus(enum.StrEnum):
@@ -39,7 +40,7 @@ class CreditNoteStatus(enum.StrEnum):
     VOIDED = "VOIDED"
 
 
-class CreditNote(Base):
+class CreditNote(CompanyScoped, Base):
     __tablename__ = "credit_notes"
     __table_args__ = (
         UniqueConstraint(

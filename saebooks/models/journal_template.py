@@ -7,9 +7,10 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from saebooks.db import Base
+from saebooks.models._scope import CompanyScoped
 
 
-class JournalTemplate(Base):
+class JournalTemplate(CompanyScoped, Base):
     __tablename__ = "journal_templates"
 
     id: Mapped[uuid.UUID] = mapped_column(

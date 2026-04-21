@@ -40,6 +40,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from saebooks.db import Base
+from saebooks.models._scope import CompanyScoped
 
 
 class RecurrenceFrequency(enum.StrEnum):
@@ -56,7 +57,7 @@ class RecurrenceStatus(enum.StrEnum):
     ENDED = "ENDED"
 
 
-class RecurringInvoice(Base):
+class RecurringInvoice(CompanyScoped, Base):
     __tablename__ = "recurring_invoices"
 
     id: Mapped[uuid.UUID] = mapped_column(

@@ -40,12 +40,13 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from saebooks.db import Base
+from saebooks.models._scope import CompanyScoped
 
 if TYPE_CHECKING:
     from saebooks.models.depreciation_model import DepreciationModel
 
 
-class FixedAsset(Base):
+class FixedAsset(CompanyScoped, Base):
     """One row per capitalised asset.
 
     Status values: ``active`` (in use, may depreciate), ``disposed``

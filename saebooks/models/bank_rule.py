@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from saebooks.db import Base
+from saebooks.models._scope import CompanyScoped
 
 
 class MatchType(enum.StrEnum):
@@ -17,7 +18,7 @@ class MatchType(enum.StrEnum):
     REGEX = "REGEX"
 
 
-class BankRule(Base):
+class BankRule(CompanyScoped, Base):
     __tablename__ = "bank_rules"
 
     id: Mapped[uuid.UUID] = mapped_column(

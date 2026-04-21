@@ -27,9 +27,10 @@ from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from saebooks.db import Base
+from saebooks.models._scope import CompanyScoped
 
 
-class AccountRange(Base):
+class AccountRange(CompanyScoped, Base):
     __tablename__ = "account_ranges"
     __table_args__ = (
         UniqueConstraint("company_id", "prefix", name="uq_account_ranges_company_prefix"),

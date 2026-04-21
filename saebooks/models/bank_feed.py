@@ -28,6 +28,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from saebooks.db import Base
+from saebooks.models._scope import CompanyScoped
 
 
 class BankFeedIssueStatus(enum.StrEnum):
@@ -35,7 +36,7 @@ class BankFeedIssueStatus(enum.StrEnum):
     CLOSED = "closed"
 
 
-class BankFeedClient(Base):
+class BankFeedClient(CompanyScoped, Base):
     """One row per ``Company`` that has been registered with the aggregator."""
 
     __tablename__ = "bank_feed_clients"
@@ -63,7 +64,7 @@ class BankFeedClient(Base):
     )
 
 
-class BankFeedAccount(Base):
+class BankFeedAccount(CompanyScoped, Base):
     """One row per aggregator-side account connected to a SAE Books ledger."""
 
     __tablename__ = "bank_feed_accounts"

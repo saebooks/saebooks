@@ -25,6 +25,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from saebooks.db import Base
+from saebooks.models._scope import CompanyScoped
 
 
 class ProjectStatus(enum.StrEnum):
@@ -33,7 +34,7 @@ class ProjectStatus(enum.StrEnum):
     ARCHIVED = "ARCHIVED"
 
 
-class Project(Base):
+class Project(CompanyScoped, Base):
     __tablename__ = "projects"
     __table_args__ = (
         UniqueConstraint("company_id", "code", name="uq_projects_company_code"),

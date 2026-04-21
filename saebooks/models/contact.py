@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from saebooks.db import Base
+from saebooks.models._scope import CompanyScoped
 
 
 class ContactType(enum.StrEnum):
@@ -15,7 +16,7 @@ class ContactType(enum.StrEnum):
     BOTH = "BOTH"
 
 
-class Contact(Base):
+class Contact(CompanyScoped, Base):
     __tablename__ = "contacts"
 
     id: Mapped[uuid.UUID] = mapped_column(

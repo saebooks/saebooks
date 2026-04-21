@@ -16,6 +16,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from saebooks.db import Base
+from saebooks.models._scope import CompanyScoped
 
 
 class AccountType(enum.StrEnum):
@@ -29,7 +30,7 @@ class AccountType(enum.StrEnum):
     OTHER_EXPENSE = "OTHER_EXPENSE"
 
 
-class Account(Base):
+class Account(CompanyScoped, Base):
     __tablename__ = "accounts"
     __table_args__ = (UniqueConstraint("company_id", "code", name="uq_accounts_company_code"),)
 

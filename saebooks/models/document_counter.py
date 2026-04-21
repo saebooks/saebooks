@@ -15,9 +15,10 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from saebooks.db import Base
+from saebooks.models._scope import CompanyScoped
 
 
-class DocumentCounter(Base):
+class DocumentCounter(CompanyScoped, Base):
     __tablename__ = "document_counters"
     __table_args__ = (
         UniqueConstraint("company_id", "kind", name="uq_document_counters_company_kind"),

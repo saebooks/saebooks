@@ -33,9 +33,10 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from saebooks.db import Base
+from saebooks.models._scope import CompanyScoped
 
 
-class Budget(Base):
+class Budget(CompanyScoped, Base):
     __tablename__ = "budgets"
     __table_args__ = (
         UniqueConstraint(

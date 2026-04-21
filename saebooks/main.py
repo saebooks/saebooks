@@ -37,7 +37,7 @@ from saebooks.routers import (
     templates,
 )
 from saebooks.services import metrics as metrics_svc
-from saebooks.services import observability
+from saebooks.services import observability, tenant
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -48,6 +48,14 @@ logger = logging.getLogger("saebooks")
 # SENTRY_DSN). Both are no-ops when their respective env vars are unset,
 # so Community builds stay on plain-text logs and never call home.
 observability.configure(settings)
+
+# Install the tenant-scope ORM event listener. It's a no-op when the
+# company contextvar is unset (single-company default), so flipping
+# it on has zero effect on existing call sites. When a future
+# TenantMiddleware binds ``current_company_id``, every SELECT touching
+# a ``CompanyScoped`` entity gets a ``WHERE company_id = :cid`` clause
+# injected defence-in-depth.
+tenant.install()
 
 
 @asynccontextmanager

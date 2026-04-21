@@ -7,9 +7,10 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from saebooks.db import Base
+from saebooks.models._scope import CompanyScoped
 
 
-class TaxCode(Base):
+class TaxCode(CompanyScoped, Base):
     __tablename__ = "tax_codes"
 
     id: Mapped[uuid.UUID] = mapped_column(

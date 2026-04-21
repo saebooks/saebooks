@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from saebooks.db import Base
+from saebooks.models._scope import CompanyScoped
 
 
 class StatementLineStatus(enum.StrEnum):
@@ -16,7 +17,7 @@ class StatementLineStatus(enum.StrEnum):
     MATCHED = "MATCHED"
 
 
-class BankStatementLine(Base):
+class BankStatementLine(CompanyScoped, Base):
     __tablename__ = "bank_statement_lines"
 
     id: Mapped[uuid.UUID] = mapped_column(

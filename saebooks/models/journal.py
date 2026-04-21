@@ -19,6 +19,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from saebooks.db import Base
+from saebooks.models._scope import CompanyScoped
 
 
 class EntryStatus(enum.StrEnum):
@@ -27,7 +28,7 @@ class EntryStatus(enum.StrEnum):
     REVERSED = "REVERSED"
 
 
-class JournalEntry(Base):
+class JournalEntry(CompanyScoped, Base):
     __tablename__ = "journal_entries"
     __table_args__ = (
         UniqueConstraint("company_id", "ref", name="uq_journal_entries_company_ref"),
@@ -99,7 +100,7 @@ class JournalLine(Base):
     entry: Mapped[JournalEntry] = relationship(back_populates="lines")
 
 
-class PeriodLock(Base):
+class PeriodLock(CompanyScoped, Base):
     __tablename__ = "period_locks"
 
     id: Mapped[uuid.UUID] = mapped_column(
