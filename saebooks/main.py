@@ -20,6 +20,7 @@ from saebooks.routers import (
     dashboard,
     health,
     imports,
+    integrations,
     invoices,
     journal,
     pay_run,
@@ -75,6 +76,14 @@ def create_app() -> FastAPI:
     app.include_router(ranges.router)
     app.include_router(reports.router)
     app.include_router(reconciliation.router)
+    # Integrations (LEI/GLEIF lookup, Stripe webhook, Paperless attach,
+    # ATO prefill stub). No prefix — routes carry their own mount paths
+    # (/contacts/lei-*, /webhooks/stripe, /admin/integrations/*) so they
+    # integrate with the contact form + public webhook surface + admin
+    # landing. Registered BEFORE contacts.router so /contacts/lei-lookup
+    # beats the catch-all /contacts/{contact_id} path (same trick as
+    # /invoices/recurring vs /invoices/{invoice_id} below).
+    app.include_router(integrations.router)
     app.include_router(contacts.router)
     # recurring_invoices mounts at /invoices/recurring — must register
     # BEFORE invoices.router so `/invoices/recurring` beats the catch-all

@@ -89,5 +89,36 @@ class Settings(BaseSettings):
     sentry_dsn: str = Field(default="", alias="SENTRY_DSN")
     log_json: bool = Field(default=False, alias="SAEBOOKS_LOG_JSON")
 
+    # ---------------------------------------------------------------- #
+    # Integrations (Batch DD)                                          #
+    # ---------------------------------------------------------------- #
+    # Paperless — document-store integration. PAPERLESS_URL is the
+    # browser-facing base URL (used to build preview links on the
+    # attachment UI); PAPERLESS_API_URL is what the server itself
+    # calls (may be the same, may be an internal hostname like
+    # http://paperless:8000 behind Caddy). If PAPERLESS_API_TOKEN is
+    # empty the module raises PaperlessNotConfiguredError on use.
+    paperless_url: str = Field(default="", alias="PAPERLESS_URL")
+    paperless_api_url: str = Field(default="", alias="PAPERLESS_API_URL")
+    paperless_api_token: str = Field(default="", alias="PAPERLESS_API_TOKEN")
+
+    # LEI / GLEIF — same shape as ABR. Enterprise-only feature gate
+    # (see FLAG_LEI_LOOKUP). No API key needed — GLEIF is public.
+    lei_api_base: str = Field(
+        default="https://api.gleif.org/api/v1",
+        alias="LEI_API_BASE",
+    )
+
+    # Stripe webhook — public /webhooks/stripe endpoint. When
+    # STRIPE_WEBHOOK_SECRET is empty the webhook handler returns 503
+    # so an unconfigured instance doesn't silently accept forged
+    # events. STRIPE_DEFAULT_BANK_ACCOUNT_ID pins the ledger account
+    # that incoming Payment rows are created against on
+    # payment_intent.succeeded (optional — skipped if empty).
+    stripe_webhook_secret: str = Field(default="", alias="STRIPE_WEBHOOK_SECRET")
+    stripe_default_bank_account_id: str = Field(
+        default="", alias="STRIPE_DEFAULT_BANK_ACCOUNT_ID"
+    )
+
 
 settings = Settings()
