@@ -34,6 +34,35 @@ from saebooks.services.theme import (
 
 TEMPLATES_DIR: Path = Path(__file__).resolve().parent / "templates"
 THEMES_DIR: Path = TEMPLATES_DIR / "themes"
+STATIC_DIR: Path = Path(__file__).resolve().parent / "static"
+
+
+def _compute_static_version() -> str:
+    """Cache-buster for CSS/JS URLs.
+
+    Computed once at import time from the max mtime of everything under
+    ``saebooks/static/``. The app restarts on every deploy → mtime
+    changes when any CSS/JS file is edited → templates render a fresh
+    ``?v=…`` query param → Cloudflare (and browsers) treat it as a new
+    URL and miss their cache. No manual bump needed.
+
+    If the directory is missing (tests without the tree), falls back to
+    ``0`` so templates don't crash.
+    """
+
+    try:
+        latest = 0.0
+        for p in STATIC_DIR.rglob("*"):
+            if p.is_file():
+                mt = p.stat().st_mtime
+                if mt > latest:
+                    latest = mt
+        return str(int(latest)) if latest else "0"
+    except (OSError, FileNotFoundError):
+        return "0"
+
+
+STATIC_VERSION: str = _compute_static_version()
 
 # The one and only Jinja2Templates instance in the app. Routers import
 # this directly; they do not build their own. The ChoiceLoader inside
@@ -66,3 +95,4 @@ def _theme_for_request(request: Request) -> str:
 
 # Register the global so every template can call it.
 templates.env.globals["theme_for_request"] = _theme_for_request
+templates.env.globals["static_version"] = STATIC_VERSION

@@ -25,8 +25,8 @@
      follows to override every shared selector with denser MYOB chrome.
      The shared {% block theme_assets %} slot stays intact so a
      per-user preferred_theme downgrade still works consistently. #}
-  <link rel="stylesheet" href="/static/app.css">
-  <link rel="stylesheet" href="/static/themes/classic/app.css">
+  <link rel="stylesheet" href="/static/app.css?v={{ static_version }}">
+  <link rel="stylesheet" href="/static/themes/classic/app.css?v={{ static_version }}">
   {% block theme_assets %}
     {% set _theme = theme_for_request(request) %}
     {# Slot left in place so downstream themes can opt in; classic is

@@ -21,11 +21,11 @@
       } catch (e) { /* localStorage unavailable — default light */ }
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/app.css?v={{ static_version }}">
   {% block theme_assets %}
     {% set _theme = theme_for_request(request) %}
     {% if _theme and _theme != "default" %}
-    <link rel="stylesheet" href="/static/themes/{{ _theme }}/app.css">
+    <link rel="stylesheet" href="/static/themes/{{ _theme }}/app.css?v={{ static_version }}">
     {% endif %}
   {% endblock %}
   <script src="https://unpkg.com/htmx.org@2.0.3" defer></script>
