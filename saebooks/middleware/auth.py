@@ -48,6 +48,24 @@ REMOTE_USER_HEADER = "remote-user"
 REMOTE_EMAIL_HEADER = "remote-email"
 REMOTE_NAME_HEADER = "remote-name"
 
+
+def _bootstrap_admins() -> frozenset[str]:
+    """Usernames that get auto-promoted to ``admin`` on upsert.
+
+    Comma-separated list in ``SAEBOOKS_BOOTSTRAP_ADMINS``. Solves the
+    chicken-and-egg of "first user on a fresh install needs to be admin
+    so they can promote others, but the middleware defaults everyone to
+    readonly". Once a bootstrap admin has been upserted, they keep
+    admin across requests even if removed from the env var (the role is
+    stored in the DB, not re-derived each hit).
+
+    The explicit /admin/users flow is still the long-term source of
+    truth — this env var is just a boot knob.
+    """
+
+    raw = os.environ.get("SAEBOOKS_BOOTSTRAP_ADMINS", "")
+    return frozenset(name.strip() for name in raw.split(",") if name.strip())
+
 # Routes we deliberately serve unauthenticated — healthchecks, metrics,
 # static files, public webhooks. Anything else that wants to be
 # anonymous-friendly can match a prefix in this tuple.
@@ -88,6 +106,7 @@ async def _upsert_user(
     (table missing, Postgres down, …) — caller treats that as "serve
     anonymously" rather than crash.
     """
+    bootstrap_admins = _bootstrap_admins()
     try:
         async with AsyncSessionLocal() as session:
             existing = (
@@ -98,7 +117,19 @@ async def _upsert_user(
 
             now = datetime.now(UTC)
             if existing is None:
-                role = dev_role or UserRole.READONLY.value
+                # Bootstrap admins always start at admin; dev override
+                # wins over bootstrap (useful in tests); everyone else
+                # starts readonly and gets promoted via /admin/users.
+                if dev_role:
+                    role = dev_role
+                elif username in bootstrap_admins:
+                    role = UserRole.ADMIN.value
+                    logger.info(
+                        "Bootstrapping %r as admin (SAEBOOKS_BOOTSTRAP_ADMINS)",
+                        username,
+                    )
+                else:
+                    role = UserRole.READONLY.value
                 user = User(
                     username=username,
                     display_name=display_name,
@@ -122,6 +153,17 @@ async def _upsert_user(
             # never touches role here — admin-only UI does it.
             if dev_role and dev_role != existing.role:
                 existing.role = dev_role
+            # Bootstrap admins get auto-repaired: if the env lists a
+            # username that somehow got demoted below admin (fresh DB
+            # seed, manual SQL, etc.), bump them back up on next hit.
+            # Once the env var is removed, this stops firing — the role
+            # stays wherever /admin/users set it.
+            elif username in bootstrap_admins and existing.role != UserRole.ADMIN.value:
+                logger.info(
+                    "Re-bootstrapping %r to admin (SAEBOOKS_BOOTSTRAP_ADMINS)",
+                    username,
+                )
+                existing.role = UserRole.ADMIN.value
             await session.commit()
             await session.refresh(existing)
             return existing
@@ -169,5 +211,18 @@ class ForwardAuthMiddleware(BaseHTTPMiddleware):
                 # 403s. Prevents an admin "removing" a user from
                 # racing with an in-flight request.
                 request.state.username = user.username
+        else:
+            # No Remote-User header and no dev override. Most of the
+            # time this is an anonymous healthcheck-ish request from
+            # inside the docker network — harmless. But if this fires
+            # for a browser hitting an admin page we want to see the
+            # header names Caddy actually sent so we can debug forward-
+            # auth without guessing. Logs at DEBUG (not INFO) so the
+            # default INFO level stays quiet in production.
+            logger.debug(
+                "No Remote-User on %s; saw headers: %s",
+                request.url.path,
+                sorted(request.headers.keys()),
+            )
 
         return await call_next(request)
