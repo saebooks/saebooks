@@ -101,6 +101,8 @@ async def create_draft(
     supplier_reference: str | None = None,
     lines: list[dict[str, object]] | None = None,
     notes: str | None = None,
+    currency: str = "AUD",
+    fx_rate: Decimal | None = None,
 ) -> Bill:
     bill = Bill(
         company_id=company_id,
@@ -110,6 +112,8 @@ async def create_draft(
         supplier_reference=supplier_reference,
         notes=notes,
         status=BillStatus.DRAFT,
+        currency=currency.upper(),
+        fx_rate=fx_rate if fx_rate is not None else Decimal("1"),
     )
     session.add(bill)
     await session.flush()
@@ -188,6 +192,19 @@ async def _recalc(session: AsyncSession, bill: Bill) -> None:
     bill.tax_total = _q2(Decimal(tax))
     bill.total = bill.subtotal + bill.tax_total
 
+    # Foreign-currency shadow totals. Same pattern as invoices — sum
+    # per-line base contributions so header base_total matches the sum
+    # of per-line journal lines that post_bill will emit.
+    rate = Decimal(str(bill.fx_rate or Decimal("1")))
+    base_subtotal = sum(
+        (_q2(ln.line_subtotal * rate) for ln in lines), Decimal("0")
+    )
+    base_tax = sum((_q2(ln.line_tax * rate) for ln in lines), Decimal("0"))
+    bill.base_subtotal = _q2(Decimal(base_subtotal))
+    bill.base_tax_total = _q2(Decimal(base_tax))
+    bill.base_total = bill.base_subtotal + bill.base_tax_total
+    bill.base_amount_paid = _q2(Decimal(bill.amount_paid) * rate)
+
 
 async def get(session: AsyncSession, bill_id: uuid.UUID) -> Bill:
     result = await session.execute(
@@ -238,6 +255,8 @@ async def update_draft(
     supplier_reference: str | None = None,
     lines: list[dict[str, object]] | None = None,
     notes: str | None = None,
+    currency: str | None = None,
+    fx_rate: Decimal | None = None,
 ) -> Bill:
     bill = await get(session, bill_id)
     if bill.status != BillStatus.DRAFT:
@@ -255,6 +274,10 @@ async def update_draft(
         bill.supplier_reference = supplier_reference
     if notes is not None:
         bill.notes = notes
+    if currency is not None:
+        bill.currency = currency.upper()
+    if fx_rate is not None:
+        bill.fx_rate = fx_rate
     if lines is not None:
         await _replace_lines(session, bill, lines)
     await _recalc(session, bill)
@@ -311,29 +334,38 @@ async def post_bill(
     ap_account = await _get_ap_account(session, bill.company_id)
     ref = bill.supplier_reference or bill.number
 
+    # Post the journal in base currency. AUD-only: rate=1, base_*=
+    # unscaled, behaviour unchanged. Foreign-currency: per-line
+    # Dr + GST are translated at the bill's rate.
+    rate = Decimal(str(bill.fx_rate or Decimal("1")))
+
     journal_lines: list[dict[str, object]] = []
     # One Dr line per expense/asset account per bill line; GST
     # auto-poster appends the matching Dr GST Paid. project_id rides
     # through so P&L-by-project can pick up cost-side postings.
     for line in bill.lines:
+        line_base_subtotal = _q2(line.line_subtotal * rate)
+        line_base_tax = (
+            _q2(line.line_tax * rate) if line.line_tax > 0 else None
+        )
         journal_lines.append(
             {
                 "account_id": line.account_id,
                 "description": f"{bill.number}: {line.description}",
-                "debit": line.line_subtotal,
+                "debit": line_base_subtotal,
                 "credit": Decimal("0"),
                 "tax_code_id": line.tax_code_id,
-                "gst_amount": line.line_tax if line.line_tax > 0 else None,
+                "gst_amount": line_base_tax,
                 "project_id": line.project_id,
             }
         )
-    # Cr Trade Creditors for the total.
+    # Cr Trade Creditors for the base-currency total.
     journal_lines.append(
         {
             "account_id": ap_account.id,
             "description": f"Bill {bill.number} ({ref})",
             "debit": Decimal("0"),
-            "credit": bill.total,
+            "credit": bill.base_total,
         }
     )
 

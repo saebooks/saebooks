@@ -105,6 +105,20 @@ class Payment(CompanyScoped, Base):
     amount: Mapped[Decimal] = mapped_column(
         Numeric(18, 2), nullable=False, default=Decimal("0")
     )
+    # --- Foreign-currency header (Batch GG/2) ------------------------------
+    # The payment may settle a foreign-currency invoice/bill at a
+    # *different* rate than the one stamped on the document — that rate
+    # difference is the realised FX gain/loss posted by
+    # ``services/fx/settle.py`` during allocation.
+    currency: Mapped[str] = mapped_column(
+        String(3), nullable=False, default="AUD"
+    )
+    fx_rate: Mapped[Decimal] = mapped_column(
+        Numeric(18, 8), nullable=False, default=Decimal("1")
+    )
+    base_amount: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False, default=Decimal("0")
+    )
     reference: Mapped[str | None] = mapped_column(String(128))
     notes: Mapped[str | None] = mapped_column(Text)
     posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

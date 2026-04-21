@@ -84,6 +84,28 @@ class Bill(CompanyScoped, Base):
     amount_paid: Mapped[Decimal] = mapped_column(
         Numeric(18, 2), nullable=False, default=Decimal("0")
     )
+    # --- Foreign-currency header (Batch GG/2) ------------------------------
+    # Mirror of ``Invoice`` — the supplier's document may be in any
+    # currency; we store the rate to base at bill-issue date and the
+    # base-currency totals for GL posting.
+    currency: Mapped[str] = mapped_column(
+        String(3), nullable=False, default="AUD"
+    )
+    fx_rate: Mapped[Decimal] = mapped_column(
+        Numeric(18, 8), nullable=False, default=Decimal("1")
+    )
+    base_subtotal: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False, default=Decimal("0")
+    )
+    base_tax_total: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False, default=Decimal("0")
+    )
+    base_total: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False, default=Decimal("0")
+    )
+    base_amount_paid: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False, default=Decimal("0")
+    )
     notes: Mapped[str | None] = mapped_column(Text)
     posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     posted_by: Mapped[str | None] = mapped_column(String)

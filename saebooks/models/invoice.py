@@ -87,6 +87,31 @@ class Invoice(CompanyScoped, Base):
     amount_paid: Mapped[Decimal] = mapped_column(
         Numeric(18, 2), nullable=False, default=Decimal("0")
     )
+    # --- Foreign-currency header (Batch GG/2) ------------------------------
+    # ``currency`` is the document currency (ISO 4217). ``fx_rate`` is
+    # the rate from document currency → company base currency at issue
+    # time. Both default so AUD-only installs never have to think about
+    # FX. The ``base_*`` shadow columns carry the base-currency view of
+    # the totals — GL postings use those so the book of account stays
+    # in the base currency regardless of the issue currency.
+    currency: Mapped[str] = mapped_column(
+        String(3), nullable=False, default="AUD"
+    )
+    fx_rate: Mapped[Decimal] = mapped_column(
+        Numeric(18, 8), nullable=False, default=Decimal("1")
+    )
+    base_subtotal: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False, default=Decimal("0")
+    )
+    base_tax_total: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False, default=Decimal("0")
+    )
+    base_total: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False, default=Decimal("0")
+    )
+    base_amount_paid: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False, default=Decimal("0")
+    )
     notes: Mapped[str | None] = mapped_column(Text)
     payment_terms: Mapped[str | None] = mapped_column(Text)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

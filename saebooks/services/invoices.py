@@ -99,6 +99,8 @@ async def create_draft(
     lines: list[dict[str, object]] | None = None,
     notes: str | None = None,
     payment_terms: str | None = None,
+    currency: str = "AUD",
+    fx_rate: Decimal | None = None,
 ) -> Invoice:
     inv = Invoice(
         company_id=company_id,
@@ -108,6 +110,8 @@ async def create_draft(
         notes=notes,
         payment_terms=payment_terms,
         status=InvoiceStatus.DRAFT,
+        currency=currency.upper(),
+        fx_rate=fx_rate if fx_rate is not None else Decimal("1"),
     )
     session.add(inv)
     await session.flush()
@@ -194,6 +198,23 @@ async def _recalc(session: AsyncSession, inv: Invoice) -> None:
     inv.tax_total = _q2(Decimal(tax))
     inv.total = inv.subtotal + inv.tax_total
 
+    # Foreign-currency shadow totals. Computed from per-line base
+    # contributions so header totals equal the sum of per-line values
+    # that post_invoice will push into the journal (avoids a 1-cent
+    # drift between Dr AR base_total and Cr income per line).
+    rate = Decimal(str(inv.fx_rate or Decimal("1")))
+    base_subtotal = sum(
+        (_q2(ln.line_subtotal * rate) for ln in lines), Decimal("0")
+    )
+    base_tax = sum((_q2(ln.line_tax * rate) for ln in lines), Decimal("0"))
+    inv.base_subtotal = _q2(Decimal(base_subtotal))
+    inv.base_tax_total = _q2(Decimal(base_tax))
+    inv.base_total = inv.base_subtotal + inv.base_tax_total
+    # Preserve amount_paid → base_amount_paid at the invoice rate. Actual
+    # realised-FX gain/loss happens in services/payments.py at post time
+    # using the payment's rate vs the invoice's rate.
+    inv.base_amount_paid = _q2(Decimal(inv.amount_paid) * rate)
+
 
 async def get(session: AsyncSession, invoice_id: uuid.UUID) -> Invoice:
     result = await session.execute(
@@ -244,6 +265,8 @@ async def update_draft(
     lines: list[dict[str, object]] | None = None,
     notes: str | None = None,
     payment_terms: str | None = None,
+    currency: str | None = None,
+    fx_rate: Decimal | None = None,
 ) -> Invoice:
     inv = await get(session, invoice_id)
     if inv.status != InvoiceStatus.DRAFT:
@@ -261,6 +284,10 @@ async def update_draft(
         inv.notes = notes
     if payment_terms is not None:
         inv.payment_terms = payment_terms
+    if currency is not None:
+        inv.currency = currency.upper()
+    if fx_rate is not None:
+        inv.fx_rate = fx_rate
     if lines is not None:
         await _replace_lines(session, inv, lines)
     await _recalc(session, inv)
@@ -316,12 +343,19 @@ async def post_invoice(
 
     ar_account = await _get_ar_account(session, inv.company_id)
 
+    # Post the journal in base currency. For AUD-only installs
+    # ``fx_rate`` is 1 and base_* equal their unscaled counterparts, so
+    # the math is identical to the pre-FX shape. For foreign-currency
+    # invoices the per-line Cr amounts + GST are translated at the
+    # invoice's rate.
+    rate = Decimal(str(inv.fx_rate or Decimal("1")))
+
     journal_lines: list[dict[str, object]] = [
-        # Line 1: Dr Trade Debtors for the invoice total.
+        # Line 1: Dr Trade Debtors for the base-currency invoice total.
         {
             "account_id": ar_account.id,
             "description": f"Invoice {inv.number}",
-            "debit": inv.total,
+            "debit": inv.base_total,
             "credit": Decimal("0"),
         },
     ]
@@ -329,14 +363,18 @@ async def post_invoice(
     # appends the matching Cr GST Collected. project_id is carried
     # through so the GL can drive P&L-by-project reports directly.
     for line in inv.lines:
+        line_base_subtotal = _q2(line.line_subtotal * rate)
+        line_base_tax = (
+            _q2(line.line_tax * rate) if line.line_tax > 0 else None
+        )
         journal_lines.append(
             {
                 "account_id": line.account_id,
                 "description": f"{inv.number}: {line.description}",
                 "debit": Decimal("0"),
-                "credit": line.line_subtotal,
+                "credit": line_base_subtotal,
                 "tax_code_id": line.tax_code_id,
-                "gst_amount": line.line_tax if line.line_tax > 0 else None,
+                "gst_amount": line_base_tax,
                 "project_id": line.project_id,
             }
         )

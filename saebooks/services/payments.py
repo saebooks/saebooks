@@ -11,12 +11,22 @@ account (no invoice to match) and allocate later. Allocations update
 ``Invoice.amount_paid`` — flipping status to POSTED/VOIDED is out of
 scope for now (the simplified lifecycle stays DRAFT → POSTED →
 VOIDED; amount_paid just carries the remaining balance).
+
+Foreign currency (Batch GG/2):
+    Payments carry their own ``currency`` + ``fx_rate`` which may
+    differ from the invoice / bill rate. At post time we walk the
+    allocations, translate each allocation to base at the *invoice /
+    bill* rate (the rate that originally stamped AR / AP), and plug
+    the difference vs ``pay.base_amount`` into ``6-1630 Exchange Rate
+    Loss`` / ``6-1640 Exchange Rate Gain``. In a single-currency (AUD)
+    install all rates collapse to 1 and behaviour is identical to the
+    pre-FX shape.
 """
 from __future__ import annotations
 
 import uuid
 from datetime import UTC, date, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,6 +53,13 @@ class PaymentError(ValueError):
 
 _AR_CODE = "1-1200"
 _AP_CODE = "2-1200"
+_FX_GAIN_CODE = "6-1640"  # Exchange Rate Gain (INCOME per seed)
+_FX_LOSS_CODE = "6-1630"  # Exchange Rate Loss (EXPENSE per seed)
+_TWOPLACES = Decimal("0.01")
+
+
+def _q2(value: Decimal) -> Decimal:
+    return value.quantize(_TWOPLACES, rounding=ROUND_HALF_UP)
 
 
 async def _get_control_account(
@@ -72,9 +89,12 @@ async def create_draft(
     method: PaymentMethod = PaymentMethod.EFT,
     reference: str | None = None,
     notes: str | None = None,
+    currency: str = "AUD",
+    fx_rate: Decimal | None = None,
 ) -> Payment:
     if amount <= Decimal("0"):
         raise PaymentError("Payment amount must be positive")
+    rate = fx_rate if fx_rate is not None else Decimal("1")
     pay = Payment(
         company_id=company_id,
         contact_id=contact_id,
@@ -86,6 +106,9 @@ async def create_draft(
         reference=reference,
         notes=notes,
         status=PaymentStatus.DRAFT,
+        currency=currency.upper(),
+        fx_rate=rate,
+        base_amount=_q2(amount * rate),
     )
     session.add(pay)
     await session.commit()
@@ -209,6 +232,15 @@ async def allocate(
                 f"Invoice {inv.number or inv.id} is not POSTED "
                 f"(status={inv.status.value})"
             )
+        # Currency guard: cross-currency allocation is out of scope for
+        # v1. Same-currency pay ↔ inv at different rates is fine — that's
+        # the realised-FX path handled in post_payment.
+        if inv.currency != pay.currency:
+            raise PaymentError(
+                f"Invoice {inv.number or inv.id} is in {inv.currency}; "
+                f"payment is in {pay.currency}. Cross-currency settlement "
+                "is not supported in v1."
+            )
         session.add(
             PaymentAllocation(
                 payment_id=pay.id,
@@ -225,6 +257,12 @@ async def allocate(
             raise PaymentError(
                 f"Bill {bill.number or bill.id} is not POSTED "
                 f"(status={bill.status.value})"
+            )
+        if bill.currency != pay.currency:
+            raise PaymentError(
+                f"Bill {bill.number or bill.id} is in {bill.currency}; "
+                f"payment is in {pay.currency}. Cross-currency settlement "
+                "is not supported in v1."
             )
         session.add(
             PaymentAllocation(
@@ -264,6 +302,11 @@ async def _refresh_invoice_amount_paid(
     inv = await session.get(Invoice, invoice_id)
     if inv is not None:
         inv.amount_paid = total
+        # base_amount_paid tracks the amount paid translated at the
+        # invoice's own rate — that's the portion of AR that actually
+        # cleared. Realised FX lives in the GL on the payment's
+        # journal, not here.
+        inv.base_amount_paid = _q2(total * Decimal(str(inv.fx_rate)))
     await session.flush()
 
 
@@ -283,7 +326,81 @@ async def _refresh_bill_amount_paid(
     bill = await session.get(Bill, bill_id)
     if bill is not None:
         bill.amount_paid = total
+        bill.base_amount_paid = _q2(total * Decimal(str(bill.fx_rate)))
     await session.flush()
+
+
+async def _compute_control_credit(
+    session: AsyncSession,
+    pay: Payment,
+) -> tuple[Decimal, Decimal]:
+    """Compute (control_base_amount, allocated_doc_amount) for a payment.
+
+    ``control_base_amount`` is the base-currency value that clears AR
+    (INCOMING) or AP (OUTGOING): it sums each allocation at the
+    *document's* fx_rate (so AR/AP are cleared at the rate that stamped
+    them), with any unallocated remainder translated at the payment's
+    own rate (= "on account", which will be allocated later at a
+    future rate + reopened for realised FX if needed).
+
+    Returns ``(control_base_amount, allocated_doc_amount)`` where the
+    second is the sum of allocation document-currency amounts. Caller
+    derives unallocated = ``pay.amount - allocated_doc_amount``.
+    """
+    allocated_doc = Decimal("0")
+    control_base = Decimal("0")
+    if pay.direction == PaymentDirection.INCOMING:
+        for a in pay.allocations:
+            if a.invoice_id is None:
+                continue
+            inv = await session.get(Invoice, a.invoice_id)
+            if inv is None:
+                continue
+            allocated_doc += Decimal(str(a.amount))
+            control_base += _q2(
+                Decimal(str(a.amount)) * Decimal(str(inv.fx_rate))
+            )
+    else:
+        for a in pay.allocations:
+            if a.bill_id is None:
+                continue
+            bill = await session.get(Bill, a.bill_id)
+            if bill is None:
+                continue
+            allocated_doc += Decimal(str(a.amount))
+            control_base += _q2(
+                Decimal(str(a.amount)) * Decimal(str(bill.fx_rate))
+            )
+    # Unallocated remainder moves at the payment's own rate. Translates
+    # into an "on account" AR/AP balance which, when allocated later,
+    # may kick off further realised FX if rates have moved.
+    unallocated_doc = Decimal(str(pay.amount)) - allocated_doc
+    control_base += _q2(unallocated_doc * Decimal(str(pay.fx_rate)))
+    return _q2(control_base), allocated_doc
+
+
+async def _get_fx_accounts(
+    session: AsyncSession, company_id: uuid.UUID
+) -> tuple[Account | None, Account | None]:
+    """Return (gain_account, loss_account). Either may be ``None`` on a
+    site with a trimmed-down CoA — the caller then skips FX posting
+    with a warning rather than crashing.
+    """
+    gain = await session.execute(
+        select(Account).where(
+            Account.company_id == company_id,
+            Account.code == _FX_GAIN_CODE,
+            Account.archived_at.is_(None),
+        )
+    )
+    loss = await session.execute(
+        select(Account).where(
+            Account.company_id == company_id,
+            Account.code == _FX_LOSS_CODE,
+            Account.archived_at.is_(None),
+        )
+    )
+    return gain.scalar_one_or_none(), loss.scalar_one_or_none()
 
 
 async def post_payment(
@@ -308,20 +425,27 @@ async def post_payment(
     if bank_acct is None:
         raise PaymentError("Bank account not found")
 
+    # Base-currency totals. For AUD-only installs base_amount == amount
+    # and the control credit equals it, so the resulting journal is
+    # identical to the pre-FX shape.
+    bank_base = Decimal(str(pay.base_amount or pay.amount))
+    control_base, _alloc_doc = await _compute_control_credit(session, pay)
+    fx_delta = bank_base - control_base  # Dr - Cr (INCOMING perspective)
+
     if pay.direction == PaymentDirection.INCOMING:
         control = await _get_control_account(session, pay.company_id, _AR_CODE)
         lines: list[dict[str, object]] = [
             {
                 "account_id": bank_acct.id,
                 "description": f"Receipt {pay.number}",
-                "debit": pay.amount,
+                "debit": bank_base,
                 "credit": Decimal("0"),
             },
             {
                 "account_id": control.id,
                 "description": f"Receipt {pay.number}",
                 "debit": Decimal("0"),
-                "credit": pay.amount,
+                "credit": control_base,
             },
         ]
     else:
@@ -330,16 +454,54 @@ async def post_payment(
             {
                 "account_id": control.id,
                 "description": f"Payment {pay.number}",
-                "debit": pay.amount,
+                "debit": control_base,
                 "credit": Decimal("0"),
             },
             {
                 "account_id": bank_acct.id,
                 "description": f"Payment {pay.number}",
                 "debit": Decimal("0"),
-                "credit": pay.amount,
+                "credit": bank_base,
             },
         ]
+        # For OUTGOING: Dr control_base, Cr bank_base. Delta from
+        # "control > bank" means AP cleared more than bank paid —
+        # we owed more than we actually paid → GAIN. Flip the sign so
+        # the rest of the function uses a single "positive = gain" rule.
+        fx_delta = control_base - bank_base
+
+    # Post the realised FX gain / loss plug. Sign convention: positive
+    # delta = gain (Cr Exchange Rate Gain), negative = loss (Dr
+    # Exchange Rate Loss). In AUD-only installs ``fx_delta == 0`` and
+    # this block is a no-op.
+    if fx_delta != Decimal("0"):
+        gain_acct, loss_acct = await _get_fx_accounts(session, pay.company_id)
+        if fx_delta > Decimal("0") and gain_acct is not None:
+            lines.append(
+                {
+                    "account_id": gain_acct.id,
+                    "description": f"Realised FX gain on {pay.number}",
+                    "debit": Decimal("0"),
+                    "credit": fx_delta,
+                }
+            )
+        elif fx_delta < Decimal("0") and loss_acct is not None:
+            lines.append(
+                {
+                    "account_id": loss_acct.id,
+                    "description": f"Realised FX loss on {pay.number}",
+                    "debit": -fx_delta,
+                    "credit": Decimal("0"),
+                }
+            )
+        else:
+            # FX accounts missing from the CoA — refuse to post a
+            # silently-unbalanced journal. Caller must seed 6-1630 /
+            # 6-1640 or settle at the invoice rate.
+            raise PaymentError(
+                "Realised FX gain/loss detected but Exchange Rate Gain / "
+                "Loss accounts are missing — re-run the AU CoA seed."
+            )
 
     entry = await journal_svc.create_draft(
         session,
