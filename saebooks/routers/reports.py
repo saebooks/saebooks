@@ -348,6 +348,94 @@ def _uuid_or_none(raw: str | None) -> uuid.UUID | None:
         return None
 
 
+@router.get("/pl-by-segment", response_class=HTMLResponse)
+async def pl_by_segment_report(
+    request: Request,
+    from_date: str | None = Query(None, alias="from"),
+    to_date: str | None = Query(None, alias="to"),
+    segment: str = Query("project"),
+) -> HTMLResponse:
+    """P&L grouped by segment (project for v1)."""
+    company = await _first_company()
+    fd = _parse_date(from_date)
+    td = _parse_date(to_date)
+    async with AsyncSessionLocal() as session:
+        segments = await svc.pl_by_segment(
+            session, company.id,
+            from_date=fd, to_date=td, segment=segment,
+        )
+    return templates.TemplateResponse(
+        request,
+        "reports/pl_by_segment.html",
+        {
+            "edition": settings.edition,
+            "company_name": company.name,
+            "segments": segments,
+            "segment": segment,
+            "from_date": from_date or "",
+            "to_date": to_date or "",
+        },
+    )
+
+
+@router.get("/budget-vs-actual", response_class=HTMLResponse)
+async def budget_vs_actual_report(
+    request: Request,
+    year: int | None = Query(None),
+) -> HTMLResponse:
+    """Budget vs actual per P&L account for a calendar year."""
+    company = await _first_company()
+    year_val = year or date.today().year
+    async with AsyncSessionLocal() as session:
+        report = await svc.budget_vs_actual(session, company.id, year=year_val)
+    month_labels = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ]
+    years = list(range(year_val - 2, year_val + 3))
+    return templates.TemplateResponse(
+        request,
+        "reports/budget_vs_actual.html",
+        {
+            "edition": settings.edition,
+            "company_name": company.name,
+            "report": report,
+            "year": year_val,
+            "years": years,
+            "month_labels": month_labels,
+        },
+    )
+
+
+@router.get("/cashflow-forecast", response_class=HTMLResponse)
+async def cashflow_forecast_report(
+    request: Request,
+    horizon: int = Query(90),
+    as_of: str | None = Query(None),
+) -> HTMLResponse:
+    """Rolling cash-flow forecast: open AR + AP + recurring, weekly roll-up."""
+    company = await _first_company()
+    as_of_date = _parse_date(as_of) or date.today()
+    horizon_days = max(7, min(365, horizon))
+    async with AsyncSessionLocal() as session:
+        report = await svc.cashflow_forecast(
+            session, company.id,
+            horizon_days=horizon_days,
+            as_of=as_of_date,
+        )
+    return templates.TemplateResponse(
+        request,
+        "reports/cashflow_forecast.html",
+        {
+            "edition": settings.edition,
+            "company_name": company.name,
+            "report": report,
+            "horizon": horizon_days,
+            "as_of": as_of_date.isoformat(),
+        },
+    )
+
+
 @router.post("/bas/settle", response_model=None)
 async def bas_settle(request: Request) -> RedirectResponse:
     """Create a BAS settlement journal entry."""

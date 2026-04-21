@@ -1,23 +1,31 @@
-"""Reporting service — trial balance, P&L, balance sheet, aged AR/AP.
+"""Reporting service — trial balance, P&L, balance sheet, aged AR/AP,
+P&L by segment, budget vs actual, cashflow forecast.
 
-All reports operate on POSTED journal lines only (except aged AR/AP,
-which walks the `invoices`/`bills` tables directly so it can show
-per-document line items and balance-due drilldown).
+All reports operate on POSTED journal lines only (except aged AR/AP
++ cashflow forecast, which walk ``invoices``/``bills`` tables directly
+so they can show per-document line items).
 """
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
-from sqlalchemy import and_, select
+from sqlalchemy import Integer, and_, cast, extract, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from saebooks.models.account import Account, AccountType
 from saebooks.models.bill import Bill, BillStatus
+from saebooks.models.budget import Budget
 from saebooks.models.contact import Contact
 from saebooks.models.invoice import Invoice, InvoiceStatus
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
+from saebooks.models.project import Project
+from saebooks.models.recurring_invoice import (
+    RecurrenceStatus,
+    RecurringInvoice,
+)
 
 # Account types that go on the balance sheet (permanent accounts)
 BALANCE_SHEET_TYPES = {
@@ -531,3 +539,551 @@ def aged_ap_csv(report: AgedReport) -> str:
                 ]
             )
     return buf.getvalue()
+
+
+# ---------------------------------------------------------------------- #
+# P&L by segment (project for v1; contact segment needs                   #
+# JournalEntry.contact_id which lands in a later batch)                   #
+# ---------------------------------------------------------------------- #
+
+
+@dataclass
+class SegmentRow:
+    """One segment's slice of the P&L (e.g. one project's P&L)."""
+
+    segment_id: uuid.UUID | None  # None == "Unassigned"
+    segment_label: str
+    sections: list[ReportSection] = field(default_factory=list)
+    net_profit: Decimal = Decimal("0")
+
+
+async def pl_by_segment(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    *,
+    from_date: date | None = None,
+    to_date: date | None = None,
+    segment: str = "project",
+) -> list[SegmentRow]:
+    """P&L grouped by segment tag.
+
+    v1 supports ``segment="project"`` only — lines without a project
+    tag are collected under an "Unassigned" bucket so the grand-total
+    still reconciles with :func:`profit_and_loss` for the same window.
+
+    Contact-segment needs ``JournalEntry.contact_id`` (not present
+    today) — raises :class:`ValueError` if asked for anything else.
+    """
+    if segment != "project":
+        raise ValueError(
+            f"Unsupported segment {segment!r}; only 'project' is "
+            "implemented in v1"
+        )
+
+    conditions = [
+        JournalEntry.company_id == company_id,
+        JournalEntry.status == EntryStatus.POSTED,
+    ]
+    if from_date:
+        conditions.append(JournalEntry.entry_date >= from_date)
+    if to_date:
+        conditions.append(JournalEntry.entry_date <= to_date)
+
+    stmt = (
+        select(
+            JournalLine.project_id,
+            JournalLine.account_id,
+            Account.code,
+            Account.name,
+            Account.account_type,
+            JournalLine.debit,
+            JournalLine.credit,
+        )
+        .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+        .join(Account, JournalLine.account_id == Account.id)
+        .where(and_(*conditions), Account.account_type.in_(PNL_TYPES))
+    )
+    result = await session.execute(stmt)
+
+    # segment_id -> account_id -> AccountBalance
+    per_segment: dict[uuid.UUID | None, dict[uuid.UUID, AccountBalance]] = (
+        defaultdict(dict)
+    )
+    for row in result.all():
+        seg_id, acct_id, code, name, acct_type, debit, credit = row
+        bucket = per_segment[seg_id]
+        if acct_id not in bucket:
+            bucket[acct_id] = AccountBalance(
+                account_id=acct_id,
+                code=code,
+                name=name,
+                account_type=acct_type,
+            )
+        bucket[acct_id].debit += debit
+        bucket[acct_id].credit += credit
+
+    # Resolve project labels up front. ``None`` stays "Unassigned".
+    project_ids = {sid for sid in per_segment if sid is not None}
+    labels: dict[uuid.UUID, str] = {}
+    if project_ids:
+        proj_stmt = select(Project.id, Project.code, Project.name).where(
+            Project.id.in_(project_ids)
+        )
+        for pid, pcode, pname in (await session.execute(proj_stmt)).all():
+            labels[pid] = f"{pcode} — {pname}"
+
+    rows: list[SegmentRow] = []
+    for seg_id, bucket in per_segment.items():
+        sorted_balances = sorted(bucket.values(), key=lambda b: b.code)
+        sections = _group_balances(sorted_balances)
+        income = sum(
+            (s.total_balance for s in sections
+             if s.account_type in {
+                 AccountType.INCOME, AccountType.OTHER_INCOME,
+             }),
+            Decimal("0"),
+        )
+        expenses = sum(
+            (s.total_balance for s in sections
+             if s.account_type in {
+                 AccountType.EXPENSE,
+                 AccountType.COST_OF_SALES,
+                 AccountType.OTHER_EXPENSE,
+             }),
+            Decimal("0"),
+        )
+        net_profit = -income - expenses
+        label = labels.get(seg_id, "Unassigned") if seg_id else "Unassigned"
+        rows.append(
+            SegmentRow(
+                segment_id=seg_id,
+                segment_label=label,
+                sections=sections,
+                net_profit=net_profit,
+            )
+        )
+
+    # "Unassigned" last; otherwise alphabetical by label.
+    rows.sort(key=lambda r: (r.segment_id is None, r.segment_label))
+    return rows
+
+
+# ---------------------------------------------------------------------- #
+# Budget vs actual                                                        #
+# ---------------------------------------------------------------------- #
+
+
+@dataclass
+class BudgetVsActualRow:
+    """One account's 12-month budget-vs-actual comparison for a year.
+
+    Amounts are stored as the account's **natural positive sign** —
+    income reads as ``credit - debit`` so budgeted $1,000 sales and
+    actual $1,000 sales both come out as ``+1000``; expenses read as
+    ``debit - credit`` for the same reason. A positive ``variance``
+    means actual exceeded budget (good for income, bad for expenses —
+    the UI colours accordingly).
+    """
+
+    account_id: uuid.UUID
+    account_code: str
+    account_name: str
+    account_type: AccountType
+    budget_monthly: list[Decimal] = field(
+        default_factory=lambda: [Decimal("0")] * 12
+    )
+    actual_monthly: list[Decimal] = field(
+        default_factory=lambda: [Decimal("0")] * 12
+    )
+
+    @property
+    def budget_ytd(self) -> Decimal:
+        return sum(self.budget_monthly, Decimal("0"))
+
+    @property
+    def actual_ytd(self) -> Decimal:
+        return sum(self.actual_monthly, Decimal("0"))
+
+    @property
+    def variance_ytd(self) -> Decimal:
+        return self.actual_ytd - self.budget_ytd
+
+    @property
+    def variance_monthly(self) -> list[Decimal]:
+        return [
+            self.actual_monthly[i] - self.budget_monthly[i]
+            for i in range(12)
+        ]
+
+
+@dataclass
+class BudgetVsActualReport:
+    year: int
+    rows: list[BudgetVsActualRow] = field(default_factory=list)
+
+    def _sum_column(self, key: str) -> list[Decimal]:
+        out = [Decimal("0")] * 12
+        for row in self.rows:
+            monthly = getattr(row, key)
+            for i in range(12):
+                out[i] += monthly[i]
+        return out
+
+    @property
+    def budget_totals(self) -> list[Decimal]:
+        return self._sum_column("budget_monthly")
+
+    @property
+    def actual_totals(self) -> list[Decimal]:
+        return self._sum_column("actual_monthly")
+
+    @property
+    def variance_totals(self) -> list[Decimal]:
+        return [
+            self.actual_totals[i] - self.budget_totals[i]
+            for i in range(12)
+        ]
+
+
+async def budget_vs_actual(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    *,
+    year: int,
+) -> BudgetVsActualReport:
+    """Compare budgeted amounts to POSTED actuals per P&L account.
+
+    Returns one row per account that has either a budget or an actual
+    in ``year``. The whole thing is a single-pass aggregation — the
+    UI can layer on its own sort order.
+    """
+    # Actuals — aggregate POSTED journal lines per (account, month).
+    conditions = [
+        JournalEntry.company_id == company_id,
+        JournalEntry.status == EntryStatus.POSTED,
+        extract("year", JournalEntry.entry_date) == year,
+    ]
+    month_expr = cast(extract("month", JournalEntry.entry_date), Integer)
+    stmt = (
+        select(
+            JournalLine.account_id,
+            Account.code,
+            Account.name,
+            Account.account_type,
+            month_expr.label("month"),
+            func.coalesce(func.sum(JournalLine.debit), 0).label("debit"),
+            func.coalesce(func.sum(JournalLine.credit), 0).label("credit"),
+        )
+        .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+        .join(Account, JournalLine.account_id == Account.id)
+        .where(and_(*conditions), Account.account_type.in_(PNL_TYPES))
+        .group_by(
+            JournalLine.account_id,
+            Account.code,
+            Account.name,
+            Account.account_type,
+            month_expr,
+        )
+    )
+    actual_rows = (await session.execute(stmt)).all()
+
+    # Budgets — already per (account, year, month).
+    budget_rows = (
+        await session.execute(
+            select(Budget).where(
+                Budget.company_id == company_id,
+                Budget.year == year,
+            )
+        )
+    ).scalars().all()
+
+    # Resolve (code, name, type) from whichever side provides the account.
+    meta: dict[uuid.UUID, tuple[str, str, AccountType]] = {}
+    for ar in actual_rows:
+        meta[ar.account_id] = (ar.code, ar.name, ar.account_type)
+    missing = {b.account_id for b in budget_rows} - set(meta)
+    if missing:
+        q = select(
+            Account.id, Account.code, Account.name, Account.account_type
+        ).where(Account.id.in_(missing))
+        for aid, code, name, atype in (await session.execute(q)).all():
+            meta[aid] = (code, name, atype)
+
+    per_account_actuals: dict[uuid.UUID, list[Decimal]] = defaultdict(
+        lambda: [Decimal("0")] * 12
+    )
+    per_account_budgets: dict[uuid.UUID, list[Decimal]] = defaultdict(
+        lambda: [Decimal("0")] * 12
+    )
+    for ar in actual_rows:
+        debit = Decimal(str(ar.debit or 0))
+        credit = Decimal(str(ar.credit or 0))
+        if ar.account_type in (
+            AccountType.INCOME, AccountType.OTHER_INCOME,
+        ):
+            value = credit - debit  # credit-normal → positive
+        else:
+            value = debit - credit  # debit-normal → positive
+        per_account_actuals[ar.account_id][int(ar.month) - 1] = value
+    for b in budget_rows:
+        per_account_budgets[b.account_id][b.month - 1] = b.amount
+
+    account_ids = sorted(
+        set(per_account_actuals) | set(per_account_budgets),
+        key=lambda aid: meta.get(aid, ("", "", AccountType.EXPENSE))[0],
+    )
+    rows = [
+        BudgetVsActualRow(
+            account_id=aid,
+            account_code=meta[aid][0],
+            account_name=meta[aid][1],
+            account_type=meta[aid][2],
+            budget_monthly=per_account_budgets[aid],
+            actual_monthly=per_account_actuals[aid],
+        )
+        for aid in account_ids
+    ]
+    return BudgetVsActualReport(year=year, rows=rows)
+
+
+# ---------------------------------------------------------------------- #
+# Cashflow forecast                                                       #
+# ---------------------------------------------------------------------- #
+
+
+@dataclass
+class ForecastItem:
+    """One projected cash event. ``amount`` is signed: +=inflow, -=outflow."""
+
+    expected_date: date
+    description: str
+    source: str  # "invoice" | "bill" | "recurring"
+    source_id: uuid.UUID
+    amount: Decimal
+
+
+@dataclass
+class WeekBucket:
+    """One 7-day slice of the horizon for the weekly roll-up."""
+
+    start: date
+    inflows: Decimal = Decimal("0")
+    outflows: Decimal = Decimal("0")
+    running_balance: Decimal = Decimal("0")
+
+    @property
+    def net(self) -> Decimal:
+        return self.inflows - self.outflows
+
+
+@dataclass
+class CashflowForecast:
+    """Full cash-flow forecast: items, weekly buckets, grand totals."""
+
+    from_date: date
+    to_date: date
+    opening_balance: Decimal
+    items: list[ForecastItem] = field(default_factory=list)
+    weeks: list[WeekBucket] = field(default_factory=list)
+
+    @property
+    def total_inflows(self) -> Decimal:
+        return sum(
+            (i.amount for i in self.items if i.amount > 0), Decimal("0")
+        )
+
+    @property
+    def total_outflows(self) -> Decimal:
+        return -sum(
+            (i.amount for i in self.items if i.amount < 0), Decimal("0")
+        )
+
+    @property
+    def projected_closing(self) -> Decimal:
+        return self.opening_balance + self.total_inflows - self.total_outflows
+
+
+def _advance_by_frequency(
+    current: date, frequency: str, anchor_day: int | None
+) -> date:
+    """Thin wrapper around ``services.recurrence.advance``.
+
+    Imports lazily to avoid a circular import at module load (reports
+    is imported by the dashboard, which is imported from main; the
+    recurrence service imports invoices which imports journal which
+    is a heavy leaf).
+    """
+    # `advance` wants a RecurrenceFrequency enum — look it up.
+    from saebooks.models.recurring_invoice import RecurrenceFrequency
+    from saebooks.services.recurrence import advance
+
+    return advance(current, RecurrenceFrequency(frequency), anchor_day)
+
+
+async def cashflow_forecast(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    *,
+    horizon_days: int = 90,
+    as_of: date | None = None,
+) -> CashflowForecast:
+    """Project cash in/out over the next ``horizon_days`` days.
+
+    Three sources of projected movement:
+
+    * Open POSTED invoices (``total > amount_paid``) → inflow on
+      ``due_date``. Overdue invoices land on ``as_of`` so they show up
+      in week-0 rather than vanishing into the past.
+    * Open POSTED bills (same rule) → outflow on ``due_date``.
+    * ACTIVE recurring-invoice templates → one inflow per materialisation
+      at each ``next_run``, walking forward through the horizon. Totals
+      use the template's lines (qty x unit_price x (1 - discount%)).
+
+    Opening balance = GL balance (debit - credit) of all ASSET accounts
+    flagged ``reconcile=True`` through ``as_of``. This is the same sum
+    the dashboard uses so the two agree.
+    """
+    as_of = as_of or date.today()
+    horizon_end = as_of + timedelta(days=horizon_days)
+
+    # Opening bank balance — same shape as dashboard.bank_balances total
+    open_stmt = (
+        select(
+            func.coalesce(
+                func.sum(JournalLine.debit - JournalLine.credit),
+                Decimal("0"),
+            )
+        )
+        .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+        .join(Account, JournalLine.account_id == Account.id)
+        .where(
+            JournalEntry.company_id == company_id,
+            JournalEntry.status == EntryStatus.POSTED,
+            JournalEntry.entry_date <= as_of,
+            Account.account_type == AccountType.ASSET,
+            Account.reconcile.is_(True),
+        )
+    )
+    opening = (await session.execute(open_stmt)).scalar() or Decimal("0")
+    opening = Decimal(str(opening))
+
+    items: list[ForecastItem] = []
+
+    # Open invoices → inflows
+    inv_stmt = (
+        select(Invoice, Contact.name)
+        .join(Contact, Invoice.contact_id == Contact.id)
+        .where(
+            Invoice.company_id == company_id,
+            Invoice.status == InvoiceStatus.POSTED,
+            Invoice.archived_at.is_(None),
+            Invoice.total > Invoice.amount_paid,
+            Invoice.due_date <= horizon_end,
+        )
+    )
+    for inv, cname in (await session.execute(inv_stmt)).all():
+        due = max(inv.due_date, as_of)  # overdue → land on today
+        items.append(
+            ForecastItem(
+                expected_date=due,
+                description=f"Invoice {inv.number or '(draft)'} — {cname}",
+                source="invoice",
+                source_id=inv.id,
+                amount=inv.total - inv.amount_paid,
+            )
+        )
+
+    # Open bills → outflows
+    bill_stmt = (
+        select(Bill, Contact.name)
+        .join(Contact, Bill.contact_id == Contact.id)
+        .where(
+            Bill.company_id == company_id,
+            Bill.status == BillStatus.POSTED,
+            Bill.archived_at.is_(None),
+            Bill.total > Bill.amount_paid,
+            Bill.due_date <= horizon_end,
+        )
+    )
+    for bill, cname in (await session.execute(bill_stmt)).all():
+        due = max(bill.due_date, as_of)
+        items.append(
+            ForecastItem(
+                expected_date=due,
+                description=f"Bill {bill.number or '(draft)'} — {cname}",
+                source="bill",
+                source_id=bill.id,
+                amount=-(bill.total - bill.amount_paid),
+            )
+        )
+
+    # Recurring-invoice templates → projected inflows at each
+    # materialisation in the horizon window.
+    rec_stmt = (
+        select(RecurringInvoice, Contact.name)
+        .join(Contact, RecurringInvoice.contact_id == Contact.id)
+        .options(selectinload(RecurringInvoice.lines))
+        .where(
+            RecurringInvoice.company_id == company_id,
+            RecurringInvoice.status == RecurrenceStatus.ACTIVE,
+            RecurringInvoice.archived_at.is_(None),
+        )
+    )
+    for tpl, cname in (await session.execute(rec_stmt)).all():
+        total_per_run = Decimal("0")
+        for ln in tpl.lines:
+            line_sub = (
+                ln.quantity * ln.unit_price
+                * (Decimal("1") - ln.discount_pct / Decimal("100"))
+            )
+            total_per_run += line_sub.quantize(Decimal("0.01"))
+        if total_per_run <= 0:
+            continue
+        run = tpl.next_run
+        # Walk forward through the horizon. `advance` is pure so no
+        # risk of infinite loop provided it strictly moves forward.
+        safety = 0
+        while run <= horizon_end and safety < 400:
+            safety += 1
+            if run >= as_of and (tpl.end_date is None or run <= tpl.end_date):
+                items.append(
+                    ForecastItem(
+                        expected_date=run,
+                        description=f"Recurring: {tpl.name} — {cname}",
+                        source="recurring",
+                        source_id=tpl.id,
+                        amount=total_per_run,
+                    )
+                )
+            run = _advance_by_frequency(
+                run, tpl.frequency, tpl.anchor_day
+            )
+
+    items.sort(key=lambda i: (i.expected_date, i.description))
+
+    # Weekly roll-up — 7-day slices from as_of through horizon_end.
+    weeks: list[WeekBucket] = []
+    cursor = as_of
+    while cursor <= horizon_end:
+        weeks.append(WeekBucket(start=cursor))
+        cursor += timedelta(days=7)
+    for item in items:
+        idx = (item.expected_date - as_of).days // 7
+        if 0 <= idx < len(weeks):
+            if item.amount >= 0:
+                weeks[idx].inflows += item.amount
+            else:
+                weeks[idx].outflows += -item.amount
+
+    running = opening
+    for wk in weeks:
+        running += wk.net
+        wk.running_balance = running
+
+    return CashflowForecast(
+        from_date=as_of,
+        to_date=horizon_end,
+        opening_balance=opening,
+        items=items,
+        weeks=weeks,
+    )
