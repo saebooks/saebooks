@@ -31,14 +31,23 @@ and ``in_service_date + useful_life`` (where useful life is
 ``method_number x method_period`` months, rendered as calendar days via
 365.25/12 ≈ 30.4375 days per month). Caps at ``cost - residual``.
 
+Diminishing-value (DV) math: rate is ``rate_pct`` (e.g. 30 for 30% per
+year). We step month-by-month from ``in_service_date`` — each full
+month's charge is ``book_value * rate / 12``. The first partial month
+(and the month containing ``through``) are day-count-prorated inside
+that month. Caps at ``cost - residual`` so book value asymptotes to
+residual without ever undershooting (classical DV would never reach
+zero otherwise).
+
 No-depreciation ("asset_no_depreciation") models always yield 0 — safe
 to post on, safe to call the depreciation functions on.
 """
 from __future__ import annotations
 
+import calendar
 import uuid
 from datetime import UTC, date, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -257,6 +266,84 @@ def _cumulative_linear(
     return (depreciable_base * elapsed_days / useful_life_days).quantize(_CENT)
 
 
+def _month_end(year: int, month: int) -> date:
+    last = calendar.monthrange(year, month)[1]
+    return date(year, month, last)
+
+
+def _cumulative_dv(
+    *,
+    cost: Decimal,
+    residual: Decimal,
+    in_service_date: date,
+    annual_rate_pct: Decimal,
+    through: date,
+) -> Decimal:
+    """Total diminishing-value depreciation from in_service through date.
+
+    Walks month-by-month: each month charges
+    ``book_value * (rate_pct / 100) / 12 * month_fraction`` where
+    ``book_value = cost - accumulated_dep_so_far``. The first month
+    is prorated by the day ``in_service_date`` lands on within that
+    month; the final month is prorated by how far through the month
+    ``through`` is. Book value floored at ``residual`` — we never
+    depreciate below salvage.
+
+    Cap stops the classical DV asymptote from overshooting. This is a
+    pure function so tests can exercise the math without a DB.
+    """
+    if through < in_service_date:
+        return Decimal("0")
+    depreciable_base = cost - residual
+    if depreciable_base <= 0:
+        return Decimal("0")
+
+    monthly_rate = annual_rate_pct / Decimal("100") / Decimal("12")
+    accum = Decimal("0")
+
+    cursor_year = in_service_date.year
+    cursor_month = in_service_date.month
+    first = True
+    while True:
+        m_start = date(cursor_year, cursor_month, 1)
+        m_end = _month_end(cursor_year, cursor_month)
+        if m_start > through:
+            break
+
+        # Fraction of this month that's active:
+        #   · bounded below by the in-service day on the first month
+        #   · bounded above by ``through`` on the closing month
+        start_anchor = in_service_date if first else m_start
+        end_anchor = through if through < m_end else m_end
+        total_days_in_month = Decimal((m_end - m_start).days + 1)
+        active_days = Decimal((end_anchor - start_anchor).days + 1)
+        if active_days <= 0:
+            break
+        month_fraction = active_days / total_days_in_month
+
+        book_value = cost - accum
+        remaining_to_residual = book_value - residual
+        if remaining_to_residual <= 0:
+            break
+        month_charge = (book_value * monthly_rate * month_fraction).quantize(
+            _CENT, rounding=ROUND_HALF_UP
+        )
+        if month_charge > remaining_to_residual:
+            month_charge = remaining_to_residual.quantize(_CENT)
+        accum += month_charge
+
+        if end_anchor == through:
+            break
+        first = False
+        if cursor_month == 12:
+            cursor_month = 1
+            cursor_year += 1
+        else:
+            cursor_month += 1
+
+    return accum.quantize(_CENT)
+
+
 async def cumulative_depreciation_through(
     session: AsyncSession,
     asset: FixedAsset,
@@ -281,6 +368,23 @@ async def cumulative_depreciation_through(
             depreciable_base=depreciable_base,
             in_service_date=asset.in_service_date,
             useful_life_days=_useful_life_days(model),
+            through=through,
+        )
+
+    if model.method == "diminishing_value":
+        if model.rate_pct is None or model.rate_pct <= 0:
+            raise ValueError(
+                f"DV model {model.id!r} missing positive rate_pct — "
+                f"cannot compute depreciation"
+            )
+        depreciable_base = asset.cost - asset.residual_value
+        if depreciable_base <= 0:
+            return Decimal("0")
+        return _cumulative_dv(
+            cost=asset.cost,
+            residual=asset.residual_value,
+            in_service_date=asset.in_service_date,
+            annual_rate_pct=model.rate_pct,
             through=through,
         )
 

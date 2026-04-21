@@ -195,11 +195,17 @@ async def _load_depreciation_models(session: AsyncSession) -> int:
             method_period = int(row.get("method_period", "0") or "0")
             raw_factor = row.get("method_progress_factor", "").strip()
             progress_factor = raw_factor if raw_factor else None
+            raw_rate = row.get("rate_pct", "").strip()
+            # Cast empty strings to SQL NULL via ``::numeric`` — asyncpg
+            # otherwise sends bare strings as VARCHAR and mismatches the
+            # numeric column.
             await session.execute(
                 text(
                     "INSERT INTO depreciation_models ("
-                    "id, method, method_number, method_period, method_progress_factor"
-                    ") VALUES (:id, :method, :mnum, :mper, :mpf) "
+                    "id, method, method_number, method_period, "
+                    "method_progress_factor, rate_pct"
+                    ") VALUES (:id, :method, :mnum, :mper, "
+                    "CAST(:mpf AS numeric), CAST(:rate AS numeric)) "
                     "ON CONFLICT (id) DO NOTHING"
                 ).bindparams(
                     id=slug,
@@ -207,6 +213,7 @@ async def _load_depreciation_models(session: AsyncSession) -> int:
                     mnum=method_number,
                     mper=method_period,
                     mpf=progress_factor,
+                    rate=raw_rate if raw_rate else None,
                 ),
             )
             n += 1

@@ -59,6 +59,13 @@ class DepreciationModel(Base):
         Numeric(8, 4),
         comment="Reserved for diminishing-value rate (e.g. 2.0 for 200% DV)",
     )
+    rate_pct: Mapped[Decimal | None] = mapped_column(
+        Numeric(7, 4),
+        comment=(
+            "Annual DV percentage (e.g. 30.0000 for 30%). NULL for linear / "
+            "no-depreciation models."
+        ),
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
