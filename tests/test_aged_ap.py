@@ -4,7 +4,9 @@ Mirror of ``test_aged_ar.py`` but walking POSTED, non-archived bills.
 """
 from __future__ import annotations
 
+import contextlib
 import uuid
+from collections.abc import AsyncGenerator
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -14,12 +16,111 @@ from sqlalchemy import select
 
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account
-from saebooks.models.bill import BillStatus
+from saebooks.models.bill import Bill, BillStatus
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
+from saebooks.models.document_counter import DocumentCounter
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import bills as bill_svc
 from saebooks.services import reports as svc
+
+
+_TEST_CONTACT_NAMES = {
+    "Aged AP Test Co",
+    "Partial Pay Creditor",
+    "AP Exclusion Creditor",
+    "CSV Creditor",
+}
+
+
+async def _fast_forward_bill_counter() -> None:
+    """Advance the per-company bill DocumentCounter past any existing
+    BILL-NNNNNN number — see ``test_bills.py`` for the full rationale.
+    """
+    async with AsyncSessionLocal() as session:
+        company = (
+            await session.execute(
+                select(Company)
+                .where(Company.archived_at.is_(None))
+                .order_by(Company.created_at)
+            )
+        ).scalars().first()
+        assert company is not None
+        numbers = (
+            await session.execute(
+                select(Bill.number).where(
+                    Bill.company_id == company.id,
+                    Bill.number.isnot(None),
+                )
+            )
+        ).scalars().all()
+        max_suffix = 0
+        for n in numbers:
+            try:
+                max_suffix = max(max_suffix, int(str(n).rsplit("-", 1)[-1]))
+            except ValueError:
+                continue
+        counter = (
+            await session.execute(
+                select(DocumentCounter).where(
+                    DocumentCounter.company_id == company.id,
+                    DocumentCounter.kind == "bill",
+                )
+            )
+        ).scalar_one_or_none()
+        if counter is None:
+            counter = DocumentCounter(
+                company_id=company.id,
+                kind="bill",
+                prefix="BILL-",
+                pad_width=6,
+                next_value=max_suffix + 1,
+            )
+            session.add(counter)
+        elif counter.next_value <= max_suffix:
+            counter.next_value = max_suffix + 1
+        await session.commit()
+
+
+async def _purge_test_bills() -> None:
+    """Void every bill attached to an aged-AP test contact.
+
+    The aged reports bucket POSTED bills by due date, so unpaid bills
+    left behind by prior runs leak into the ``current`` bucket and
+    skew bucketing assertions. Voiding flips status to VOIDED and
+    reverses the journal, which is what the report already excludes.
+    The partial-payment test stamps ``amount_paid`` directly (not via
+    the payments service), so we zero it out first — void_bill
+    refuses to proceed on bills with a non-zero amount_paid.
+    """
+    async with AsyncSessionLocal() as session:
+        rows = (
+            await session.execute(
+                select(Bill.id)
+                .join(Contact, Bill.contact_id == Contact.id)
+                .where(
+                    Contact.name.in_(_TEST_CONTACT_NAMES),
+                    Bill.status == BillStatus.POSTED,
+                )
+            )
+        ).scalars().all()
+    for bill_id in rows:
+        async with AsyncSessionLocal() as session:
+            bill = await session.get(Bill, bill_id)
+            if bill is not None and bill.amount_paid > Decimal("0"):
+                bill.amount_paid = Decimal("0")
+                await session.commit()
+        async with AsyncSessionLocal() as session:
+            with contextlib.suppress(Exception):
+                await bill_svc.void_bill(session, bill_id, posted_by="cleanup")
+
+
+@pytest.fixture(autouse=True, scope="module")
+async def _prep_aged_ap() -> AsyncGenerator[None, None]:
+    await _fast_forward_bill_counter()
+    await _purge_test_bills()
+    yield
+    await _purge_test_bills()
 
 
 async def _ctx() -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:

@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncGenerator
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -19,9 +20,66 @@ from sqlalchemy import select
 
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
+from saebooks.models.bill import Bill
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
+from saebooks.models.document_counter import DocumentCounter
 from saebooks.services import bills as bill_svc
+
+
+async def _fast_forward_bill_counter() -> None:
+    """Advance the per-company bill DocumentCounter past any existing
+    BILL-NNNNNN number — see ``test_bills.py`` for the full rationale.
+    """
+    async with AsyncSessionLocal() as session:
+        company = (
+            await session.execute(
+                select(Company)
+                .where(Company.archived_at.is_(None))
+                .order_by(Company.created_at)
+            )
+        ).scalars().first()
+        assert company is not None
+        numbers = (
+            await session.execute(
+                select(Bill.number).where(
+                    Bill.company_id == company.id,
+                    Bill.number.isnot(None),
+                )
+            )
+        ).scalars().all()
+        max_suffix = 0
+        for n in numbers:
+            try:
+                max_suffix = max(max_suffix, int(str(n).rsplit("-", 1)[-1]))
+            except ValueError:
+                continue
+        counter = (
+            await session.execute(
+                select(DocumentCounter).where(
+                    DocumentCounter.company_id == company.id,
+                    DocumentCounter.kind == "bill",
+                )
+            )
+        ).scalar_one_or_none()
+        if counter is None:
+            counter = DocumentCounter(
+                company_id=company.id,
+                kind="bill",
+                prefix="BILL-",
+                pad_width=6,
+                next_value=max_suffix + 1,
+            )
+            session.add(counter)
+        elif counter.next_value <= max_suffix:
+            counter.next_value = max_suffix + 1
+        await session.commit()
+
+
+@pytest.fixture(autouse=True, scope="module")
+async def _prep_bill_counter() -> AsyncGenerator[None, None]:
+    await _fast_forward_bill_counter()
+    yield
 
 
 async def _bootstrap() -> tuple[uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID]:
