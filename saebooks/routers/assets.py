@@ -202,6 +202,7 @@ def _parse_asset_form(
     custody_person: str,
     warranty_end: str,
     purchase_contact_id: str,
+    tax_model_id: str = "",
 ) -> dict[str, Any]:
     return {
         "name": name.strip(),
@@ -211,6 +212,7 @@ def _parse_asset_form(
         "accum_dep_account_id": uuid.UUID(accum_dep_account_id),
         "dep_expense_account_id": uuid.UUID(dep_expense_account_id),
         "depreciation_model_id": depreciation_model_id.strip(),
+        "tax_model_id": tax_model_id.strip() or None,
         "purchase_date": _parse_date(purchase_date, "purchase_date"),
         "in_service_date": _optional_date(in_service_date, "in_service_date"),
         "cost": _parse_decimal(cost, "cost"),
@@ -246,6 +248,7 @@ async def assets_create(
     custody_person: str = Form(""),
     warranty_end: str = Form(""),
     purchase_contact_id: str = Form(""),
+    tax_model_id: str = Form(""),
 ) -> RedirectResponse | HTMLResponse:
     company = await _first_company()
     try:
@@ -257,6 +260,7 @@ async def assets_create(
             accum_dep_account_id=accum_dep_account_id,
             dep_expense_account_id=dep_expense_account_id,
             depreciation_model_id=depreciation_model_id,
+            tax_model_id=tax_model_id,
             purchase_date=purchase_date,
             in_service_date=in_service_date,
             cost=cost,
@@ -445,6 +449,7 @@ async def assets_update(
     custody_person: str = Form(""),
     warranty_end: str = Form(""),
     purchase_contact_id: str = Form(""),
+    tax_model_id: str = Form(""),
 ) -> RedirectResponse | HTMLResponse:
     try:
         kwargs = _parse_asset_form(
@@ -455,6 +460,7 @@ async def assets_update(
             accum_dep_account_id=accum_dep_account_id,
             dep_expense_account_id=dep_expense_account_id,
             depreciation_model_id=depreciation_model_id,
+            tax_model_id=tax_model_id,
             purchase_date=purchase_date,
             in_service_date=in_service_date,
             cost=cost,

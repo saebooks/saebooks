@@ -107,6 +107,20 @@ class FixedAsset(CompanyScoped, Base):
         String(64),
         ForeignKey("depreciation_models.id", ondelete="RESTRICT"),
         nullable=False,
+        comment=(
+            "Book depreciation model — management/GL cadence. Drives the "
+            "journals posted by post_depreciation()."
+        ),
+    )
+    tax_model_id: Mapped[str | None] = mapped_column(
+        String(64),
+        ForeignKey("depreciation_models.id", ondelete="RESTRICT"),
+        nullable=True,
+        comment=(
+            "Optional tax depreciation model (e.g. asset_dv_30). NULL = "
+            "tax schedule matches book. Reporting-only overlay, never "
+            "touches GL."
+        ),
     )
 
     # ---- Money / dates ---------------------------------------------- #
@@ -182,5 +196,6 @@ class FixedAsset(CompanyScoped, Base):
     )
 
     depreciation_model: Mapped[DepreciationModel] = relationship(
-        back_populates="assets"
+        back_populates="assets",
+        foreign_keys=[depreciation_model_id],
     )

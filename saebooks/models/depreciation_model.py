@@ -70,6 +70,12 @@ class DepreciationModel(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
+    # Two FKs now point at depreciation_models: book (required) and tax
+    # (nullable overlay). SA can't guess which one drives
+    # DepreciationModel.assets — pin it to the book FK. Callers that
+    # need tax-linked assets should query via FixedAsset.tax_model_id
+    # directly; there's no symmetric `.tax_for_assets` collection yet.
     assets: Mapped[list[FixedAsset]] = relationship(
-        back_populates="depreciation_model"
+        back_populates="depreciation_model",
+        foreign_keys="FixedAsset.depreciation_model_id",
     )

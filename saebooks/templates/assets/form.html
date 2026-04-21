@@ -38,10 +38,18 @@
       {% endfor %}
     </select>
   </label>
-  <label>Depreciation model
+  <label>Depreciation model (book)
     <select name="depreciation_model_id" required>
       {% for m in models %}
       <option value="{{ m.id }}" {{ 'selected' if asset and asset.depreciation_model_id == m.id }}>{{ m.id }} ({{ m.method }}{% if m.method == 'linear' %} · {{ m.method_number }}yr{% endif %})</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Tax model
+    <select name="tax_model_id">
+      <option value="">— same as book —</option>
+      {% for m in models %}
+      <option value="{{ m.id }}" {{ 'selected' if asset and asset.tax_model_id == m.id }}>{{ m.id }} ({{ m.method }}{% if m.method == 'linear' %} · {{ m.method_number }}yr{% endif %})</option>
       {% endfor %}
     </select>
   </label>

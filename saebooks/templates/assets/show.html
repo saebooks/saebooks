@@ -30,7 +30,8 @@
     <tr><td>Cost account</td><td>{{ cost_acct.code }} {{ cost_acct.name }}</td></tr>
     <tr><td>Accum dep account</td><td>{{ accum_acct.code }} {{ accum_acct.name }}</td></tr>
     <tr><td>Dep expense account</td><td>{{ dep_acct.code }} {{ dep_acct.name }}</td></tr>
-    <tr><td>Depreciation model</td><td>{{ model.id }} — {{ model.method }}{% if model.method == 'linear' %}, {{ model.method_number }} years{% endif %}</td></tr>
+    <tr><td>Depreciation model (book)</td><td>{{ model.id }} — {{ model.method }}{% if model.method == 'linear' %}, {{ model.method_number }} years{% endif %}</td></tr>
+    <tr><td>Tax model</td><td class="dim">{{ asset.tax_model_id if asset.tax_model_id else '(same as book)' }}</td></tr>
   </table>
 </section>
 

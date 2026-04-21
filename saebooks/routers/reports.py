@@ -11,6 +11,7 @@ from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
+from saebooks.services import assets_reports as assets_reports_svc
 from saebooks.services import bas as bas_svc
 from saebooks.services import gst as gst_svc
 from saebooks.services import period_close as period_close_svc
@@ -428,6 +429,53 @@ async def cashflow_forecast_report(
             "report": report,
             "horizon": horizon_days,
             "as_of": as_of_date.isoformat(),
+        },
+    )
+
+
+@router.get("/depreciation-schedule", response_class=HTMLResponse)
+async def depreciation_schedule_report(
+    request: Request,
+    as_at: str | None = Query(None),
+    include_disposed: bool = Query(False),
+    format: str = Query("html"),
+) -> Response:
+    """Fixed-asset depreciation schedule with book vs tax overlay.
+
+    Reporting-only — tax cumulative is computed on-demand from the
+    asset's ``tax_model_id`` (or the book model when NULL). No GL
+    side effects.
+    """
+    company = await _first_company()
+    cutoff = _parse_date(as_at) or date.today()
+    async with AsyncSessionLocal() as session:
+        schedule = await assets_reports_svc.depreciation_schedule(
+            session,
+            company.id,
+            as_at=cutoff,
+            include_disposed=include_disposed,
+        )
+
+    if format == "csv":
+        csv_text = assets_reports_svc.depreciation_schedule_csv(schedule)
+        filename = f"depreciation-schedule-{cutoff.isoformat()}.csv"
+        return Response(
+            content=csv_text,
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
+        )
+
+    return templates.TemplateResponse(
+        request,
+        "reports/depreciation_schedule.html",
+        {
+            "edition": settings.edition,
+            "company_name": company.name,
+            "schedule": schedule,
+            "as_at": cutoff.isoformat(),
+            "include_disposed": include_disposed,
         },
     )
 

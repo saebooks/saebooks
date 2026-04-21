@@ -117,6 +117,7 @@ async def create(
     depreciation_model_id: str,
     purchase_date: date,
     cost: Decimal,
+    tax_model_id: str | None = None,
     in_service_date: date | None = None,
     residual_value: Decimal | None = None,
     code: str | None = None,
@@ -134,6 +135,7 @@ async def create(
     ``code`` auto-generates to ``FA-NNNN`` if not supplied.
     ``in_service_date`` defaults to ``purchase_date``.
     ``residual_value`` defaults to 0.
+    ``tax_model_id`` NULL means tax schedule matches book.
     """
     asset = FixedAsset(
         company_id=company_id,
@@ -144,6 +146,7 @@ async def create(
         accum_dep_account_id=accum_dep_account_id,
         dep_expense_account_id=dep_expense_account_id,
         depreciation_model_id=depreciation_model_id,
+        tax_model_id=tax_model_id,
         purchase_date=purchase_date,
         in_service_date=in_service_date or purchase_date,
         cost=Decimal(cost).quantize(_CENT),
@@ -344,18 +347,18 @@ def _cumulative_dv(
     return accum.quantize(_CENT)
 
 
-async def cumulative_depreciation_through(
+async def _cumulative_for_model(
     session: AsyncSession,
     asset: FixedAsset,
+    model_id: str,
     through: date,
 ) -> Decimal:
-    """Total depreciation that should have accumulated by ``through``.
+    """Compute cumulative depreciation using a specific model (not ``asset.depreciation_model_id``).
 
-    Method-aware. Returns 0 for ``no_depreciation``. Capped at
-    ``cost - residual``. Does NOT reference what's actually been posted
-    — that's ``compute_depreciation_through``'s job.
+    Factored out so the same math serves both book (``depreciation_model_id``)
+    and tax (``tax_model_id``) schedules.
     """
-    model = await _load_model(session, asset.depreciation_model_id)
+    model = await _load_model(session, model_id)
 
     if model.method == "no_depreciation":
         return Decimal("0")
@@ -392,6 +395,40 @@ async def cumulative_depreciation_through(
         f"Depreciation method {model.method!r} is not implemented — "
         f"add a handler in saebooks.services.assets"
     )
+
+
+async def cumulative_depreciation_through(
+    session: AsyncSession,
+    asset: FixedAsset,
+    through: date,
+) -> Decimal:
+    """Book depreciation accumulated by ``through``.
+
+    Drives the depreciation journals posted by ``post_depreciation``.
+    Method-aware. Returns 0 for ``no_depreciation``. Capped at
+    ``cost - residual``. Does NOT reference what's actually been posted
+    — that's ``compute_depreciation_through``'s job.
+    """
+    return await _cumulative_for_model(
+        session, asset, asset.depreciation_model_id, through
+    )
+
+
+async def cumulative_tax_depreciation_through(
+    session: AsyncSession,
+    asset: FixedAsset,
+    through: date,
+) -> Decimal:
+    """Tax depreciation accumulated by ``through`` (reporting-only).
+
+    Uses ``asset.tax_model_id`` if set, otherwise falls back to the
+    book model — so an asset with NULL ``tax_model_id`` always shows
+    zero book-vs-tax difference on the depreciation schedule report.
+
+    Pure reporting overlay — never drives GL postings.
+    """
+    model_id = asset.tax_model_id or asset.depreciation_model_id
+    return await _cumulative_for_model(session, asset, model_id, through)
 
 
 async def compute_depreciation_through(
