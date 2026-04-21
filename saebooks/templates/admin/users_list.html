@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Users — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Users</h1>
+  <div class="meta">{{ edition }}</div>
+</div>
+
+<p>
+  Every user that has reached SAE Books (via Authentik forward-auth) has a
+  row here. Newly-seen users start at <code>readonly</code> — an admin
+  must explicitly grant a higher role. Archiving a user keeps their audit
+  trail intact but freezes their role gates (every action 403s).
+</p>
+
+<table class="users">
+  <thead>
+    <tr>
+      <th>Username</th>
+      <th>Display name</th>
+      <th>Email</th>
+      <th>Role</th>
+      <th>Last seen</th>
+      <th>Status</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for u in users %}
+    <tr{% if u.archived_at %} class="archived"{% endif %}>
+      <td><code>{{ u.username }}</code></td>
+      <td>{{ u.display_name or "—" }}</td>
+      <td>{{ u.email or "—" }}</td>
+      <td>
+        <form method="post" action="/admin/users/{{ u.id }}/role" style="display:inline">
+          <select name="role">
+            {% for r in valid_roles %}
+            <option value="{{ r }}"{% if r == u.role %} selected{% endif %}>{{ r }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit">Save</button>
+        </form>
+      </td>
+      <td>{{ u.last_seen_at.isoformat() if u.last_seen_at else "—" }}</td>
+      <td>
+        {% if u.archived_at %}
+        <span class="badge badge-archived">archived</span>
+        {% else %}
+        <span class="badge badge-active">active</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if u.archived_at %}
+        <form method="post" action="/admin/users/{{ u.id }}/unarchive" style="display:inline">
+          <button type="submit">Unarchive</button>
+        </form>
+        {% else %}
+        <form method="post" action="/admin/users/{{ u.id }}/archive" style="display:inline"
+              onsubmit="return confirm('Archive {{ u.username }}? They stay authenticated but every action will 403.');">
+          <button type="submit" class="danger">Archive</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    {% if not users %}
+    <tr><td colspan="7"><em>No users yet — the first authenticated request creates a row.</em></td></tr>
+    {% endif %}
+  </tbody>
+</table>
+{% endblock %}

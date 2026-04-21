@@ -17,7 +17,10 @@ For a DELETE (no after_data):
     await audit.snapshot_row(session, obj, action="delete", performed_by="web")
     await session.delete(obj)
 """
+import csv
 import enum
+import io
+import json
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
@@ -27,7 +30,8 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.inspection import inspect
-from sqlalchemy.types import Date, DateTime, Enum as SAEnum, Numeric
+from sqlalchemy.types import Date, DateTime, Numeric
+from sqlalchemy.types import Enum as SAEnum
 
 from saebooks.models.audit_snapshot import AuditSnapshot
 
@@ -44,9 +48,7 @@ def _row_to_dict(obj: Any) -> dict[str, Any]:
         val = getattr(obj, col.key)
         if isinstance(val, uuid.UUID):
             val = str(val)
-        elif isinstance(val, datetime):
-            val = val.isoformat()
-        elif isinstance(val, date):
+        elif isinstance(val, datetime | date):
             val = val.isoformat()
         elif isinstance(val, Decimal):
             val = str(val)
@@ -229,8 +231,17 @@ def _resolve_model(table_name: str) -> Any | None:
     """Find the SQLAlchemy model class mapped to `table_name`, or None."""
     # Import locally to avoid circular import at module load time.
     from saebooks.models import (
-        Account, AccountRange, BankRule, BankStatementLine, Company, Contact,
-        JournalEntry, JournalLine, JournalTemplate, PeriodLock, Setting,
+        Account,
+        AccountRange,
+        BankRule,
+        BankStatementLine,
+        Company,
+        Contact,
+        JournalEntry,
+        JournalLine,
+        JournalTemplate,
+        PeriodLock,
+        Setting,
         TaxCode,
     )
     registry: dict[str, Any] = {
@@ -384,6 +395,104 @@ async def revert(
     )
     await session.commit()
     return snap
+
+
+# ---------------------------------------------------------------------------
+# CSV export — 5-year retention compliance dump
+# ---------------------------------------------------------------------------
+
+
+EXPORT_COLUMNS = (
+    "id",
+    "created_at",
+    "table_name",
+    "row_id",
+    "action",
+    "performed_by",
+    "reason",
+    "before_data",
+    "after_data",
+)
+
+
+async def export_csv(
+    session: AsyncSession,
+    *,
+    from_date: datetime | None = None,
+    to_date: datetime | None = None,
+    table_name: str | None = None,
+    performed_by: str | None = None,
+) -> str:
+    """Export audit snapshots as a CSV string.
+
+    Used by the 5-year-retention admin exporter. Rows are ordered
+    ``created_at ASC`` so the exported file reads chronologically.
+    JSONB columns are JSON-serialised so the CSV round-trips — a
+    reviewer can re-load the export into jq / pandas without a
+    second parser.
+
+    ``from_date`` / ``to_date`` are inclusive on both ends (common
+    sense for accounting: "give me FY25" means 1-Jul-2024 through
+    30-Jun-2025, both days included).
+    """
+    stmt = select(AuditSnapshot)
+    if from_date is not None:
+        stmt = stmt.where(AuditSnapshot.created_at >= from_date)
+    if to_date is not None:
+        stmt = stmt.where(AuditSnapshot.created_at <= to_date)
+    if table_name:
+        stmt = stmt.where(AuditSnapshot.table_name == table_name)
+    if performed_by:
+        stmt = stmt.where(AuditSnapshot.performed_by == performed_by)
+    stmt = stmt.order_by(AuditSnapshot.created_at.asc())
+    result = await session.execute(stmt)
+    rows = list(result.scalars().all())
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(EXPORT_COLUMNS)
+    for r in rows:
+        writer.writerow(
+            [
+                str(r.id),
+                r.created_at.isoformat() if r.created_at else "",
+                r.table_name,
+                r.row_id,
+                r.action,
+                r.performed_by or "",
+                r.reason or "",
+                json.dumps(r.before_data, sort_keys=True) if r.before_data else "",
+                json.dumps(r.after_data, sort_keys=True) if r.after_data else "",
+            ]
+        )
+    return buf.getvalue()
+
+
+async def count_snapshots(
+    session: AsyncSession,
+    *,
+    from_date: datetime | None = None,
+    to_date: datetime | None = None,
+    table_name: str | None = None,
+    performed_by: str | None = None,
+) -> int:
+    """Count snapshots matching the same filters as ``export_csv``.
+
+    Lets the admin UI show "N rows will be exported" before the click.
+    """
+    from sqlalchemy import func as _func
+
+    stmt = select(_func.count()).select_from(AuditSnapshot)
+    if from_date is not None:
+        stmt = stmt.where(AuditSnapshot.created_at >= from_date)
+    if to_date is not None:
+        stmt = stmt.where(AuditSnapshot.created_at <= to_date)
+    if table_name:
+        stmt = stmt.where(AuditSnapshot.table_name == table_name)
+    if performed_by:
+        stmt = stmt.where(AuditSnapshot.performed_by == performed_by)
+    result = await session.execute(stmt)
+    return int(result.scalar_one())
 
 
 def diff_fields(

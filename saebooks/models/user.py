@@ -1,0 +1,91 @@
+"""User model — bound to the Authentik username on the forward-auth header.
+
+The row is auto-created on first request (middleware does an upsert on
+``Remote-User``) and the role is assigned by an admin via
+``/admin/users/{id}``. Until then, a newly-seen user sits at the
+default role (``readonly``) — no destructive actions possible.
+"""
+from __future__ import annotations
+
+import enum
+import uuid
+from datetime import datetime
+
+from sqlalchemy import DateTime, String, func
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from saebooks.db import Base
+
+
+class UserRole(enum.StrEnum):
+    """All v1 roles. Ordered from most-privileged to least."""
+
+    ADMIN = "admin"
+    ACCOUNTANT = "accountant"
+    BOOKKEEPER = "bookkeeper"
+    READONLY = "readonly"
+    CLIENT = "client"
+
+
+# Lookup set for the middleware + authz dep to validate header values
+# without reimporting the enum class everywhere.
+VALID_ROLES: frozenset[str] = frozenset(r.value for r in UserRole)
+
+
+# Capability hierarchy — higher number == more privileged. Used by
+# ``require_role`` to allow a single admin decoration to also permit
+# accountants, etc.
+_ROLE_RANK: dict[str, int] = {
+    UserRole.CLIENT.value: 0,
+    UserRole.READONLY.value: 1,
+    UserRole.BOOKKEEPER.value: 2,
+    UserRole.ACCOUNTANT.value: 3,
+    UserRole.ADMIN.value: 4,
+}
+
+
+def role_rank(role: str) -> int:
+    """Return the rank for ``role`` (higher = more privileged).
+
+    Returns ``-1`` for unknown roles so stale role strings always fail
+    closed (``has_at_least`` returns False, ``require_role`` 403s).
+    """
+    return _ROLE_RANK.get(role, -1)
+
+
+def has_at_least(user_role: str, required: str) -> bool:
+    """Does ``user_role`` equal or outrank ``required``?"""
+    ur = role_rank(user_role)
+    rr = role_rank(required)
+    if ur < 0 or rr < 0:
+        return False
+    return ur >= rr
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    username: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    display_name: Mapped[str | None] = mapped_column(String(128))
+    email: Mapped[str | None] = mapped_column(String(255))
+    role: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default=UserRole.READONLY.value,
+        server_default=UserRole.READONLY.value,
+    )
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

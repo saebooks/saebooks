@@ -8,6 +8,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from saebooks.config import settings
+from saebooks.middleware.auth import ForwardAuthMiddleware
 from saebooks.routers import (
     accounts,
     admin,
@@ -62,6 +63,13 @@ def create_app() -> FastAPI:
         description="Self-hosted double-entry accounting",
         lifespan=lifespan,
     )
+    # ForwardAuthMiddleware reads Authentik's Remote-User header (set by
+    # Caddy forward-auth) and stamps request.state.user / .role. It's a
+    # no-op on /healthz, /metrics, /static/, /webhooks/, /favicon.ico so
+    # uptime probes + webhooks work without SSO. Dev override via
+    # SAEBOOKS_DEV_USER + SAEBOOKS_DEV_ROLE env vars.
+    app.add_middleware(ForwardAuthMiddleware)
+
     @app.get("/")
     async def root() -> RedirectResponse:
         return RedirectResponse("/dashboard", status_code=302)

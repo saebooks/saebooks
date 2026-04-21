@@ -1,17 +1,23 @@
 import uuid
+from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Form, Query, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi import APIRouter, Depends, Form, Query, Request
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import select
 
 from saebooks.config import settings as app_settings
 from saebooks.db import AsyncSessionLocal
+from saebooks.models.company import Company
+from saebooks.models.user import VALID_ROLES, User, UserRole
 from saebooks.services import audit as audit_svc
 from saebooks.services import backups as backups_svc
 from saebooks.services import features as features_svc
 from saebooks.services import settings as svc
 from saebooks.services import sql_tool as sql_svc
+from saebooks.services.authz import require_role, require_user
+from saebooks.services.exports.company import build_company_export
 
 router = APIRouter(prefix="/admin")
 
@@ -188,6 +194,56 @@ async def audit_list(
             },
             "page": page,
             "has_next": has_next,
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Audit CSV export (5-year retention dump).
+#
+# Registered BEFORE /audit/{snapshot_id} so FastAPI doesn't try to coerce
+# the literal "export.csv" into a UUID and 422.
+# ---------------------------------------------------------------------------
+
+
+def _parse_date(s: str | None) -> datetime | None:
+    if not s:
+        return None
+    # Accept ISO date (YYYY-MM-DD) or ISO datetime.
+    try:
+        return datetime.fromisoformat(s)
+    except ValueError:
+        return None
+
+
+@router.get("/audit/export.csv")
+async def audit_export_csv(
+    from_date: str | None = Query(None),
+    to_date: str | None = Query(None),
+    table_name: str | None = Query(None),
+    performed_by: str | None = Query(None),
+    _admin: User = Depends(require_role(UserRole.ACCOUNTANT)),  # noqa: B008
+) -> PlainTextResponse:
+    """Download the audit trail as CSV.
+
+    Filters are the same shape as ``/admin/audit``. Timestamps parsed
+    with ``datetime.fromisoformat`` so ``2024-07-01`` and
+    ``2024-07-01T00:00:00+10:00`` both work.
+    """
+    async with AsyncSessionLocal() as session:
+        csv_text = await audit_svc.export_csv(
+            session,
+            from_date=_parse_date(from_date),
+            to_date=_parse_date(to_date),
+            table_name=table_name or None,
+            performed_by=performed_by or None,
+        )
+    stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
+    return PlainTextResponse(
+        csv_text,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="audit-{stamp}.csv"',
         },
     )
 
@@ -392,6 +448,156 @@ async def backups_admin(request: Request) -> HTMLResponse:
             "dumps": backups_svc.list_dumps(),
             "runs": backups_svc.recent_backup_runs(limit=30),
             "tests": backups_svc.recent_restore_tests(limit=20),
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Users (role admin)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/users", response_class=HTMLResponse)
+async def users_list(
+    request: Request,
+    _admin: User = Depends(require_role(UserRole.ADMIN)),  # noqa: B008
+) -> HTMLResponse:
+    """List every Authentik-authenticated user that's hit the app."""
+    async with AsyncSessionLocal() as session:
+        users = (
+            await session.execute(
+                select(User).order_by(User.username)
+            )
+        ).scalars().all()
+    return templates.TemplateResponse(
+        request,
+        "admin/users_list.html",
+        {
+            "edition": app_settings.edition,
+            "users": users,
+            "valid_roles": sorted(VALID_ROLES),
+        },
+    )
+
+
+@router.post("/users/{user_id}/role")
+async def users_set_role(
+    user_id: uuid.UUID,
+    role: str = Form(...),
+    _admin: User = Depends(require_role(UserRole.ADMIN)),  # noqa: B008
+) -> RedirectResponse:
+    """Change a user's role. 400 on unknown roles."""
+    if role not in VALID_ROLES:
+        return RedirectResponse("/admin/users?err=bad_role", status_code=303)
+    async with AsyncSessionLocal() as session:
+        user = await session.get(User, user_id)
+        if user is None:
+            return RedirectResponse("/admin/users?err=not_found", status_code=303)
+        user.role = role
+        await session.commit()
+    return RedirectResponse("/admin/users?saved=1", status_code=303)
+
+
+@router.post("/users/{user_id}/archive")
+async def users_archive(
+    user_id: uuid.UUID,
+    _admin: User = Depends(require_role(UserRole.ADMIN)),  # noqa: B008
+) -> RedirectResponse:
+    async with AsyncSessionLocal() as session:
+        user = await session.get(User, user_id)
+        if user is None:
+            return RedirectResponse("/admin/users?err=not_found", status_code=303)
+        user.archived_at = datetime.now()
+        await session.commit()
+    return RedirectResponse("/admin/users?archived=1", status_code=303)
+
+
+@router.post("/users/{user_id}/unarchive")
+async def users_unarchive(
+    user_id: uuid.UUID,
+    _admin: User = Depends(require_role(UserRole.ADMIN)),  # noqa: B008
+) -> RedirectResponse:
+    async with AsyncSessionLocal() as session:
+        user = await session.get(User, user_id)
+        if user is None:
+            return RedirectResponse("/admin/users?err=not_found", status_code=303)
+        user.archived_at = None
+        await session.commit()
+    return RedirectResponse("/admin/users?unarchived=1", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# /whoami — self-service identity check for any authenticated user
+# ---------------------------------------------------------------------------
+
+
+@router.get("/whoami")
+async def whoami(
+    request: Request,
+    user: User = Depends(require_user()),  # noqa: B008
+) -> dict[str, str | None]:
+    """Return the caller's user row + role. Useful for /debug and /tests."""
+    return {
+        "username": user.username,
+        "display_name": user.display_name,
+        "email": user.email,
+        "role": user.role,
+        "last_seen_at": user.last_seen_at.isoformat() if user.last_seen_at else None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Full-company ZIP export
+# ---------------------------------------------------------------------------
+
+
+@router.get("/company/export", response_class=HTMLResponse)
+async def company_export_form(
+    request: Request,
+    _admin: User = Depends(require_role(UserRole.ACCOUNTANT)),  # noqa: B008
+) -> HTMLResponse:
+    """Pick a company to export. Most Community installs have exactly one."""
+    async with AsyncSessionLocal() as session:
+        companies = (
+            await session.execute(
+                select(Company)
+                .where(Company.archived_at.is_(None))
+                .order_by(Company.name)
+            )
+        ).scalars().all()
+    return templates.TemplateResponse(
+        request,
+        "admin/company_export.html",
+        {
+            "edition": app_settings.edition,
+            "companies": companies,
+        },
+    )
+
+
+@router.post("/company/export")
+async def company_export_zip(
+    request: Request,
+    company_id: uuid.UUID = Form(...),  # noqa: B008
+    include_audit: str = Form("on"),
+    admin_user: User = Depends(require_role(UserRole.ACCOUNTANT)),  # noqa: B008
+) -> Response:
+    """Stream the full-company zip bundle."""
+    async with AsyncSessionLocal() as session:
+        try:
+            payload, filename = await build_company_export(
+                session,
+                company_id=company_id,
+                exported_by=admin_user.username,
+                include_audit=(include_audit == "on"),
+            )
+        except ValueError as exc:
+            return PlainTextResponse(str(exc), status_code=404)
+    return Response(
+        content=payload,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
         },
     )
 

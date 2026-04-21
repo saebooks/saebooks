@@ -17,6 +17,7 @@ from saebooks.models.journal_template import JournalTemplate
 from saebooks.models.settings import Setting
 from saebooks.models.sql_query import SqlQuery
 from saebooks.models.tax_code import TaxCode
+from saebooks.models.user import User, UserRole
 
 __all__ = [
     "Account",
@@ -43,4 +44,6 @@ __all__ = [
     "SqlQuery",
     "StatementLineStatus",
     "TaxCode",
+    "User",
+    "UserRole",
 ]
