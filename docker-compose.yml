@@ -39,6 +39,35 @@ services:
       - default
       - revproxy
 
+  # Second app instance pinned to the MYOB Classic theme, sharing the
+  # same database + codebase as ``app``. Lets the two themes be
+  # compared side-by-side at books.sauer.com.au (default) vs
+  # books-classic.sauer.com.au (classic) without restarting the main
+  # app. The env var ``SAEBOOKS_FRONTEND=classic`` swaps the Jinja
+  # ChoiceLoader at boot (see services/theme.py → validate_startup_theme).
+  # No host port is published — Caddy reaches it over the revproxy
+  # network by compose name (``saebooks-classic-1:8000``).
+  classic:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./saebooks:/app/saebooks
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+      - ./tests:/app/tests
+      - ${SAEBOOKS_BACKUP_DIR:-/home/sauer/saebooks-backups}:/app/backups:ro
+    environment:
+      SAEBOOKS_BACKUP_DIR_IN_CONTAINER: /app/backups
+      SAEBOOKS_FRONTEND: classic
+    networks:
+      - default
+      - revproxy
+
 networks:
   # 'default' stays on the compose-managed bridge so app↔db keeps
   # working; revproxy is the external shared network Caddy + Authentik
