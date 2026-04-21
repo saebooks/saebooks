@@ -4,6 +4,23 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}SAE Books{% endblock %}</title>
+  <script>
+    // Inline dark-mode bootstrap. Runs synchronously before first
+    // paint so there's no flash on reload. Modes: "auto" (follow OS),
+    // "light", "dark" — persisted in localStorage.saebooks-theme.
+    (function () {
+      try {
+        var mode = localStorage.getItem("saebooks-theme") || "auto";
+        var eff = mode;
+        if (mode === "auto") {
+          eff = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark" : "light";
+        }
+        document.documentElement.dataset.theme = eff;
+        document.documentElement.dataset.themeMode = mode;
+      } catch (e) { /* localStorage unavailable — default light */ }
+    })();
+  </script>
   <link rel="stylesheet" href="/static/app.css">
   {% block theme_assets %}
     {% set _theme = theme_for_request(request) %}
@@ -49,6 +66,8 @@
       <a href="/admin/theme">Theme</a>
       <a href="#" id="open-palette" title="Search (Ctrl+K or /)">Search</a>
     </nav>
+    <button type="button" class="theme-toggle" id="theme-toggle"
+            title="Theme: auto (click to cycle)" aria-label="Cycle theme">◐</button>
     <div class="edition">{{ edition }}</div>
   </header>
   <main>
@@ -81,6 +100,48 @@
       const paletteInput = document.getElementById("palette-input");
       const paletteResults = document.getElementById("palette-results");
       const openBtn = document.getElementById("open-palette");
+
+      // Theme toggle: cycles auto → light → dark → auto. The bootstrap
+      // script in <head> already applied the effective theme; this just
+      // wires the button + reacts to OS preference changes when in auto.
+      const themeToggle = document.getElementById("theme-toggle");
+      function iconFor(mode) { return mode === "auto" ? "◐" : mode === "dark" ? "☾" : "☀"; }
+      function applyMode(mode) {
+        var eff = mode;
+        if (mode === "auto") {
+          eff = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark" : "light";
+        }
+        document.documentElement.dataset.theme = eff;
+        document.documentElement.dataset.themeMode = mode;
+        if (themeToggle) {
+          themeToggle.textContent = iconFor(mode);
+          themeToggle.title = "Theme: " + mode + " (click to cycle)";
+        }
+      }
+      if (themeToggle) {
+        // Initial icon (bootstrap script already set data-theme).
+        var current = localStorage.getItem("saebooks-theme") || "auto";
+        themeToggle.textContent = iconFor(current);
+        themeToggle.title = "Theme: " + current + " (click to cycle)";
+        themeToggle.addEventListener("click", function (e) {
+          e.preventDefault();
+          var cur = localStorage.getItem("saebooks-theme") || "auto";
+          var next = cur === "auto" ? "light" : cur === "light" ? "dark" : "auto";
+          try { localStorage.setItem("saebooks-theme", next); } catch (_) {}
+          applyMode(next);
+        });
+      }
+      if (window.matchMedia) {
+        var mq = window.matchMedia("(prefers-color-scheme: dark)");
+        if (mq.addEventListener) {
+          mq.addEventListener("change", function (ev) {
+            if ((localStorage.getItem("saebooks-theme") || "auto") === "auto") {
+              document.documentElement.dataset.theme = ev.matches ? "dark" : "light";
+            }
+          });
+        }
+      }
 
       function openPalette() {
         if (!palette) return;

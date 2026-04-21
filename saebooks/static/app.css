@@ -690,3 +690,180 @@ ul.ac-results li:hover { background: #eef; }
   margin-bottom: 1rem;
 }
 .search-form input[type="search"] { flex: 1; padding: 0.5rem; }
+
+/* ============================================================
+ * Theme toggle button (header)
+ * ============================================================ */
+.theme-toggle {
+  margin-left: 0.5rem;
+  background: transparent;
+  border: 1px solid #444;
+  color: #ddd;
+  font: inherit;
+  padding: 0.15rem 0.5rem;
+  cursor: pointer;
+  border-radius: 2px;
+  font-size: 13px;
+  line-height: 1;
+}
+.theme-toggle:hover { color: #fff; border-color: #888; }
+
+/* ============================================================
+ * Dark mode
+ *
+ * Applied when <html data-theme="dark">. The inline bootstrap
+ * script in base.html sets this attribute before first paint
+ * based on localStorage + prefers-color-scheme so there's no
+ * flash on load. Light mode is the default (no attribute).
+ * ============================================================ */
+
+html[data-theme="dark"] {
+  --fg: #e7e5e4;
+  --fg-dim: #a8a29e;
+  --bg: #1c1917;
+  --panel: #242120;
+  --rule: #44403c;
+  --accent: #34d399;
+  color-scheme: dark;
+}
+
+/* Top chrome */
+html[data-theme="dark"] header.top {
+  background: #0c0a09;
+  border-bottom-color: #000;
+  color: #e7e5e4;
+}
+html[data-theme="dark"] header nav a { color: #c4c0bd; }
+html[data-theme="dark"] header nav a:hover { color: #fff; }
+html[data-theme="dark"] .theme-toggle { color: #c4c0bd; border-color: #3f3a36; }
+html[data-theme="dark"] .theme-toggle:hover { color: #fff; border-color: #78716c; }
+
+/* Table headers + hover rows (hardcoded in light mode) */
+html[data-theme="dark"] .acct-table th,
+html[data-theme="dark"] .je-grid th,
+html[data-theme="dark"] .report-table th,
+html[data-theme="dark"] .sql-result th {
+  background: #33302e;
+}
+html[data-theme="dark"] .acct-table tbody tr:hover,
+html[data-theme="dark"] .je-grid tbody tr:hover {
+  background: #2d2a28;
+}
+html[data-theme="dark"] .acct-header-row td,
+html[data-theme="dark"] .report-table .section-header td,
+html[data-theme="dark"] .opening-row td {
+  background: #2d2a28;
+}
+
+/* Form inputs (hardcoded #fff bgs everywhere) */
+html[data-theme="dark"] form.tc-form input,
+html[data-theme="dark"] form.tc-form select,
+html[data-theme="dark"] .je-header input,
+html[data-theme="dark"] .je-grid .num input,
+html[data-theme="dark"] .je-grid td input,
+html[data-theme="dark"] .settings-form input,
+html[data-theme="dark"] .settings-form select,
+html[data-theme="dark"] .report-filter input,
+html[data-theme="dark"] .audit-filters select,
+html[data-theme="dark"] .audit-filters input,
+html[data-theme="dark"] .migrate-form select,
+html[data-theme="dark"] .override-group input,
+html[data-theme="dark"] .bulk-bar select {
+  background: #1c1917;
+  color: var(--fg);
+  border-color: var(--rule);
+}
+html[data-theme="dark"] .sql-form textarea {
+  background: var(--panel);
+  color: var(--fg);
+  border-color: var(--rule);
+}
+
+/* Alerts — shift to dark surface but keep semantic hue */
+html[data-theme="dark"] .alert-error {
+  background: #3a1616; border-color: #991b1b; color: #fca5a5;
+}
+html[data-theme="dark"] .alert-info {
+  background: #1c213d; border-color: #3f51b5; color: #9cafff;
+}
+html[data-theme="dark"] .alert-ok {
+  background: #122d20; border-color: #10b981; color: #6ee7b7;
+}
+html[data-theme="dark"] .alert-warn {
+  background: #332614; border-color: #b56c00; color: #fcd34d;
+}
+html[data-theme="dark"] .alert-warn strong { color: #fcd34d; }
+
+/* Diff highlight + audit action badges */
+html[data-theme="dark"] .diff-table .diff-before { background: #3a1616; color: #fca5a5; }
+html[data-theme="dark"] .diff-table .diff-after  { background: #122d20; color: #6ee7b7; }
+html[data-theme="dark"] .diff-table tr.highlight td { background: #332614; }
+html[data-theme="dark"] .audit-action.audit-update { background: #1c213d; color: #9cafff; }
+html[data-theme="dark"] .audit-action.audit-delete { background: #3a1616; color: #fca5a5; }
+html[data-theme="dark"] .audit-action.audit-migrate { background: #332614; color: #fcd34d; }
+
+/* Contact-type chips */
+html[data-theme="dark"] .contact-type { background: #2d2a28; color: var(--fg-dim); }
+html[data-theme="dark"] .contact-type.customer {
+  background: #1c213d; color: #9cafff; border-color: #3f51b5;
+}
+html[data-theme="dark"] .contact-type.supplier {
+  background: #332614; color: #fcd34d; border-color: #b56c00;
+}
+html[data-theme="dark"] .contact-type.both {
+  background: #122d20; color: #6ee7b7; border-color: #10b981;
+}
+
+/* Acct badges */
+html[data-theme="dark"] .acct-badge.type { background: #2d2a28; }
+html[data-theme="dark"] .acct-badge.sys { background: #1c213d; color: #9cafff; border-color: #3f51b5; }
+html[data-theme="dark"] .acct-badge.rec { background: #122d20; color: #6ee7b7; border-color: #10b981; }
+html[data-theme="dark"] .acct-badge.protected {
+  background: #332614; color: #fcd34d; border-color: #b56c00;
+}
+
+/* Rule-suggest, autocomplete, bulk bar (hardcoded light-blue accents) */
+html[data-theme="dark"] ul.ac-results li:hover { background: #1c213d; }
+html[data-theme="dark"] .rule-suggest {
+  background: #1c213d; color: #9cafff; border-color: #3f51b5;
+}
+html[data-theme="dark"] .rule-suggest:hover { background: #23295f; }
+html[data-theme="dark"] .bulk-bar {
+  background: #1c213d; border-color: #3f51b5; color: #9cafff;
+}
+html[data-theme="dark"] .bulk-bar select {
+  background: var(--panel); color: var(--fg);
+}
+html[data-theme="dark"] .tc-display:hover { background: #1c213d; }
+
+/* SQL browser */
+html[data-theme="dark"] .sql-result th { background: #33302e; }
+html[data-theme="dark"] .sql-history tr.row-error td { background: #3a1616; }
+
+/* Backups / status */
+html[data-theme="dark"] .backup-summary .value.fail,
+html[data-theme="dark"] .backup-summary .error-detail { color: #fca5a5; }
+html[data-theme="dark"] .status-error { color: #fca5a5; }
+html[data-theme="dark"] .status-reversed { color: #a8a29e; }
+html[data-theme="dark"] .status-draft { color: #fcd34d; }
+
+/* Balance-negative + inline warnings */
+html[data-theme="dark"] .balance-neg { color: #fca5a5; }
+html[data-theme="dark"] .warn-link { color: #fcd34d !important; }
+html[data-theme="dark"] .anomaly-flag { color: #fcd34d; }
+
+/* Bustard tag — dark lilac */
+html[data-theme="dark"] .bustard-tag { background: #2b1f3a; color: #c4b5fd; }
+
+/* Protected row border-left, code-hint — already reference vars, OK */
+html[data-theme="dark"] .backup-help code { background: #ffffff14; }
+
+/* Links default to --accent; make sure default-coloured `a` in content
+   is readable on dark (body + page-header contexts) */
+html[data-theme="dark"] a { color: var(--accent); }
+html[data-theme="dark"] .report-card { color: var(--fg); }
+html[data-theme="dark"] .report-card:hover { border-color: var(--accent); }
+html[data-theme="dark"] .acct-actions a { color: var(--fg-dim); background: var(--panel); }
+html[data-theme="dark"] .acct-actions a:hover { color: var(--accent); border-color: var(--accent); }
+
+/* Journal / page-header .dim utility already uses --fg-dim — OK */

@@ -4,6 +4,22 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}SAE Books{% endblock %}</title>
+  <script>
+    // Inline dark-mode bootstrap — see default base.html for the same
+    // pattern. Runs before first paint so there's no flash on reload.
+    (function () {
+      try {
+        var mode = localStorage.getItem("saebooks-theme") || "auto";
+        var eff = mode;
+        if (mode === "auto") {
+          eff = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark" : "light";
+        }
+        document.documentElement.dataset.theme = eff;
+        document.documentElement.dataset.themeMode = mode;
+      } catch (e) { /* localStorage unavailable — default light */ }
+    })();
+  </script>
   {# Default bundle first so non-overridden pages (e.g. /accounts with
      .acct-table) still get baseline typography/colour; classic.css
      follows to override every shared selector with denser MYOB chrome.
@@ -87,6 +103,8 @@
       <div class="header-actions">
         <a href="#" id="open-palette" title="Search (Ctrl+K, /, or F3)">Search</a>
         <a href="/help/shortcuts" title="Keyboard shortcuts (F1)">Help</a>
+        <button type="button" class="theme-toggle" id="theme-toggle"
+                title="Theme: auto (click to cycle)" aria-label="Cycle theme">◐</button>
       </div>
     </header>
 
@@ -151,6 +169,47 @@
       const paletteResults = document.getElementById("palette-results");
       const openBtn = document.getElementById("open-palette");
       const modal = document.getElementById("classic-modal");
+
+      // Theme toggle — cycles auto → light → dark → auto. Bootstrap
+      // script in <head> already set the effective theme; this just
+      // wires the button + keeps auto mode in sync with OS changes.
+      const themeToggle = document.getElementById("theme-toggle");
+      function iconFor(mode) { return mode === "auto" ? "◐" : mode === "dark" ? "☾" : "☀"; }
+      function applyMode(mode) {
+        var eff = mode;
+        if (mode === "auto") {
+          eff = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark" : "light";
+        }
+        document.documentElement.dataset.theme = eff;
+        document.documentElement.dataset.themeMode = mode;
+        if (themeToggle) {
+          themeToggle.textContent = iconFor(mode);
+          themeToggle.title = "Theme: " + mode + " (click to cycle)";
+        }
+      }
+      if (themeToggle) {
+        var cur0 = localStorage.getItem("saebooks-theme") || "auto";
+        themeToggle.textContent = iconFor(cur0);
+        themeToggle.title = "Theme: " + cur0 + " (click to cycle)";
+        themeToggle.addEventListener("click", function (e) {
+          e.preventDefault();
+          var cur = localStorage.getItem("saebooks-theme") || "auto";
+          var next = cur === "auto" ? "light" : cur === "light" ? "dark" : "auto";
+          try { localStorage.setItem("saebooks-theme", next); } catch (_) {}
+          applyMode(next);
+        });
+      }
+      if (window.matchMedia) {
+        var mq = window.matchMedia("(prefers-color-scheme: dark)");
+        if (mq.addEventListener) {
+          mq.addEventListener("change", function (ev) {
+            if ((localStorage.getItem("saebooks-theme") || "auto") === "auto") {
+              document.documentElement.dataset.theme = ev.matches ? "dark" : "light";
+            }
+          });
+        }
+      }
 
       function openPalette() {
         if (!palette) return;
