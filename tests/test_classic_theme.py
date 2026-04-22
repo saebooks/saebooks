@@ -1,15 +1,16 @@
-"""Smoke tests for the MYOB Classic theme (Batch RR).
+"""Smoke tests for the MYOB Classic theme (Batch RR3 — Command Centre).
 
 The ChoiceLoader is already covered in ``tests/services/test_theme.py``;
 this module exercises the actual classic theme directory — the CSS
-bundle exists and is the target size, the classic base template has
-the sidebar / status bar / F-key driver, and the list overrides carry
+bundle exists and is under budget, the classic base template carries
+the AccountRight Command Centre chrome (top ribbon, breadcrumb, main,
+bottom action bar) + the F-key driver, and the list overrides carry
 the ``data-new-action`` hook that the F2 keyboard shortcut binds to.
 
 We don't render the classic theme through the live app (that'd need a
 module-level theme swap + container rebuild); the sanity targets here
 are file-system + template-source checks, which are enough to catch a
-missing asset or a malformed sidebar.
+missing asset or a malformed ribbon.
 """
 from __future__ import annotations
 
@@ -45,12 +46,15 @@ def test_classic_css_has_classic_grid_selector() -> None:
     css = (STATIC_ROOT / "app.css").read_text()
     assert "table.classic-grid" in css
     assert "--c-primary" in css
-    assert "classic-sidebar" in css
-    assert "classic-statusbar" in css
+    # RR3: Command Centre ribbon + action bar replace the sidebar +
+    # statusbar. The purple accent is the new brand signal.
+    assert ".cc-ribbon" in css
+    assert ".cc-actionbar" in css
+    assert "--c-purple" in css
 
 
 # ---------------------------------------------------------------- #
-# base.html — sidebar + status bar + F-key driver
+# base.html — Command Centre ribbon + action bar + F-key driver
 # ---------------------------------------------------------------- #
 
 
@@ -59,27 +63,33 @@ def classic_base() -> str:
     return (THEME_ROOT / "base.html").read_text()
 
 
-def test_classic_base_has_sidebar_group_headers(classic_base: str) -> None:
-    """Every section of the sidebar tree must be present."""
+def test_classic_base_has_command_centre_hubs(classic_base: str) -> None:
+    """The seven AccountRight hubs must all be present in the ribbon."""
 
-    for marker in (
-        "Workspace",
-        "Sales",
-        "Purchases",
-        "Contacts &amp; items",
+    for hub_label in (
+        "Accounts",
         "Banking",
-        "Accounting",
-        "Admin",
+        "Sales",
+        "Projects",
+        "Purchases",
+        "Inventory",
+        "Card File",
     ):
-        assert marker in classic_base, f"sidebar missing group {marker!r}"
+        assert hub_label in classic_base, f"ribbon missing hub {hub_label!r}"
+    # The ribbon element itself must be present, and so must the
+    # home/command-centre entry point.
+    assert 'class="cc-ribbon"' in classic_base
+    assert "Command Centre" in classic_base
 
 
-def test_classic_base_has_statusbar(classic_base: str) -> None:
-    """Status bar must reference user + edition + the hot-key hints."""
+def test_classic_base_has_actionbar(classic_base: str) -> None:
+    """Bottom action bar must reference user + edition + the F-key hints."""
 
-    assert 'class="classic-statusbar"' in classic_base
+    assert 'class="cc-actionbar"' in classic_base
     assert "edition" in classic_base
-    assert "Ctrl" in classic_base and "F1" in classic_base and "F2" in classic_base
+    # Action bar exposes F-key chips that the keyboard driver binds.
+    for fkey in ("F2", "F3", "F9", "F12"):
+        assert fkey in classic_base
 
 
 def test_classic_base_has_fkey_driver(classic_base: str) -> None:
@@ -229,5 +239,5 @@ def test_classic_loader_serves_classic_base_when_active(tmp_path: Path) -> None:
     # finding the source is enough to prove the ChoiceLoader picks
     # the classic file.
     source, _path, _uptodate = env.loader.get_source(env, "base.html")  # type: ignore[union-attr]
-    assert "classic-sidebar" in source
-    assert "classic-statusbar" in source
+    assert "cc-ribbon" in source
+    assert "cc-actionbar" in source

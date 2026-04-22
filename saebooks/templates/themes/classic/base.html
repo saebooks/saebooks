@@ -22,112 +22,123 @@
   </script>
   {# Default bundle first so non-overridden pages (e.g. /accounts with
      .acct-table) still get baseline typography/colour; classic.css
-     follows to override every shared selector with denser MYOB chrome.
-     The shared {% block theme_assets %} slot stays intact so a
-     per-user preferred_theme downgrade still works consistently. #}
+     follows to override every shared selector with the Command Centre
+     chrome. The shared {% block theme_assets %} slot stays intact so
+     a per-user preferred_theme downgrade still works consistently. #}
   <link rel="stylesheet" href="/static/app.css?v={{ static_version }}">
   <link rel="stylesheet" href="/static/themes/classic/app.css?v={{ static_version }}">
-  {% block theme_assets %}
-    {% set _theme = theme_for_request(request) %}
-    {# Slot left in place so downstream themes can opt in; classic is
-       already loaded above so the per-user resolver is mostly a hint
-       for the default-theme CSS bundle. #}
-  {% endblock %}
+  {% block theme_assets %}{% endblock %}
   <script src="https://unpkg.com/htmx.org@2.0.3" defer></script>
 </head>
 <body>
-  <div class="classic-layout">
-    <aside class="classic-sidebar" aria-label="primary">
-      <div class="brand">SAE Books</div>
+  {#
+    Hub map — the 7 AccountRight Command Centres. Each entry's
+    ``match`` is a list of URL-path prefixes that make this hub the
+    active one, and ``href`` is where the ribbon icon links to. The
+    dashboard has its own anchor-based deep-links so clicking "Sales"
+    from anywhere goes to /dashboard#sales when you're already on
+    the dashboard, and to the sales list otherwise.
+  #}
+  {% set _path = request.url.path %}
+  {% set _hubs = [
+    {"key": "accounts",  "label": "Accounts",   "icon": "₳", "href": "/accounts",
+     "match": ["/accounts", "/journal", "/reports", "/templates", "/admin/tax-codes"]},
+    {"key": "banking",   "label": "Banking",    "icon": "⛁", "href": "/reconciliation",
+     "match": ["/admin/bank-feeds", "/reconciliation", "/bank-rules"]},
+    {"key": "sales",     "label": "Sales",      "icon": "❖", "href": "/invoices",
+     "match": ["/invoices", "/credit-notes", "/payments"]},
+    {"key": "projects",  "label": "Projects",   "icon": "⎔", "href": "/projects",
+     "match": ["/projects", "/budgets"]},
+    {"key": "purchases", "label": "Purchases",  "icon": "⬒", "href": "/bills",
+     "match": ["/bills", "/pay-run"]},
+    {"key": "inventory", "label": "Inventory",  "icon": "▤", "href": "/items",
+     "match": ["/items", "/assets"]},
+    {"key": "cardfile",  "label": "Card File",  "icon": "☰", "href": "/contacts",
+     "match": ["/contacts"]}
+  ] %}
+  {% set _active_hub = "dashboard" %}
+  {% for h in _hubs %}
+    {% for p in h.match %}
+      {% if _path == p or _path.startswith(p + "/") %}
+        {% set _active_hub = h.key %}{# jinja "last wins" — fine #}
+      {% endif %}
+    {% endfor %}
+  {% endfor %}
 
-      <div class="sidebar-group">Workspace</div>
-      <a href="/dashboard"{% if request.url.path.startswith('/dashboard') %} class="active"{% endif %}>Dashboard</a>
-
-      <div class="sidebar-group">Sales</div>
-      <a href="/invoices"{% if request.url.path == '/invoices' or request.url.path.startswith('/invoices/') and not request.url.path.startswith('/invoices/recurring') %} class="active"{% endif %}>Invoices</a>
-      <a href="/invoices/recurring"{% if request.url.path.startswith('/invoices/recurring') %} class="active"{% endif %}>Recurring</a>
-      <a href="/credit-notes"{% if request.url.path.startswith('/credit-notes') %} class="active"{% endif %}>Credit notes</a>
-      <a href="/payments"{% if request.url.path.startswith('/payments') %} class="active"{% endif %}>Payments</a>
-
-      <div class="sidebar-group">Purchases</div>
-      <a href="/bills"{% if request.url.path.startswith('/bills') %} class="active"{% endif %}>Bills</a>
-      <a href="/pay-run"{% if request.url.path.startswith('/pay-run') %} class="active"{% endif %}>Pay run</a>
-
-      <div class="sidebar-group">Contacts &amp; items</div>
-      <a href="/contacts"{% if request.url.path.startswith('/contacts') %} class="active"{% endif %}>Contacts</a>
-      <a href="/items"{% if request.url.path.startswith('/items') %} class="active"{% endif %}>Items</a>
-      <a href="/assets"{% if request.url.path.startswith('/assets') %} class="active"{% endif %}>Assets</a>
-
-      <div class="sidebar-group">Banking</div>
-      <a href="/admin/bank-feeds"{% if request.url.path.startswith('/admin/bank-feeds') %} class="active"{% endif %}>Feeds</a>
-      <a href="/reconciliation"{% if request.url.path.startswith('/reconciliation') %} class="active"{% endif %}>Reconcile</a>
-      <a href="/bank-rules"{% if request.url.path.startswith('/bank-rules') %} class="active"{% endif %}>Rules</a>
-
-      <div class="sidebar-group">Accounting</div>
-      <a href="/journal"{% if request.url.path.startswith('/journal') %} class="active"{% endif %}>Journal</a>
-      <a href="/accounts"{% if request.url.path.startswith('/accounts') %} class="active"{% endif %}>Accounts</a>
-      <a href="/templates"{% if request.url.path == '/templates' or request.url.path.startswith('/templates/') %} class="active"{% endif %}>Templates</a>
-      <a href="/projects"{% if request.url.path.startswith('/projects') %} class="active"{% endif %}>Projects</a>
-      <a href="/budgets"{% if request.url.path.startswith('/budgets') %} class="active"{% endif %}>Budgets</a>
-      <a href="/reports"{% if request.url.path.startswith('/reports') %} class="active"{% endif %}>Reports</a>
-      <a href="/admin/tax-codes"{% if request.url.path.startswith('/admin/tax-codes') %} class="active"{% endif %}>Tax codes</a>
-
-      <div class="sidebar-group">Admin</div>
-      <a href="/admin/imports"{% if request.url.path.startswith('/admin/imports') %} class="active"{% endif %}>Imports</a>
-      <a href="/admin/integrations"{% if request.url.path.startswith('/admin/integrations') %} class="active"{% endif %}>Integrations</a>
-      <a href="/admin/backups"{% if request.url.path.startswith('/admin/backups') %} class="active"{% endif %}>Backups</a>
-      <a href="/admin/audit"{% if request.url.path.startswith('/admin/audit') %} class="active"{% endif %}>Audit</a>
-      <a href="/admin/users"{% if request.url.path.startswith('/admin/users') %} class="active"{% endif %}>Users</a>
-      <a href="/admin/company/export"{% if request.url.path.startswith('/admin/company/export') %} class="active"{% endif %}>Export</a>
-      <a href="/admin/sql"{% if request.url.path.startswith('/admin/sql') %} class="active"{% endif %}>SQL</a>
-      <a href="/admin/settings"{% if request.url.path.startswith('/admin/settings') %} class="active"{% endif %}>Settings</a>
-      <a href="/admin/license"{% if request.url.path.startswith('/admin/license') %} class="active"{% endif %}>Licence</a>
-      <a href="/admin/theme"{% if request.url.path.startswith('/admin/theme') %} class="active"{% endif %}>Theme</a>
-      <div class="sidebar-gap"></div>
-    </aside>
-
-    <header class="classic-header" aria-label="breadcrumb">
-      <div class="breadcrumb">
-        {# Breadcrumb is best-effort: first segment is the area, rest
-           of the path shows as the current item. Pages that care can
-           override {% block breadcrumb %}. #}
-        {% block breadcrumb %}
-          <a href="/dashboard">Home</a>
-          {% set _path = request.url.path.strip('/').split('/') %}
-          {% if _path and _path[0] %}
-            <span class="sep">›</span>
-            <span class="current">{{ _path[0]|replace('-', ' ')|title }}</span>
-          {% endif %}
-        {% endblock %}
+  <div class="cc-layout">
+    <header class="cc-titlebar" aria-label="titlebar">
+      <div class="cc-brand">
+        <a href="/dashboard" aria-label="Command Centre">
+          <span class="cc-brand-mark">SAE</span>
+          <span class="cc-brand-name">Books</span>
+        </a>
       </div>
-      <div class="header-actions">
-        <a href="#" id="open-palette" title="Search (Ctrl+K, /, or F3)">Search</a>
-        <a href="/help/shortcuts" title="Keyboard shortcuts (F1)">Help</a>
-        <button type="button" class="theme-toggle" id="theme-toggle"
+      <nav class="cc-ribbon" aria-label="command centre">
+        <a href="/dashboard"
+           class="cc-hub{% if _active_hub == 'dashboard' %} active{% endif %}"
+           title="Command Centre">
+          <span class="cc-hub-icon">⌂</span>
+          <span class="cc-hub-label">Command Centre</span>
+        </a>
+        {% for h in _hubs %}
+          <a href="{{ h.href }}"
+             class="cc-hub{% if _active_hub == h.key %} active{% endif %}"
+             title="{{ h.label }}">
+            <span class="cc-hub-icon">{{ h.icon }}</span>
+            <span class="cc-hub-label">{{ h.label }}</span>
+          </a>
+        {% endfor %}
+      </nav>
+      <div class="cc-titlebar-actions">
+        <a href="#" id="open-palette" class="cc-chip" title="Search (Ctrl+K, /, or F3)">⌕ Search</a>
+        <a href="/admin/settings" class="cc-chip" title="Settings">⚙</a>
+        <a href="/help/shortcuts" class="cc-chip" title="Keyboard shortcuts (F1)">?</a>
+        <button type="button" class="cc-chip theme-toggle" id="theme-toggle"
                 title="Theme: auto (click to cycle)" aria-label="Cycle theme">◐</button>
       </div>
     </header>
 
-    <main class="classic-main">
+    <nav class="cc-breadcrumb" aria-label="breadcrumb">
+      {% block breadcrumb %}
+        <a href="/dashboard">Home</a>
+        {% set _crumbs = request.url.path.strip('/').split('/') %}
+        {% if _crumbs and _crumbs[0] %}
+          <span class="sep">›</span>
+          <span class="current">{{ _crumbs[0]|replace('-', ' ')|title }}</span>
+        {% endif %}
+      {% endblock %}
+    </nav>
+
+    <main class="cc-main">
       {% block content %}{% endblock %}
     </main>
 
-    <footer class="classic-statusbar" aria-label="status">
-      <span>{{ company_name or "SAE Books" }}</span>
-      <span class="sep">|</span>
-      <span>{{ edition or "community" }}</span>
-      <span class="sep">|</span>
-      {% if request.state.username is defined and request.state.username %}
-      <span>user: {{ request.state.username }}</span>
-      <span class="sep">|</span>
-      {% endif %}
-      <span>
-        <kbd>Ctrl</kbd>+<kbd>K</kbd> search
-        · <kbd>F1</kbd> help
-        · <kbd>F2</kbd> new
-        · <kbd>F9</kbd> post
-        · <kbd>g</kbd> nav
-      </span>
+    {# Bottom action bar — MYOB's perennial F-key footer, reworked
+       as a horizontal strip of labelled buttons + the status readout
+       on the right. Pages opt in with {% block action_bar %} to show
+       their own actions; the defaults below cover list-style pages. #}
+    <footer class="cc-actionbar" aria-label="actions">
+      <div class="cc-actions">
+        {% block action_bar %}
+          <button type="button" class="cc-action" data-action="new"
+                  title="New (F2)"><kbd>F2</kbd> New</button>
+          <button type="button" class="cc-action" data-action="search"
+                  title="Search (F3)"><kbd>F3</kbd> Search</button>
+          <button type="button" class="cc-action" data-action="post"
+                  title="Post (F9)"><kbd>F9</kbd> Post</button>
+          <button type="button" class="cc-action" data-action="save-draft"
+                  title="Save draft (F12)"><kbd>F12</kbd> Draft</button>
+        {% endblock %}
+      </div>
+      <div class="cc-status">
+        <span>{{ company_name or "SAE Books" }}</span>
+        <span class="sep">|</span>
+        <span class="cc-edition cc-edition-{{ edition or "community" }}">{{ edition or "community" }}</span>
+        {% if request.state.username is defined and request.state.username %}
+          <span class="sep">|</span>
+          <span>{{ request.state.username }}</span>
+        {% endif %}
+      </div>
     </footer>
   </div>
 
@@ -156,13 +167,9 @@
   </dialog>
 
   <script>
-    // Classic theme keyboard driver — extends the default theme with
-    // F-key bindings. F1=help, F2=new-on-list, F3=search, F5=refresh,
-    // F9=post (submit any form#post-action), F12=save-draft
-    // (submit any form#save-draft or fall back to the active form).
-    // All F-keys are preventDefaulted so the browser doesn't open its
-    // own help / find / etc. Non-F shortcuts (g-nav, /, Ctrl+K, n)
-    // mirror the default theme.
+    // Classic theme keyboard driver — unchanged from RR2; the F-key
+    // bindings and grid navigation still drive the page. The only
+    // thing that moved is the chrome around it.
     (function () {
       const palette = document.getElementById("search-palette");
       const paletteInput = document.getElementById("palette-input");
@@ -170,9 +177,6 @@
       const openBtn = document.getElementById("open-palette");
       const modal = document.getElementById("classic-modal");
 
-      // Theme toggle — cycles auto → light → dark → auto. Bootstrap
-      // script in <head> already set the effective theme; this just
-      // wires the button + keeps auto mode in sync with OS changes.
       const themeToggle = document.getElementById("theme-toggle");
       function iconFor(mode) { return mode === "auto" ? "◐" : mode === "dark" ? "☾" : "☀"; }
       function applyMode(mode) {
@@ -228,10 +232,6 @@
         });
       }
 
-      // HTMX modal: any list page can set hx-target="#classic-modal"
-      // + hx-swap="innerHTML" on its row links; we auto-open the
-      // dialog when content lands, auto-close on Esc (handled by
-      // browser dialog default).
       document.body.addEventListener("htmx:afterSwap", (evt) => {
         if (modal && evt.detail && evt.detail.target && evt.detail.target.id === "classic-modal") {
           if (!modal.open) modal.showModal();
@@ -246,9 +246,6 @@
         return false;
       }
 
-      // Grid keyboard navigation: j/k moves row-selected within the
-      // first table.classic-grid / table.data on the page; Enter
-      // follows the first anchor in the selected row.
       function activeGrid() {
         return document.querySelector("table.classic-grid, table.data");
       }
@@ -288,7 +285,23 @@
         return true;
       }
 
-      // Two-key "g" sequences (same as default theme).
+      // Action-bar buttons — dispatch to the existing F-key handlers
+      // by firing synthetic keyboard events. Keeps one place to own
+      // the behaviour.
+      function fireKey(key) {
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: key, bubbles: true }));
+      }
+      document.querySelectorAll(".cc-action").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.preventDefault();
+          const a = btn.dataset.action;
+          if (a === "new") return fireKey("F2");
+          if (a === "search") return fireKey("F3");
+          if (a === "post") return fireKey("F9");
+          if (a === "save-draft") return fireKey("F12");
+        });
+      });
+
       let gTimer = null;
       let gArmed = false;
       const gMap = {
@@ -303,14 +316,11 @@
       };
 
       document.addEventListener("keydown", function (evt) {
-        // Esc closes modal / palette.
         if (evt.key === "Escape") {
           if (palette && palette.open) { closePalette(); return; }
           if (modal && modal.open) { modal.close(); return; }
         }
 
-        // F-key bindings — always prevent default so the browser
-        // doesn't swallow them.
         if (evt.key === "F1") {
           evt.preventDefault();
           window.location.assign("/help/shortcuts");
@@ -321,11 +331,7 @@
           openPalette();
           return;
         }
-        if (evt.key === "F5") {
-          // Let Ctrl+F5 do its full-reload thing; bare F5 stays a
-          // standard refresh — no preventDefault.
-          return;
-        }
+        if (evt.key === "F5") { return; }
         if (evt.key === "F2") {
           evt.preventDefault();
           const preferred = document.querySelector("[data-new-action]");
@@ -339,7 +345,6 @@
           return;
         }
         if (evt.key === "F9") {
-          // Submit the page's primary post-action form, if any.
           const form = document.querySelector("form#post-action")
             || document.querySelector("form[data-post-action]");
           if (form) { evt.preventDefault(); form.submit(); }
@@ -352,14 +357,12 @@
           return;
         }
 
-        // Ctrl+K / Cmd+K universal palette opener.
         if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === "k") {
           evt.preventDefault();
           openPalette();
           return;
         }
 
-        // Everything else gates on "not typing".
         if (isTypingTarget(document.activeElement)) return;
 
         if (evt.key === "/") {
@@ -368,12 +371,10 @@
           return;
         }
 
-        // Grid j/k navigation + Enter-to-open.
         if (evt.key === "j") { if (moveSelection(1)) { evt.preventDefault(); return; } }
         if (evt.key === "k") { if (moveSelection(-1)) { evt.preventDefault(); return; } }
         if (evt.key === "Enter") { if (openSelection()) { evt.preventDefault(); return; } }
 
-        // "g" arms the two-key nav sequence.
         if (evt.key === "g") {
           gArmed = true;
           clearTimeout(gTimer);
@@ -387,8 +388,6 @@
           return;
         }
 
-        // "n" = new-on-current-list (same behaviour as F2 so muscle
-        // memory from default theme + from MYOB both work).
         if (evt.key === "n") {
           const preferred = document.querySelector("[data-new-action]");
           if (preferred) {
