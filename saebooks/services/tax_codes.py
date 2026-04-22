@@ -1,12 +1,60 @@
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import audit as audit_svc
+from saebooks.services import change_log as change_log_svc
+
+
+class VersionConflict(Exception):
+    """Raised when ``expected_version`` does not match the stored value.
+
+    The API layer catches this and returns 409 with current server state.
+    """
+
+    def __init__(self, current: TaxCode) -> None:
+        super().__init__(
+            f"TaxCode {current.id} is at version {current.version}, not the expected version"
+        )
+        self.current = current
+
+
+# Columns serialised into change_log.payload
+_TAX_CODE_COLUMNS: tuple[str, ...] = (
+    "id",
+    "company_id",
+    "code",
+    "name",
+    "rate",
+    "tax_system",
+    "reporting_type",
+    "description",
+    "version",
+    "created_at",
+    "archived_at",
+)
+
+
+def _serialise(tax_code: TaxCode) -> dict[str, Any]:
+    """Row → JSON-safe dict for change_log.payload."""
+    data: dict[str, Any] = {}
+    for key in _TAX_CODE_COLUMNS:
+        val = getattr(tax_code, key)
+        if isinstance(val, uuid.UUID):
+            val = str(val)
+        elif isinstance(val, datetime):
+            val = val.isoformat()
+        elif isinstance(val, Decimal):
+            val = str(val)
+        elif hasattr(val, "value"):  # StrEnum
+            val = val.value
+        data[key] = val
+    return data
 
 # Canonical AU GST starter set — users can edit or add more.
 AU_SEED: list[dict[str, object]] = [
@@ -169,3 +217,128 @@ async def archive(
         performed_by=performed_by,
     )
     await session.commit()
+
+
+# ---------------------------------------------------------------------------
+# API-oriented helpers (version-aware, change_log wiring)
+# The Jinja-facing functions above remain untouched.
+# ---------------------------------------------------------------------------
+
+
+async def create_for_api(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    *,
+    code: str,
+    name: str,
+    rate: Decimal,
+    tax_system: str = "GST",
+    reporting_type: str = "taxable",
+    description: str | None = None,
+    actor: str = "api",
+) -> TaxCode:
+    """Create a new tax code and append a change_log row."""
+    tax_code = TaxCode(
+        company_id=company_id,
+        code=code.strip(),
+        name=name.strip(),
+        rate=rate,
+        tax_system=tax_system,
+        reporting_type=reporting_type,
+        description=description,
+        version=1,
+    )
+    session.add(tax_code)
+    await session.flush()
+    await session.refresh(tax_code)
+    await change_log_svc.append(
+        session,
+        entity="tax_code",
+        entity_id=tax_code.id,
+        op="create",
+        actor=actor,
+        payload=_serialise(tax_code),
+        version=tax_code.version,
+    )
+    await session.commit()
+    return tax_code
+
+
+async def update_with_version(
+    session: AsyncSession,
+    tax_code_id: uuid.UUID,
+    *,
+    code: str | None = None,
+    name: str | None = None,
+    rate: Decimal | None = None,
+    tax_system: str | None = None,
+    reporting_type: str | None = None,
+    description: str | None = None,
+    expected_version: int | None = None,
+    actor: str | None = None,
+) -> TaxCode:
+    """Update a tax code with optimistic locking + change_log."""
+    tax_code = await session.get(TaxCode, tax_code_id)
+    if tax_code is None:
+        raise ValueError(f"Tax code {tax_code_id} not found")
+
+    if expected_version is not None and tax_code.version != expected_version:
+        raise VersionConflict(tax_code)
+
+    if code is not None:
+        tax_code.code = code.strip()
+    if name is not None:
+        tax_code.name = name.strip()
+    if rate is not None:
+        tax_code.rate = rate
+    if tax_system is not None:
+        tax_code.tax_system = tax_system
+    if reporting_type is not None:
+        tax_code.reporting_type = reporting_type
+    if description is not None:
+        tax_code.description = description or None
+
+    tax_code.version = tax_code.version + 1
+    await session.flush()
+    await session.refresh(tax_code)
+    await change_log_svc.append(
+        session,
+        entity="tax_code",
+        entity_id=tax_code.id,
+        op="update",
+        actor=actor or "api",
+        payload=_serialise(tax_code),
+        version=tax_code.version,
+    )
+    await session.commit()
+    return tax_code
+
+
+async def archive_with_version(
+    session: AsyncSession,
+    tax_code_id: uuid.UUID,
+    *,
+    expected_version: int | None = None,
+    actor: str | None = None,
+) -> TaxCode | None:
+    """Soft-archive a tax code with optimistic locking + change_log."""
+    tax_code = await session.get(TaxCode, tax_code_id)
+    if tax_code is None:
+        return None
+    if expected_version is not None and tax_code.version != expected_version:
+        raise VersionConflict(tax_code)
+    tax_code.archived_at = datetime.now(UTC)
+    tax_code.version = tax_code.version + 1
+    await session.flush()
+    await session.refresh(tax_code)
+    await change_log_svc.append(
+        session,
+        entity="tax_code",
+        entity_id=tax_code.id,
+        op="archive",
+        actor=actor or "api",
+        payload=_serialise(tax_code),
+        version=tax_code.version,
+    )
+    await session.commit()
+    return tax_code

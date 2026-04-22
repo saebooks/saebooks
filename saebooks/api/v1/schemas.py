@@ -211,22 +211,53 @@ class CompanyConflictBody(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Tax Codes — kept for future Phase 1 cycle (schema defined here for
-# reference; router will be added in cycle 3)
+# Tax Codes — Phase 1 tier-1 (cycle 3)
 # ---------------------------------------------------------------------------
 
 
-class TaxCodeOut(BaseModel):
+class TaxCodeBase(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    code: str = Field(min_length=1, max_length=16)
+    name: str = Field(min_length=1, max_length=255)
+    rate: Decimal
+    tax_system: str = Field(default="GST", min_length=1, max_length=16)
+    reporting_type: str = Field(default="taxable", min_length=1, max_length=32)
+    description: str | None = None
+
+
+class TaxCodeCreate(TaxCodeBase):
+    """POST body for creating a new tax code."""
+
+
+class TaxCodeUpdate(BaseModel):
+    """PATCH body — every field optional."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    code: str | None = Field(default=None, min_length=1, max_length=16)
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    rate: Decimal | None = None
+    tax_system: str | None = Field(default=None, min_length=1, max_length=16)
+    reporting_type: str | None = Field(default=None, min_length=1, max_length=32)
+    description: str | None = None
+
+
+class TaxCodeOut(TaxCodeBase):
     id: uuid.UUID
     company_id: uuid.UUID
-    code: str
-    name: str
-    rate: Decimal
-    tax_system: str
-    reporting_type: str
-    description: str | None = None
     version: int
     created_at: datetime
     archived_at: datetime | None = None
+
+
+class TaxCodeListOut(BaseModel):
+    items: list[TaxCodeOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class TaxCodeConflictBody(BaseModel):
+    detail: str
+    current: TaxCodeOut
