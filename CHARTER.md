@@ -95,8 +95,16 @@ it wrong.
 
 ## 6. Monetisation model — open core
 
-SAE Books is **open core**. Two editions, one codebase, runtime feature
-flags decide what's enabled.
+SAE Books is **open core**. One codebase, five editions, runtime feature
+flags decide what's enabled. Two licensing paths exist: **perpetual
+licence** (buy once, own it — the Offline edition) and **subscription
+licence** (monthly/annual, cloud or self-hosted — Business / Pro /
+Enterprise). Community is always free.
+
+Customer-facing licensing detail lives in `SPEC-LICENSING.md`; pricing
+numbers, setup fees, and internal commercial policy live in
+`SPEC-PRICING.md` (private repo). This charter fixes the shape; those
+docs fix the numbers.
 
 ### 6.1 Community edition (free, AGPL-3.0)
 
@@ -105,47 +113,191 @@ complete, usable bookkeeping system for a single Australian small
 business.
 
 Community includes: full chart of accounts, journal entries, sales,
-purchases, contacts, banking, reconciliation, GST/BAS reporting,
-standard reports, full export, SQLite or Postgres backend, immutable
-ledger audit mode, single-company runtime.
+purchases, contacts, banking, reconciliation, GST/BAS **report
+generation** (prep only, not e-lodgement), standard reports, full
+export, Postgres or SQLite backend, immutable ledger audit mode,
+single-company single-user runtime.
 
-### 6.2 Enterprise edition (paid, commercial licence)
+### 6.2 Offline edition (perpetual licence, USB-bound)
 
-Same codebase. The features below are compiled in but gated behind a
-runtime licence-key flag. Anyone who builds from source can flip the
-flag — that's AGPL. Practically, the friction of rebuilding and
-self-supporting is the moat, not DRM.
+A once-off purchase for customers who want MYOB v19's ownership model —
+pay once, own it, run on your own hardware, no phone-home. Target
+audience: sole traders and small Pty Ltds who resent subscription
+billing, and displaced MYOB AccountRight Classic v19 users (read-only
+from 28 Feb 2026).
 
-Enterprise adds:
+Offline includes everything in Community, **plus** all core
+accounting-depth features that don't depend on our ongoing API costs:
 
-- **Multi-company / intercompany.** Multiple companies under one
-  login, reciprocal journals between them, consolidated reporting.
-  The schema is always multi-tenant; Enterprise unlocks the UI and
-  runtime to use it.
-- **Ledger audit mode choice.** Community is immutable-only.
-  Enterprise unlocks Open Journal and Hybrid modes (per §7.2).
-- **Compliance API access from the app.** Built-in BAS submission,
-  STP (when offered), ABN/LEI/ABR/Companies-House lookup, e-invoicing.
-  Community users can call those APIs directly (they're separate paid
-  services); Enterprise bundles them into the UI.
-- **Priority support + signed releases + LTS branches.**
+- Multi-currency + FX revaluation (month-end adjusting/reversing)
+- Inventory v1 (items with weighted-average cost)
+- Projects + budgets
+- Asset register v2 (linear + diminishing-value, partial disposal,
+  CSV bulk import, tax-vs-book split)
+- Multi-company runtime + intercompany journals
+- Open Journal + Hybrid audit modes (in addition to Immutable)
+- Granular permissions matrix (per §12.2)
+- All themes (default, MYOB Classic, and any others we ship)
+- BAS report generation for AU (prep only — e-lodgement is subscription-
+  tier because ATO SBR has ongoing DSP certification costs)
 
-### 6.3 Revenue sources, in order of likelihood
+Offline excludes only the paid-API integrations (bank feeds, ABR / LEI /
+Companies House lookup, ATO SBR e-lodgement). Those are subscription
+features because they cost us money per customer per month.
 
-1. **Enterprise licence.** Annual per-company fee. Priced well below
-   QBO/Xero for equivalent functionality.
-2. **Hosted SaaS.** Same codebase, we run it. Enterprise features on.
+**USB-bound licensing model** — the licence file lives on a USB drive,
+bound to the drive's immutable hardware identifier. The drive must be
+present at startup and every 24h for the licence to validate. Activation
+requires a one-time online handshake; everything after that runs
+offline. See `SPEC-LICENSING.md` for the full protocol.
+
+**Seat limit:** 1 admin user per Offline licence. Soft cap (warning
+banner, full functionality retained) — the "WinRAR path."
+
+**Company limit:** 1 company per Offline licence. Hard cap.
+
+**Updates:** 12 months of updates included with every Offline purchase.
+After that, the install runs forever on the version it has — users can
+choose to keep it as-is, or buy an optional annual maintenance plan to
+keep receiving updates. See §6.13.
+
+### 6.3 Business edition (subscription, entry paid tier)
+
+Target audience: typical Australian small businesses running on a single
+legal entity, or small groups with two related entities, who want live
+bank feeds and compliance automation without running their own licence
+USB.
+
+Business includes everything in Offline, **plus**:
+
+- Bank feeds (SISS / ACSISS daily sync)
+- ABR lookup (Australian Business Number enrichment on contacts)
+- Stripe + Paperless integrations
+- Email delivery of invoices (SAE-hosted SMTP relay)
+
+**Seat limit:** 2 admin users + 3 employee users included; additional
+seats available as paid add-ons. Hard cap — user creation blocked
+when over limit with upgrade CTA.
+
+**Company limit:** Up to 2 companies under one subscription. Hard cap.
+
+### 6.4 Pro edition (subscription, mid tier)
+
+Target audience: bookkeepers, accountants, and medium businesses running
+consolidated groups of up to three entities.
+
+Pro includes everything in Business, **plus**:
+
+- LEI / GLEIF lookup
+- UK Companies House lookup
+- ATO SBR e-lodgement (BAS, and STP when offered)
+- QuickBooks Online data import (migration tooling)
+- Ad-hoc SQL query tool for power users
+- Audit snapshot service (point-in-time financial snapshots)
+- Automated scheduled backups
+
+**Seat limit:** 5 admin users + 10 employee users included; additional
+seats available as paid add-ons. Hard cap.
+
+**Company limit:** Up to 3 companies under one subscription. Hard cap.
+
+### 6.5 Enterprise edition (subscription, top tier)
+
+Target audience: groups with more than three entities, professional
+bookkeeping practices serving many clients, or any customer who needs
+a support SLA.
+
+Enterprise includes everything in Pro, **plus**:
+
+- Unlimited companies
+- Unlimited seats
+- Per-company SISS credentials (separate bank-feed contracts per entity)
+- Priority support with defined response-time SLA
+- Signed releases + LTS (long-term support) branches
+- Custom integrations (bespoke ERP / payroll / vertical connectors)
+- Bespoke reporting and data-migration services
+- Hosted SaaS option with same feature set
+
+### 6.6 Two licensing paths
+
+| Dimension | Perpetual (Offline) | Subscription (Business / Pro / Enterprise) |
+|---|---|---|
+| Payment | Once off (payment plan available) | Monthly or annual |
+| Ownership | You own the licence forever | You rent access |
+| Binding | USB hardware + online activation once | Ledger identifier (company legal entity) |
+| Updates | 12 months included, optional annual maintenance thereafter | Included while subscription active |
+| Paid APIs (feeds / lookups / lodgement) | Not included | Included |
+| Seat / company caps | 1 / 1 | Per tier, see §6.3–6.5 |
+| Upgrade path | → Subscription tier preserves all Offline features | → Higher subscription tier preserves all features (§6.9) |
+| Loss of USB | One free replacement per 12 months; otherwise see SPEC-LICENSING | N/A |
+
+### 6.7 User / seat model
+
+Every user account carries a **seat class**:
+
+- **Admin seat** — full administrative rights; maps to the `admin` role
+  in the permissions matrix (§12.2).
+- **Employee seat** — operational rights only; maps to any non-admin
+  role (`accountant`, `bookkeeper`, `readonly`, `client`, or any
+  customer-defined role that grants < full admin).
+
+Seat caps are enforced separately per class. Downgrading an admin to an
+employee frees an admin seat and consumes an employee seat, enforced at
+role-change time. Upgrading consumes an admin seat.
+
+### 6.8 Pricing anchors
+
+The charter fixes the *shape*; commercial pricing lives in
+`SPEC-PRICING.md`. For orientation only (not contractual):
+
+- **Community:** $0
+- **Offline:** single once-off charge, payment plan available over up to
+  6 months with full access from day 1
+- **Business / Pro:** monthly subscription with annual discount
+  (roughly two months free for annual pre-pay)
+- **Enterprise:** starts from a published monthly floor, with either an
+  optional setup fee OR a 12-month lock-in at a higher monthly rate
+  with no setup fee
+
+All pricing under QBO / Xero / MYOB equivalents for comparable seat and
+feature counts. Self-hosting is the reason the maths works: our marginal
+cost per customer approaches zero.
+
+### 6.9 Upgradeability guarantee
+
+Every paid tier is a strict superset of the tier below. Moving up never
+removes a feature a customer was already using. The canonical order is:
+
+```
+Community ⊂ Offline ⊂ Business ⊂ Pro ⊂ Enterprise
+```
+
+Offline is intentionally positioned as a full-featured *offline-capable*
+edition (matches the Community→Offline→Business path for customers who
+start Free, buy Offline, then later add cloud features). Upgrading from
+Offline to Business means *adding* bank feeds, ABR, Stripe, Paperless,
+plus cloud billing; nothing already in Offline disappears.
+
+### 6.10 Revenue sources, in order of likelihood
+
+1. **Subscription licences (Business / Pro / Enterprise).** Monthly or
+   annual per-account fee.
+2. **Offline perpetual licences.** Once-off purchase, optional annual
+   maintenance plan.
+3. **Hosted SaaS.** Same codebase, we run it. Enterprise features on.
    Target: users who like the philosophy but don't want to operate a
    server.
-3. **Compliance APIs.** Paid hosted APIs (BAS, STP, ABN/LEI/ABR).
-   Usable standalone or via Enterprise UI integration.
-4. **Plugin marketplace revenue share.** First-party premium plugins
-   we publish; 3rd-party plugin listings with revenue share (see §14).
-5. **Custom solutions.** Bespoke integrations, migrations, reporting.
-6. **Partnerships.** Revenue share with certified bodies (LEI
-   Register, ASIC data providers, bank-feed aggregators).
+4. **Compliance APIs.** Paid hosted APIs (BAS SBR, STP, ABN / LEI / ABR
+   lookup). Usable standalone or via subscription UI integration.
+5. **Setup + migration services.** Optional data-import + training
+   packs on paid tiers; custom migration for Enterprise.
+6. **Plugin marketplace revenue share.** First-party premium plugins we
+   publish; third-party plugin listings with revenue share (§14).
+7. **Custom solutions.** Bespoke integrations, migrations, reporting.
+8. **Partnerships.** Revenue share with certified bodies (LEI Register,
+   ASIC data providers, bank-feed aggregators).
 
-### 6.4 Ad slots (deferred, not enabled)
+### 6.11 Ad slots (deferred, not enabled)
 
 The UI ships with **named rendering slots** (e.g. dashboard sidebar,
 empty-state panels) that are empty by default and config-driven. This
@@ -154,21 +306,84 @@ sponsored content in the hosted SaaS later without retrofitting the UI.
 Self-hosted deployments never render ads unless the operator
 explicitly enables a slot provider.
 
-### 6.5 Explicitly not doing
+### 6.12 Acceptable Use Policy
 
-- **Paywalling core ledger, reporting, or BAS.** Hero promise and
-  AGPL spirit. The Community edition is real, not a demo.
+SAE Books is sold under a commercial licensing agreement (EULA / ToS —
+separate document). The licence is not available to, and may be
+revoked from, any entity that:
+
+1. Appears on the UN, Australian DFAT Consolidated List, US OFAC SDN
+   list, EU CFSP sanctions list, or UK OFSI consolidated list.
+2. Is materially involved in **armed conflict targeting civilians**,
+   weapons manufacturing primarily targeting civilians, or
+   state-sponsored violence.
+3. Has its primary purpose documented as **human-rights violations**
+   (modern slavery, child labour, persecution of identified groups
+   on grounds of race, religion, gender, sexual orientation, or
+   political opinion).
+4. Is listed by recognised monitoring bodies (SPLC, ADL, Hope Not
+   Hate, and Australian equivalents) as a hate organisation.
+
+SAE Books reserves the right to terminate any commercial licence for
+cause under the AUP. Data export rights persist for 30 days
+post-termination — the hero promise does not die at the licensing
+gate. Customers may appeal a termination to a human reviewer with a
+14-day response SLA.
+
+AGPL Community use is not gated by the AUP — AGPL rights cannot be
+revoked under an acceptable-use clause. The AUP applies to **commercial
+licences only** (Offline perpetual + subscription).
+
+### 6.13 Updates policy (opt-in, loud)
+
+The charter's position on updates is a direct consequence of the hero
+promise ("your books, your control"):
+
+- **No auto-update by default.** Container images don't pull new
+  versions unless the operator configures it.
+- **"Update available" banners are opt-in.** Default is silent.
+- `/admin/updates` screen shows current version, latest version,
+  changelog, and a single explicit button. Nothing runs without the
+  click.
+- **Your install keeps running, forever.** A customer who never
+  updates still has a working accounting system on the version they
+  bought. We never hold functioning code hostage behind a "your
+  version is too old, upgrade or lose access" flow.
+- Offline licences have a documented `updates_until` date (activation
+  + 12 months by default, extended by maintenance renewals). Past that
+  date, the app continues to run — only new-version pulls are gated.
+- Subscription licences receive updates continuously while active. If
+  the subscription lapses, the app continues to run on the last
+  version that was current at lapse.
+
+UI copy, verbatim, on every update-relevant screen: **"Your SAE Books
+install will keep running exactly as-is, forever. Updates are
+optional and are for you to choose when it suits you."**
+
+### 6.14 Explicitly not doing
+
+- **Paywalling core ledger, reporting, or BAS report generation.** Hero
+  promise and AGPL spirit. The Community edition is real, not a demo.
 - **Ads in self-hosted deployments by default.** Slots exist; they
   stay empty unless the operator opts in.
 - **Selling user data.** Ever.
-- **DRM / phone-home licence enforcement.** Enterprise licence keys
-  validate locally against a public key. No network call required to
-  run the product.
+- **DRM / phone-home licence enforcement.** Licence keys validate
+  locally against a public key bundled in the binary. Offline needs a
+  one-time online activation handshake; no network call required to
+  continue running after that. Subscription installs check in with the
+  portal at a configurable interval (default weekly), but continue to
+  run read-write during any outage of the portal up to the subscription
+  grace period.
+- **Forcing updates on customers to maintain functionality.** See §6.13.
+- **Kill-switching customer books.** If a subscription lapses, the app
+  goes to a read-only + export mode after the grace period; it never
+  deletes or encrypts the customer's data.
 
 If the product never earns revenue, Richard has still replaced a $40/mo
 QBO subscription and owns his data outright. If it does earn revenue,
-it's from Enterprise gating, compliance plumbing, and the marketplace
-— not from holding the ledger hostage.
+it's from Offline perpetual licences, subscription Business / Pro /
+Enterprise gating, compliance plumbing, and the marketplace — not from
+holding the ledger hostage.
 
 ## 7. Architecture decisions
 
@@ -177,16 +392,20 @@ it's from Enterprise gating, compliance plumbing, and the marketplace
 - **Schema is multi-tenant from day 1.** Every business-data table has
   a `company_id` FK. Migrations assume this. Retrofitting is a refactor
   nobody wants.
-- **Community runtime is single-tenant.** A runtime flag enforces
-  exactly one active `company_id` per deployment. The schema supports
-  more; the Community binary refuses to use them.
-- **Enterprise runtime unlocks multi-company / intercompany.**
-  Multiple companies under one login, reciprocal journals between
-  them — e.g. Sauer Pty Ltd and Saueesti Trust under one login. That's
-  the genuine gap in the market and the single biggest Enterprise
-  hook.
+- **Company caps per edition** (hard-enforced at company-creation time):
+  - Community: 1
+  - Offline: 1
+  - Business: up to 2
+  - Pro: up to 3
+  - Enterprise: unlimited
+- **Multi-company / intercompany unlocks at Offline.** Multiple companies
+  under one login, reciprocal journals between them — e.g. Sauer Pty Ltd
+  and Saueesti Trust under one login. Offline gets this because it's a
+  pure-code feature with no ongoing cost to us; Business+ raises the
+  cap.
 - **Self-compiling users can flip the flag.** AGPL reality. Accepted.
-  The friction of rebuilding + self-supporting is the moat.
+  The friction of rebuilding + self-supporting + forgoing signed
+  releases, LTS, and support is the moat.
 - **Future hosted SaaS** flips the same flag server-side to run
   multi-tenant across businesses. Same code, different deployment.
 
@@ -338,28 +557,82 @@ Writing these down so we can't pretend they weren't known:
 
 ## 12. Edition matrix
 
-Unambiguous split so nobody has to guess what's in which tier.
+Unambiguous split so nobody has to guess what's in which tier. Paid
+tiers are **strict supersets** of the tiers below (§6.9). Community and
+Offline are both self-hosted-only; Business / Pro / Enterprise ship as
+either self-hosted or hosted SaaS at the customer's choice.
 
-| Capability | Community (AGPL, free) | Enterprise (paid) |
-|---|---|---|
-| Chart of accounts, journal, GL | ✅ | ✅ |
-| Sales, purchases, contacts | ✅ | ✅ |
-| Bank reconcile | ✅ | ✅ |
-| GST / BAS report generation | ✅ | ✅ |
-| Full export (CSV, JSON, OFX, QIF, DB dump) | ✅ | ✅ |
-| Postgres + SQLite | ✅ | ✅ |
-| Single-company runtime | ✅ | ✅ |
-| Immutable audit mode | ✅ | ✅ |
-| Multi-company / intercompany runtime | ❌ | ✅ |
-| Open Journal / Hybrid audit modes | ❌ | ✅ |
-| Built-in BAS/STP/ABN API UI | ❌ | ✅ |
-| Priority support + signed LTS releases | ❌ | ✅ |
-| Marketplace plugin distribution (first-party) | ❌ | ✅ |
-| Source available | ✅ (AGPL) | ✅ (AGPL; Enterprise features under commercial licence) |
-| Self-compile to flip feature flags | ✅ allowed | ✅ allowed |
+### 12.1 Feature matrix
+
+| Capability | Community | Offline | Business | Pro | Enterprise |
+|---|---|---|---|---|---|
+| Chart of accounts, journal, GL | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Sales, purchases, contacts | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Bank reconcile (CSV / OFX import) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Bank rules (auto-categorisation) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Fixed assets v1 (linear, full disposal) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| GST / BAS report **generation** | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Full export (CSV, JSON, OFX, QIF, DB dump) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Postgres + SQLite | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Immutable audit mode | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Recurring invoices, credit notes, payments | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Pay run + ABA file generation | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Multi-currency + FX revaluation | ❌ | ✅ | ✅ | ✅ | ✅ |
+| Inventory v1 (items, WAC) | ❌ | ✅ | ✅ | ✅ | ✅ |
+| Projects + budgets | ❌ | ✅ | ✅ | ✅ | ✅ |
+| Fixed assets v2 (DV dep, partial disposal, CSV, tax/book) | ❌ | ✅ | ✅ | ✅ | ✅ |
+| Multi-company / intercompany runtime | ❌ | ✅ (1) | ✅ (2) | ✅ (3) | ✅ (∞) |
+| Open Journal + Hybrid audit modes | ❌ | ✅ | ✅ | ✅ | ✅ |
+| Granular permissions matrix | ❌ | ✅ | ✅ | ✅ | ✅ |
+| All themes (MYOB Classic, SS, TT, etc.) | ❌ | ✅ | ✅ | ✅ | ✅ |
+| Bank feeds (SISS daily sync) | ❌ | ❌ | ✅ | ✅ | ✅ |
+| ABR lookup | ❌ | ❌ | ✅ | ✅ | ✅ |
+| Stripe + Paperless integrations | ❌ | BYO keys | ✅ | ✅ | ✅ |
+| SAE-hosted SMTP for invoice delivery | ❌ | ❌ | ✅ | ✅ | ✅ |
+| LEI / GLEIF lookup | ❌ | ❌ | ❌ | ✅ | ✅ |
+| UK Companies House lookup | ❌ | ❌ | ❌ | ✅ | ✅ |
+| ATO SBR e-lodgement (BAS, STP) | ❌ | ❌ | ❌ | ✅ | ✅ |
+| QuickBooks Online import | ❌ | ❌ | ❌ | ✅ | ✅ |
+| SQL query tool | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Audit snapshot service | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Automated scheduled backups | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Per-company SISS credentials | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Priority support + SLA | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Signed releases + LTS branches | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Custom integrations + bespoke reporting | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Marketplace plugin distribution (first-party) | ❌ | ✅ | ✅ | ✅ | ✅ |
+| Source available | ✅ (AGPL) | ✅ (AGPL + commercial) | ✅ (AGPL + commercial) | ✅ (AGPL + commercial) | ✅ (AGPL + commercial) |
+| Self-compile to flip feature flags | ✅ allowed | ✅ allowed | ✅ allowed | ✅ allowed | ✅ allowed |
 
 Flipping a flag in a self-compiled build is never a licence violation.
-Running an unflagged commercial-licensed binary in production is.
+Running an unflagged commercial-licensed binary in production *is*.
+
+### 12.2 Seat matrix
+
+| Edition | Admin seats | Employee seats | Seat cap enforcement | Paid add-on seats |
+|---|---|---|---|---|
+| Community | 1 | 0 | Hard | — |
+| Offline | 1 | 0 | **Soft** (warning banner) | — |
+| Business | 2 | 3 | Hard | Available |
+| Pro | 5 | 10 | Hard | Available |
+| Enterprise | ∞ | ∞ | N/A | N/A |
+
+"Hard" = user creation is blocked at the limit with an upgrade CTA.
+"Soft" = functionality retained; banner only. Offline is soft because
+it's an owned perpetual licence on a single physical device — the USB
+binding itself is the real limit (see §6.2 and `SPEC-LICENSING.md`).
+
+Admin vs employee mapping to permission roles is fixed in §6.7.
+
+### 12.3 Company matrix
+
+| Edition | Company cap | Enforcement |
+|---|---|---|
+| Community | 1 | Hard |
+| Offline | 1 | Hard |
+| Business | 2 | Hard |
+| Pro | 3 | Hard |
+| Enterprise | ∞ | N/A |
 
 ## 13. Plugin integration guidelines
 
@@ -488,3 +761,4 @@ Every commit signed, every PR (once public) CLA-checked.
 ---
 
 *Charter v1.0 — 2026-04-15*
+*Charter v1.1 — 2026-04-22 — Amended §6 (five-edition model + Offline perpetual + USB-bound licensing + AUP + updates policy), §7.1 (company caps per edition), §12 (five-column feature matrix + seat matrix + company matrix). Companion docs: `SPEC-LICENSING.md` (public), `SPEC-PRICING.md` (private), `EULA.md` draft (private, pending lawyer review).*
