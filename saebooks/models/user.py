@@ -11,6 +11,7 @@ import enum
 import uuid
 from datetime import datetime
 
+import sqlalchemy as sa
 from sqlalchemy import DateTime, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -93,3 +94,11 @@ class User(Base):
         nullable=False,
     )
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Optimistic-locking version — added by migration 0038_phase1_user_version.
+    # Starts at 1, incremented on every API write.
+    version: Mapped[int] = mapped_column(
+        sa.Integer(),
+        nullable=False,
+        default=1,
+        server_default="1",
+    )

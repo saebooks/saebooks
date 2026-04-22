@@ -261,3 +261,104 @@ class TaxCodeListOut(BaseModel):
 class TaxCodeConflictBody(BaseModel):
     detail: str
     current: TaxCodeOut
+
+
+# ---------------------------------------------------------------------------
+# Users — Phase 1 tier-2 (cycle 4)
+# NOTE: password fields are deliberately absent from ALL user schemas.
+# ---------------------------------------------------------------------------
+
+
+class UserBase(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    username: str = Field(min_length=1, max_length=64)
+    display_name: str | None = None
+    email: str | None = None
+    role: str = Field(default="readonly", min_length=1, max_length=16)
+    preferred_theme: str | None = None
+
+
+class UserCreate(UserBase):
+    """POST body for creating a new user (admin only)."""
+
+
+class UserUpdate(BaseModel):
+    """PATCH body — every field optional. Never includes password."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    display_name: str | None = None
+    email: str | None = None
+    role: str | None = Field(default=None, min_length=1, max_length=16)
+    preferred_theme: str | None = None
+
+
+class UserOut(BaseModel):
+    """Response model — NO password_hash or any secret field."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    username: str
+    display_name: str | None = None
+    email: str | None = None
+    role: str
+    preferred_theme: str | None = None
+    last_seen_at: datetime | None = None
+    version: int
+    created_at: datetime
+    updated_at: datetime
+    archived_at: datetime | None = None
+
+
+class UserListOut(BaseModel):
+    items: list[UserOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class UserConflictBody(BaseModel):
+    detail: str
+    current: UserOut
+
+
+# ---------------------------------------------------------------------------
+# Permissions — Phase 1 tier-2 (cycle 4)
+# The monolith uses a three-layer model:
+#   Permission (catalogue) + RolePermission (role→code M2M)
+#   + UserPermission (per-user override grant/revoke).
+# The API surfaces the resolved set for a user plus the full catalogue.
+# ---------------------------------------------------------------------------
+
+
+class PermissionOut(BaseModel):
+    """One entry in the permission catalogue."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    code: str
+    description: str
+    created_at: datetime
+
+
+class UserPermissionOut(BaseModel):
+    """A permission code as it applies to a user (resolved = True means granted)."""
+
+    code: str
+    description: str
+    resolved: bool  # True = user has this permission; False = revoked / absent
+
+
+class UserPermissionsBody(BaseModel):
+    """PUT /api/v1/users/{id}/permissions — replace the user's per-user overrides."""
+
+    grants: list[str] = Field(
+        default_factory=list,
+        description="Permission codes to explicitly grant (override role).",
+    )
+    revokes: list[str] = Field(
+        default_factory=list,
+        description="Permission codes to explicitly revoke (override role).",
+    )
