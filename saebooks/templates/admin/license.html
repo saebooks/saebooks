@@ -9,10 +9,15 @@
 <p>
   This build is running the <strong>{{ edition }}</strong> edition.
   The feature matrix below reflects what the current licence enables.
-  Enterprise features are built into the code but gated off in
-  Community builds; flip the <code>SAEBOOKS_EDITION</code> environment
-  variable to enable them (requires a commercial licence — see
-  <a href="https://saebooks.com.au/licence">saebooks.com.au/licence</a>).
+  SAE Books ships five editions — <em>community</em>, <em>offline</em>,
+  <em>business</em>, <em>pro</em>, <em>enterprise</em> — as a strict
+  superset: every tier contains every feature of the tier below it.
+  All features live in this AGPL source tree but paid-tier routes are
+  runtime-gated; the active tier is set by a USB Ed25519 licence
+  (offline) or a portal-issued JWT (business / pro / enterprise), or
+  falls through to community when neither is present.
+  See <a href="https://saebooks.com.au/licence">saebooks.com.au/licence</a>
+  for commercial terms.
 </p>
 
 <table class="features">
