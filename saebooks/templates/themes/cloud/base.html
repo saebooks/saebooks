@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en" class="theme-cloud">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}SAE Books{% endblock %}</title>
+  <script>
+    // Dark-mode bootstrap — same pattern as default. Runs before
+    // first paint so there's no light-flash on reload.
+    (function () {
+      try {
+        var mode = localStorage.getItem("saebooks-theme") || "auto";
+        var eff = mode;
+        if (mode === "auto") {
+          eff = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark" : "light";
+        }
+        document.documentElement.dataset.theme = eff;
+        document.documentElement.dataset.themeMode = mode;
+      } catch (e) { /* localStorage unavailable — default light */ }
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/app.css?v={{ static_version }}">
+  <link rel="stylesheet" href="/static/themes/cloud/app.css?v={{ static_version }}">
+  {% block theme_assets %}{% endblock %}
+  <script src="https://unpkg.com/htmx.org@2.0.3" defer></script>
+</head>
+<body>
+  {#
+    Cloud theme — Xero / QBO-style. Collapsible left icon rail
+    (single-column on narrow viewports), top bar with search +
+    profile, main content area with generous whitespace and cards.
+
+    The left rail shows grouped icons with tooltips on hover; the
+    groups are the same seven MYOB hubs but the interaction is
+    "click an icon, land on the list" rather than hub-first.
+  #}
+  {% set _path = request.url.path %}
+  {% set _nav = [
+    {"key": "dashboard",      "label": "Dashboard",      "icon": "⌂", "href": "/dashboard",      "match": ["/dashboard"]},
+    {"key": "invoices",       "label": "Invoices",       "icon": "❖", "href": "/invoices",       "match": ["/invoices", "/credit-notes", "/payments"]},
+    {"key": "bills",          "label": "Bills",          "icon": "⬒", "href": "/bills",          "match": ["/bills", "/pay-run"]},
+    {"key": "banking",        "label": "Banking",        "icon": "⛁", "href": "/reconciliation", "match": ["/reconciliation", "/bank-rules", "/admin/bank-feeds"]},
+    {"key": "contacts",       "label": "Contacts",       "icon": "☰", "href": "/contacts",       "match": ["/contacts"]},
+    {"key": "items",          "label": "Items",          "icon": "▤", "href": "/items",          "match": ["/items", "/assets"]},
+    {"key": "projects",       "label": "Projects",       "icon": "⎔", "href": "/projects",       "match": ["/projects", "/budgets"]},
+    {"key": "accounts",       "label": "Accounting",     "icon": "₳", "href": "/accounts",       "match": ["/accounts", "/journal", "/templates", "/admin/tax-codes"]},
+    {"key": "reports",        "label": "Reports",        "icon": "▦", "href": "/reports",        "match": ["/reports"]}
+  ] %}
+  {% set _active = "" %}
+  {% for n in _nav %}
+    {% for p in n.match %}
+      {% if _path == p or _path.startswith(p + "/") %}
+        {% set _active = n.key %}
+      {% endif %}
+    {% endfor %}
+  {% endfor %}
+
+  <div class="cl-shell">
+    <aside class="cl-rail" aria-label="primary">
+      <a href="/dashboard" class="cl-brand" aria-label="SAE Books">
+        <span class="cl-brand-dot"></span>
+      </a>
+      <nav class="cl-nav">
+        {% for n in _nav %}
+          <a href="{{ n.href }}"
+             class="cl-nav-item{% if _active == n.key %} active{% endif %}"
+             title="{{ n.label }}"
+             aria-label="{{ n.label }}">
+            <span class="cl-nav-icon" aria-hidden="true">{{ n.icon }}</span>
+            <span class="cl-nav-label">{{ n.label }}</span>
+          </a>
+        {% endfor %}
+      </nav>
+      <div class="cl-rail-foot">
+        <a href="/admin/settings" class="cl-nav-item" title="Settings" aria-label="Settings">
+          <span class="cl-nav-icon" aria-hidden="true">⚙</span>
+          <span class="cl-nav-label">Settings</span>
+        </a>
+        <a href="/help/shortcuts" class="cl-nav-item" title="Help" aria-label="Help">
+          <span class="cl-nav-icon" aria-hidden="true">?</span>
+          <span class="cl-nav-label">Help</span>
+        </a>
+        <button type="button" class="cl-nav-item cl-theme-toggle" id="theme-toggle"
+                title="Theme: auto (click to cycle)" aria-label="Cycle theme">
+          <span class="cl-nav-icon" aria-hidden="true">◐</span>
+          <span class="cl-nav-label">Theme</span>
+        </button>
+      </div>
+    </aside>
+
+    <div class="cl-content">
+      <header class="cl-topbar" aria-label="topbar">
+        <div class="cl-org">
+          <span class="cl-org-name">{{ company_name or "SAE Books" }}</span>
+          <span class="cl-edition cl-edition-{{ edition or "community" }}">{{ edition or "community" }}</span>
+        </div>
+        <div class="cl-search-wrap">
+          <label class="cl-search">
+            <span class="cl-search-icon" aria-hidden="true">⌕</span>
+            <input type="search"
+                   id="cl-search-input"
+                   placeholder="Search contacts, invoices, bills…"
+                   aria-label="Search"
+                   autocomplete="off">
+          </label>
+        </div>
+        <div class="cl-topbar-actions">
+          <a href="/invoices/new" class="cl-btn cl-btn-primary" title="New invoice (F2)">+ New</a>
+          {% if request.state.username is defined and request.state.username %}
+            <span class="cl-user">{{ request.state.username }}</span>
+          {% endif %}
+        </div>
+      </header>
+
+      <nav class="cl-breadcrumb" aria-label="breadcrumb">
+        {% block breadcrumb %}
+          <a href="/dashboard">Home</a>
+          {% set _crumbs = request.url.path.strip('/').split('/') %}
+          {% if _crumbs and _crumbs[0] %}
+            <span class="sep">/</span>
+            <span class="current">{{ _crumbs[0]|replace('-', ' ')|title }}</span>
+          {% endif %}
+        {% endblock %}
+      </nav>
+
+      <main class="cl-main">
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </div>
+
+  <dialog id="search-palette" class="cl-palette">
+    <form method="dialog" class="cl-palette-form">
+      <input
+        type="search"
+        id="palette-input"
+        name="q"
+        placeholder="Search contacts, invoices, bills, accounts…"
+        autocomplete="off"
+        hx-get="/search"
+        hx-trigger="keyup changed delay:150ms"
+        hx-target="#palette-results"
+        hx-swap="innerHTML"
+      >
+      <button type="submit" class="palette-close">Esc</button>
+    </form>
+    <div id="palette-results" class="palette-results"></div>
+  </dialog>
+
+  <dialog id="classic-modal" class="cl-modal">
+    <div id="classic-modal-content"></div>
+  </dialog>
+
+  <script>
+    // Cloud theme keyboard driver — same F-key + g-nav repertoire as
+    // classic/default, minus the bottom-bar dispatcher (cloud has no
+    // action bar; it uses the top-right "+ New" button instead).
+    (function () {
+      const palette = document.getElementById("search-palette");
+      const paletteInput = document.getElementById("palette-input");
+      const paletteResults = document.getElementById("palette-results");
+      const topSearch = document.getElementById("cl-search-input");
+      const modal = document.getElementById("classic-modal");
+
+      const themeToggle = document.getElementById("theme-toggle");
+      function iconFor(mode) { return mode === "auto" ? "◐" : mode === "dark" ? "☾" : "☀"; }
+      function applyMode(mode) {
+        var eff = mode;
+        if (mode === "auto") {
+          eff = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark" : "light";
+        }
+        document.documentElement.dataset.theme = eff;
+        document.documentElement.dataset.themeMode = mode;
+        if (themeToggle) {
+          const ic = themeToggle.querySelector(".cl-nav-icon");
+          if (ic) ic.textContent = iconFor(mode);
+          themeToggle.title = "Theme: " + mode + " (click to cycle)";
+        }
+      }
+      if (themeToggle) {
+        var cur0 = localStorage.getItem("saebooks-theme") || "auto";
+        const ic = themeToggle.querySelector(".cl-nav-icon");
+        if (ic) ic.textContent = iconFor(cur0);
+        themeToggle.title = "Theme: " + cur0 + " (click to cycle)";
+        themeToggle.addEventListener("click", function (e) {
+          e.preventDefault();
+          var cur = localStorage.getItem("saebooks-theme") || "auto";
+          var next = cur === "auto" ? "light" : cur === "light" ? "dark" : "auto";
+          try { localStorage.setItem("saebooks-theme", next); } catch (_) {}
+          applyMode(next);
+        });
+      }
+      if (window.matchMedia) {
+        var mq = window.matchMedia("(prefers-color-scheme: dark)");
+        if (mq.addEventListener) {
+          mq.addEventListener("change", function (ev) {
+            if ((localStorage.getItem("saebooks-theme") || "auto") === "auto") {
+              document.documentElement.dataset.theme = ev.matches ? "dark" : "light";
+            }
+          });
+        }
+      }
+
+      function openPalette() {
+        if (!palette) return;
+        if (!palette.open) palette.showModal();
+        paletteInput.value = "";
+        paletteResults.innerHTML = "";
+        setTimeout(() => paletteInput.focus(), 0);
+      }
+      function closePalette() {
+        if (palette && palette.open) palette.close();
+      }
+      // Top-bar search is a "teaser" — focusing it opens the real palette.
+      if (topSearch) {
+        topSearch.addEventListener("focus", (e) => {
+          e.preventDefault();
+          topSearch.blur();
+          openPalette();
+        });
+      }
+
+      document.body.addEventListener("htmx:afterSwap", (evt) => {
+        if (modal && evt.detail && evt.detail.target && evt.detail.target.id === "classic-modal") {
+          if (!modal.open) modal.showModal();
+        }
+      });
+
+      function isTypingTarget(el) {
+        if (!el) return false;
+        const tag = el.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+        if (el.isContentEditable) return true;
+        return false;
+      }
+
+      function activeGrid() {
+        return document.querySelector("table.cl-grid, table.classic-grid, table.data");
+      }
+      function selectedRow(grid) { return grid.querySelector("tbody tr[aria-selected='true']"); }
+      function rowsOf(grid) {
+        return Array.from(grid.querySelectorAll("tbody tr")).filter(r => r.querySelector("td"));
+      }
+      function selectRow(grid, idx) {
+        const rows = rowsOf(grid);
+        if (!rows.length) return;
+        idx = Math.max(0, Math.min(rows.length - 1, idx));
+        rows.forEach(r => r.removeAttribute("aria-selected"));
+        rows[idx].setAttribute("aria-selected", "true");
+        rows[idx].scrollIntoView({ block: "nearest" });
+      }
+      function moveSelection(delta) {
+        const grid = activeGrid();
+        if (!grid) return false;
+        const rows = rowsOf(grid);
+        if (!rows.length) return false;
+        const cur = selectedRow(grid);
+        const idx = cur ? rows.indexOf(cur) : -1;
+        selectRow(grid, idx + delta);
+        return true;
+      }
+      function openSelection() {
+        const grid = activeGrid();
+        if (!grid) return false;
+        const row = selectedRow(grid);
+        if (!row) return false;
+        const link = row.querySelector("a[href]");
+        if (!link) return false;
+        window.location.assign(link.getAttribute("href"));
+        return true;
+      }
+
+      let gTimer = null, gArmed = false;
+      const gMap = {
+        d: "/dashboard", j: "/journal", i: "/invoices", b: "/bills",
+        c: "/contacts", a: "/accounts", r: "/reports", p: "/payments",
+      };
+
+      document.addEventListener("keydown", function (evt) {
+        if (evt.key === "Escape") {
+          if (palette && palette.open) { closePalette(); return; }
+          if (modal && modal.open) { modal.close(); return; }
+        }
+        if (evt.key === "F1") { evt.preventDefault(); window.location.assign("/help/shortcuts"); return; }
+        if (evt.key === "F3") { evt.preventDefault(); openPalette(); return; }
+        if (evt.key === "F2") {
+          evt.preventDefault();
+          const preferred = document.querySelector("[data-new-action]");
+          if (preferred) { window.location.assign(preferred.getAttribute("data-new-action")); return; }
+          const candidate = Array.from(document.querySelectorAll("a"))
+            .find(a => (a.getAttribute("href") || "").endsWith("/new"));
+          if (candidate) window.location.assign(candidate.getAttribute("href"));
+          return;
+        }
+        if (evt.key === "F9") {
+          const form = document.querySelector("form#post-action") || document.querySelector("form[data-post-action]");
+          if (form) { evt.preventDefault(); form.submit(); }
+          return;
+        }
+        if (evt.key === "F12") {
+          const form = document.querySelector("form#save-draft") || document.querySelector("form[data-save-draft]");
+          if (form) { evt.preventDefault(); form.submit(); }
+          return;
+        }
+        if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === "k") {
+          evt.preventDefault(); openPalette(); return;
+        }
+        if (isTypingTarget(document.activeElement)) return;
+        if (evt.key === "/") { evt.preventDefault(); openPalette(); return; }
+        if (evt.key === "j") { if (moveSelection(1)) { evt.preventDefault(); return; } }
+        if (evt.key === "k") { if (moveSelection(-1)) { evt.preventDefault(); return; } }
+        if (evt.key === "Enter") { if (openSelection()) { evt.preventDefault(); return; } }
+        if (evt.key === "g") {
+          gArmed = true; clearTimeout(gTimer);
+          gTimer = setTimeout(() => { gArmed = false; }, 1200);
+          return;
+        }
+        if (gArmed && gMap[evt.key]) {
+          gArmed = false; clearTimeout(gTimer);
+          window.location.assign(gMap[evt.key]); return;
+        }
+        if (evt.key === "n") {
+          const preferred = document.querySelector("[data-new-action]");
+          if (preferred) { evt.preventDefault(); window.location.assign(preferred.getAttribute("data-new-action")); return; }
+          const candidate = Array.from(document.querySelectorAll("a"))
+            .find(a => (a.getAttribute("href") || "").endsWith("/new"));
+          if (candidate) { evt.preventDefault(); window.location.assign(candidate.getAttribute("href")); }
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

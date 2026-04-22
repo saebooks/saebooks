@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — SAE Books{% endblock %}
+{#
+  Cloud dashboard — Xero/QBO card layout. The same five dashboard
+  fragments as every other theme, arranged in a responsive card
+  grid with generous padding and a soft shadow stack. The page
+  opens with a "hello" greeting banner.
+#}
+{% block content %}
+<section class="cl-greeting">
+  <h1>Good day{% if request.state.username is defined and request.state.username %}, {{ request.state.username }}{% endif %}</h1>
+  <p class="cl-muted">{{ company_name }} · {{ today.strftime("%A, %-d %B %Y") }}</p>
+</section>
+
+<section class="cl-card-grid">
+  <article class="cl-card">
+    {% include "dashboard/_bank_balances.html" %}
+  </article>
+  <article class="cl-card">
+    {% include "dashboard/_aged_ar.html" %}
+  </article>
+  <article class="cl-card">
+    {% include "dashboard/_unmatched.html" %}
+  </article>
+  <article class="cl-card cl-card-wide">
+    {% include "dashboard/_cashflow.html" %}
+  </article>
+  <article class="cl-card">
+    {% include "dashboard/_upcoming_recurring.html" %}
+  </article>
+</section>
+
+<section class="cl-quick-actions">
+  <h2>Quick actions</h2>
+  <div class="cl-quick-grid">
+    <a href="/invoices/new" class="cl-quick"><span class="cl-quick-icon">❖</span> New invoice</a>
+    <a href="/bills/new" class="cl-quick"><span class="cl-quick-icon">⬒</span> New bill</a>
+    <a href="/payments/new" class="cl-quick"><span class="cl-quick-icon">↓</span> Receive payment</a>
+    <a href="/reconciliation" class="cl-quick"><span class="cl-quick-icon">⛁</span> Reconcile</a>
+    <a href="/reports" class="cl-quick"><span class="cl-quick-icon">▦</span> Reports</a>
+    <a href="/contacts/new" class="cl-quick"><span class="cl-quick-icon">☰</span> New contact</a>
+  </div>
+</section>
+{% endblock %}

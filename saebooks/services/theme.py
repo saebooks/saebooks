@@ -37,13 +37,17 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------- #
 
 DEFAULT_THEME = "default"
-CLASSIC_THEME = "classic"
+CLASSIC_THEME = "classic"   # Batch RR / RR3 — MYOB AccountRight Command Centre
+CLOUD_THEME = "cloud"       # Batch SS     — Xero / QBO cloud modern
+DENSE_THEME = "dense"       # Batch TT     — Linear / Stripe dense dark
 
 #: Every theme known to the server. ``default`` is the flat
 #: ``saebooks/templates/`` tree; every other entry must have a directory
 #: under ``saebooks/templates/themes/<name>/`` containing template
 #: overrides + a CSS bundle at ``saebooks/static/themes/<name>/app.css``.
-ACTIVE_THEMES: frozenset[str] = frozenset({DEFAULT_THEME, CLASSIC_THEME})
+ACTIVE_THEMES: frozenset[str] = frozenset(
+    {DEFAULT_THEME, CLASSIC_THEME, CLOUD_THEME, DENSE_THEME}
+)
 
 
 class ThemeError(ValueError):
