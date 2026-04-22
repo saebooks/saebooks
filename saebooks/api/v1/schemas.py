@@ -1,16 +1,18 @@
 """Pydantic 2.x request/response models for API v1.
 
-Kept in one module for Phase 0 — once more entities land, split into
+Kept in one module for Phase 0/1 — once more entities land, split into
 ``schemas/<entity>.py`` files under ``api/v1/schemas/``.
 """
 from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from saebooks.models.contact import ContactType
+from saebooks.models.account import AccountType
 
 
 class ContactBase(BaseModel):
@@ -99,3 +101,132 @@ class ChangeLogOut(BaseModel):
     at: datetime
     version: int
     payload: dict
+
+
+# ---------------------------------------------------------------------------
+# Accounts (Chart of Accounts) — Phase 1 tier-1
+# ---------------------------------------------------------------------------
+
+
+class AccountBase(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    code: str = Field(min_length=1, max_length=32)
+    name: str = Field(min_length=1, max_length=255)
+    account_type: AccountType
+    parent_id: uuid.UUID | None = None
+    tax_code_default: str | None = None
+    is_header: bool = False
+    reconcile: bool = False
+
+
+class AccountCreate(AccountBase):
+    """POST body for creating a new account."""
+
+
+class AccountUpdate(BaseModel):
+    """PATCH body — every field optional."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    code: str | None = Field(default=None, min_length=1, max_length=32)
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    account_type: AccountType | None = None
+    tax_code_default: str | None = None
+    is_header: bool | None = None
+    reconcile: bool | None = None
+
+
+class AccountOut(AccountBase):
+    id: uuid.UUID
+    company_id: uuid.UUID
+    version: int
+    system_managed: bool
+    bsb: str | None = None
+    bank_account_number: str | None = None
+    bank_account_title: str | None = None
+    apca_user_id: str | None = None
+    bank_abbreviation: str | None = None
+    created_at: datetime
+    archived_at: datetime | None = None
+
+
+class AccountListOut(BaseModel):
+    items: list[AccountOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class AccountConflictBody(BaseModel):
+    detail: str
+    current: AccountOut
+
+
+# ---------------------------------------------------------------------------
+# Companies — Phase 1 tier-1 (FLAG_MULTI_COMPANY present in codebase)
+# ---------------------------------------------------------------------------
+
+
+class CompanyOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    legal_name: str | None = None
+    trading_name: str | None = None
+    abn: str | None = None
+    acn: str | None = None
+    base_currency: str
+    fin_year_start_month: int
+    audit_mode: str
+    version: int
+    created_at: datetime
+    archived_at: datetime | None = None
+
+
+class CompanyListOut(BaseModel):
+    items: list[CompanyOut]
+    total: int
+
+
+class CompanyUpdate(BaseModel):
+    """PATCH body for updating company metadata — every field optional."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    legal_name: str | None = None
+    trading_name: str | None = None
+    abn: str | None = None
+    acn: str | None = None
+    base_currency: str | None = Field(default=None, min_length=3, max_length=3)
+    fin_year_start_month: int | None = Field(default=None, ge=1, le=12)
+    audit_mode: str | None = None
+
+
+class CompanyConflictBody(BaseModel):
+    detail: str
+    current: CompanyOut
+
+
+# ---------------------------------------------------------------------------
+# Tax Codes — kept for future Phase 1 cycle (schema defined here for
+# reference; router will be added in cycle 3)
+# ---------------------------------------------------------------------------
+
+
+class TaxCodeOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    code: str
+    name: str
+    rate: Decimal
+    tax_system: str
+    reporting_type: str
+    description: str | None = None
+    version: int
+    created_at: datetime
+    archived_at: datetime | None = None

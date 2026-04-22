@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Integer,
     String,
     UniqueConstraint,
     func,
@@ -72,6 +73,10 @@ class Account(CompanyScoped, Base):
         String(3), comment="3-letter ABA bank code — CBA, ANZ, NAB, WBC, …"
     )
     extra: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # Optimistic-locking version — bumped on every write through the API.
+    # Jinja routes that call the service layer without expected_version skip
+    # the guard (last-writer-wins, same behaviour as before Phase 1).
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

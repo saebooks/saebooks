@@ -35,7 +35,59 @@ from saebooks.models.bank_statement import BankStatementLine
 from saebooks.models.journal import JournalEntry, JournalLine
 from saebooks.models.journal_template import JournalTemplate
 from saebooks.services import audit as audit_svc
+from saebooks.services import change_log as change_log_svc
 from saebooks.services import settings as settings_svc
+
+class VersionConflict(Exception):
+    """Raised when ``expected_version`` does not match the stored value.
+
+    The API layer catches this and returns 409 with current server state.
+    """
+
+    def __init__(self, current: Account) -> None:
+        super().__init__(
+            f"Account {current.id} is at version {current.version}, not the expected version"
+        )
+        self.current = current
+
+
+# Columns serialised into change_log.payload
+_ACCOUNT_COLUMNS: tuple[str, ...] = (
+    "id",
+    "company_id",
+    "code",
+    "name",
+    "account_type",
+    "parent_id",
+    "tax_code_default",
+    "is_header",
+    "reconcile",
+    "system_managed",
+    "bsb",
+    "bank_account_number",
+    "bank_account_title",
+    "apca_user_id",
+    "bank_abbreviation",
+    "version",
+    "created_at",
+    "archived_at",
+)
+
+
+def _serialise(account: Account) -> dict[str, Any]:
+    """Row → JSON-safe dict for change_log.payload."""
+    data: dict[str, Any] = {}
+    for key in _ACCOUNT_COLUMNS:
+        val = getattr(account, key)
+        if isinstance(val, uuid.UUID):
+            val = str(val)
+        elif isinstance(val, datetime):
+            val = val.isoformat()
+        elif hasattr(val, "value"):  # StrEnum
+            val = val.value
+        data[key] = val
+    return data
+
 
 # Max child levels (digits after prefix, before the bustard)
 MAX_CHILD_LEVELS = 5
@@ -435,6 +487,7 @@ async def create(
     is_header: bool = False,
     tax_code_default: str | None = None,
     skip_validation: bool = False,
+    actor: str = "web",
 ) -> Account:
     code = code.strip()
 
@@ -455,10 +508,21 @@ async def create(
         reconcile=reconcile,
         is_header=is_header,
         tax_code_default=tax_code_default,
+        version=1,
     )
     session.add(account)
-    await session.commit()
+    await session.flush()
     await session.refresh(account)
+    await change_log_svc.append(
+        session,
+        entity="account",
+        entity_id=account.id,
+        op="create",
+        actor=actor,
+        payload=_serialise(account),
+        version=account.version,
+    )
+    await session.commit()
     return account
 
 
@@ -474,10 +538,15 @@ async def update(
     tax_code_default: str | None = None,
     skip_validation: bool = False,
     performed_by: str | None = None,
+    actor: str | None = None,
+    expected_version: int | None = None,
 ) -> Account:
     account = await session.get(Account, account_id)
     if account is None:
         raise ValueError(f"Account {account_id} not found")
+
+    if expected_version is not None and account.version != expected_version:
+        raise VersionConflict(account)
 
     new_code = code.strip() if code is not None else account.code
     new_type = account_type if account_type is not None else account.account_type
@@ -510,6 +579,8 @@ async def update(
         parent = await find_parent(session, account.company_id, new_code)
         account.parent_id = parent.id if parent else None
 
+    account.version = account.version + 1
+
     # Snapshot AFTER mutation, pairing with the captured before-state, so the
     # audit viewer can diff the fields that actually changed.
     if should_snapshot:
@@ -520,17 +591,49 @@ async def update(
             performed_by=performed_by,
         )
 
-    await session.commit()
+    await session.flush()
     await session.refresh(account)
+    await change_log_svc.append(
+        session,
+        entity="account",
+        entity_id=account.id,
+        op="update",
+        actor=actor or performed_by or "web",
+        payload=_serialise(account),
+        version=account.version,
+    )
+    await session.commit()
     return account
 
 
-async def archive(session: AsyncSession, account_id: uuid.UUID) -> None:
+async def archive(
+    session: AsyncSession,
+    account_id: uuid.UUID,
+    *,
+    performed_by: str | None = None,
+    actor: str | None = None,
+    expected_version: int | None = None,
+) -> Account | None:
     account = await session.get(Account, account_id)
     if account is None:
-        return
+        return None
+    if expected_version is not None and account.version != expected_version:
+        raise VersionConflict(account)
     account.archived_at = datetime.now(UTC)
+    account.version = account.version + 1
+    await session.flush()
+    await session.refresh(account)
+    await change_log_svc.append(
+        session,
+        entity="account",
+        entity_id=account.id,
+        op="archive",
+        actor=actor or performed_by or "web",
+        payload=_serialise(account),
+        version=account.version,
+    )
     await session.commit()
+    return account
 
 
 # ---------------------------------------------------------------------------

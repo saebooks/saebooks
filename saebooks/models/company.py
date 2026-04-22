@@ -36,6 +36,8 @@ class Company(Base):
     siss_subscription_key_encrypted: Mapped[str | None] = mapped_column(String)
     siss_environment: Mapped[str | None] = mapped_column(String(32))
 
+    # Optimistic-locking version — bumped on every write through the API.
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

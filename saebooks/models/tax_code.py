@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String, func
+from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -25,6 +25,8 @@ class TaxCode(CompanyScoped, Base):
     tax_system: Mapped[str] = mapped_column(String(16), nullable=False, default="GST")
     reporting_type: Mapped[str] = mapped_column(String(32), nullable=False, default="taxable")
     description: Mapped[str | None] = mapped_column(String)
+    # Optimistic-locking version — bumped on every write through the API.
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
