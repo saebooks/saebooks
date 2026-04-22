@@ -16,7 +16,12 @@ from saebooks.services import permissions as perm_svc
 from saebooks.services import settings as svc
 from saebooks.services import sql_tool as sql_svc
 from saebooks.services import theme as theme_svc
+from saebooks.services import users as users_svc
 from saebooks.services.authz import require_role, require_user
+from saebooks.services.licence import (
+    has_capacity_for_role_change,
+    resolve_licence,
+)
 from saebooks.services.exports.company import build_company_export
 from saebooks.web import templates
 
@@ -551,13 +556,51 @@ async def users_set_role(
     role: str = Form(...),
     _admin: User = Depends(require_role(UserRole.ADMIN)),  # noqa: B008
 ) -> RedirectResponse:
-    """Change a user's role. 400 on unknown roles."""
+    """Change a user's role. 400 on unknown roles.
+
+    Enforces the CHARTER §12.2 seat cap for the active edition — a
+    promotion from an employee role to ``admin`` is blocked when the
+    admin bucket is already full on a hard-cap tier, and warned-on
+    (but allowed) on Offline's soft cap. Demotions check employee
+    capacity symmetrically so a tier with a full employee bucket
+    can't silently overflow.
+    """
     if role not in VALID_ROLES:
         return RedirectResponse("/admin/users?err=bad_role", status_code=303)
     async with AsyncSessionLocal() as session:
         user = await session.get(User, user_id)
         if user is None:
             return RedirectResponse("/admin/users?err=not_found", status_code=303)
+
+        from_seat = users_svc.seat_class_for(user.role)
+        to_seat = users_svc.seat_class_for(role)
+        if from_seat != to_seat:
+            current_admins = await users_svc.count_admin_seats(session)
+            current_employees = await users_svc.count_employee_seats(session)
+            licence = resolve_licence()
+            check = has_capacity_for_role_change(
+                edition=licence.edition,
+                current_admins=current_admins,
+                current_employees=current_employees,
+                from_role=from_seat,
+                to_role=to_seat,
+            )
+            if check.blocked:
+                return RedirectResponse(
+                    f"/admin/users?err=seat_cap&seat={to_seat}",
+                    status_code=303,
+                )
+            if check.should_warn:
+                # Offline soft cap — allow but surface the banner on
+                # the redirect target (the users list template reads
+                # the ``warn`` query param).
+                user.role = role
+                await session.commit()
+                return RedirectResponse(
+                    f"/admin/users?saved=1&warn=seat_soft&seat={to_seat}",
+                    status_code=303,
+                )
+
         user.role = role
         await session.commit()
     return RedirectResponse("/admin/users?saved=1", status_code=303)
