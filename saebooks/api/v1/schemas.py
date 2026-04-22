@@ -333,6 +333,81 @@ class UserConflictBody(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Items — Phase 1 tier-2 (cycle 5)
+# ---------------------------------------------------------------------------
+
+
+class ItemBase(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    sku: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=255)
+    item_type: str = Field(default="inventory", min_length=1, max_length=16)
+    description: str | None = None
+    cost_method: str = Field(default="WAC", min_length=1, max_length=16)
+    default_sale_price: Decimal = Decimal("0")
+    inventory_account_id: uuid.UUID
+    cogs_account_id: uuid.UUID
+    income_account_id: uuid.UUID
+
+
+class ItemCreate(ItemBase):
+    """POST body for creating a new item."""
+
+    on_hand_qty: Decimal = Decimal("0")
+    wac_cost: Decimal = Decimal("0")
+
+
+class ItemUpdate(BaseModel):
+    """PATCH body — every field optional. on_hand_qty/wac_cost/cost_method/item_type not editable here."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    sku: str | None = Field(default=None, min_length=1, max_length=64)
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = None
+    default_sale_price: Decimal | None = None
+    inventory_account_id: uuid.UUID | None = None
+    cogs_account_id: uuid.UUID | None = None
+    income_account_id: uuid.UUID | None = None
+
+
+class ItemOut(ItemBase):
+    id: uuid.UUID
+    company_id: uuid.UUID
+    on_hand_qty: Decimal
+    wac_cost: Decimal
+    version: int
+    created_at: datetime
+    archived_at: datetime | None = None
+
+
+class ItemListOut(BaseModel):
+    items: list[ItemOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class ItemConflictBody(BaseModel):
+    detail: str
+    current: ItemOut
+
+
+class StockOut(BaseModel):
+    """Response body for GET /api/v1/items/{id}/stock."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    item_id: uuid.UUID
+    sku: str
+    item_type: str
+    on_hand_qty: Decimal
+    wac_cost: Decimal
+    inventory_value: Decimal  # on_hand_qty * wac_cost
+
+
 class PermissionOut(BaseModel):
     """One entry in the permission catalogue."""
 

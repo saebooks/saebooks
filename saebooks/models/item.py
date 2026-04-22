@@ -35,6 +35,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Integer,
     Numeric,
     String,
     Text,
@@ -53,6 +54,11 @@ class CostMethod(enum.StrEnum):
     # Future: FIFO = "FIFO"; STANDARD = "STANDARD"
 
 
+class ItemType(enum.StrEnum):
+    INVENTORY = "inventory"  # tracked stock with on_hand_qty + WAC
+    SERVICE = "service"      # non-stocked — no stock movements
+
+
 class Item(CompanyScoped, Base):
     __tablename__ = "items"
     __table_args__ = (
@@ -60,6 +66,10 @@ class Item(CompanyScoped, Base):
         CheckConstraint(
             "cost_method IN ('WAC')",
             name="ck_items_cost_method_valid",
+        ),
+        CheckConstraint(
+            "item_type IN ('inventory', 'service')",
+            name="ck_items_item_type_valid",
         ),
     )
 
@@ -72,6 +82,9 @@ class Item(CompanyScoped, Base):
         nullable=False,
     )
     sku: Mapped[str] = mapped_column(String(64), nullable=False)
+    item_type: Mapped[ItemType] = mapped_column(
+        String(16), nullable=False, default=ItemType.INVENTORY
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     cost_method: Mapped[CostMethod] = mapped_column(
@@ -102,6 +115,8 @@ class Item(CompanyScoped, Base):
         nullable=False,
     )
     extra: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # Optimistic-locking version — bumped on every write through the API.
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

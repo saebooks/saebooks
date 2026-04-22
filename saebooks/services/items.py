@@ -43,8 +43,9 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from saebooks.models.item import CostMethod, Item
+from saebooks.models.item import CostMethod, Item, ItemType
 from saebooks.services import audit as audit_svc
+from saebooks.services import change_log as change_log_svc
 
 _FOURPLACES = Decimal("0.0001")
 
@@ -325,3 +326,207 @@ async def issue_stock(
     cogs_value = _q4(qty * item.wac_cost)
     item.on_hand_qty = _q4(item.on_hand_qty - qty)
     return cogs_value
+
+
+# ---------------------------------------------------------------------------
+# API-oriented helpers (version-aware, change_log wiring)
+# The Jinja-facing functions above remain untouched.
+# ---------------------------------------------------------------------------
+
+
+class VersionConflict(Exception):
+    """Raised when ``expected_version`` does not match the stored value.
+
+    The API layer catches this and returns 409 with current server state.
+    """
+
+    def __init__(self, current: Item) -> None:
+        super().__init__(
+            f"Item {current.id} is at version {current.version}, "
+            "not the expected version"
+        )
+        self.current = current
+
+
+# Columns serialised into change_log.payload
+_ITEM_COLUMNS: tuple[str, ...] = (
+    "id",
+    "company_id",
+    "sku",
+    "item_type",
+    "name",
+    "description",
+    "cost_method",
+    "on_hand_qty",
+    "wac_cost",
+    "default_sale_price",
+    "inventory_account_id",
+    "cogs_account_id",
+    "income_account_id",
+    "version",
+    "created_at",
+    "archived_at",
+)
+
+
+def _serialise(item: Item) -> dict[str, Any]:
+    """Row → JSON-safe dict for change_log.payload."""
+    data: dict[str, Any] = {}
+    for key in _ITEM_COLUMNS:
+        val = getattr(item, key)
+        if isinstance(val, uuid.UUID):
+            val = str(val)
+        elif isinstance(val, datetime):
+            val = val.isoformat()
+        elif isinstance(val, Decimal):
+            val = str(val)
+        elif hasattr(val, "value"):  # StrEnum
+            val = val.value
+        data[key] = val
+    return data
+
+
+async def create_for_api(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    *,
+    sku: str,
+    name: str,
+    inventory_account_id: uuid.UUID,
+    cogs_account_id: uuid.UUID,
+    income_account_id: uuid.UUID,
+    item_type: ItemType = ItemType.INVENTORY,
+    description: str | None = None,
+    cost_method: CostMethod = CostMethod.WAC,
+    on_hand_qty: Decimal = Decimal("0"),
+    wac_cost: Decimal = Decimal("0"),
+    default_sale_price: Decimal = Decimal("0"),
+    extra: dict[str, Any] | None = None,
+    actor: str = "api",
+) -> Item:
+    """Create an item and append a change_log row."""
+    if cost_method != CostMethod.WAC:
+        raise ItemError(
+            f"Cost method {cost_method} not supported in v1; only WAC."
+        )
+    if on_hand_qty < Decimal("0"):
+        raise ItemError("on_hand_qty must be >= 0")
+    if wac_cost < Decimal("0"):
+        raise ItemError("wac_cost must be >= 0")
+
+    item = Item(
+        company_id=company_id,
+        sku=sku.strip(),
+        item_type=item_type,
+        name=name.strip(),
+        description=description,
+        cost_method=cost_method,
+        on_hand_qty=on_hand_qty,
+        wac_cost=wac_cost,
+        default_sale_price=default_sale_price,
+        inventory_account_id=inventory_account_id,
+        cogs_account_id=cogs_account_id,
+        income_account_id=income_account_id,
+        extra=extra,
+        version=1,
+    )
+    session.add(item)
+    await session.flush()
+    await session.refresh(item)
+    await change_log_svc.append(
+        session,
+        entity="item",
+        entity_id=item.id,
+        op="create",
+        actor=actor,
+        payload=_serialise(item),
+        version=item.version,
+    )
+    await session.commit()
+    return item
+
+
+async def update_with_version(
+    session: AsyncSession,
+    item_id: uuid.UUID,
+    *,
+    expected_version: int | None = None,
+    actor: str | None = None,
+    **kwargs: Any,
+) -> Item:
+    """Update item fields with optimistic locking + change_log.
+
+    Only whitelisted fields can be changed (same list as the Jinja ``update``
+    function). ``on_hand_qty`` / ``wac_cost`` / ``cost_method`` / ``item_type``
+    are intentionally not editable through this path.
+    """
+    item = await session.get(Item, item_id)
+    if item is None:
+        raise ItemError(f"Item {item_id} not found")
+
+    if expected_version is not None and item.version != expected_version:
+        raise VersionConflict(item)
+
+    if "sku" in kwargs and kwargs["sku"] is not None:
+        kwargs["sku"] = kwargs["sku"].strip()
+    if "name" in kwargs and kwargs["name"] is not None:
+        kwargs["name"] = kwargs["name"].strip()
+
+    for key, value in kwargs.items():
+        if key not in _ALLOWED_UPDATE_FIELDS:
+            raise ItemError(f"Cannot update field: {key}")
+        setattr(item, key, value)
+
+    item.version = item.version + 1
+    await session.flush()
+    await session.refresh(item)
+    await change_log_svc.append(
+        session,
+        entity="item",
+        entity_id=item.id,
+        op="update",
+        actor=actor or "api",
+        payload=_serialise(item),
+        version=item.version,
+    )
+    await session.commit()
+    return item
+
+
+async def archive_with_version(
+    session: AsyncSession,
+    item_id: uuid.UUID,
+    *,
+    expected_version: int | None = None,
+    actor: str | None = None,
+) -> Item | None:
+    """Soft-archive an item with optimistic locking + change_log.
+
+    Raises ``ItemError`` if the item still has on-hand stock, consistent
+    with the Jinja-facing ``archive`` function.
+    """
+    item = await session.get(Item, item_id)
+    if item is None:
+        return None
+    if expected_version is not None and item.version != expected_version:
+        raise VersionConflict(item)
+    if item.on_hand_qty != Decimal("0"):
+        raise ItemError(
+            f"Cannot archive item {item.sku} while on_hand_qty "
+            f"({item.on_hand_qty}) is non-zero; write-off stock first."
+        )
+    item.archived_at = datetime.now(UTC)
+    item.version = item.version + 1
+    await session.flush()
+    await session.refresh(item)
+    await change_log_svc.append(
+        session,
+        entity="item",
+        entity_id=item.id,
+        op="archive",
+        actor=actor or "api",
+        payload=_serialise(item),
+        version=item.version,
+    )
+    await session.commit()
+    return item
