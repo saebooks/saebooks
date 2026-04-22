@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+{% block title %}ATO SBR onboarding — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>ATO SBR onboarding</h1>
+  <div class="meta">{{ company_name }} — STP / BAS e-lodgement setup</div>
+</div>
+
+{% if message %}<div class="alert alert-success">{{ message }}</div>{% endif %}
+{% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+{% if test_badge == "ok" %}
+<div class="alert alert-success">
+  Reachability test against <strong>{{ test_env }}</strong> passed.
+</div>
+{% elif test_badge == "fail" %}
+<div class="alert alert-error">
+  Reachability test against <strong>{{ test_env }}</strong> failed —
+  see the detail above.
+</div>
+{% endif %}
+
+{% if not encryption_configured %}
+<div class="alert alert-warning">
+  <code>SAEBOOKS_FIELD_ENCRYPTION_KEY</code> is empty. You can't upload
+  the Machine Credential until a Fernet key is configured. Generate one with:
+  <pre>python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'</pre>
+  then set the env var and restart the app.
+</div>
+{% endif %}
+
+<section>
+  <h3>Progress</h3>
+  <ol class="acct-table" style="max-width:48rem">
+    {% for step in status.steps %}
+    <li>
+      {% if step.done %}
+        <strong>&#10003;</strong>
+      {% else %}
+        <strong>&#9633;</strong>
+      {% endif %}
+      {{ step.label }}
+    </li>
+    {% endfor %}
+  </ol>
+  <p class="dim">
+    Ready to test: {{ "yes" if status.ready_to_test else "no — upload keystore + SSID first" }}.
+    Ready to lodge: {{ "yes" if status.ready_to_lodge else "no — complete every step + verify at least EVTE" }}.
+  </p>
+</section>
+
+<section>
+  <h3>Step 1 — myGovID (Strong identity)</h3>
+  <p class="dim">
+    Install the myGovID app on your phone and reach <strong>Strong</strong>
+    identity strength (passport / Medicare / drivers licence verified).
+    Guide: <a href="https://www.mygovid.gov.au/" target="_blank" rel="noopener">mygovid.gov.au</a>.
+  </p>
+  {% if config.mygovid_confirmed_at %}
+  <p><em>Confirmed {{ config.mygovid_confirmed_at.isoformat() }}.</em></p>
+  {% else %}
+  <form method="post" action="/admin/ato-sbr/confirm">
+    <input type="hidden" name="step" value="mygovid">
+    <button type="submit" class="btn-secondary">I have myGovID with Strong identity</button>
+  </form>
+  {% endif %}
+</section>
+
+<section>
+  <h3>Step 2 — RAM Principal Authority for this ABN</h3>
+  <p class="dim">
+    Sign in to <a href="{{ ram_url }}" target="_blank" rel="noopener">Relationship
+    Authorisation Manager</a> with your myGovID and link ABN
+    <code>{{ company.abn or '— set company ABN first —' }}</code>
+    as Principal Authority. Only the Principal Authority can issue machine
+    credentials.
+  </p>
+  {% if config.ram_authority_confirmed_at %}
+  <p><em>Confirmed {{ config.ram_authority_confirmed_at.isoformat() }}.</em></p>
+  {% else %}
+  <form method="post" action="/admin/ato-sbr/confirm">
+    <input type="hidden" name="step" value="ram_authority">
+    <button type="submit" class="btn-secondary">Principal Authority linked</button>
+  </form>
+  {% endif %}
+</section>
+
+<section>
+  <h3>Step 3 — Machine Credential Downloader</h3>
+  <p class="dim">
+    Install the
+    <a href="https://chromewebstore.google.com/search/Machine%20Credential%20Downloader"
+       target="_blank" rel="noopener">Machine Credential Downloader</a>
+    Chrome extension. RAM only releases the keystore through this extension
+    — there's no CLI / REST alternative.
+  </p>
+  {% if config.downloader_confirmed_at %}
+  <p><em>Confirmed {{ config.downloader_confirmed_at.isoformat() }}.</em></p>
+  {% else %}
+  <form method="post" action="/admin/ato-sbr/confirm">
+    <input type="hidden" name="step" value="downloader">
+    <button type="submit" class="btn-secondary">Extension installed</button>
+  </form>
+  {% endif %}
+</section>
+
+<section>
+  <h3>Step 4 — Upload the Machine Credential</h3>
+  <p class="dim">
+    In RAM &rarr; Manage credentials &rarr; Create machine credential.
+    The extension downloads a <code>keystore.xml</code> file and records the
+    password you chose. Upload both here — the keystore is encrypted at rest
+    using the Fernet field-encryption key.
+  </p>
+  {% if config.keystore_encrypted %}
+  <table class="acct-table" style="max-width:48rem">
+    <tr><td>Filename</td><td>{{ config.keystore_filename or '—' }}</td></tr>
+    <tr><td>Subject CN</td><td>{{ config.keystore_subject_cn or '—' }}</td></tr>
+    <tr><td>Issuer CN</td><td>{{ config.keystore_issuer_cn or '—' }}</td></tr>
+    <tr><td>Serial</td><td><code>{{ config.keystore_serial }}</code></td></tr>
+    <tr><td>Not before</td><td>{{ config.keystore_not_before.isoformat() if config.keystore_not_before else '—' }}</td></tr>
+    <tr><td>Not after</td><td>{{ config.keystore_not_after.isoformat() if config.keystore_not_after else '—' }}</td></tr>
+  </table>
+  {% endif %}
+  <form method="post" action="/admin/ato-sbr/keystore" enctype="multipart/form-data">
+    <div class="form-row">
+      <label>
+        Keystore file
+        <input type="file" name="file" accept=".xml,.p12,.pfx" required>
+      </label>
+    </div>
+    <div class="form-row">
+      <label>
+        Keystore password
+        <input type="password" name="password" autocomplete="new-password" required>
+      </label>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn" {% if not encryption_configured %}disabled{% endif %}>
+        Upload {% if config.keystore_encrypted %}(replace existing){% endif %}
+      </button>
+    </div>
+  </form>
+</section>
+
+<section>
+  <h3>Step 5 — Software Service ID (SSID)</h3>
+  <p class="dim">
+    Apply at <a href="https://softwaredevelopers.ato.gov.au/" target="_blank" rel="noopener">Software
+    Developers onboarding</a> (self-lodger mode). ATO returns a numeric SSID
+    — paste it here. The SSID accompanies every SBR lodgement payload.
+  </p>
+  <form method="post" action="/admin/ato-sbr/ssid">
+    <div class="form-row">
+      <label>
+        SSID
+        <input type="text" name="ssid" value="{{ config.ssid or '' }}" autocomplete="off" required>
+      </label>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn">Save SSID</button>
+    </div>
+  </form>
+</section>
+
+<section>
+  <h3>Step 6 — Test + environment</h3>
+  <p class="dim">
+    EVTE is ATO's External Vendor Test Environment — use it until the
+    credential is verified end-to-end. The smoke-test here is a
+    <strong>TLS reachability probe</strong>; a green tick means your
+    network can reach the ATO gateway. Full signed-SOAP lodgement lands
+    with the STP / BAS modules.
+  </p>
+  <table class="acct-table" style="max-width:48rem">
+    <tr>
+      <td>Current environment</td>
+      <td>
+        <strong>{{ config.environment }}</strong>
+        {% if config.evte_verified_at %}
+          — EVTE verified {{ config.evte_verified_at.isoformat() }}
+        {% endif %}
+        {% if config.prod_verified_at %}
+          — production verified {{ config.prod_verified_at.isoformat() }}
+        {% endif %}
+      </td>
+    </tr>
+  </table>
+  <form method="post" action="/admin/ato-sbr/environment" style="display:inline">
+    <label>
+      Set environment
+      <select name="environment">
+        <option value="evte" {% if config.environment == 'evte' %}selected{% endif %}>evte</option>
+        <option value="production" {% if config.environment == 'production' %}selected{% endif %}>production</option>
+      </select>
+    </label>
+    <button type="submit" class="btn-secondary">Save</button>
+  </form>
+  <form method="post" action="/admin/ato-sbr/test" style="display:inline">
+    <input type="hidden" name="environment" value="evte">
+    <button type="submit" class="btn-secondary">Test EVTE</button>
+  </form>
+  <form method="post" action="/admin/ato-sbr/test" style="display:inline">
+    <input type="hidden" name="environment" value="production">
+    <button type="submit" class="btn-secondary">Test production</button>
+  </form>
+</section>
+
+<section>
+  <h3>Danger zone</h3>
+  <form method="post" action="/admin/ato-sbr/clear" onsubmit="return confirm('Wipe the ATO SBR config for this company?');">
+    <button type="submit" class="btn-secondary">Clear SBR config</button>
+  </form>
+</section>
+{% endblock %}

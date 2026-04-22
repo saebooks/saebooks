@@ -159,5 +159,27 @@ class Settings(BaseSettings):
         default="", alias="STRIPE_DEFAULT_BANK_ACCOUNT_ID"
     )
 
+    # ---------------------------------------------------------------- #
+    # ATO SBR (Batch II.5)                                             #
+    # ---------------------------------------------------------------- #
+    # AUSkey is retired — STP / BAS e-lodgement uses a Machine
+    # Credential issued via RAM (Relationship Authorisation Manager)
+    # linked to the admin's myGovID, plus a Software Service ID (SSID)
+    # from ATO Software Developer onboarding.
+    #
+    # We default to the External Vendor Test Environment (EVTE) for
+    # every ping so a misconfigured install can't accidentally lodge
+    # against production. The onboarding UI flips a per-company
+    # ``environment`` toggle to production once a real credential is
+    # verified; these base URLs stay global.
+    ato_sbr_evte_base: str = Field(
+        default="https://softwareauthorisations.acc.ato.gov.au",
+        alias="ATO_SBR_EVTE_BASE",
+    )
+    ato_sbr_prod_base: str = Field(
+        default="https://softwareauthorisations.ato.gov.au",
+        alias="ATO_SBR_PROD_BASE",
+    )
+
 
 settings = Settings()
