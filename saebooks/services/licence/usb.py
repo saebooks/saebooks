@@ -3,49 +3,54 @@
 Per ``CHARTER v1.1 §6.2`` and ``SPEC-LICENSING §3.2``:
 
 * A USB licence is an Ed25519-signed JSON payload written to a USB
-  drive at purchase time. The drive's hardware UUID (``ID_SERIAL`` as
-  reported by udev) is embedded in the payload; the licence is only
-  valid on the originally-bound drive.
+  drive at purchase time. The drive's filesystem UUID (as reported
+  by ``blkid`` / ``/dev/disk/by-uuid``) is embedded in the payload;
+  the licence is only valid on the originally-bound drive.
 * The public key used to verify the signature is burned into this
   binary at release time. Self-compilers can replace the pubkey with
   their own to sign their own licences — §12.1 "self-compile allowed"
   line protects this explicitly.
-* Runtime check: the drive must be mounted and readable, the signature
-  verifies against the bound UUID, and the ``updates_until`` field has
-  not elapsed *if we are inside the licence's update window*. Expired
-  update windows don't disable the licence — they just freeze updates
-  (CHARTER §6.2 "the install runs forever on the version it has").
+* Runtime check: the drive must be mounted and readable, the
+  signature verifies against the bound UUID, and the ``updates_until``
+  field is recorded but does NOT invalidate the licence — CHARTER §6.2
+  "the install runs forever on the version it has". Expired updates
+  windows just freeze updates.
 
-Activation (first-use online handshake) is the portal's concern
-(``saebooks-portal.usb_activation``) — this module only handles
-*reading* an already-signed licence blob and verifying it.
+File format on the stick (``<mount>/saebooks.licence``):
 
-This module is a scaffolded interface. Real Ed25519 verification
-arrives alongside the portal in Wave 5; until then ``load_usb_licence``
-returns ``None`` so the resolver falls through to community on every
-startup, which is the safe default.
+    base64(Ed25519-signature-64-bytes) + "\n" + canonical-json-payload
+
+Canonical JSON = ``json.dumps(payload, sort_keys=True, separators=(",", ":"))``.
+Signing happens in the portal's air-gapped signer; verification here
+re-serialises the payload the same way before handing it to
+``Ed25519PublicKey.verify()``.
 """
 from __future__ import annotations
 
+import base64
+import json
+import logging
+import os
+import subprocess
 from pathlib import Path
+from typing import Any
+
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from saebooks.services.licence.caps import caps_for
 from saebooks.services.licence.models import LicenceSource, ResolvedLicence
 
+log = logging.getLogger(__name__)
 
-# Public key (Ed25519, raw 32 bytes, base64-URL encoded) that every
+
+# Public key (Ed25519, raw 32 bytes, base64 encoded) that every
 # released binary uses to verify USB licences. The private half lives
-# on an offline signing host at SAE Engineering; see
-# ``saebooks-portal.licensing.usb_signer`` once Wave 5 scaffolds it.
-#
-# Empty during development. A release build sets this via the
-# ``SAEBOOKS_USB_PUBKEY`` env / build variable; an empty value tells
-# ``load_usb_licence`` to skip USB entirely.
+# on an offline signing host at SAE Engineering; see the portal's
+# usb_signer service. Empty during development.
 USB_PUBKEY_B64: str = ""
 
 # Default mount prefixes we scan for a ``saebooks.licence`` file.
-# Linux udev mounts removable media under these paths; the Offline
-# Windows build is separate concern.
 DEFAULT_SCAN_PATHS: tuple[str, ...] = (
     "/run/media",
     "/media",
@@ -53,6 +58,17 @@ DEFAULT_SCAN_PATHS: tuple[str, ...] = (
 )
 
 LICENCE_FILENAME = "saebooks.licence"
+
+
+def _load_usb_public_key() -> Ed25519PublicKey | None:
+    if not USB_PUBKEY_B64:
+        return None
+    try:
+        raw = base64.b64decode(USB_PUBKEY_B64)
+        return Ed25519PublicKey.from_public_bytes(raw)
+    except Exception:
+        log.exception("invalid USB_PUBKEY_B64 — treating as unconfigured")
+        return None
 
 
 def load_usb_licence(
@@ -66,31 +82,97 @@ def load_usb_licence(
     * The build has no embedded public key (development build).
     * The signature fails verification.
     * The ``usb_uuid`` inside the payload doesn't match the drive's
-      hardware serial.
+      filesystem UUID.
     * The payload parses but names an unknown edition.
 
     A ``None`` return always means "fall through to the next driver"
     — never raises on a bad licence, because a tampered USB on a
-    customer's desk shouldn't crash the app at boot; it should
-    silently drop the install back to community and leave a trail in
-    the audit log (TODO: emit audit event — wired when the portal is
-    live in Wave 5).
+    customer's desk shouldn't crash the app at boot.
     """
-    if not USB_PUBKEY_B64:
+    pubkey = _load_usb_public_key()
+    if pubkey is None:
         return None
 
     path = _find_licence_file(scan_paths)
     if path is None:
         return None
 
-    # Real verification lands in Wave 5 alongside the portal's signer
-    # code. Until then, flagging the path so tests can assert "we
-    # scanned and found a file but didn't honour it in dev builds".
-    return None
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        log.warning("cannot read %s: %s", path, exc)
+        return None
+
+    parsed = _parse_blob(raw)
+    if parsed is None:
+        return None
+    signature, payload_bytes, payload = parsed
+
+    try:
+        pubkey.verify(signature, payload_bytes)
+    except InvalidSignature:
+        log.warning("USB licence signature verification failed")
+        return None
+
+    expected_uuid = payload.get("usb_uuid")
+    actual_uuid = _filesystem_uuid_for(path)
+    if expected_uuid and actual_uuid and expected_uuid != actual_uuid:
+        log.warning(
+            "USB licence usb_uuid %r does not match drive UUID %r",
+            expected_uuid,
+            actual_uuid,
+        )
+        return None
+
+    edition = payload.get("edition")
+    if edition not in {"offline", "business", "pro", "enterprise"}:
+        log.warning("USB licence carries unknown edition %r", edition)
+        return None
+
+    return ResolvedLicence(
+        edition=edition,
+        source=LicenceSource.USB,
+        caps=caps_for(edition),
+        usb_uuid=expected_uuid,
+        licence_id=payload.get("licence_id"),
+        licensed_to=payload.get("licensed_to") or payload.get("ledger_id"),
+    )
+
+
+def _parse_blob(
+    raw: bytes,
+) -> tuple[bytes, bytes, dict[str, Any]] | None:
+    """Split ``raw`` into (signature, canonical-payload-bytes, payload-dict)."""
+    try:
+        sig_line, payload_bytes = raw.split(b"\n", 1)
+    except ValueError:
+        log.warning("USB licence: missing newline between sig and payload")
+        return None
+
+    try:
+        signature = base64.b64decode(sig_line.strip())
+    except Exception:
+        log.warning("USB licence: signature is not base64")
+        return None
+
+    try:
+        payload = json.loads(payload_bytes.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        log.warning("USB licence: payload is not valid JSON")
+        return None
+    if not isinstance(payload, dict):
+        log.warning("USB licence: payload is not a JSON object")
+        return None
+
+    # Re-canonicalise — callers sign this exact form, so trailing
+    # whitespace in the file must not affect verification.
+    canonical = json.dumps(
+        payload, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return signature, canonical, payload
 
 
 def _find_licence_file(scan_paths: tuple[str, ...]) -> Path | None:
-    """Return the path to a ``saebooks.licence`` file, or ``None``."""
     for prefix in scan_paths:
         root = Path(prefix)
         if not root.is_dir():
@@ -99,6 +181,35 @@ def _find_licence_file(scan_paths: tuple[str, ...]) -> Path | None:
             if candidate.is_file():
                 return candidate
     return None
+
+
+def _filesystem_uuid_for(path: Path) -> str | None:
+    """Return the filesystem UUID of the mount containing ``path``.
+
+    Uses ``findmnt -n -o UUID`` on the parent directory. Returns
+    ``None`` on any failure — callers treat that as "can't verify,
+    reject the licence" via the equality check above.
+    """
+    try:
+        result = subprocess.run(
+            [
+                "findmnt",
+                "--noheadings",
+                "--output",
+                "UUID",
+                "--target",
+                os.fspath(path.parent),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        log.warning("findmnt failed for %s: %s", path, exc)
+        return None
+    out = result.stdout.strip()
+    return out or None
 
 
 # --------------------------------------------------------------------- #
@@ -113,13 +224,7 @@ def build_fake_licence_for_tests(
     licence_id: str = "00000000-0000-0000-0000-000000000000",
     licensed_to: str = "Test Holder",
 ) -> ResolvedLicence:
-    """Build a ``ResolvedLicence`` with ``source=USB`` for tests.
-
-    Bypasses every crypto check. Only call from tests. The resolver
-    uses this via monkey-patching in the Wave 3 test suite — Wave 5
-    replaces the body of ``load_usb_licence`` and removes the need for
-    this helper at runtime.
-    """
+    """Build a ``ResolvedLicence`` with ``source=USB`` for tests."""
     return ResolvedLicence(
         edition=edition,
         source=LicenceSource.USB,
