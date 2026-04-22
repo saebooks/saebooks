@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from saebooks.api.v1 import router as api_v1_router
 from saebooks.config import settings
 from saebooks.middleware.auth import ForwardAuthMiddleware
 from saebooks.routers import (
@@ -127,6 +128,11 @@ def create_app() -> FastAPI:
     # /help/shortcuts at the top level so the Cmd-K palette fetch call
     # can stay short.
     app.include_router(search.router)
+    # Phase 0 JSON API surface. Mounted last so its /api/v1/* paths
+    # can't clash with any future top-level Jinja route. Bearer-auth
+    # gated per-router (see saebooks/api/v1/auth.py) — independent
+    # from the Authentik forward-auth middleware above.
+    app.include_router(api_v1_router)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
     # Prometheus /metrics + per-request latency histogram. Install last

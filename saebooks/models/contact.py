@@ -65,3 +65,9 @@ class Contact(CompanyScoped, Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Monotonic version counter for optimistic-locking via the API's
+    # ``If-Match: <version>`` header. Bumped on every write that goes
+    # through the new ``saebooks.api.v1`` router; legacy Jinja writes
+    # also route through the same service layer so the counter stays
+    # authoritative. See alembic/versions/0036_phase0_api_scaffolding.py.
+    version: Mapped[int] = mapped_column(default=1, nullable=False)

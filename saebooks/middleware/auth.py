@@ -98,6 +98,10 @@ OPEN_PATH_PREFIXES: tuple[str, ...] = (
     "/static/",
     "/webhooks/",
     "/favicon.ico",
+    # JSON API — uses its own bearer-token auth dependency
+    # (``saebooks.api.v1.auth.require_bearer``); doesn't want the
+    # Authentik user upsert on every call.
+    "/api/",
 )
 
 

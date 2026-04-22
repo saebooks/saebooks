@@ -1,16 +1,41 @@
-"""Contact service — CRUD, search, archive."""
+"""Contact service — CRUD, search, archive.
+
+All writes bump ``Contact.version`` and append a row to ``change_log``
+so the Phase 0 API (and the offline-sync work in Phase 4.5) has a
+single authoritative source of truth. Legacy Jinja routes call the
+same helpers, which is why ``update`` and ``archive`` accept an
+optional ``expected_version`` — the API passes it (enforcing
+``If-Match``), and the Jinja layer omits it (last-writer-wins, same
+as today).
+"""
 import re
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.models.contact import Contact, ContactType
 from saebooks.services import audit as audit_svc
+from saebooks.services import change_log as change_log_svc
 
 # ABN: exactly 11 digits after stripping spaces
 _ABN_RE = re.compile(r"^\d{11}$")
+
+
+class VersionConflict(Exception):
+    """Raised when ``expected_version`` does not match the stored value.
+
+    The API layer catches this and returns 409 with the current server
+    state so the client can reconcile.
+    """
+
+    def __init__(self, current: Contact) -> None:
+        super().__init__(
+            f"Contact {current.id} is at version {current.version}, not the expected version"
+        )
+        self.current = current
 
 
 def _validate_abn(raw: str) -> str:
@@ -23,6 +48,53 @@ def _validate_abn(raw: str) -> str:
     return cleaned
 
 
+_CONTACT_COLUMNS: tuple[str, ...] = (
+    "id",
+    "company_id",
+    "name",
+    "contact_type",
+    "email",
+    "phone",
+    "abn",
+    "address_line1",
+    "address_line2",
+    "city",
+    "state",
+    "postcode",
+    "country",
+    "notes",
+    "default_account_id",
+    "default_tax_code",
+    "bank_bsb",
+    "bank_account_number",
+    "bank_account_title",
+    "created_at",
+    "updated_at",
+    "archived_at",
+    "version",
+)
+
+
+def _serialise(contact: Contact) -> dict[str, Any]:
+    """Row → JSON-safe dict for change_log.payload.
+
+    Uses an explicit column list so we don't trigger SQLAlchemy
+    inspection magic (which can bridge into greenlet IO if any
+    attribute is still pending).
+    """
+    data: dict[str, Any] = {}
+    for key in _CONTACT_COLUMNS:
+        val = getattr(contact, key)
+        if isinstance(val, uuid.UUID):
+            val = str(val)
+        elif isinstance(val, datetime):
+            val = val.isoformat()
+        elif hasattr(val, "value"):  # StrEnum
+            val = val.value
+        data[key] = val
+    return data
+
+
 async def list_active(
     session: AsyncSession,
     company_id: uuid.UUID,
@@ -30,6 +102,7 @@ async def list_active(
     contact_type: ContactType | None = None,
     search: str | None = None,
     limit: int = 200,
+    offset: int = 0,
 ) -> list[Contact]:
     """List active contacts, optionally filtered by type or search term (name/email)."""
     stmt = (
@@ -43,7 +116,7 @@ async def list_active(
         stmt = stmt.where(
             Contact.name.ilike(pattern) | Contact.email.ilike(pattern)
         )
-    stmt = stmt.order_by(Contact.name).limit(limit)
+    stmt = stmt.order_by(Contact.name).offset(offset).limit(limit)
     result = await session.execute(stmt)
     return list(result.scalars().all())
 
@@ -56,6 +129,7 @@ async def create(
     session: AsyncSession,
     company_id: uuid.UUID,
     *,
+    actor: str = "web",
     name: str,
     contact_type: ContactType,
     email: str | None = None,
@@ -91,10 +165,23 @@ async def create(
         notes=notes,
         default_account_id=default_account_id,
         default_tax_code=default_tax_code,
+        version=1,
     )
     session.add(contact)
-    await session.commit()
+    await session.flush()
+    # Pull server-side defaults (created_at, updated_at) so the
+    # serialised payload isn't missing fields.
     await session.refresh(contact)
+    await change_log_svc.append(
+        session,
+        entity="contact",
+        entity_id=contact.id,
+        op="create",
+        actor=actor,
+        payload=_serialise(contact),
+        version=contact.version,
+    )
+    await session.commit()
     return contact
 
 
@@ -103,12 +190,22 @@ async def update(
     contact_id: uuid.UUID,
     *,
     performed_by: str | None = None,
+    actor: str | None = None,
+    expected_version: int | None = None,
     **kwargs,
 ) -> Contact:
-    """Update contact fields. Only update fields that are explicitly passed."""
+    """Update contact fields. Only update fields that are explicitly passed.
+
+    If ``expected_version`` is supplied and does not match the stored
+    ``Contact.version``, raises ``VersionConflict``. Otherwise bumps
+    the version, appends a change_log row, and commits.
+    """
     contact = await session.get(Contact, contact_id)
     if contact is None:
         raise ValueError(f"Contact {contact_id} not found")
+
+    if expected_version is not None and contact.version != expected_version:
+        raise VersionConflict(contact)
 
     if "abn" in kwargs and kwargs["abn"] is not None:
         kwargs["abn"] = _validate_abn(kwargs["abn"])
@@ -128,14 +225,27 @@ async def update(
             raise ValueError(f"Unknown field: {key}")
         setattr(contact, key, value)
 
+    contact.version = contact.version + 1
+
     await audit_svc.snapshot_row(
         session, contact,
         action="update",
         before_data=before,
         performed_by=performed_by,
     )
-    await session.commit()
+    # snapshot_row flushed; refresh to pull the new onupdate=func.now()
+    # timestamp before we serialise for change_log.
     await session.refresh(contact)
+    await change_log_svc.append(
+        session,
+        entity="contact",
+        entity_id=contact.id,
+        op="update",
+        actor=actor or performed_by or "web",
+        payload=_serialise(contact),
+        version=contact.version,
+    )
+    await session.commit()
     return contact
 
 
@@ -144,20 +254,36 @@ async def archive(
     contact_id: uuid.UUID,
     *,
     performed_by: str | None = None,
-) -> None:
+    actor: str | None = None,
+    expected_version: int | None = None,
+) -> Contact | None:
     """Soft-delete."""
     contact = await session.get(Contact, contact_id)
     if contact is None:
-        return
+        return None
+    if expected_version is not None and contact.version != expected_version:
+        raise VersionConflict(contact)
     before = audit_svc.capture(contact)
     contact.archived_at = datetime.now(UTC)
+    contact.version = contact.version + 1
     await audit_svc.snapshot_row(
         session, contact,
         action="archive",
         before_data=before,
         performed_by=performed_by,
     )
+    await session.refresh(contact)
+    await change_log_svc.append(
+        session,
+        entity="contact",
+        entity_id=contact.id,
+        op="archive",
+        actor=actor or performed_by or "web",
+        payload=_serialise(contact),
+        version=contact.version,
+    )
     await session.commit()
+    return contact
 
 
 async def search_by_name(
