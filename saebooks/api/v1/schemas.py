@@ -1484,6 +1484,88 @@ class BudgetConflictBody(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Reports — Tier 5 (cycle 19): Profit & Loss + Balance Sheet
+# ---------------------------------------------------------------------------
+
+
+class PnLAccountLine(BaseModel):
+    """One account's net amount in a P&L section."""
+
+    account_id: uuid.UUID
+    account_name: str
+    code: str
+    amount: float
+
+
+class PnLIncome(BaseModel):
+    """Income section of a P&L report."""
+
+    INCOME: list[PnLAccountLine] = Field(default_factory=list)
+    OTHER_INCOME: list[PnLAccountLine] = Field(default_factory=list)
+    total_income: float
+
+
+class PnLExpenses(BaseModel):
+    """Expenses section of a P&L report."""
+
+    EXPENSE: list[PnLAccountLine] = Field(default_factory=list)
+    COST_OF_SALES: list[PnLAccountLine] = Field(default_factory=list)
+    OTHER_EXPENSE: list[PnLAccountLine] = Field(default_factory=list)
+    total_expenses: float
+
+
+class PnLReport(BaseModel):
+    """Full profit & loss report for a date range."""
+
+    from_date: date
+    to_date: date
+    income: PnLIncome
+    expenses: PnLExpenses
+    net_profit: float
+
+
+class BSAccountLine(BaseModel):
+    """One account's balance in a balance sheet section."""
+
+    account_id: uuid.UUID
+    account_name: str
+    code: str
+    balance: float
+
+
+class BSAssets(BaseModel):
+    """Assets section of a balance sheet."""
+
+    ASSET: list[BSAccountLine] = Field(default_factory=list)
+    total_assets: float
+
+
+class BSLiabilities(BaseModel):
+    """Liabilities section of a balance sheet."""
+
+    LIABILITY: list[BSAccountLine] = Field(default_factory=list)
+    total_liabilities: float
+
+
+class BSEquity(BaseModel):
+    """Equity section of a balance sheet."""
+
+    EQUITY: list[BSAccountLine] = Field(default_factory=list)
+    total_equity: float
+
+
+class BSReport(BaseModel):
+    """Full balance sheet as at a given date."""
+
+    as_of_date: date
+    assets: BSAssets
+    liabilities: BSLiabilities
+    equity: BSEquity
+    balanced: bool
+    difference: float
+
+
 class AgedContact(BaseModel):
     """One contact's aged balance row.
 

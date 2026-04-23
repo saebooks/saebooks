@@ -1,9 +1,12 @@
 """JSON router — ``/api/v1/reports``.
 
-Tier-5 report endpoints: Aged Receivables and Aged Payables.
+Tier-5 report endpoints: Aged Receivables, Aged Payables, Profit & Loss,
+and Balance Sheet.
 
-Both reports walk the ``invoices`` / ``bills`` tables directly (not the
-GL) so they can show per-document outstanding balances.  The outstanding
+Aged reports
+------------
+Both AR/AP reports walk the ``invoices`` / ``bills`` tables directly (not
+the GL) so they can show per-document outstanding balances.  The outstanding
 balance for each document is ``total - amount_paid`` (both fields exist
 on the model).
 
@@ -29,6 +32,19 @@ controls the day-count boundaries.  With the default you get:
 A custom value of e.g. ``[0, 14, 60]`` produces:
     current / 1-14 days / 15-60 days / 60+ days
 
+GL reports (P&L + Balance Sheet)
+----------------------------------
+Both financial statements are derived from the ``journal_lines`` table
+joined to ``journal_entries`` (filtered by status) and ``accounts``.
+
+* P&L: sums JournalLine debit/credit over a date range.  Income accounts:
+  net = credit - debit (credits increase income).  Expense accounts:
+  net = debit - credit.  Groups by AccountType.
+* Balance Sheet: cumulative sum of all JournalLine entries up to
+  ``as_of_date``.  Asset accounts: balance = debit - credit.  Liability
+  and equity accounts: balance = credit - debit.  Checks whether
+  total_assets == total_liabilities + total_equity (balanced flag).
+
 Tenant isolation
 ----------------
 Queries are scoped to the tenant resolved from
@@ -44,16 +60,18 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
-from saebooks.api.v1.schemas import AgedReport
+from saebooks.api.v1.schemas import AgedReport, BSReport, PnLReport
 from saebooks.db import AsyncSessionLocal
+from saebooks.models.account import Account, AccountType
 from saebooks.models.bill import Bill, BillStatus
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact
 from saebooks.models.invoice import Invoice, InvoiceStatus
+from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
 
 router = APIRouter(
     prefix="/reports",
@@ -279,3 +297,240 @@ async def aged_payables(
         rows = (await session.execute(stmt)).all()
 
     return _build_report(rows, as_of, bd, labels)
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/reports/profit_loss
+# ---------------------------------------------------------------------------
+
+# AccountTypes that are income accounts (credits increase balance).
+_INCOME_TYPES = {AccountType.INCOME, AccountType.OTHER_INCOME}
+
+# AccountTypes that are expense accounts (debits increase balance).
+_EXPENSE_TYPES = {AccountType.EXPENSE, AccountType.COST_OF_SALES, AccountType.OTHER_EXPENSE}
+
+
+@router.get("/profit_loss", response_model=PnLReport)
+async def profit_loss(
+    from_date: date = Query(...),
+    to_date: date = Query(...),
+    include_draft: bool = Query(default=False),
+) -> PnLReport:
+    """Profit & Loss for a date range.
+
+    Sums JournalLine debit/credit per account for POSTED JEs whose
+    ``entry_date`` falls within [from_date, to_date] (inclusive).
+    When ``include_draft=True``, DRAFT entries are also included.
+
+    Income accounts: net = credit - debit (credits increase income).
+    Expense accounts: net = debit - credit (debits increase expense).
+    Only accounts with a non-zero net amount appear in the result.
+    """
+    statuses = [EntryStatus.POSTED]
+    if include_draft:
+        statuses.append(EntryStatus.DRAFT)
+
+    async with AsyncSessionLocal() as session:
+        tenant_id = resolve_tenant_id()
+        company_id = await _first_company_id(session)
+
+        stmt = (
+            select(
+                Account.id,
+                Account.name,
+                Account.code,
+                Account.account_type,
+                func.sum(JournalLine.debit).label("total_debit"),
+                func.sum(JournalLine.credit).label("total_credit"),
+            )
+            .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+            .join(Account, JournalLine.account_id == Account.id)
+            .where(
+                and_(
+                    JournalEntry.company_id == company_id,
+                    JournalEntry.tenant_id == tenant_id,
+                    JournalEntry.status.in_(statuses),
+                    JournalEntry.archived_at.is_(None),
+                    JournalEntry.entry_date >= from_date,
+                    JournalEntry.entry_date <= to_date,
+                )
+            )
+            .group_by(Account.id, Account.name, Account.code, Account.account_type)
+            .order_by(Account.code)
+        )
+        rows = (await session.execute(stmt)).all()
+
+    # Accumulate per account-type
+    income_by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    expenses_by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
+
+    for row in rows:
+        acc_id, acc_name, acc_code, acc_type, total_debit, total_credit = row
+        total_debit = Decimal(total_debit or "0")
+        total_credit = Decimal(total_credit or "0")
+
+        if acc_type in _INCOME_TYPES:
+            net = float(total_credit - total_debit)
+            if net != 0.0:
+                income_by_type[acc_type.value].append(
+                    {
+                        "account_id": acc_id,
+                        "account_name": acc_name,
+                        "code": acc_code,
+                        "amount": net,
+                    }
+                )
+        elif acc_type in _EXPENSE_TYPES:
+            net = float(total_debit - total_credit)
+            if net != 0.0:
+                expenses_by_type[acc_type.value].append(
+                    {
+                        "account_id": acc_id,
+                        "account_name": acc_name,
+                        "code": acc_code,
+                        "amount": net,
+                    }
+                )
+
+    total_income = sum(
+        line["amount"]
+        for lines in income_by_type.values()
+        for line in lines
+    )
+    total_expenses = sum(
+        line["amount"]
+        for lines in expenses_by_type.values()
+        for line in lines
+    )
+
+    return PnLReport(
+        from_date=from_date,
+        to_date=to_date,
+        income={
+            "INCOME": income_by_type.get("INCOME", []),
+            "OTHER_INCOME": income_by_type.get("OTHER_INCOME", []),
+            "total_income": total_income,
+        },
+        expenses={
+            "EXPENSE": expenses_by_type.get("EXPENSE", []),
+            "COST_OF_SALES": expenses_by_type.get("COST_OF_SALES", []),
+            "OTHER_EXPENSE": expenses_by_type.get("OTHER_EXPENSE", []),
+            "total_expenses": total_expenses,
+        },
+        net_profit=total_income - total_expenses,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/reports/balance_sheet
+# ---------------------------------------------------------------------------
+
+# AccountTypes whose balance = debit - credit (normal debit balance).
+_ASSET_TYPES = {AccountType.ASSET}
+
+# AccountTypes whose balance = credit - debit (normal credit balance).
+_LIABILITY_TYPES = {AccountType.LIABILITY}
+_EQUITY_TYPES = {AccountType.EQUITY}
+
+
+@router.get("/balance_sheet", response_model=BSReport)
+async def balance_sheet(
+    as_of_date: date = Query(...),
+) -> BSReport:
+    """Balance sheet as at ``as_of_date``.
+
+    Sums ALL POSTED JournalLine entries where ``entry_date <= as_of_date``
+    (cumulative from inception).
+
+    Asset accounts: balance = debit - credit.
+    Liability + equity accounts: balance = credit - debit.
+    Accounts with a zero net balance are omitted from the response.
+
+    ``balanced`` is True when
+    ``abs(total_assets - total_liabilities - total_equity) < 0.01``.
+    """
+    async with AsyncSessionLocal() as session:
+        tenant_id = resolve_tenant_id()
+        company_id = await _first_company_id(session)
+
+        stmt = (
+            select(
+                Account.id,
+                Account.name,
+                Account.code,
+                Account.account_type,
+                func.sum(JournalLine.debit).label("total_debit"),
+                func.sum(JournalLine.credit).label("total_credit"),
+            )
+            .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+            .join(Account, JournalLine.account_id == Account.id)
+            .where(
+                and_(
+                    JournalEntry.company_id == company_id,
+                    JournalEntry.tenant_id == tenant_id,
+                    JournalEntry.status == EntryStatus.POSTED,
+                    JournalEntry.archived_at.is_(None),
+                    JournalEntry.entry_date <= as_of_date,
+                )
+            )
+            .group_by(Account.id, Account.name, Account.code, Account.account_type)
+            .order_by(Account.code)
+        )
+        rows = (await session.execute(stmt)).all()
+
+    assets: list[dict[str, Any]] = []
+    liabilities: list[dict[str, Any]] = []
+    equity: list[dict[str, Any]] = []
+
+    for row in rows:
+        acc_id, acc_name, acc_code, acc_type, total_debit, total_credit = row
+        total_debit = Decimal(total_debit or "0")
+        total_credit = Decimal(total_credit or "0")
+
+        if acc_type in _ASSET_TYPES:
+            bal = float(total_debit - total_credit)
+            if bal != 0.0:
+                assets.append(
+                    {
+                        "account_id": acc_id,
+                        "account_name": acc_name,
+                        "code": acc_code,
+                        "balance": bal,
+                    }
+                )
+        elif acc_type in _LIABILITY_TYPES:
+            bal = float(total_credit - total_debit)
+            if bal != 0.0:
+                liabilities.append(
+                    {
+                        "account_id": acc_id,
+                        "account_name": acc_name,
+                        "code": acc_code,
+                        "balance": bal,
+                    }
+                )
+        elif acc_type in _EQUITY_TYPES:
+            bal = float(total_credit - total_debit)
+            if bal != 0.0:
+                equity.append(
+                    {
+                        "account_id": acc_id,
+                        "account_name": acc_name,
+                        "code": acc_code,
+                        "balance": bal,
+                    }
+                )
+
+    total_assets = sum(line["balance"] for line in assets)
+    total_liabilities = sum(line["balance"] for line in liabilities)
+    total_equity = sum(line["balance"] for line in equity)
+    difference = abs(total_assets - total_liabilities - total_equity)
+
+    return BSReport(
+        as_of_date=as_of_date,
+        assets={"ASSET": assets, "total_assets": total_assets},
+        liabilities={"LIABILITY": liabilities, "total_liabilities": total_liabilities},
+        equity={"EQUITY": equity, "total_equity": total_equity},
+        balanced=difference < 0.01,
+        difference=round(difference, 2),
+    )
