@@ -14,7 +14,7 @@ BAS labels:
 
 The mapping from tax_code.reporting_type:
   - "taxable"        → income lines go to G1, expense lines to G11
-  - "free"           → income lines go to G3
+  - "gst_free"       → income lines go to G3
   - "export"         → income lines go to G2
   - "input_taxed"    → excluded from GST calc
   - "capital"        → expense lines go to G10
@@ -127,7 +127,7 @@ async def bas_report(
                 gst_collected += gst
             elif reporting_type == "export":
                 g2 += net
-            elif reporting_type == "free":
+            elif reporting_type == "gst_free":
                 g3 += net
         elif acct_type in _PURCHASE_TYPES:
             net = debit - credit  # expense is debit-normal
@@ -137,7 +137,7 @@ async def bas_report(
                 else:
                     g11 += net + gst
                 gst_paid += gst
-            elif reporting_type == "free":
+            elif reporting_type == "gst_free":
                 pass  # GST-free purchases — no GST component
 
     return BASReport(
