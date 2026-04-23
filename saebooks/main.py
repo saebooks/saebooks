@@ -1,4 +1,5 @@
 import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -9,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from saebooks.api.v1 import router as api_v1_router
 from saebooks.config import settings
+from saebooks.grpc_server import serve as grpc_serve
 from saebooks.middleware.auth import ForwardAuthMiddleware
 from saebooks.routers import (
     accounts,
@@ -66,7 +68,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("SAE Books starting (edition=%s)", settings.edition)
     if settings.edition == "community":
         await _assert_single_company()
+    # Start the gRPC server alongside uvicorn.
+    # Port env vars: SAEBOOKS_REST_PORT (default 8042), SAEBOOKS_GRPC_PORT (default 50051).
+    grpc_port = int(os.getenv("SAEBOOKS_GRPC_PORT", "50051"))
+    grpc_server = await grpc_serve(grpc_port)
     yield
+    await grpc_server.stop(grace=5)
 
 
 def create_app() -> FastAPI:
