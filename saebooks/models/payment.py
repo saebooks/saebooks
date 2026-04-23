@@ -26,6 +26,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Integer,
     Numeric,
     String,
     Text,
@@ -141,6 +142,17 @@ class Payment(CompanyScoped, Base):
         nullable=False,
     )
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # --- Optimistic locking + multi-tenant (added cycle 9) ----------------
+    # ``version`` starts at 1 on create; every PATCH via the API bumps it.
+    # ``tenant_id`` defaults to the single default tenant so the legacy
+    # service layer still works without change.
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        default=uuid.UUID("00000000-0000-0000-0000-000000000001"),
+    )
 
     allocations: Mapped[list[PaymentAllocation]] = relationship(
         back_populates="payment",

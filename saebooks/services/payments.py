@@ -596,11 +596,372 @@ __all__ = [
     "PaymentError",
     "PaymentMethod",
     "PaymentStatus",
+    "VersionConflict",
     "allocate",
+    "api_create",
+    "api_get",
+    "api_update",
+    "api_void",
     "archive",
     "create_draft",
     "get",
+    "list_active",
     "list_payments",
     "post_payment",
     "void_payment",
 ]
+
+
+# ==========================================================================
+# API-oriented service (cycle 9) — optimistic locking + change_log
+#
+# These functions are the API surface for /api/v1/payments.  They are
+# intentionally separate from the legacy posting pipeline above so the
+# two surfaces can evolve independently.
+# ==========================================================================
+
+from saebooks.services import change_log as change_log_svc  # noqa: E402
+from sqlalchemy import func  # noqa: E402
+
+# ---------------------------------------------------------------------------
+# Exceptions
+# ---------------------------------------------------------------------------
+
+
+class VersionConflict(Exception):
+    """Raised when expected_version does not match the stored value."""
+
+    def __init__(self, current: Payment) -> None:
+        super().__init__(
+            f"Payment {current.id} is at version {current.version}, "
+            "not the expected version"
+        )
+        self.current = current
+
+
+# ---------------------------------------------------------------------------
+# Columns serialised into change_log.payload
+# ---------------------------------------------------------------------------
+
+_PAYMENT_COLUMNS: tuple[str, ...] = (
+    "id",
+    "company_id",
+    "tenant_id",
+    "contact_id",
+    "bank_account_id",
+    "number",
+    "direction",
+    "method",
+    "status",
+    "payment_date",
+    "amount",
+    "currency",
+    "fx_rate",
+    "base_amount",
+    "reference",
+    "notes",
+    "version",
+    "created_at",
+    "updated_at",
+    "archived_at",
+)
+
+
+def _serialise_payment(pay: Payment) -> dict:
+    from decimal import Decimal as _D
+
+    data: dict = {}
+    for key in _PAYMENT_COLUMNS:
+        val = getattr(pay, key, None)
+        if isinstance(val, uuid.UUID):
+            val = str(val)
+        elif isinstance(val, datetime):
+            val = val.isoformat()
+        elif isinstance(val, date):
+            val = val.isoformat()
+        elif isinstance(val, _D):
+            val = str(val)
+        elif hasattr(val, "value"):  # StrEnum
+            val = val.value
+        data[key] = val
+    return data
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+_DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+
+async def _get_with_allocations(
+    session: AsyncSession, payment_id: uuid.UUID
+) -> Payment | None:
+    result = await session.execute(
+        select(Payment)
+        .options(selectinload(Payment.allocations))
+        .where(Payment.id == payment_id)
+    )
+    return result.scalar_one_or_none()
+
+
+# ---------------------------------------------------------------------------
+# Read operations
+# ---------------------------------------------------------------------------
+
+
+async def list_active(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    *,
+    contact_id: uuid.UUID | None = None,
+    direction: PaymentDirection | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[Payment], int]:
+    """Return (payments, total_count) — excludes archived payments."""
+    base_where = [
+        Payment.company_id == company_id,
+        Payment.archived_at.is_(None),
+    ]
+    if contact_id is not None:
+        base_where.append(Payment.contact_id == contact_id)
+    if direction is not None:
+        base_where.append(Payment.direction == direction)
+    if date_from is not None:
+        base_where.append(Payment.payment_date >= date_from)
+    if date_to is not None:
+        base_where.append(Payment.payment_date <= date_to)
+
+    count_stmt = select(func.count()).select_from(Payment).where(*base_where)
+    total = (await session.execute(count_stmt)).scalar_one()
+
+    stmt = (
+        select(Payment)
+        .options(selectinload(Payment.allocations))
+        .where(*base_where)
+        .order_by(Payment.payment_date.desc(), Payment.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    payments = list((await session.execute(stmt)).scalars().unique().all())
+    return payments, total
+
+
+async def api_get(
+    session: AsyncSession, payment_id: uuid.UUID
+) -> Payment | None:
+    """Fetch a single payment with its allocations. Returns None if not found."""
+    return await _get_with_allocations(session, payment_id)
+
+
+# ---------------------------------------------------------------------------
+# Write operations
+# ---------------------------------------------------------------------------
+
+
+async def api_create(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    actor: str,
+    *,
+    contact_id: uuid.UUID,
+    bank_account_id: uuid.UUID,
+    payment_date: date,
+    amount: Decimal,
+    direction: PaymentDirection = PaymentDirection.INCOMING,
+    method: PaymentMethod = PaymentMethod.EFT,
+    reference: str | None = None,
+    notes: str | None = None,
+    currency: str = "AUD",
+    fx_rate: Decimal | None = None,
+    allocations: list[dict] | None = None,
+) -> Payment:
+    """Create a payment draft with version=1 and a change_log row."""
+    if amount <= Decimal("0"):
+        raise PaymentError("Payment amount must be positive")
+    rate = fx_rate if fx_rate is not None else Decimal("1")
+    pay = Payment(
+        company_id=company_id,
+        tenant_id=tenant_id,
+        contact_id=contact_id,
+        bank_account_id=bank_account_id,
+        payment_date=payment_date,
+        amount=amount,
+        direction=direction,
+        method=method,
+        reference=reference,
+        notes=notes,
+        status=PaymentStatus.DRAFT,
+        currency=currency.upper(),
+        fx_rate=rate,
+        base_amount=_q2(amount * rate),
+        version=1,
+    )
+    session.add(pay)
+    await session.flush()
+    await session.refresh(pay)
+
+    # Attach allocations if provided
+    if allocations:
+        for alloc in allocations:
+            invoice_id = alloc.get("invoice_id")
+            bill_id = alloc.get("bill_id")
+            credit_note_id = alloc.get("credit_note_id")
+            alloc_amount = Decimal(str(alloc["amount"]))
+            if alloc_amount <= Decimal("0"):
+                raise PaymentError("Allocation amounts must be positive")
+            session.add(
+                PaymentAllocation(
+                    payment_id=pay.id,
+                    invoice_id=uuid.UUID(str(invoice_id)) if invoice_id else None,
+                    bill_id=uuid.UUID(str(bill_id)) if bill_id else None,
+                    credit_note_id=uuid.UUID(str(credit_note_id)) if credit_note_id else None,
+                    amount=alloc_amount,
+                )
+            )
+        await session.flush()
+
+    pay_loaded = await _get_with_allocations(session, pay.id)
+    assert pay_loaded is not None
+
+    await change_log_svc.append(
+        session,
+        entity="payment",
+        entity_id=pay_loaded.id,
+        op="create",
+        actor=actor,
+        payload=_serialise_payment(pay_loaded),
+        version=pay_loaded.version,
+    )
+    await session.commit()
+    return await _get_with_allocations(session, pay_loaded.id)  # type: ignore[return-value]
+
+
+async def api_update(
+    session: AsyncSession,
+    payment_id: uuid.UUID,
+    actor: str,
+    expected_version: int,
+    *,
+    contact_id: uuid.UUID | None = None,
+    bank_account_id: uuid.UUID | None = None,
+    payment_date: date | None = None,
+    amount: Decimal | None = None,
+    direction: PaymentDirection | None = None,
+    method: PaymentMethod | None = None,
+    reference: str | None = None,
+    notes: str | None = None,
+    currency: str | None = None,
+    allocations: list[dict] | None = None,
+) -> Payment:
+    """Update a payment draft with optimistic locking + change_log."""
+    pay = await _get_with_allocations(session, payment_id)
+    if pay is None:
+        raise PaymentError(f"Payment {payment_id} not found")
+    if pay.version != expected_version:
+        raise VersionConflict(pay)
+
+    if contact_id is not None:
+        pay.contact_id = contact_id
+    if bank_account_id is not None:
+        pay.bank_account_id = bank_account_id
+    if payment_date is not None:
+        pay.payment_date = payment_date
+    if amount is not None:
+        if amount <= Decimal("0"):
+            raise PaymentError("Payment amount must be positive")
+        pay.amount = amount
+        pay.base_amount = _q2(amount * Decimal(str(pay.fx_rate)))
+    if direction is not None:
+        pay.direction = direction
+    if method is not None:
+        pay.method = method
+    if reference is not None:
+        pay.reference = reference
+    if notes is not None:
+        pay.notes = notes
+    if currency is not None:
+        pay.currency = currency.upper()
+    if allocations is not None:
+        from sqlalchemy import delete as sa_delete
+        await session.execute(
+            sa_delete(PaymentAllocation).where(
+                PaymentAllocation.payment_id == pay.id
+            )
+        )
+        await session.flush()
+        for alloc in allocations:
+            invoice_id = alloc.get("invoice_id")
+            bill_id = alloc.get("bill_id")
+            credit_note_id = alloc.get("credit_note_id")
+            alloc_amount = Decimal(str(alloc["amount"]))
+            if alloc_amount <= Decimal("0"):
+                raise PaymentError("Allocation amounts must be positive")
+            session.add(
+                PaymentAllocation(
+                    payment_id=pay.id,
+                    invoice_id=uuid.UUID(str(invoice_id)) if invoice_id else None,
+                    bill_id=uuid.UUID(str(bill_id)) if bill_id else None,
+                    credit_note_id=uuid.UUID(str(credit_note_id)) if credit_note_id else None,
+                    amount=alloc_amount,
+                )
+            )
+
+    pay.version = pay.version + 1
+    await session.flush()
+    await session.refresh(pay)
+
+    pay_loaded = await _get_with_allocations(session, payment_id)
+    assert pay_loaded is not None
+
+    await change_log_svc.append(
+        session,
+        entity="payment",
+        entity_id=pay_loaded.id,
+        op="update",
+        actor=actor,
+        payload=_serialise_payment(pay_loaded),
+        version=pay_loaded.version,
+    )
+    await session.commit()
+    return await _get_with_allocations(session, payment_id)  # type: ignore[return-value]
+
+
+async def api_void(
+    session: AsyncSession,
+    payment_id: uuid.UUID,
+    actor: str,
+    expected_version: int,
+) -> Payment:
+    """Soft-delete (archive/void) a payment with optimistic locking + change_log."""
+    pay = await _get_with_allocations(session, payment_id)
+    if pay is None:
+        raise PaymentError(f"Payment {payment_id} not found")
+    if pay.version != expected_version:
+        raise VersionConflict(pay)
+
+    pay.archived_at = datetime.now(UTC)
+    pay.status = PaymentStatus.VOIDED
+    pay.version = pay.version + 1
+    await session.flush()
+    await session.refresh(pay)
+
+    pay_loaded = await _get_with_allocations(session, payment_id)
+    assert pay_loaded is not None
+
+    await change_log_svc.append(
+        session,
+        entity="payment",
+        entity_id=pay_loaded.id,
+        op="archive",
+        actor=actor,
+        payload=_serialise_payment(pay_loaded),
+        version=pay_loaded.version,
+    )
+    await session.commit()
+    return await _get_with_allocations(session, payment_id)  # type: ignore[return-value]

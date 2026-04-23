@@ -757,3 +757,109 @@ class BillListOut(BaseModel):
 class BillConflictBody(BaseModel):
     detail: str
     current: BillOut
+
+
+# ---------------------------------------------------------------------------
+# Payments — Phase 1 tier-3 (cycle 9)
+# ---------------------------------------------------------------------------
+
+
+class PaymentAllocationOut(BaseModel):
+    """One allocation nested inside PaymentOut."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    payment_id: uuid.UUID
+    invoice_id: uuid.UUID | None = None
+    bill_id: uuid.UUID | None = None
+    credit_note_id: uuid.UUID | None = None
+    amount: Decimal
+
+
+class PaymentAllocationCreate(BaseModel):
+    """Allocation sub-object in a POST/PATCH payload."""
+
+    invoice_id: uuid.UUID | None = None
+    bill_id: uuid.UUID | None = None
+    credit_note_id: uuid.UUID | None = None
+    amount: Decimal
+
+
+class PaymentBase(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    contact_id: uuid.UUID
+    bank_account_id: uuid.UUID
+    payment_date: date
+    amount: Decimal
+    direction: str = "INCOMING"
+    method: str = "eft"
+    reference: str | None = None
+    notes: str | None = None
+    currency: str = Field(default="AUD", min_length=3, max_length=3)
+
+
+class PaymentCreate(PaymentBase):
+    """POST body."""
+
+    allocations: list[PaymentAllocationCreate] = Field(default_factory=list)
+
+
+class PaymentUpdate(BaseModel):
+    """PATCH body — every field optional."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    contact_id: uuid.UUID | None = None
+    bank_account_id: uuid.UUID | None = None
+    payment_date: date | None = None
+    amount: Decimal | None = None
+    direction: str | None = None
+    method: str | None = None
+    reference: str | None = None
+    notes: str | None = None
+    currency: str | None = None
+    allocations: list[PaymentAllocationCreate] | None = None
+
+
+class PaymentOut(BaseModel):
+    """Full payment response — includes nested allocations, tenant_id, version."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    tenant_id: uuid.UUID
+    contact_id: uuid.UUID
+    bank_account_id: uuid.UUID
+    number: str | None = None
+    direction: str
+    method: str
+    status: str
+    payment_date: date
+    amount: Decimal
+    currency: str
+    fx_rate: Decimal
+    base_amount: Decimal
+    reference: str | None = None
+    notes: str | None = None
+    posted_at: datetime | None = None
+    posted_by: str | None = None
+    version: int
+    created_at: datetime
+    updated_at: datetime
+    archived_at: datetime | None = None
+    allocations: list[PaymentAllocationOut] = Field(default_factory=list)
+
+
+class PaymentListOut(BaseModel):
+    items: list[PaymentOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class PaymentConflictBody(BaseModel):
+    detail: str
+    current: PaymentOut
