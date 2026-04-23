@@ -31,6 +31,7 @@ from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.schemas import (
     FixedAssetConflictBody,
     FixedAssetCreate,
+    FixedAssetDispose,
     FixedAssetListOut,
     FixedAssetOut,
     FixedAssetUpdate,
@@ -266,6 +267,63 @@ async def update_fixed_asset(
             await _remember_idempotent(session, key, body, 200)
             await session.commit()
     return JSONResponse(body, status_code=200)
+
+
+# ---------------------------------------------------------------------------
+# Dispose (state transition → 200 with updated FixedAssetOut)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/{asset_id}/dispose",
+    responses={
+        200: {"model": FixedAssetOut},
+        409: {"model": FixedAssetConflictBody, "description": "Version mismatch"},
+    },
+)
+async def dispose_fixed_asset(
+    asset_id: UUID,
+    payload: FixedAssetDispose,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+    bearer: str = Depends(require_bearer),
+) -> Any:
+    """Dispose a fixed asset.
+
+    Marks the asset ``disposed``, stamps disposal_date and proceeds,
+    and bumps the version. Requires ``If-Match: <version>`` for
+    optimistic locking.
+
+    Returns 422 if the asset is already disposed.
+    Returns 409 on version conflict (with current state in body).
+    """
+    expected = _parse_if_match(if_match)
+    if expected is None:
+        raise HTTPException(428, "If-Match header with asset version is required")
+
+    async with AsyncSessionLocal() as session:
+        try:
+            asset = await svc.api_dispose(
+                session,
+                asset_id,
+                actor=f"api:{bearer[:8]}…",
+                expected_version=expected,
+                disposal_date=payload.disposal_date,
+                proceeds=payload.proceeds,
+                notes=payload.notes,
+            )
+        except svc.VersionConflict as exc:
+            body = FixedAssetConflictBody(
+                detail="version mismatch",
+                current=FixedAssetOut.model_validate(exc.current),
+            ).model_dump(mode="json")
+            return JSONResponse(body, status_code=409)
+        except (ValueError, svc.FixedAssetApiError) as exc:
+            msg = str(exc)
+            if "not found" in msg.lower():
+                raise HTTPException(404, msg) from exc
+            raise HTTPException(422, msg) from exc
+
+    return JSONResponse(_dump(asset), status_code=200)
 
 
 # ---------------------------------------------------------------------------

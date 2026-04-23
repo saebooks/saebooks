@@ -1664,3 +1664,54 @@ class CashflowStatement(BaseModel):
     net_change: float
     opening_cash: float
     closing_cash: float
+
+
+# ---------------------------------------------------------------------------
+# Depreciation Schedule Report — tier-5 (cycle 21)
+# ---------------------------------------------------------------------------
+
+
+class DepreciationAssetLine(BaseModel):
+    """One asset row in the depreciation schedule report."""
+
+    asset_id: uuid.UUID
+    asset_number: str
+    description: str | None
+    acquisition_date: date
+    cost: float
+    residual_value: float
+    useful_life_months: int
+    depreciation_method: str
+    accumulated_depreciation: float
+    current_book_value: float
+    next_month_depreciation: float
+    fully_depreciated: bool
+
+
+class DepreciationSchedule(BaseModel):
+    """Depreciation schedule as at a given date.
+
+    ``assets`` is sorted by asset_number.  ``method`` query param
+    filters to ``linear`` or ``diminishing_value`` (DB method strings).
+    The convenience aliases ``STRAIGHT_LINE`` and ``DECLINING_BALANCE``
+    are also accepted and mapped internally.
+    """
+
+    as_of_date: date
+    assets: list[DepreciationAssetLine]
+    total_cost: float
+    total_accumulated: float
+    total_book_value: float
+
+
+# ---------------------------------------------------------------------------
+# Fixed Asset Disposal — tier-4 (cycle 21)
+# ---------------------------------------------------------------------------
+
+
+class FixedAssetDispose(BaseModel):
+    """POST body for disposing a fixed asset."""
+
+    disposal_date: date
+    proceeds: Decimal
+    notes: str | None = None

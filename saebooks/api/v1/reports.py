@@ -64,15 +64,26 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
-from saebooks.api.v1.schemas import AgedReport, BSReport, BASSummary, CashflowStatement, PnLReport
+from saebooks.api.v1.schemas import (
+    AgedReport,
+    BASSummary,
+    BSReport,
+    CashflowStatement,
+    DepreciationAssetLine,
+    DepreciationSchedule,
+    PnLReport,
+)
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
 from saebooks.models.bill import Bill, BillStatus
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact
+from saebooks.models.depreciation_model import DepreciationModel
+from saebooks.models.fixed_asset import FixedAsset
 from saebooks.models.invoice import Invoice, InvoiceStatus
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
 from saebooks.models.tax_code import TaxCode
+from saebooks.services import assets as assets_svc
 
 router = APIRouter(
     prefix="/reports",
@@ -816,4 +827,182 @@ async def cashflow(
         net_change=net_change,
         opening_cash=opening_cash,
         closing_cash=closing_cash,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/reports/depreciation_schedule
+# ---------------------------------------------------------------------------
+
+# Mapping from friendly filter aliases to DB method strings.
+_METHOD_ALIAS: dict[str, str] = {
+    "STRAIGHT_LINE": "linear",
+    "DECLINING_BALANCE": "diminishing_value",
+    "linear": "linear",
+    "diminishing_value": "diminishing_value",
+    "no_depreciation": "no_depreciation",
+}
+
+
+def _useful_life_months(model: DepreciationModel) -> int:
+    """Return useful life in months: method_number × method_period.
+
+    For linear models seeded as ``method_number=N years,
+    method_period=12``, this returns ``N × 12``.  For no-depreciation
+    and DV models where method_number=0, returns 0.
+    """
+    return model.method_number * model.method_period
+
+
+def _next_month_depreciation(
+    model: DepreciationModel,
+    current_book_value: Decimal,
+    residual_value: Decimal,
+    cost: Decimal,
+) -> Decimal:
+    """Compute one month's depreciation charge for the report column.
+
+    STRAIGHT_LINE (linear):
+        ``(cost - residual) / useful_life_months``
+    DECLINING_BALANCE (diminishing_value):
+        ``current_book_value × (rate_pct / 100 / 12)``
+        where rate_pct comes from the model.
+    Both are capped at ``max(book_value - residual, 0)`` and zeroed
+    when fully depreciated.
+
+    Returns 0 when the model is no_depreciation or when already fully
+    depreciated (book_value <= residual_value).
+    """
+    zero = Decimal("0")
+    remaining = current_book_value - residual_value
+    if remaining <= 0:
+        return zero
+
+    if model.method == "linear":
+        life_months = _useful_life_months(model)
+        if life_months <= 0:
+            return zero
+        depreciable_base = cost - residual_value
+        if depreciable_base <= 0:
+            return zero
+        charge = (depreciable_base / Decimal(life_months)).quantize(Decimal("0.01"))
+        return min(charge, remaining).quantize(Decimal("0.01"))
+
+    if model.method == "diminishing_value":
+        if model.rate_pct is None or model.rate_pct <= 0:
+            return zero
+        monthly_rate = model.rate_pct / Decimal("100") / Decimal("12")
+        charge = (current_book_value * monthly_rate).quantize(Decimal("0.01"))
+        return min(charge, remaining).quantize(Decimal("0.01"))
+
+    return zero
+
+
+@router.get("/depreciation_schedule", response_model=DepreciationSchedule)
+async def depreciation_schedule(
+    as_of_date: date | None = Query(default=None),
+    method: str | None = Query(default=None),
+) -> DepreciationSchedule:
+    """Depreciation schedule for all active (non-disposed, non-archived) assets.
+
+    ``as_of_date`` defaults to today.  ``method`` optionally filters to a
+    specific depreciation method; accepted values are ``STRAIGHT_LINE``,
+    ``DECLINING_BALANCE``, ``linear``, or ``diminishing_value``.
+
+    For each asset the report computes:
+
+    * ``accumulated_depreciation`` — total depreciation from in_service_date
+      to ``as_of_date`` via the same math used for GL posting.
+    * ``current_book_value`` — ``cost - accumulated_depreciation``.
+    * ``next_month_depreciation`` — one month's charge at the current
+      book value; zero when ``fully_depreciated``.
+    """
+    as_of = as_of_date or date.today()
+
+    # Validate and map method alias.
+    db_method: str | None = None
+    if method is not None:
+        db_method = _METHOD_ALIAS.get(method)
+        if db_method is None:
+            raise HTTPException(
+                422,
+                f"Unknown method filter {method!r}. "
+                "Use STRAIGHT_LINE, DECLINING_BALANCE, linear, or diminishing_value.",
+            )
+
+    async with AsyncSessionLocal() as session:
+        tenant_id = resolve_tenant_id()
+        company_id = await _first_company_id(session)
+
+        # Build query: non-archived, non-disposed assets for this tenant+company.
+        where_clauses = [
+            FixedAsset.company_id == company_id,
+            FixedAsset.tenant_id == tenant_id,
+            FixedAsset.archived_at.is_(None),
+            FixedAsset.status != "disposed",
+        ]
+
+        stmt = (
+            select(FixedAsset, DepreciationModel)
+            .join(
+                DepreciationModel,
+                FixedAsset.depreciation_model_id == DepreciationModel.id,
+            )
+            .where(*where_clauses)
+            .order_by(FixedAsset.code)
+        )
+        if db_method is not None:
+            stmt = stmt.where(DepreciationModel.method == db_method)
+
+        rows = (await session.execute(stmt)).all()
+
+        asset_lines: list[DepreciationAssetLine] = []
+        total_cost = Decimal("0")
+        total_accumulated = Decimal("0")
+        total_book_value = Decimal("0")
+
+        for asset, dep_model in rows:
+            # Compute accumulated depreciation up to as_of.
+            accum = await assets_svc.cumulative_depreciation_through(
+                session, asset, as_of
+            )
+            book_val = (asset.cost - accum).quantize(Decimal("0.01"))
+            fully_dep = book_val <= asset.residual_value
+
+            next_month = (
+                Decimal("0")
+                if fully_dep
+                else _next_month_depreciation(
+                    dep_model, book_val, asset.residual_value, asset.cost
+                )
+            )
+
+            life_months = _useful_life_months(dep_model)
+
+            asset_lines.append(
+                DepreciationAssetLine(
+                    asset_id=asset.id,
+                    asset_number=asset.code,
+                    description=asset.description,
+                    acquisition_date=asset.in_service_date,
+                    cost=float(asset.cost),
+                    residual_value=float(asset.residual_value),
+                    useful_life_months=life_months,
+                    depreciation_method=dep_model.method,
+                    accumulated_depreciation=float(accum),
+                    current_book_value=float(book_val),
+                    next_month_depreciation=float(next_month),
+                    fully_depreciated=fully_dep,
+                )
+            )
+            total_cost += asset.cost
+            total_accumulated += accum
+            total_book_value += book_val
+
+    return DepreciationSchedule(
+        as_of_date=as_of,
+        assets=asset_lines,
+        total_cost=float(total_cost),
+        total_accumulated=float(total_accumulated),
+        total_book_value=float(total_book_value),
     )

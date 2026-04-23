@@ -390,11 +390,64 @@ async def api_delete(
     return asset
 
 
+async def api_dispose(
+    session: AsyncSession,
+    asset_id: uuid.UUID,
+    actor: str,
+    expected_version: int,
+    *,
+    disposal_date: Any,
+    proceeds: Decimal,
+    notes: str | None = None,
+) -> FixedAsset:
+    """Dispose a fixed asset with optimistic locking + change_log.
+
+    Marks the asset as ``disposed``, stamps ``disposal_date`` and
+    ``disposal_proceeds``, and bumps the version. Does NOT post GL
+    journals — full accounting disposal is handled by the lower-tier
+    ``saebooks.services.assets.dispose_asset`` function. This entry
+    point is the thin API-tier state-transition that the v1 router calls.
+
+    Raises:
+        FixedAssetApiError: asset not found, or already disposed.
+        VersionConflict: ``expected_version`` does not match stored value.
+    """
+    asset = await api_get(session, asset_id)
+    if asset is None:
+        raise FixedAssetApiError(f"FixedAsset {asset_id} not found")
+    if asset.status == "disposed":
+        raise FixedAssetApiError(
+            f"FixedAsset {asset_id} is already disposed"
+        )
+    if asset.version != expected_version:
+        raise VersionConflict(asset)
+
+    asset.status = "disposed"
+    asset.disposal_date = disposal_date
+    asset.disposal_proceeds = Decimal(str(proceeds)).quantize(Decimal("0.01"))
+    asset.version = asset.version + 1
+    await session.flush()
+    await session.refresh(asset)
+
+    await change_log_svc.append(
+        session,
+        entity="fixed_asset",
+        entity_id=asset.id,
+        op="disposed",
+        actor=actor,
+        payload=_serialise(asset),
+        version=asset.version,
+    )
+    await session.commit()
+    return await api_get(session, asset_id)  # type: ignore[return-value]
+
+
 __all__ = [
     "FixedAssetApiError",
     "VersionConflict",
     "api_create",
     "api_delete",
+    "api_dispose",
     "api_get",
     "api_update",
     "list_fixed_assets",
