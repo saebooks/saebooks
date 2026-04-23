@@ -71,6 +71,8 @@ from saebooks.api.v1.schemas import (
     CashflowStatement,
     DepreciationAssetLine,
     DepreciationSchedule,
+    FXRevaluationItem,
+    FXRevaluationReport,
     PnLReport,
 )
 from saebooks.db import AsyncSessionLocal
@@ -1005,4 +1007,118 @@ async def depreciation_schedule(
         total_cost=float(total_cost),
         total_accumulated=float(total_accumulated),
         total_book_value=float(total_book_value),
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/reports/fx_revaluation — tier-5 (cycle 25)
+# ---------------------------------------------------------------------------
+
+_FX_RATE_UNAVAILABLE_NOTE = "FX rate not available — manual revaluation required"
+_FX_REPORT_NOTE = "Live FX rates not configured. Amounts shown in original currency."
+
+
+@router.get("/fx_revaluation", response_model=FXRevaluationReport)
+async def fx_revaluation(
+    as_of_date: date = Query(...),
+    base_currency: str = Query(default="AUD"),
+) -> FXRevaluationReport:
+    """FX revaluation report as at ``as_of_date``.
+
+    Returns all POSTED invoices and bills whose document currency differs
+    from ``base_currency`` (default AUD), showing the outstanding foreign
+    balance for each.  In v1 there is no live FX rate lookup; the
+    ``outstanding_base`` field is always ``null`` and a note is attached
+    to each item and to the report.
+
+    Only POSTED documents are included (DRAFT uncommitted; VOIDED reversed).
+    Documents with zero outstanding balance (fully paid) are included so
+    the operator can confirm no residual exposure.
+    """
+    async with AsyncSessionLocal() as session:
+        tenant_id = resolve_tenant_id()
+        company_id = await _first_company_id(session)
+
+        # --- POSTED invoices with non-base currency ---
+        inv_stmt = (
+            select(Invoice, Contact.name)
+            .join(Contact, Invoice.contact_id == Contact.id)
+            .where(
+                and_(
+                    Invoice.company_id == company_id,
+                    Invoice.tenant_id == tenant_id,
+                    Invoice.status == InvoiceStatus.POSTED,
+                    Invoice.archived_at.is_(None),
+                    Invoice.currency != base_currency,
+                    Invoice.issue_date <= as_of_date,
+                )
+            )
+            .order_by(Invoice.issue_date, Invoice.number)
+        )
+        inv_rows = (await session.execute(inv_stmt)).all()
+
+        # --- POSTED bills with non-base currency ---
+        bill_stmt = (
+            select(Bill, Contact.name)
+            .join(Contact, Bill.contact_id == Contact.id)
+            .where(
+                and_(
+                    Bill.company_id == company_id,
+                    Bill.tenant_id == tenant_id,
+                    Bill.status == BillStatus.POSTED,
+                    Bill.archived_at.is_(None),
+                    Bill.currency != base_currency,
+                    Bill.issue_date <= as_of_date,
+                )
+            )
+            .order_by(Bill.issue_date, Bill.number)
+        )
+        bill_rows = (await session.execute(bill_stmt)).all()
+
+    items: list[FXRevaluationItem] = []
+
+    for inv, contact_name in inv_rows:
+        original = float(inv.total)
+        paid = float(inv.amount_paid)
+        outstanding = original - paid
+        items.append(
+            FXRevaluationItem(
+                entity_type="INVOICE",
+                entity_id=inv.id,
+                entity_ref=inv.number,
+                contact_name=contact_name,
+                currency=inv.currency,
+                original_amount=original,
+                amount_paid=paid,
+                outstanding_foreign=outstanding,
+                outstanding_base=None,
+                note=_FX_RATE_UNAVAILABLE_NOTE,
+            )
+        )
+
+    for bill, contact_name in bill_rows:
+        original = float(bill.total)
+        paid = float(bill.amount_paid)
+        outstanding = original - paid
+        items.append(
+            FXRevaluationItem(
+                entity_type="BILL",
+                entity_id=bill.id,
+                entity_ref=bill.number,
+                contact_name=contact_name,
+                currency=bill.currency,
+                original_amount=original,
+                amount_paid=paid,
+                outstanding_foreign=outstanding,
+                outstanding_base=None,
+                note=_FX_RATE_UNAVAILABLE_NOTE,
+            )
+        )
+
+    return FXRevaluationReport(
+        as_of_date=as_of_date,
+        base_currency=base_currency,
+        items=items,
+        total_items=len(items),
+        note=_FX_REPORT_NOTE,
     )

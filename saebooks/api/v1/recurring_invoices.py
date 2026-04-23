@@ -323,3 +323,131 @@ async def delete_recurring_invoice(
             raise HTTPException(422, msg) from exc
 
     return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
+# Status transitions
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/{ri_id}/pause",
+    responses={
+        200: {"model": RecurringInvoiceOut},
+        409: {"model": RecurringInvoiceConflictBody, "description": "Version mismatch"},
+    },
+)
+async def pause_recurring_invoice(
+    ri_id: UUID,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+    bearer: str = Depends(require_bearer),
+) -> Any:
+    """Transition ACTIVE → PAUSED."""
+    expected = _parse_if_match(if_match)
+    if expected is None:
+        raise HTTPException(428, "If-Match header with template version is required")
+
+    async with AsyncSessionLocal() as session:
+        try:
+            ri = await svc.api_pause(
+                session,
+                ri_id,
+                actor=f"api:{bearer[:8]}…",
+                expected_version=expected,
+            )
+        except svc.VersionConflict as exc:
+            body = RecurringInvoiceConflictBody(
+                detail="version mismatch",
+                current=RecurringInvoiceOut.model_validate(exc.current),
+            ).model_dump(mode="json")
+            return JSONResponse(body, status_code=409)
+        except (ValueError, svc.RecurringInvoiceApiError) as exc:
+            msg = str(exc)
+            if "not found" in msg.lower():
+                raise HTTPException(404, msg) from exc
+            raise HTTPException(422, msg) from exc
+
+        body = _dump(ri)
+    return JSONResponse(body, status_code=200)
+
+
+@router.post(
+    "/{ri_id}/resume",
+    responses={
+        200: {"model": RecurringInvoiceOut},
+        409: {"model": RecurringInvoiceConflictBody, "description": "Version mismatch"},
+    },
+)
+async def resume_recurring_invoice(
+    ri_id: UUID,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+    bearer: str = Depends(require_bearer),
+) -> Any:
+    """Transition PAUSED → ACTIVE."""
+    expected = _parse_if_match(if_match)
+    if expected is None:
+        raise HTTPException(428, "If-Match header with template version is required")
+
+    async with AsyncSessionLocal() as session:
+        try:
+            ri = await svc.api_resume(
+                session,
+                ri_id,
+                actor=f"api:{bearer[:8]}…",
+                expected_version=expected,
+            )
+        except svc.VersionConflict as exc:
+            body = RecurringInvoiceConflictBody(
+                detail="version mismatch",
+                current=RecurringInvoiceOut.model_validate(exc.current),
+            ).model_dump(mode="json")
+            return JSONResponse(body, status_code=409)
+        except (ValueError, svc.RecurringInvoiceApiError) as exc:
+            msg = str(exc)
+            if "not found" in msg.lower():
+                raise HTTPException(404, msg) from exc
+            raise HTTPException(422, msg) from exc
+
+        body = _dump(ri)
+    return JSONResponse(body, status_code=200)
+
+
+@router.post(
+    "/{ri_id}/end",
+    responses={
+        200: {"model": RecurringInvoiceOut},
+        409: {"model": RecurringInvoiceConflictBody, "description": "Version mismatch"},
+    },
+)
+async def end_recurring_invoice(
+    ri_id: UUID,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+    bearer: str = Depends(require_bearer),
+) -> Any:
+    """Transition any non-ENDED status → ENDED (terminal)."""
+    expected = _parse_if_match(if_match)
+    if expected is None:
+        raise HTTPException(428, "If-Match header with template version is required")
+
+    async with AsyncSessionLocal() as session:
+        try:
+            ri = await svc.api_end(
+                session,
+                ri_id,
+                actor=f"api:{bearer[:8]}…",
+                expected_version=expected,
+            )
+        except svc.VersionConflict as exc:
+            body = RecurringInvoiceConflictBody(
+                detail="version mismatch",
+                current=RecurringInvoiceOut.model_validate(exc.current),
+            ).model_dump(mode="json")
+            return JSONResponse(body, status_code=409)
+        except (ValueError, svc.RecurringInvoiceApiError) as exc:
+            msg = str(exc)
+            if "not found" in msg.lower():
+                raise HTTPException(404, msg) from exc
+            raise HTTPException(422, msg) from exc
+
+        body = _dump(ri)
+    return JSONResponse(body, status_code=200)

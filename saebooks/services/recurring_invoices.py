@@ -378,12 +378,144 @@ async def api_delete(
     return ri
 
 
+async def api_pause(
+    session: AsyncSession,
+    ri_id: uuid.UUID,
+    actor: str,
+    expected_version: int,
+) -> RecurringInvoice:
+    """Transition ACTIVE → PAUSED with optimistic locking + change_log.
+
+    Raises ``VersionConflict`` on stale version.
+    Raises ``RecurringInvoiceApiError`` if not found or invalid transition.
+    """
+    ri = await _get_with_lines(session, ri_id)
+    if ri is None:
+        raise RecurringInvoiceApiError(f"RecurringInvoice {ri_id} not found")
+    if ri.version != expected_version:
+        raise VersionConflict(ri)
+    if ri.status != RecurrenceStatus.ACTIVE:
+        raise RecurringInvoiceApiError(
+            f"Cannot pause: recurring invoice is in status {ri.status.value!r}, "
+            "expected ACTIVE"
+        )
+
+    ri.status = RecurrenceStatus.PAUSED
+    ri.version = ri.version + 1
+    await session.flush()
+    await session.refresh(ri)
+
+    ri = await _get_with_lines(session, ri_id)
+    assert ri is not None
+
+    await change_log_svc.append(
+        session,
+        entity="recurring_invoice",
+        entity_id=ri.id,
+        op="paused",
+        actor=actor,
+        payload=_serialise(ri),
+        version=ri.version,
+    )
+    await session.commit()
+    return await _get_with_lines(session, ri_id)  # type: ignore[return-value]
+
+
+async def api_resume(
+    session: AsyncSession,
+    ri_id: uuid.UUID,
+    actor: str,
+    expected_version: int,
+) -> RecurringInvoice:
+    """Transition PAUSED → ACTIVE with optimistic locking + change_log.
+
+    Raises ``VersionConflict`` on stale version.
+    Raises ``RecurringInvoiceApiError`` if not found or invalid transition.
+    """
+    ri = await _get_with_lines(session, ri_id)
+    if ri is None:
+        raise RecurringInvoiceApiError(f"RecurringInvoice {ri_id} not found")
+    if ri.version != expected_version:
+        raise VersionConflict(ri)
+    if ri.status != RecurrenceStatus.PAUSED:
+        raise RecurringInvoiceApiError(
+            f"Cannot resume: recurring invoice is in status {ri.status.value!r}, "
+            "expected PAUSED"
+        )
+
+    ri.status = RecurrenceStatus.ACTIVE
+    ri.version = ri.version + 1
+    await session.flush()
+    await session.refresh(ri)
+
+    ri = await _get_with_lines(session, ri_id)
+    assert ri is not None
+
+    await change_log_svc.append(
+        session,
+        entity="recurring_invoice",
+        entity_id=ri.id,
+        op="resumed",
+        actor=actor,
+        payload=_serialise(ri),
+        version=ri.version,
+    )
+    await session.commit()
+    return await _get_with_lines(session, ri_id)  # type: ignore[return-value]
+
+
+async def api_end(
+    session: AsyncSession,
+    ri_id: uuid.UUID,
+    actor: str,
+    expected_version: int,
+) -> RecurringInvoice:
+    """Transition any non-ENDED status → ENDED with optimistic locking + change_log.
+
+    ENDED is terminal — once ended, no further transitions are permitted.
+    Raises ``VersionConflict`` on stale version.
+    Raises ``RecurringInvoiceApiError`` if not found or already ENDED.
+    """
+    ri = await _get_with_lines(session, ri_id)
+    if ri is None:
+        raise RecurringInvoiceApiError(f"RecurringInvoice {ri_id} not found")
+    if ri.version != expected_version:
+        raise VersionConflict(ri)
+    if ri.status == RecurrenceStatus.ENDED:
+        raise RecurringInvoiceApiError(
+            f"RecurringInvoice {ri_id} is already ENDED"
+        )
+
+    ri.status = RecurrenceStatus.ENDED
+    ri.version = ri.version + 1
+    await session.flush()
+    await session.refresh(ri)
+
+    ri = await _get_with_lines(session, ri_id)
+    assert ri is not None
+
+    await change_log_svc.append(
+        session,
+        entity="recurring_invoice",
+        entity_id=ri.id,
+        op="ended",
+        actor=actor,
+        payload=_serialise(ri),
+        version=ri.version,
+    )
+    await session.commit()
+    return await _get_with_lines(session, ri_id)  # type: ignore[return-value]
+
+
 __all__ = [
     "RecurringInvoiceApiError",
     "VersionConflict",
     "api_create",
     "api_delete",
+    "api_end",
     "api_get",
+    "api_pause",
+    "api_resume",
     "api_update",
     "list_recurring_invoices",
 ]

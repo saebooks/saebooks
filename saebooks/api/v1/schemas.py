@@ -1705,6 +1705,36 @@ class DepreciationSchedule(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# FX Revaluation Report — tier-5 (cycle 25)
+# ---------------------------------------------------------------------------
+
+
+class FXRevaluationItem(BaseModel):
+    """One foreign-currency document line in the FX revaluation report."""
+
+    entity_type: str  # "INVOICE" or "BILL"
+    entity_id: uuid.UUID
+    entity_ref: str | None  # document number if minted, else None
+    contact_name: str
+    currency: str
+    original_amount: float
+    amount_paid: float
+    outstanding_foreign: float
+    outstanding_base: float | None  # None when FX rate unavailable
+    note: str
+
+
+class FXRevaluationReport(BaseModel):
+    """FX revaluation report as at a given date."""
+
+    as_of_date: date
+    base_currency: str
+    items: list[FXRevaluationItem]
+    total_items: int
+    note: str
+
+
+# ---------------------------------------------------------------------------
 # Fixed Asset Disposal — tier-4 (cycle 21)
 # ---------------------------------------------------------------------------
 
