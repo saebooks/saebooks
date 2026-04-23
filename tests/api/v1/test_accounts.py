@@ -47,12 +47,11 @@ async def unauth_client() -> AsyncClient:
 
 def _rand_code(prefix: str = "6") -> str:
     """Generate a valid structured account code for the Expenses range (prefix 6).
-    The format is {prefix}-{4digits} per account code rules.
-    Using a random 4-digit number to avoid collisions between test runs.
+    Uses 5 digits (max child levels) to provide 100 000 unique values and
+    avoid collisions on a persistent shared DB across many test cycles.
     """
-    # Convert 4 hex chars to decimal digits (0-9 only, pad to 4)
-    raw = int(uuid.uuid4().hex[:4], 16)  # 0–65535
-    digits = str(raw % 10000).zfill(4)
+    raw = int(uuid.uuid4().hex[:5], 16)  # 0–1 048 575
+    digits = str(raw % 100000).zfill(5)
     return f"{prefix}-{digits}"
 
 

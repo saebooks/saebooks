@@ -107,12 +107,32 @@ async def test_count_active_companies_excludes_archived() -> None:
 async def test_create_company_blocks_paid_tiers_at_cap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Pro caps at 3 — the shared test DB already exceeds that."""
+    """Pro caps at 3 — create enough companies to hit the cap, then assert."""
     monkeypatch.setattr(
         companies_svc, "resolve_licence", lambda: _fake_licence("pro")
     )
-    async with AsyncSessionLocal() as session:
-        with pytest.raises(companies_svc.CompanyCapExceeded) as exc:
-            await companies_svc.create_company(session, name="CAP_TEST_pro")
+    cap = 3
+    tag = uuid.uuid4().hex[:8]
+    try:
+        async with AsyncSessionLocal() as session:
+            current = await companies_svc.count_active_companies(session)
+            # Create however many companies are needed to reach the cap.
+            for i in range(max(0, cap - current)):
+                filler = Company(
+                    name=f"CAP_TEST_filler_{tag}_{i}",
+                    base_currency="AUD",
+                )
+                session.add(filler)
+            await session.commit()
+
+        # Now at the cap — one more must raise.
+        async with AsyncSessionLocal() as session:
+            with pytest.raises(companies_svc.CompanyCapExceeded) as exc:
+                await companies_svc.create_company(
+                    session, name=f"CAP_TEST_over_{tag}"
+                )
         assert exc.value.edition == "pro"
-        assert exc.value.limit == 3
+        assert exc.value.limit == cap
+    finally:
+        await _purge_test_companies(f"CAP_TEST_filler_{tag}")
+        await _purge_test_companies(f"CAP_TEST_over_{tag}")

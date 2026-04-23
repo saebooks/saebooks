@@ -60,7 +60,7 @@ async def unauth_client() -> AsyncClient:
 def _project_payload(**overrides: object) -> dict:
     """Return a minimal valid ProjectCreate payload."""
     base: dict = {
-        "code": f"J-{uuid.uuid4().hex[:4].upper()}",
+        "code": f"J-{uuid.uuid4().hex[:8].upper()}",
         "name": "Test Project",
         "status": "ACTIVE",
     }
@@ -133,7 +133,7 @@ async def test_projects_list_archived_filter(api_client: AsyncClient) -> None:
 
 async def test_projects_list_status_filter(api_client: AsyncClient) -> None:
     """?status=COMPLETED must only return COMPLETED projects."""
-    code = f"J-{uuid.uuid4().hex[:4].upper()}"
+    code = f"J-{uuid.uuid4().hex[:8].upper()}"
     r = await api_client.post(
         "/api/v1/projects", json=_project_payload(code=code, status="COMPLETED")
     )

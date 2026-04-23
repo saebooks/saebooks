@@ -93,9 +93,7 @@ def test_acquire_lock_basic() -> None:
         user_id="alice",
         ttl_seconds=30,
     )
-    result = asyncio.get_event_loop().run_until_complete(
-        svc.AcquireLock(req, _make_context())
-    )
+    result = asyncio.run(svc.AcquireLock(req, _make_context()))
     assert isinstance(result, saebooks_pb2.LockResponse)
     assert result.acquired is True
     assert result.locked_by == "alice"
@@ -124,11 +122,10 @@ def test_acquire_lock_conflict() -> None:
         user_id="bob",
         ttl_seconds=60,
     )
-    loop = asyncio.get_event_loop()
-    r1 = loop.run_until_complete(svc.AcquireLock(req_alice, _make_context()))
+    r1 = asyncio.run(svc.AcquireLock(req_alice, _make_context()))
     assert r1.acquired is True
 
-    r2 = loop.run_until_complete(svc.AcquireLock(req_bob, _make_context()))
+    r2 = asyncio.run(svc.AcquireLock(req_bob, _make_context()))
     assert r2.acquired is False
     assert r2.locked_by == "alice"
 
@@ -141,7 +138,6 @@ def test_release_lock() -> None:
     srv._lock_store.clear()
 
     svc = srv.SAEBooksServicer()
-    loop = asyncio.get_event_loop()
 
     acquire_req = saebooks_pb2.AcquireLockRequest(
         tenant_id="t3",
@@ -157,13 +153,13 @@ def test_release_lock() -> None:
         user_id="carol",
     )
 
-    r1 = loop.run_until_complete(svc.AcquireLock(acquire_req, _make_context()))
+    r1 = asyncio.run(svc.AcquireLock(acquire_req, _make_context()))
     assert r1.acquired is True
 
-    rel = loop.run_until_complete(svc.ReleaseLock(release_req, _make_context()))
+    rel = asyncio.run(svc.ReleaseLock(release_req, _make_context()))
     assert isinstance(rel, saebooks_pb2.ReleaseLockResponse)
     assert rel.released is True
 
     # Re-acquire after release.
-    r2 = loop.run_until_complete(svc.AcquireLock(acquire_req, _make_context()))
+    r2 = asyncio.run(svc.AcquireLock(acquire_req, _make_context()))
     assert r2.acquired is True

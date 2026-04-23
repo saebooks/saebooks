@@ -61,7 +61,7 @@ async def unauth_client() -> AsyncClient:
 def _ba_payload(**overrides: object) -> dict:
     """Return a minimal valid BankAccountCreate payload."""
     base: dict = {
-        "code": f"1-{uuid.uuid4().hex[:4].upper()}",
+        "code": f"1-{uuid.uuid4().hex[:8].upper()}",
         "name": "Test Operating Account",
         "bsb": "063-000",
         "bank_account_number": "12345678",

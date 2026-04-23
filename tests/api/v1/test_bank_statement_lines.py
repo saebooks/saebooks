@@ -67,7 +67,7 @@ async def unauth_client() -> AsyncClient:
 async def bank_account_id(api_client: AsyncClient) -> str:
     """Create a bank account and return its ID for use in line tests."""
     ba_payload = {
-        "code": f"B-{uuid.uuid4().hex[:4].upper()}",
+        "code": f"B-{uuid.uuid4().hex[:8].upper()}",
         "name": "Test Bank Account for Lines",
         "bsb": "063-001",
         "bank_account_number": "99887766",

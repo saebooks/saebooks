@@ -131,7 +131,7 @@ async def _ctx() -> tuple[
             await session.execute(
                 select(Account).where(
                     Account.company_id == company.id,
-                    Account.code == "5-0000",  # Cost of sales
+                    Account.code == "5-2000",  # Wholesale Cost of Sales
                 )
             )
         ).scalar_one()

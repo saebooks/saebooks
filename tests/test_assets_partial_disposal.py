@@ -376,6 +376,6 @@ async def test_child_appears_on_asset_list() -> None:
             posted_by="test",
         )
         disposed_list = await svc.list_assets(
-            session, ctx.company_id, status="disposed"
+            session, ctx.company_id, status="disposed", limit=10000
         )
         assert child.id in {a.id for a in disposed_list}

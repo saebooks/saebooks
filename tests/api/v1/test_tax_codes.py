@@ -46,8 +46,11 @@ async def unauth_client() -> AsyncClient:
 
 
 def _rand_code() -> str:
-    """Generate a unique tax code abbreviation for test isolation."""
-    return f"T{uuid.uuid4().hex[:4].upper()}"
+    """Generate a unique tax code abbreviation for test isolation.
+    Uses 8 hex chars to provide ~4 billion unique values and avoid
+    collisions on a persistent shared DB across many test cycles.
+    """
+    return f"T{uuid.uuid4().hex[:8].upper()}"
 
 
 # ---------------------------------------------------------------------------

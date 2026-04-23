@@ -45,7 +45,9 @@ async def _first_company_and_bank_account() -> tuple[uuid.UUID, uuid.UUID]:
     async with AsyncSessionLocal() as session:
         company = (
             await session.execute(
-                select(Company).where(Company.archived_at.is_(None))
+                select(Company)
+                .where(Company.archived_at.is_(None))
+                .order_by(Company.created_at)
             )
         ).scalars().first()
         assert company is not None

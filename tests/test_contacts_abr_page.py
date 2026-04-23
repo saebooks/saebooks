@@ -62,7 +62,10 @@ async def _cleanup_contact(contact_id: object) -> None:
             await session.commit()
 
 
-async def test_abr_lookup_404_in_community(client: AsyncClient) -> None:
+async def test_abr_lookup_404_in_community(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(app_settings, "edition", "community")
     r = await client.post("/contacts/abr-lookup", data={"abn": "87744586592"})
     assert r.status_code == 404
 
@@ -154,9 +157,12 @@ async def test_abr_apply_merges_and_persists(
         await _cleanup_contact(contact.id)
 
 
-async def test_abr_apply_404_in_community(client: AsyncClient) -> None:
+async def test_abr_apply_404_in_community(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import uuid as _u
 
+    monkeypatch.setattr(app_settings, "edition", "community")
     r = await client.post(
         f"/contacts/{_u.uuid4()}/abr-apply", data={"abn": "87744586592"}
     )

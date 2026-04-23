@@ -35,9 +35,11 @@ def configured_siss(monkeypatch: pytest.MonkeyPatch, enterprise: None) -> None:
     monkeypatch.setattr(app_settings, "siss_subscription_key", "tkey")
 
 
-async def test_community_build_404s(client: AsyncClient) -> None:
+async def test_community_build_404s(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Community edition — the whole router tree is 404."""
-    # settings.edition defaults to 'community' in the test env
+    monkeypatch.setattr(app_settings, "edition", "community")
     r = await client.get("/admin/bank-feeds")
     assert r.status_code == 404
 
