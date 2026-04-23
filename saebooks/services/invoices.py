@@ -28,10 +28,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from sqlalchemy import func
+
 from saebooks.models.account import Account
 from saebooks.models.invoice import Invoice, InvoiceLine, InvoiceStatus
 from saebooks.models.item import Item
 from saebooks.models.tax_code import TaxCode
+from saebooks.services import change_log as change_log_svc
 from saebooks.services import items as items_svc
 from saebooks.services import journal as journal_svc
 from saebooks.services import numbering
@@ -506,3 +509,294 @@ async def archive(
     inv.archived_at = datetime.now(UTC)
     await session.commit()
     return inv
+
+
+# ==========================================================================
+# API-oriented service (cycle 7) — optimistic locking + change_log
+#
+# These functions are the API surface for /api/v1/invoices.  They are
+# intentionally separate from the legacy posting pipeline above so the
+# two surfaces can evolve independently.
+# ==========================================================================
+
+# ---------------------------------------------------------------------------
+# Exceptions
+# ---------------------------------------------------------------------------
+
+
+class VersionConflict(Exception):
+    """Raised when expected_version does not match the stored value."""
+
+    def __init__(self, current: Invoice) -> None:
+        super().__init__(
+            f"Invoice {current.id} is at version {current.version}, "
+            "not the expected version"
+        )
+        self.current = current
+
+
+# ---------------------------------------------------------------------------
+# Columns serialised into change_log.payload
+# ---------------------------------------------------------------------------
+
+_INV_COLUMNS: tuple[str, ...] = (
+    "id",
+    "company_id",
+    "tenant_id",
+    "contact_id",
+    "number",
+    "issue_date",
+    "due_date",
+    "status",
+    "subtotal",
+    "tax_total",
+    "total",
+    "currency",
+    "notes",
+    "payment_terms",
+    "version",
+    "created_at",
+    "updated_at",
+    "archived_at",
+)
+
+
+def _serialise_invoice(inv: Invoice) -> dict:
+    from decimal import Decimal as _D
+
+    data: dict = {}
+    for key in _INV_COLUMNS:
+        val = getattr(inv, key, None)
+        if isinstance(val, uuid.UUID):
+            val = str(val)
+        elif isinstance(val, datetime):
+            val = val.isoformat()
+        elif isinstance(val, date):
+            val = val.isoformat()
+        elif isinstance(val, _D):
+            val = str(val)
+        elif hasattr(val, "value"):  # StrEnum
+            val = val.value
+        data[key] = val
+    return data
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+async def _get_with_lines(
+    session: AsyncSession, invoice_id: uuid.UUID
+) -> Invoice | None:
+    result = await session.execute(
+        select(Invoice)
+        .options(selectinload(Invoice.lines))
+        .where(Invoice.id == invoice_id)
+    )
+    return result.scalar_one_or_none()
+
+
+# ---------------------------------------------------------------------------
+# Read operations
+# ---------------------------------------------------------------------------
+
+_DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+
+async def list_active(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    *,
+    contact_id: uuid.UUID | None = None,
+    status: InvoiceStatus | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[Invoice], int]:
+    """Return (invoices, total_count) — excludes archived invoices."""
+    base_where = [
+        Invoice.company_id == company_id,
+        Invoice.archived_at.is_(None),
+    ]
+    if contact_id is not None:
+        base_where.append(Invoice.contact_id == contact_id)
+    if status is not None:
+        base_where.append(Invoice.status == status)
+    if date_from is not None:
+        base_where.append(Invoice.issue_date >= date_from)
+    if date_to is not None:
+        base_where.append(Invoice.issue_date <= date_to)
+
+    count_stmt = select(func.count()).select_from(Invoice).where(*base_where)
+    total = (await session.execute(count_stmt)).scalar_one()
+
+    stmt = (
+        select(Invoice)
+        .options(selectinload(Invoice.lines))
+        .where(*base_where)
+        .order_by(Invoice.issue_date.desc(), Invoice.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    invoices = list((await session.execute(stmt)).scalars().unique().all())
+    return invoices, total
+
+
+async def api_get(
+    session: AsyncSession, invoice_id: uuid.UUID
+) -> Invoice | None:
+    """Fetch a single invoice with its lines. Returns None if not found."""
+    return await _get_with_lines(session, invoice_id)
+
+
+# ---------------------------------------------------------------------------
+# Write operations
+# ---------------------------------------------------------------------------
+
+
+async def api_create(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    actor: str,
+    *,
+    contact_id: uuid.UUID,
+    issue_date: date,
+    due_date: date,
+    lines: list[dict] | None = None,
+    reference: str | None = None,
+    notes: str | None = None,
+    payment_terms: str | None = None,
+    currency: str = "AUD",
+    fx_rate: Decimal | None = None,
+) -> Invoice:
+    """Create an invoice draft with version=1 and a change_log row."""
+    inv = Invoice(
+        company_id=company_id,
+        tenant_id=tenant_id,
+        contact_id=contact_id,
+        issue_date=issue_date,
+        due_date=due_date,
+        notes=notes,
+        payment_terms=payment_terms,
+        status=InvoiceStatus.DRAFT,
+        currency=currency.upper(),
+        fx_rate=fx_rate if fx_rate is not None else Decimal("1"),
+        version=1,
+    )
+    session.add(inv)
+    await session.flush()
+    await session.refresh(inv)
+
+    if lines:
+        await _replace_lines(session, inv, lines)
+        await _recalc(session, inv)
+
+    await session.flush()
+
+    inv_loaded = await _get_with_lines(session, inv.id)
+    assert inv_loaded is not None
+
+    await change_log_svc.append(
+        session,
+        entity="invoice",
+        entity_id=inv_loaded.id,
+        op="create",
+        actor=actor,
+        payload=_serialise_invoice(inv_loaded),
+        version=inv_loaded.version,
+    )
+    await session.commit()
+    return await _get_with_lines(session, inv_loaded.id)  # type: ignore[return-value]
+
+
+async def api_update(
+    session: AsyncSession,
+    invoice_id: uuid.UUID,
+    actor: str,
+    expected_version: int,
+    *,
+    contact_id: uuid.UUID | None = None,
+    issue_date: date | None = None,
+    due_date: date | None = None,
+    notes: str | None = None,
+    payment_terms: str | None = None,
+    lines: list[dict] | None = None,
+) -> Invoice:
+    """Update an invoice draft with optimistic locking + change_log."""
+    inv = await _get_with_lines(session, invoice_id)
+    if inv is None:
+        raise InvoiceError(f"Invoice {invoice_id} not found")
+    if inv.version != expected_version:
+        raise VersionConflict(inv)
+
+    if contact_id is not None:
+        inv.contact_id = contact_id
+    if issue_date is not None:
+        inv.issue_date = issue_date
+    if due_date is not None:
+        inv.due_date = due_date
+    if notes is not None:
+        inv.notes = notes
+    if payment_terms is not None:
+        inv.payment_terms = payment_terms
+    if lines is not None:
+        await _replace_lines(session, inv, lines)
+        await _recalc(session, inv)
+
+    inv.version = inv.version + 1
+    await session.flush()
+    await session.refresh(inv)
+
+    inv_loaded = await _get_with_lines(session, invoice_id)
+    assert inv_loaded is not None
+
+    await change_log_svc.append(
+        session,
+        entity="invoice",
+        entity_id=inv_loaded.id,
+        op="update",
+        actor=actor,
+        payload=_serialise_invoice(inv_loaded),
+        version=inv_loaded.version,
+    )
+    await session.commit()
+    return await _get_with_lines(session, invoice_id)  # type: ignore[return-value]
+
+
+async def api_void(
+    session: AsyncSession,
+    invoice_id: uuid.UUID,
+    actor: str,
+    expected_version: int,
+) -> Invoice:
+    """Soft-delete (archive/void) an invoice with optimistic locking + change_log."""
+    inv = await _get_with_lines(session, invoice_id)
+    if inv is None:
+        raise InvoiceError(f"Invoice {invoice_id} not found")
+    if inv.version != expected_version:
+        raise VersionConflict(inv)
+
+    inv.archived_at = datetime.now(UTC)
+    inv.status = InvoiceStatus.VOIDED
+    inv.version = inv.version + 1
+    await session.flush()
+    await session.refresh(inv)
+
+    inv_loaded = await _get_with_lines(session, invoice_id)
+    assert inv_loaded is not None
+
+    await change_log_svc.append(
+        session,
+        entity="invoice",
+        entity_id=inv_loaded.id,
+        op="archive",
+        actor=actor,
+        payload=_serialise_invoice(inv_loaded),
+        version=inv_loaded.version,
+    )
+    await session.commit()
+    return await _get_with_lines(session, invoice_id)  # type: ignore[return-value]

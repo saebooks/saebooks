@@ -125,6 +125,17 @@ class Invoice(CompanyScoped, Base):
         UUID(as_uuid=True),
         ForeignKey("journal_entries.id", ondelete="SET NULL"),
     )
+    # --- Optimistic locking + multi-tenant (added cycle 7) ----------------
+    # ``version`` starts at 1 on create; every PATCH via the API bumps it.
+    # ``tenant_id`` defaults to the single default tenant so the legacy
+    # service layer (create_draft / post_invoice) still works without change.
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        default=uuid.UUID("00000000-0000-0000-0000-000000000001"),
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

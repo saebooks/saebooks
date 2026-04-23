@@ -537,3 +537,113 @@ class UserPermissionsBody(BaseModel):
         default_factory=list,
         description="Permission codes to explicitly revoke (override role).",
     )
+
+
+# ---------------------------------------------------------------------------
+# Invoices — Phase 1 tier-3 (cycle 7)
+# ---------------------------------------------------------------------------
+
+
+class InvoiceLineOut(BaseModel):
+    """One line of an invoice (nested in InvoiceOut)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    line_no: int
+    description: str
+    account_id: uuid.UUID
+    tax_code_id: uuid.UUID | None = None
+    quantity: Decimal
+    unit_price: Decimal
+    discount_pct: Decimal
+    line_subtotal: Decimal
+    line_tax: Decimal
+    line_total: Decimal
+    project_id: uuid.UUID | None = None
+    item_id: uuid.UUID | None = None
+
+
+class InvoiceLineCreate(BaseModel):
+    """One line in a POST/PATCH payload."""
+
+    description: str = Field(min_length=1)
+    account_id: uuid.UUID
+    tax_code_id: uuid.UUID | None = None
+    quantity: Decimal = Decimal("1")
+    unit_price: Decimal = Decimal("0")
+    discount_pct: Decimal = Decimal("0")
+    project_id: uuid.UUID | None = None
+    item_id: uuid.UUID | None = None
+
+
+class InvoiceBase(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    contact_id: uuid.UUID
+    issue_date: date
+    due_date: date
+    notes: str | None = None
+    payment_terms: str | None = None
+    currency: str = Field(default="AUD", min_length=3, max_length=3)
+
+
+class InvoiceCreate(InvoiceBase):
+    """POST body."""
+
+    lines: list[InvoiceLineCreate] = Field(default_factory=list)
+
+
+class InvoiceUpdate(BaseModel):
+    """PATCH body — every field optional."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    contact_id: uuid.UUID | None = None
+    issue_date: date | None = None
+    due_date: date | None = None
+    notes: str | None = None
+    payment_terms: str | None = None
+    lines: list[InvoiceLineCreate] | None = None
+
+
+class InvoiceOut(BaseModel):
+    """Full invoice response — includes nested lines, tenant_id, version."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    tenant_id: uuid.UUID
+    contact_id: uuid.UUID
+    number: str | None = None
+    issue_date: date
+    due_date: date
+    status: str
+    subtotal: Decimal
+    tax_total: Decimal
+    total: Decimal
+    amount_paid: Decimal
+    currency: str
+    fx_rate: Decimal
+    notes: str | None = None
+    payment_terms: str | None = None
+    posted_at: datetime | None = None
+    posted_by: str | None = None
+    version: int
+    created_at: datetime
+    updated_at: datetime
+    archived_at: datetime | None = None
+    lines: list[InvoiceLineOut] = Field(default_factory=list)
+
+
+class InvoiceListOut(BaseModel):
+    items: list[InvoiceOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class InvoiceConflictBody(BaseModel):
+    detail: str
+    current: InvoiceOut
