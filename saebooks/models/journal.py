@@ -40,6 +40,15 @@ class JournalEntry(CompanyScoped, Base):
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False
     )
+    # tenant_id has a DB-side server default (the single default tenant) so that
+    # legacy service code (services/journal.py) that doesn't pass tenant_id still
+    # works.  The API service (services/journal_entries.py) always passes it explicitly.
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        default=uuid.UUID("00000000-0000-0000-0000-000000000001"),
+    )
     ref: Mapped[str] = mapped_column(String(32), nullable=False)
     entry_date: Mapped[date] = mapped_column(Date, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
@@ -53,12 +62,14 @@ class JournalEntry(CompanyScoped, Base):
     )
     override_reason: Mapped[str | None] = mapped_column(Text)
     attachments: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     lines: Mapped[list["JournalLine"]] = relationship(
         back_populates="entry",

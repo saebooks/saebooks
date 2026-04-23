@@ -6,7 +6,7 @@ Kept in one module for Phase 0/1 — once more entities land, split into
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -412,6 +412,100 @@ class StockOut(BaseModel):
     on_hand_qty: Decimal
     wac_cost: Decimal
     inventory_value: Decimal  # on_hand_qty * wac_cost
+
+
+# ---------------------------------------------------------------------------
+# Journal Entries — Phase 1 tier-3 (cycle 6)
+# ---------------------------------------------------------------------------
+
+
+class JournalLineOut(BaseModel):
+    """One line of a journal entry."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    line_no: int
+    account_id: uuid.UUID
+    description: str | None = None
+    debit: Decimal
+    credit: Decimal
+    tax_code_id: uuid.UUID | None = None
+    gst_amount: Decimal | None = None
+    project_id: uuid.UUID | None = None
+
+
+class JournalLineCreate(BaseModel):
+    """One line in a POST/PATCH payload."""
+
+    account_id: uuid.UUID
+    description: str | None = None
+    debit: Decimal = Decimal("0")
+    credit: Decimal = Decimal("0")
+    tax_code_id: uuid.UUID | None = None
+    gst_amount: Decimal | None = None
+    project_id: uuid.UUID | None = None
+
+
+class JournalEntryBase(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    entry_date: date
+    narration: str | None = None
+    reference: str | None = None
+
+
+class JournalEntryCreate(JournalEntryBase):
+    """POST body."""
+
+    lines: list[JournalLineCreate] = Field(default_factory=list)
+
+
+class JournalEntryUpdate(BaseModel):
+    """PATCH body — every field optional."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    entry_date: date | None = None
+    narration: str | None = None
+    reference: str | None = None
+    status: str | None = None
+    lines: list[JournalLineCreate] | None = None
+
+
+class JournalEntryOut(BaseModel):
+    """Full response — includes nested lines, tenant_id, version."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    tenant_id: uuid.UUID
+    ref: str
+    entry_date: date
+    description: str | None = None
+    status: str
+    posted_at: datetime | None = None
+    posted_by: str | None = None
+    reversal_of_id: uuid.UUID | None = None
+    override_reason: str | None = None
+    version: int
+    created_at: datetime
+    updated_at: datetime
+    archived_at: datetime | None = None
+    lines: list[JournalLineOut] = Field(default_factory=list)
+
+
+class JournalEntryListOut(BaseModel):
+    items: list[JournalEntryOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class JournalEntryConflictBody(BaseModel):
+    detail: str
+    current: JournalEntryOut
 
 
 class PermissionOut(BaseModel):
