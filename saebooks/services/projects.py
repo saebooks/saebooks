@@ -8,6 +8,10 @@ service is a thin CRUD layer mirroring the Contact service pattern.
 within a company. `status` moves ACTIVE → COMPLETED → ARCHIVED —
 COMPLETED projects are still visible in reports but excluded from the
 line-item picker by default.
+
+API-tier functions (``api_create``, ``api_update``, ``api_delete``,
+``list_projects``, ``api_get``) added in Phase 1 tier-4 (cycle 13)
+to support ``/api/v1/projects`` with optimistic locking + change_log.
 """
 from __future__ import annotations
 
@@ -15,11 +19,31 @@ import uuid
 from datetime import UTC, date, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func as sa_func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.models.project import Project, ProjectStatus
 from saebooks.services import audit as audit_svc
+from saebooks.services import change_log as change_log_svc
+
+_DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+# Columns written to change_log.payload for project operations.
+_PROJECT_COLUMNS: tuple[str, ...] = (
+    "id",
+    "company_id",
+    "tenant_id",
+    "code",
+    "name",
+    "status",
+    "start_date",
+    "end_date",
+    "notes",
+    "extra",
+    "version",
+    "created_at",
+    "archived_at",
+)
 
 
 async def list_active(
@@ -149,3 +173,239 @@ async def archive(
         performed_by=performed_by,
     )
     await session.commit()
+
+
+# ---------------------------------------------------------------------------
+# API-tier helpers
+# ---------------------------------------------------------------------------
+
+
+def _serialise(project: Project) -> dict[str, Any]:
+    """Row → JSON-safe dict for change_log.payload."""
+    data: dict[str, Any] = {}
+    for key in _PROJECT_COLUMNS:
+        val = getattr(project, key, None)
+        if isinstance(val, uuid.UUID):
+            val = str(val)
+        elif isinstance(val, datetime):
+            val = val.isoformat()
+        elif hasattr(val, "isoformat"):  # date
+            val = val.isoformat()
+        elif hasattr(val, "value"):  # StrEnum
+            val = val.value
+        data[key] = val
+    return data
+
+
+# ---------------------------------------------------------------------------
+# API-tier exceptions
+# ---------------------------------------------------------------------------
+
+
+class ProjectApiError(ValueError):
+    """Raised on project validation or state-transition failure (API tier)."""
+
+
+class VersionConflict(Exception):
+    """Raised when expected_version does not match the stored value."""
+
+    def __init__(self, current: Project) -> None:
+        super().__init__(
+            f"Project {current.id} is at version {current.version}, "
+            "not the expected version"
+        )
+        self.current = current
+
+
+# ---------------------------------------------------------------------------
+# API-tier read operations
+# ---------------------------------------------------------------------------
+
+
+async def list_projects(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    *,
+    status: str | None = None,
+    archived: bool = False,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[Project], int]:
+    """Return (projects, total_count) filtered by status/archived flag."""
+    where = [Project.company_id == company_id]
+
+    if not archived:
+        where.append(Project.archived_at.is_(None))
+    else:
+        where.append(Project.archived_at.isnot(None))
+
+    if status is not None:
+        where.append(Project.status == status)
+
+    count_stmt = select(sa_func.count()).select_from(Project).where(*where)
+    total = (await session.execute(count_stmt)).scalar_one()
+
+    stmt = (
+        select(Project)
+        .where(*where)
+        .order_by(Project.code)
+        .limit(limit)
+        .offset(offset)
+    )
+    items = list((await session.execute(stmt)).scalars().all())
+    return items, total
+
+
+async def api_get(
+    session: AsyncSession,
+    project_id: uuid.UUID,
+) -> Project | None:
+    """Fetch a single project by primary key. Returns None if not found."""
+    return await session.get(Project, project_id)
+
+
+# ---------------------------------------------------------------------------
+# API-tier write operations
+# ---------------------------------------------------------------------------
+
+
+async def api_create(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    actor: str,
+    *,
+    code: str,
+    name: str,
+    status: str = "ACTIVE",
+    start_date: date | None = None,
+    end_date: date | None = None,
+    notes: str | None = None,
+    extra: dict[str, Any] | None = None,
+) -> Project:
+    """Create a new project row with version=1 and change_log entry."""
+    project = Project(
+        company_id=company_id,
+        tenant_id=tenant_id,
+        code=code.strip(),
+        name=name.strip(),
+        status=ProjectStatus(status),
+        start_date=start_date,
+        end_date=end_date,
+        notes=notes,
+        extra=extra,
+        version=1,
+    )
+    session.add(project)
+    await session.flush()
+    await session.refresh(project)
+
+    await change_log_svc.append(
+        session,
+        entity="project",
+        entity_id=project.id,
+        op="created",
+        actor=actor,
+        payload=_serialise(project),
+        version=project.version,
+    )
+    await session.commit()
+    await session.refresh(project)
+    return project
+
+
+async def api_update(
+    session: AsyncSession,
+    project_id: uuid.UUID,
+    actor: str,
+    expected_version: int,
+    *,
+    code: str | None = None,
+    name: str | None = None,
+    status: str | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    notes: str | None = None,
+    extra: dict[str, Any] | None = None,
+) -> Project:
+    """Update project fields with optimistic locking + change_log."""
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise ProjectApiError(f"Project {project_id} not found")
+    if project.version != expected_version:
+        raise VersionConflict(project)
+
+    if code is not None:
+        project.code = code.strip()
+    if name is not None:
+        project.name = name.strip()
+    if status is not None:
+        project.status = ProjectStatus(status)
+    if start_date is not None:
+        project.start_date = start_date
+    if end_date is not None:
+        project.end_date = end_date
+    if notes is not None:
+        project.notes = notes
+    if extra is not None:
+        project.extra = extra
+
+    project.version = project.version + 1
+    await session.flush()
+    await session.refresh(project)
+
+    await change_log_svc.append(
+        session,
+        entity="project",
+        entity_id=project.id,
+        op="updated",
+        actor=actor,
+        payload=_serialise(project),
+        version=project.version,
+    )
+    await session.commit()
+    await session.refresh(project)
+    return project
+
+
+async def api_delete(
+    session: AsyncSession,
+    project_id: uuid.UUID,
+    actor: str,
+    expected_version: int,
+) -> Project:
+    """Soft-archive a project with optimistic locking + change_log."""
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise ProjectApiError(f"Project {project_id} not found")
+    if project.version != expected_version:
+        raise VersionConflict(project)
+
+    project.archived_at = datetime.now(UTC)
+    project.version = project.version + 1
+    await session.flush()
+    await session.refresh(project)
+
+    await change_log_svc.append(
+        session,
+        entity="project",
+        entity_id=project.id,
+        op="deleted",
+        actor=actor,
+        payload=_serialise(project),
+        version=project.version,
+    )
+    await session.commit()
+    return project
+
+
+__all__ = [
+    "ProjectApiError",
+    "VersionConflict",
+    "api_create",
+    "api_delete",
+    "api_get",
+    "api_update",
+    "list_projects",
+]

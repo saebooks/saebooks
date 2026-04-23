@@ -12,6 +12,9 @@ Soft-delete via ``archived_at`` mirrors the Contact pattern: we never
 hard-delete a project because GL history may still reference it. The
 ``project_id`` FK on line tables is ``ON DELETE SET NULL`` as a
 defence-in-depth if someone does manage to hard-delete via SQL.
+
+``version`` and ``tenant_id`` added in migration 0048 (Phase 1 tier-4)
+to support optimistic locking (If-Match) and multi-tenant isolation.
 """
 from __future__ import annotations
 
@@ -20,16 +23,19 @@ import uuid
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import Date, DateTime, ForeignKey, String, Text, UniqueConstraint, func
+from sqlalchemy import Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from saebooks.db import Base
 from saebooks.models._scope import CompanyScoped
 
+_DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
 
 class ProjectStatus(enum.StrEnum):
     ACTIVE = "ACTIVE"
+    ON_HOLD = "ON_HOLD"
     COMPLETED = "COMPLETED"
     ARCHIVED = "ARCHIVED"
 
@@ -48,6 +54,12 @@ class Project(CompanyScoped, Base):
         ForeignKey("companies.id", ondelete="CASCADE"),
         nullable=False,
     )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        default=lambda: _DEFAULT_TENANT_ID,
+    )
     code: Mapped[str] = mapped_column(String(32), nullable=False)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     status: Mapped[ProjectStatus] = mapped_column(
@@ -59,6 +71,7 @@ class Project(CompanyScoped, Base):
     end_date: Mapped[date | None] = mapped_column(Date)
     notes: Mapped[str | None] = mapped_column(Text)
     extra: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

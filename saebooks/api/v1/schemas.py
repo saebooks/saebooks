@@ -1110,3 +1110,69 @@ class BankStatementLineListOut(BaseModel):
 class BankStatementLineConflictBody(BaseModel):
     detail: str
     current: BankStatementLineOut
+
+
+# ---------------------------------------------------------------------------
+# Projects — Phase 1 tier-4 (cycle 13)
+#
+# Flat job/cost-centre entities. Attached to transaction lines for
+# job costing and project-level P&L reporting.
+# ---------------------------------------------------------------------------
+
+
+class ProjectCreate(BaseModel):
+    """POST body for creating a new project."""
+
+    code: str = Field(min_length=1, max_length=32)
+    name: str = Field(min_length=1, max_length=128)
+    status: str = Field(default="ACTIVE")
+    start_date: date | None = None
+    end_date: date | None = None
+    notes: str | None = None
+    extra: dict | None = None
+
+
+class ProjectUpdate(BaseModel):
+    """PATCH body — every field optional."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    code: str | None = Field(default=None, min_length=1, max_length=32)
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    status: str | None = None
+    start_date: date | None = None
+    end_date: date | None = None
+    notes: str | None = None
+    extra: dict | None = None
+
+
+class ProjectOut(BaseModel):
+    """Full project response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    tenant_id: uuid.UUID
+    code: str
+    name: str
+    status: str
+    start_date: date | None = None
+    end_date: date | None = None
+    notes: str | None = None
+    extra: dict | None = None
+    version: int
+    created_at: datetime
+    archived_at: datetime | None = None
+
+
+class ProjectListOut(BaseModel):
+    items: list[ProjectOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class ProjectConflictBody(BaseModel):
+    detail: str
+    current: ProjectOut

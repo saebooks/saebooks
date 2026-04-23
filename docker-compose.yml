@@ -68,6 +68,52 @@ services:
       - default
       - revproxy
 
+  # Cloud theme (QuickBooks-Online-inspired). Reached by Caddy as
+  # saebooks-cloud-1:8000 — no host port published.
+  cloud:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./saebooks:/app/saebooks
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+      - ./tests:/app/tests
+      - ${SAEBOOKS_BACKUP_DIR:-/home/sauer/saebooks-backups}:/app/backups:ro
+    environment:
+      SAEBOOKS_BACKUP_DIR_IN_CONTAINER: /app/backups
+      SAEBOOKS_FRONTEND: cloud
+    networks:
+      - default
+      - revproxy
+
+  # Dense theme (information-dense power-user layout). Reached by Caddy
+  # as saebooks-dense-1:8000.
+  dense:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./saebooks:/app/saebooks
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+      - ./tests:/app/tests
+      - ${SAEBOOKS_BACKUP_DIR:-/home/sauer/saebooks-backups}:/app/backups:ro
+    environment:
+      SAEBOOKS_BACKUP_DIR_IN_CONTAINER: /app/backups
+      SAEBOOKS_FRONTEND: dense
+    networks:
+      - default
+      - revproxy
+
 networks:
   # 'default' stays on the compose-managed bridge so app↔db keeps
   # working; revproxy is the external shared network Caddy + Authentik

@@ -9,7 +9,7 @@ Phase 1 tier-2: ``/api/v1/users``, ``/api/v1/permissions``,
 Phase 1 tier-3: ``/api/v1/journal_entries``, ``/api/v1/invoices``,
 ``/api/v1/bills``, ``/api/v1/payments``, ``/api/v1/credit_notes``.
 Phase 1 tier-4: ``/api/v1/bank_accounts``,
-``/api/v1/bank_statement_lines``.
+``/api/v1/bank_statement_lines``, ``/api/v1/projects``.
 """
 from fastapi import APIRouter
 
@@ -25,6 +25,7 @@ from saebooks.api.v1.invoices import router as invoices_router
 from saebooks.api.v1.items import router as items_router
 from saebooks.api.v1.journal_entries import router as journal_entries_router
 from saebooks.api.v1.payments import router as payments_router
+from saebooks.api.v1.projects import router as projects_router
 from saebooks.api.v1.snapshot import router as snapshot_router
 from saebooks.api.v1.tax_codes import router as tax_codes_router
 from saebooks.api.v1.users import permissions_router, router as users_router
@@ -45,6 +46,7 @@ router.include_router(invoices_router)
 router.include_router(bills_router)
 router.include_router(payments_router)
 router.include_router(credit_notes_router)
+router.include_router(projects_router)
 router.include_router(changes_router)
 router.include_router(snapshot_router)
 
