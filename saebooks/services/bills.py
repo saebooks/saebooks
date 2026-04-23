@@ -477,3 +477,296 @@ async def archive(
     bill.archived_at = datetime.now(UTC)
     await session.commit()
     return bill
+
+
+# ==========================================================================
+# API-oriented service (cycle 8) — optimistic locking + change_log
+#
+# These functions are the API surface for /api/v1/bills.  They are
+# intentionally separate from the legacy posting pipeline above so the
+# two surfaces can evolve independently.
+# ==========================================================================
+
+from saebooks.services import change_log as change_log_svc  # noqa: E402
+from sqlalchemy import func  # noqa: E402
+
+# ---------------------------------------------------------------------------
+# Exceptions
+# ---------------------------------------------------------------------------
+
+
+class VersionConflict(Exception):
+    """Raised when expected_version does not match the stored value."""
+
+    def __init__(self, current: Bill) -> None:
+        super().__init__(
+            f"Bill {current.id} is at version {current.version}, "
+            "not the expected version"
+        )
+        self.current = current
+
+
+# ---------------------------------------------------------------------------
+# Columns serialised into change_log.payload
+# ---------------------------------------------------------------------------
+
+_BILL_COLUMNS: tuple[str, ...] = (
+    "id",
+    "company_id",
+    "tenant_id",
+    "contact_id",
+    "number",
+    "supplier_reference",
+    "issue_date",
+    "due_date",
+    "status",
+    "subtotal",
+    "tax_total",
+    "total",
+    "currency",
+    "notes",
+    "version",
+    "created_at",
+    "updated_at",
+    "archived_at",
+)
+
+
+def _serialise_bill(bill: Bill) -> dict:
+    from decimal import Decimal as _D
+
+    data: dict = {}
+    for key in _BILL_COLUMNS:
+        val = getattr(bill, key, None)
+        if isinstance(val, uuid.UUID):
+            val = str(val)
+        elif isinstance(val, datetime):
+            val = val.isoformat()
+        elif isinstance(val, date):
+            val = val.isoformat()
+        elif isinstance(val, _D):
+            val = str(val)
+        elif hasattr(val, "value"):  # StrEnum
+            val = val.value
+        data[key] = val
+    return data
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+_DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+
+async def _get_with_lines(
+    session: AsyncSession, bill_id: uuid.UUID
+) -> Bill | None:
+    result = await session.execute(
+        select(Bill)
+        .options(selectinload(Bill.lines))
+        .where(Bill.id == bill_id)
+    )
+    return result.scalar_one_or_none()
+
+
+# ---------------------------------------------------------------------------
+# Read operations
+# ---------------------------------------------------------------------------
+
+
+async def list_active(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    *,
+    contact_id: uuid.UUID | None = None,
+    status: BillStatus | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[Bill], int]:
+    """Return (bills, total_count) — excludes archived bills."""
+    base_where = [
+        Bill.company_id == company_id,
+        Bill.archived_at.is_(None),
+    ]
+    if contact_id is not None:
+        base_where.append(Bill.contact_id == contact_id)
+    if status is not None:
+        base_where.append(Bill.status == status)
+    if date_from is not None:
+        base_where.append(Bill.issue_date >= date_from)
+    if date_to is not None:
+        base_where.append(Bill.issue_date <= date_to)
+
+    count_stmt = select(func.count()).select_from(Bill).where(*base_where)
+    total = (await session.execute(count_stmt)).scalar_one()
+
+    stmt = (
+        select(Bill)
+        .options(selectinload(Bill.lines))
+        .where(*base_where)
+        .order_by(Bill.issue_date.desc(), Bill.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    bills = list((await session.execute(stmt)).scalars().unique().all())
+    return bills, total
+
+
+async def api_get(
+    session: AsyncSession, bill_id: uuid.UUID
+) -> Bill | None:
+    """Fetch a single bill with its lines. Returns None if not found."""
+    return await _get_with_lines(session, bill_id)
+
+
+# ---------------------------------------------------------------------------
+# Write operations
+# ---------------------------------------------------------------------------
+
+
+async def api_create(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    actor: str,
+    *,
+    contact_id: uuid.UUID,
+    issue_date: date,
+    due_date: date,
+    lines: list[dict] | None = None,
+    reference: str | None = None,
+    notes: str | None = None,
+    currency: str = "AUD",
+    fx_rate: Decimal | None = None,
+) -> Bill:
+    """Create a bill draft with version=1 and a change_log row."""
+    bill = Bill(
+        company_id=company_id,
+        tenant_id=tenant_id,
+        contact_id=contact_id,
+        issue_date=issue_date,
+        due_date=due_date,
+        supplier_reference=reference,
+        notes=notes,
+        status=BillStatus.DRAFT,
+        currency=currency.upper(),
+        fx_rate=fx_rate if fx_rate is not None else Decimal("1"),
+        version=1,
+    )
+    session.add(bill)
+    await session.flush()
+    await session.refresh(bill)
+
+    if lines:
+        await _replace_lines(session, bill, lines)
+        await _recalc(session, bill)
+
+    await session.flush()
+
+    bill_loaded = await _get_with_lines(session, bill.id)
+    assert bill_loaded is not None
+
+    await change_log_svc.append(
+        session,
+        entity="bill",
+        entity_id=bill_loaded.id,
+        op="create",
+        actor=actor,
+        payload=_serialise_bill(bill_loaded),
+        version=bill_loaded.version,
+    )
+    await session.commit()
+    return await _get_with_lines(session, bill_loaded.id)  # type: ignore[return-value]
+
+
+async def api_update(
+    session: AsyncSession,
+    bill_id: uuid.UUID,
+    actor: str,
+    expected_version: int,
+    *,
+    contact_id: uuid.UUID | None = None,
+    issue_date: date | None = None,
+    due_date: date | None = None,
+    notes: str | None = None,
+    reference: str | None = None,
+    lines: list[dict] | None = None,
+) -> Bill:
+    """Update a bill draft with optimistic locking + change_log."""
+    bill = await _get_with_lines(session, bill_id)
+    if bill is None:
+        raise BillError(f"Bill {bill_id} not found")
+    if bill.version != expected_version:
+        raise VersionConflict(bill)
+
+    if contact_id is not None:
+        bill.contact_id = contact_id
+    if issue_date is not None:
+        bill.issue_date = issue_date
+    if due_date is not None:
+        bill.due_date = due_date
+    if notes is not None:
+        bill.notes = notes
+    if reference is not None:
+        bill.supplier_reference = reference
+    if lines is not None:
+        await _replace_lines(session, bill, lines)
+        await _recalc(session, bill)
+
+    bill.version = bill.version + 1
+    await session.flush()
+    await session.refresh(bill)
+
+    bill_loaded = await _get_with_lines(session, bill_id)
+    assert bill_loaded is not None
+
+    await change_log_svc.append(
+        session,
+        entity="bill",
+        entity_id=bill_loaded.id,
+        op="update",
+        actor=actor,
+        payload=_serialise_bill(bill_loaded),
+        version=bill_loaded.version,
+    )
+    await session.commit()
+    return await _get_with_lines(session, bill_id)  # type: ignore[return-value]
+
+
+async def api_void(
+    session: AsyncSession,
+    bill_id: uuid.UUID,
+    actor: str,
+    expected_version: int,
+) -> Bill:
+    """Soft-delete (archive/void) a bill with optimistic locking + change_log."""
+    bill = await _get_with_lines(session, bill_id)
+    if bill is None:
+        raise BillError(f"Bill {bill_id} not found")
+    if bill.version != expected_version:
+        raise VersionConflict(bill)
+
+    bill.archived_at = datetime.now(UTC)
+    bill.status = BillStatus.VOIDED
+    bill.version = bill.version + 1
+    await session.flush()
+    await session.refresh(bill)
+
+    bill_loaded = await _get_with_lines(session, bill_id)
+    assert bill_loaded is not None
+
+    await change_log_svc.append(
+        session,
+        entity="bill",
+        entity_id=bill_loaded.id,
+        op="archive",
+        actor=actor,
+        payload=_serialise_bill(bill_loaded),
+        version=bill_loaded.version,
+    )
+    await session.commit()
+    return await _get_with_lines(session, bill_id)  # type: ignore[return-value]

@@ -647,3 +647,113 @@ class InvoiceListOut(BaseModel):
 class InvoiceConflictBody(BaseModel):
     detail: str
     current: InvoiceOut
+
+
+# ---------------------------------------------------------------------------
+# Bills — Phase 1 tier-3 (cycle 8)
+# ---------------------------------------------------------------------------
+
+
+class BillLineOut(BaseModel):
+    """One line of a bill (nested in BillOut)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    line_no: int
+    description: str
+    account_id: uuid.UUID
+    tax_code_id: uuid.UUID | None = None
+    quantity: Decimal
+    unit_price: Decimal
+    discount_pct: Decimal
+    line_subtotal: Decimal
+    line_tax: Decimal
+    line_total: Decimal
+    project_id: uuid.UUID | None = None
+    item_id: uuid.UUID | None = None
+
+
+class BillLineCreate(BaseModel):
+    """One line in a POST/PATCH payload."""
+
+    description: str = Field(min_length=1)
+    account_id: uuid.UUID
+    tax_code_id: uuid.UUID | None = None
+    quantity: Decimal = Decimal("1")
+    unit_price: Decimal = Decimal("0")
+    discount_pct: Decimal = Decimal("0")
+    project_id: uuid.UUID | None = None
+    item_id: uuid.UUID | None = None
+
+
+class BillBase(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    contact_id: uuid.UUID
+    issue_date: date
+    due_date: date
+    notes: str | None = None
+    supplier_reference: str | None = None
+    currency: str = Field(default="AUD", min_length=3, max_length=3)
+
+
+class BillCreate(BillBase):
+    """POST body."""
+
+    lines: list[BillLineCreate] = Field(default_factory=list)
+
+
+class BillUpdate(BaseModel):
+    """PATCH body — every field optional."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    contact_id: uuid.UUID | None = None
+    issue_date: date | None = None
+    due_date: date | None = None
+    notes: str | None = None
+    supplier_reference: str | None = None
+    lines: list[BillLineCreate] | None = None
+
+
+class BillOut(BaseModel):
+    """Full bill response — includes nested lines, tenant_id, version."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    tenant_id: uuid.UUID
+    contact_id: uuid.UUID
+    number: str | None = None
+    supplier_reference: str | None = None
+    issue_date: date
+    due_date: date
+    status: str
+    subtotal: Decimal
+    tax_total: Decimal
+    total: Decimal
+    amount_paid: Decimal
+    currency: str
+    fx_rate: Decimal
+    notes: str | None = None
+    posted_at: datetime | None = None
+    posted_by: str | None = None
+    version: int
+    created_at: datetime
+    updated_at: datetime
+    archived_at: datetime | None = None
+    lines: list[BillLineOut] = Field(default_factory=list)
+
+
+class BillListOut(BaseModel):
+    items: list[BillOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class BillConflictBody(BaseModel):
+    detail: str
+    current: BillOut
