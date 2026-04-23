@@ -1032,3 +1032,81 @@ class BankAccountListOut(BaseModel):
 class BankAccountConflictBody(BaseModel):
     detail: str
     current: BankAccountOut
+
+
+# ---------------------------------------------------------------------------
+# Bank Statement Lines — Phase 1 tier-4 (cycle 12)
+#
+# Individual transaction lines imported from bank statements.
+# Each line belongs to a bank account (accounts.bsb IS NOT NULL).
+# amount: positive = deposit/inflow, negative = withdrawal/outflow.
+# ---------------------------------------------------------------------------
+
+
+class BankStatementLineCreate(BaseModel):
+    """POST body for creating a new bank statement line."""
+
+    account_id: uuid.UUID
+    txn_date: date
+    amount: Decimal
+    description: str | None = None
+    balance: Decimal | None = None
+    reference: str | None = Field(default=None, max_length=128)
+    status: str = Field(default="UNMATCHED")
+    external_id: str | None = Field(default=None, max_length=255)
+    bank_feed_account_id: uuid.UUID | None = None
+    contact_id: uuid.UUID | None = None
+
+
+class BankStatementLineUpdate(BaseModel):
+    """PATCH body — every field optional. Primarily for reconciliation."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    description: str | None = None
+    reference: str | None = Field(default=None, max_length=128)
+    status: str | None = None
+    matched_entry_id: uuid.UUID | None = None
+    matched_at: datetime | None = None
+    matched_by: str | None = None
+    contact_id: uuid.UUID | None = None
+    balance: Decimal | None = None
+
+
+class BankStatementLineOut(BaseModel):
+    """Full bank statement line response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    tenant_id: uuid.UUID
+    account_id: uuid.UUID
+    txn_date: date
+    description: str | None = None
+    amount: Decimal
+    balance: Decimal | None = None
+    reference: str | None = None
+    status: str
+    matched_entry_id: uuid.UUID | None = None
+    matched_at: datetime | None = None
+    matched_by: str | None = None
+    contact_id: uuid.UUID | None = None
+    bank_rule_id: uuid.UUID | None = None
+    bank_feed_account_id: uuid.UUID | None = None
+    external_id: str | None = None
+    version: int
+    created_at: datetime
+    archived_at: datetime | None = None
+
+
+class BankStatementLineListOut(BaseModel):
+    items: list[BankStatementLineOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class BankStatementLineConflictBody(BaseModel):
+    detail: str
+    current: BankStatementLineOut
