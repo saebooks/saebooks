@@ -1410,3 +1410,66 @@ class RecurringInvoiceListOut(BaseModel):
 class RecurringInvoiceConflictBody(BaseModel):
     detail: str
     current: RecurringInvoiceOut
+
+
+# ---------------------------------------------------------------------------
+# Budgets — Phase 1 tier-4 (cycle 16)
+#
+# Budget rows are flat monthly-amount-per-account entries.
+# No line items — the row IS the line: (company, account, year, month) → amount.
+# Status lifecycle: rows are soft-archived via archived_at (DELETE /id).
+# Unique key: (company_id, account_id, year, month).
+# ---------------------------------------------------------------------------
+
+
+class BudgetCreate(BaseModel):
+    """POST body for creating a budget row."""
+
+    account_id: uuid.UUID
+    year: int = Field(ge=1900, le=9999)
+    month: int = Field(ge=1, le=12)
+    amount: Decimal = Decimal("0")
+    notes: str | None = None
+
+
+class BudgetUpdate(BaseModel):
+    """PATCH body — every field optional."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    account_id: uuid.UUID | None = None
+    year: int | None = Field(default=None, ge=1900, le=9999)
+    month: int | None = Field(default=None, ge=1, le=12)
+    amount: Decimal | None = None
+    notes: str | None = None
+
+
+class BudgetOut(BaseModel):
+    """Full budget row response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    tenant_id: uuid.UUID
+    account_id: uuid.UUID
+    year: int
+    month: int
+    amount: Decimal
+    notes: str | None = None
+    version: int
+    created_at: datetime
+    updated_at: datetime
+    archived_at: datetime | None = None
+
+
+class BudgetListOut(BaseModel):
+    items: list[BudgetOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class BudgetConflictBody(BaseModel):
+    detail: str
+    current: BudgetOut
