@@ -31,6 +31,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Integer,
     Numeric,
     String,
     Text,
@@ -41,6 +42,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from saebooks.db import Base
 from saebooks.models._scope import CompanyScoped
+
+_DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 if TYPE_CHECKING:
     from saebooks.models.depreciation_model import DepreciationModel
@@ -79,6 +82,13 @@ class FixedAsset(CompanyScoped, Base):
         ForeignKey("companies.id", ondelete="CASCADE"),
         nullable=False,
     )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        default=lambda: _DEFAULT_TENANT_ID,
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     code: Mapped[str] = mapped_column(
         String(32),
         nullable=False,

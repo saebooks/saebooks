@@ -1176,3 +1176,120 @@ class ProjectListOut(BaseModel):
 class ProjectConflictBody(BaseModel):
     detail: str
     current: ProjectOut
+
+
+# ---------------------------------------------------------------------------
+# Fixed Assets — Phase 1 tier-4 (cycle 14)
+#
+# Capitalised items with a depreciation schedule. Linked to a
+# ``depreciation_model`` (book method) and three GL accounts
+# (cost / accumulated depreciation / depreciation expense).
+# Status: active | disposed | archived (lowercase, matching DB default).
+# ---------------------------------------------------------------------------
+
+
+class FixedAssetCreate(BaseModel):
+    """POST body for creating a new fixed asset."""
+
+    name: str = Field(min_length=1, max_length=255)
+    depreciation_model_id: str = Field(min_length=1, max_length=64)
+    cost_account_id: uuid.UUID
+    accum_dep_account_id: uuid.UUID
+    dep_expense_account_id: uuid.UUID
+    purchase_date: date
+    cost: Decimal
+    in_service_date: date | None = None
+    residual_value: Decimal = Decimal("0")
+    code: str | None = Field(default=None, min_length=1, max_length=32)
+    description: str | None = None
+    tax_model_id: str | None = Field(default=None, max_length=64)
+    serial_number: str | None = None
+    manufacturer: str | None = None
+    model_number: str | None = None
+    location: str | None = None
+    custody_person: str | None = None
+    warranty_end: date | None = None
+    extra: dict | None = None
+
+
+class FixedAssetUpdate(BaseModel):
+    """PATCH body — every field optional."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = None
+    depreciation_model_id: str | None = Field(default=None, min_length=1, max_length=64)
+    tax_model_id: str | None = Field(default=None, max_length=64)
+    purchase_date: date | None = None
+    in_service_date: date | None = None
+    residual_value: Decimal | None = None
+    serial_number: str | None = None
+    manufacturer: str | None = None
+    model_number: str | None = None
+    location: str | None = None
+    custody_person: str | None = None
+    warranty_end: date | None = None
+    extra: dict | None = None
+
+
+class DepreciationModelOut(BaseModel):
+    """Embedded depreciation model info for FixedAssetOut UX."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    method: str
+    method_number: int
+    method_period: int
+
+
+class FixedAssetOut(BaseModel):
+    """Full fixed asset response — includes depreciation_model name for UX."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    tenant_id: uuid.UUID
+    code: str
+    name: str
+    description: str | None = None
+    status: str
+    depreciation_model_id: str
+    depreciation_model: DepreciationModelOut | None = None
+    tax_model_id: str | None = None
+    cost_account_id: uuid.UUID
+    accum_dep_account_id: uuid.UUID
+    dep_expense_account_id: uuid.UUID
+    purchase_date: date
+    in_service_date: date
+    cost: Decimal
+    residual_value: Decimal
+    last_depreciation_posted_through: date | None = None
+    disposal_date: date | None = None
+    disposal_proceeds: Decimal | None = None
+    disposal_journal_id: uuid.UUID | None = None
+    serial_number: str | None = None
+    manufacturer: str | None = None
+    model_number: str | None = None
+    location: str | None = None
+    custody_person: str | None = None
+    warranty_end: date | None = None
+    extra: dict | None = None
+    version: int
+    created_at: datetime
+    updated_at: datetime
+    archived_at: datetime | None = None
+
+
+class FixedAssetListOut(BaseModel):
+    items: list[FixedAssetOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class FixedAssetConflictBody(BaseModel):
+    detail: str
+    current: FixedAssetOut
