@@ -629,6 +629,8 @@ class InvoiceOut(BaseModel):
     fx_rate: Decimal
     notes: str | None = None
     payment_terms: str | None = None
+    journal_entry_id: uuid.UUID | None = None
+    void_journal_entry_id: uuid.UUID | None = None
     posted_at: datetime | None = None
     posted_by: str | None = None
     version: int
@@ -739,6 +741,8 @@ class BillOut(BaseModel):
     currency: str
     fx_rate: Decimal
     notes: str | None = None
+    journal_entry_id: uuid.UUID | None = None
+    void_journal_entry_id: uuid.UUID | None = None
     posted_at: datetime | None = None
     posted_by: str | None = None
     version: int

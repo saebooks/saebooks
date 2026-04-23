@@ -261,3 +261,99 @@ async def void_bill(
             raise HTTPException(422, msg) from exc
 
     return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
+# Post / status transition (POST /{id}/post → POSTED)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/{bill_id}/post",
+    responses={
+        200: {"model": BillOut},
+        409: {"model": BillConflictBody, "description": "Version mismatch"},
+    },
+)
+async def post_bill(
+    bill_id: UUID,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+    bearer: str = Depends(require_bearer),
+) -> Any:
+    """Transition bill DRAFT → POSTED, generating journal entry lines."""
+    expected = _parse_if_match(if_match)
+    if expected is None:
+        raise HTTPException(428, "If-Match header with bill version is required")
+
+    async with AsyncSessionLocal() as session:
+        tenant_id = resolve_tenant_id()
+        try:
+            bill = await svc.api_post_bill(
+                session,
+                bill_id,
+                actor=f"api:{bearer[:8]}…",
+                expected_version=expected,
+                tenant_id=tenant_id,
+            )
+        except svc.VersionConflict as exc:
+            body = BillConflictBody(
+                detail="version mismatch",
+                current=BillOut.model_validate(exc.current),
+            ).model_dump(mode="json")
+            return JSONResponse(body, status_code=409)
+        except (ValueError, svc.BillError) as exc:
+            msg = str(exc)
+            if "not found" in msg.lower():
+                raise HTTPException(404, msg) from exc
+            raise HTTPException(422, msg) from exc
+
+        body = _dump(bill)
+    return JSONResponse(body, status_code=200)
+
+
+# ---------------------------------------------------------------------------
+# Void via status transition (POST /{id}/void → VOIDED with JE reversal)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/{bill_id}/void",
+    responses={
+        200: {"model": BillOut},
+        409: {"model": BillConflictBody, "description": "Version mismatch"},
+    },
+)
+async def void_bill_transition(
+    bill_id: UUID,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+    bearer: str = Depends(require_bearer),
+) -> Any:
+    """Transition any non-VOIDED bill → VOIDED, reversing JE if POSTED."""
+    expected = _parse_if_match(if_match)
+    if expected is None:
+        raise HTTPException(428, "If-Match header with bill version is required")
+
+    async with AsyncSessionLocal() as session:
+        tenant_id = resolve_tenant_id()
+        try:
+            bill = await svc.api_void_bill(
+                session,
+                bill_id,
+                actor=f"api:{bearer[:8]}…",
+                expected_version=expected,
+                tenant_id=tenant_id,
+            )
+        except svc.VersionConflict as exc:
+            body = BillConflictBody(
+                detail="version mismatch",
+                current=BillOut.model_validate(exc.current),
+            ).model_dump(mode="json")
+            return JSONResponse(body, status_code=409)
+        except (ValueError, svc.BillError) as exc:
+            msg = str(exc)
+            if "not found" in msg.lower():
+                raise HTTPException(404, msg) from exc
+            raise HTTPException(422, msg) from exc
+
+        body = _dump(bill)
+    return JSONResponse(body, status_code=200)

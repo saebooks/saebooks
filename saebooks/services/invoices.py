@@ -800,3 +800,124 @@ async def api_void(
     )
     await session.commit()
     return await _get_with_lines(session, invoice_id)  # type: ignore[return-value]
+
+
+async def api_post_invoice(
+    session: AsyncSession,
+    invoice_id: uuid.UUID,
+    actor: str,
+    expected_version: int,
+    *,
+    tenant_id: uuid.UUID | None = None,
+) -> Invoice:
+    """Transition DRAFT → POSTED with JE generation, optimistic locking + change_log.
+
+    Wraps the legacy ``post_invoice()`` pipeline which mints the invoice
+    number, builds journal lines (Dr AR / Cr Income / Cr GST), calls
+    ``journal_svc.post()``, and stamps ``journal_entry_id`` + ``posted_at``.
+    After that legacy call completes and commits, we bump ``version`` and
+    append a change_log row in a second transaction.
+
+    When ``tenant_id`` is supplied the invoice must belong to that tenant;
+    a mismatch raises ``InvoiceError("not found")`` so callers see a 404.
+    """
+    inv = await _get_with_lines(session, invoice_id)
+    if inv is None:
+        raise InvoiceError(f"Invoice {invoice_id} not found")
+    if tenant_id is not None and inv.tenant_id != tenant_id:
+        raise InvoiceError(f"Invoice {invoice_id} not found")
+    if inv.version != expected_version:
+        raise VersionConflict(inv)
+    if inv.status == InvoiceStatus.VOIDED:
+        raise InvoiceError(
+            f"Invoice {inv.id} is VOIDED and cannot be posted"
+        )
+    if inv.status == InvoiceStatus.POSTED:
+        raise InvoiceError(f"Invoice {inv.id} is already POSTED")
+    if not inv.lines:
+        raise InvoiceError("Cannot post an invoice with no lines")
+
+    # Delegate to the legacy pipeline (mints number, builds JE, posts it,
+    # commits internally). After this call the session is in a fresh state.
+    inv = await post_invoice(
+        session,
+        invoice_id,
+        posted_by=actor,
+    )
+
+    # Bump version + append change_log in the same transaction.
+    inv.version = inv.version + 1
+    await session.flush()
+    await session.refresh(inv)
+
+    inv_loaded = await _get_with_lines(session, invoice_id)
+    assert inv_loaded is not None
+
+    await change_log_svc.append(
+        session,
+        entity="invoice",
+        entity_id=inv_loaded.id,
+        op="post",
+        actor=actor,
+        payload=_serialise_invoice(inv_loaded),
+        version=inv_loaded.version,
+    )
+    await session.commit()
+    return await _get_with_lines(session, invoice_id)  # type: ignore[return-value]
+
+
+async def api_void_invoice(
+    session: AsyncSession,
+    invoice_id: uuid.UUID,
+    actor: str,
+    expected_version: int,
+    *,
+    tenant_id: uuid.UUID | None = None,
+) -> Invoice:
+    """Transition any non-VOIDED → VOIDED with JE reversal (if POSTED),
+    optimistic locking + change_log.
+
+    Wraps the legacy ``void_invoice()`` pipeline which handles both the
+    DRAFT case (no JE) and the POSTED case (reversal JE via
+    ``journal_svc.reverse()``).
+
+    When ``tenant_id`` is supplied the invoice must belong to that tenant;
+    a mismatch raises ``InvoiceError("not found")`` so callers see a 404.
+    """
+    inv = await _get_with_lines(session, invoice_id)
+    if inv is None:
+        raise InvoiceError(f"Invoice {invoice_id} not found")
+    if tenant_id is not None and inv.tenant_id != tenant_id:
+        raise InvoiceError(f"Invoice {invoice_id} not found")
+    if inv.version != expected_version:
+        raise VersionConflict(inv)
+    if inv.status == InvoiceStatus.VOIDED:
+        raise InvoiceError(f"Invoice {inv.id} is already VOIDED")
+
+    # Delegate to legacy pipeline (handles JE reversal where needed, commits).
+    inv = await void_invoice(
+        session,
+        invoice_id,
+        posted_by=actor,
+        override_reason=f"API void by {actor}",
+    )
+
+    # Bump version + append change_log.
+    inv.version = inv.version + 1
+    await session.flush()
+    await session.refresh(inv)
+
+    inv_loaded = await _get_with_lines(session, invoice_id)
+    assert inv_loaded is not None
+
+    await change_log_svc.append(
+        session,
+        entity="invoice",
+        entity_id=inv_loaded.id,
+        op="void",
+        actor=actor,
+        payload=_serialise_invoice(inv_loaded),
+        version=inv_loaded.version,
+    )
+    await session.commit()
+    return await _get_with_lines(session, invoice_id)  # type: ignore[return-value]

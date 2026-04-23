@@ -770,3 +770,122 @@ async def api_void(
     )
     await session.commit()
     return await _get_with_lines(session, bill_id)  # type: ignore[return-value]
+
+
+async def api_post_bill(
+    session: AsyncSession,
+    bill_id: uuid.UUID,
+    actor: str,
+    expected_version: int,
+    *,
+    tenant_id: uuid.UUID | None = None,
+) -> Bill:
+    """Transition DRAFT → POSTED with JE generation, optimistic locking + change_log.
+
+    Wraps the legacy ``post_bill()`` pipeline which mints the bill
+    number, builds journal lines (Dr Expense / Dr GST Paid / Cr AP), calls
+    ``journal_svc.post()``, and stamps ``journal_entry_id`` + ``posted_at``.
+
+    When ``tenant_id`` is supplied the bill must belong to that tenant;
+    a mismatch raises ``BillError("not found")`` so callers see a 404.
+    """
+    bill = await _get_with_lines(session, bill_id)
+    if bill is None:
+        raise BillError(f"Bill {bill_id} not found")
+    if tenant_id is not None and bill.tenant_id != tenant_id:
+        raise BillError(f"Bill {bill_id} not found")
+    if bill.version != expected_version:
+        raise VersionConflict(bill)
+    if bill.status == BillStatus.VOIDED:
+        raise BillError(
+            f"Bill {bill.id} is VOIDED and cannot be posted"
+        )
+    if bill.status == BillStatus.POSTED:
+        raise BillError(f"Bill {bill.id} is already POSTED")
+    if not bill.lines:
+        raise BillError("Cannot post a bill with no lines")
+
+    # Delegate to the legacy pipeline (mints number, builds JE, posts it,
+    # commits internally). After this call the session is in a fresh state.
+    bill = await post_bill(
+        session,
+        bill_id,
+        posted_by=actor,
+    )
+
+    # Bump version + append change_log in the same transaction.
+    bill.version = bill.version + 1
+    await session.flush()
+    await session.refresh(bill)
+
+    bill_loaded = await _get_with_lines(session, bill_id)
+    assert bill_loaded is not None
+
+    await change_log_svc.append(
+        session,
+        entity="bill",
+        entity_id=bill_loaded.id,
+        op="post",
+        actor=actor,
+        payload=_serialise_bill(bill_loaded),
+        version=bill_loaded.version,
+    )
+    await session.commit()
+    return await _get_with_lines(session, bill_id)  # type: ignore[return-value]
+
+
+async def api_void_bill(
+    session: AsyncSession,
+    bill_id: uuid.UUID,
+    actor: str,
+    expected_version: int,
+    *,
+    tenant_id: uuid.UUID | None = None,
+) -> Bill:
+    """Transition any non-VOIDED → VOIDED with JE reversal (if POSTED),
+    optimistic locking + change_log.
+
+    Wraps the legacy ``void_bill()`` pipeline which handles both the
+    DRAFT case (no JE) and the POSTED case (reversal JE via
+    ``journal_svc.reverse()``).
+
+    When ``tenant_id`` is supplied the bill must belong to that tenant;
+    a mismatch raises ``BillError("not found")`` so callers see a 404.
+    """
+    bill = await _get_with_lines(session, bill_id)
+    if bill is None:
+        raise BillError(f"Bill {bill_id} not found")
+    if tenant_id is not None and bill.tenant_id != tenant_id:
+        raise BillError(f"Bill {bill_id} not found")
+    if bill.version != expected_version:
+        raise VersionConflict(bill)
+    if bill.status == BillStatus.VOIDED:
+        raise BillError(f"Bill {bill.id} is already VOIDED")
+
+    # Delegate to legacy pipeline (handles JE reversal where needed, commits).
+    bill = await void_bill(
+        session,
+        bill_id,
+        posted_by=actor,
+        override_reason=f"API void by {actor}",
+    )
+
+    # Bump version + append change_log.
+    bill.version = bill.version + 1
+    await session.flush()
+    await session.refresh(bill)
+
+    bill_loaded = await _get_with_lines(session, bill_id)
+    assert bill_loaded is not None
+
+    await change_log_svc.append(
+        session,
+        entity="bill",
+        entity_id=bill_loaded.id,
+        op="void",
+        actor=actor,
+        payload=_serialise_bill(bill_loaded),
+        version=bill_loaded.version,
+    )
+    await session.commit()
+    return await _get_with_lines(session, bill_id)  # type: ignore[return-value]
