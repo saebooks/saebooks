@@ -1477,3 +1477,41 @@ class BudgetListOut(BaseModel):
 class BudgetConflictBody(BaseModel):
     detail: str
     current: BudgetOut
+
+
+# ---------------------------------------------------------------------------
+# Reports — Tier 5 (cycle 18): Aged Receivables + Aged Payables
+# ---------------------------------------------------------------------------
+
+
+class AgedContact(BaseModel):
+    """One contact's aged balance row.
+
+    Keys in ``buckets`` are dynamic strings built from the caller's
+    ``bucket_days`` parameter — e.g. "current", "1-30 days", "31-60 days".
+    They are also surfaced as individual top-level fields for convenience
+    (JSON clients that want simple key access).  ``extra="allow"`` lets
+    Pydantic pass the dynamic bucket keys through without a fixed schema.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    contact_id: uuid.UUID
+    contact_name: str
+    total: Decimal
+
+
+class AgedReport(BaseModel):
+    """Full aged receivables / payables report.
+
+    ``buckets`` is the ordered list of bucket label strings.
+    ``contacts`` is one row per contact (each row has keys matching
+    ``buckets`` plus ``contact_id``, ``contact_name``, ``total``).
+    ``totals`` is the grand-total row with the same bucket keys plus
+    ``total``.
+    """
+
+    as_of_date: date
+    buckets: list[str]
+    contacts: list[dict]
+    totals: dict
