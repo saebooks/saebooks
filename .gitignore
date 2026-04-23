@@ -44,3 +44,6 @@ logs/
 
 # Node (for any front-end tooling we end up using)
 node_modules/
+
+# gRPC generated stubs (re-run protoc to regenerate)
+saebooks/grpc_gen/

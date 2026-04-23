@@ -24,6 +24,8 @@ dependencies = [
     "sentry-sdk[fastapi]>=2.18",
     "python-json-logger>=2.0",
     "cryptography>=43.0",
+    "grpcio>=1.62",
+    "grpcio-tools>=1.62",
 ]
 
 [project.optional-dependencies]

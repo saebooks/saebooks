@@ -1,0 +1,49 @@
+syntax = "proto3";
+package saebooks;
+option py_generic_services = false;
+
+// Pagination
+message PageRequest { int32 page = 1; int32 page_size = 2; }
+message PageInfo { int32 total = 1; int32 page = 2; int32 page_size = 3; }
+
+// Contacts
+message ContactRecord {
+  string id = 1;
+  string name = 2;
+  string email = 3;
+  string phone = 4;
+  int32 version = 5;
+  string updated_at = 6;
+}
+message ListContactsRequest { PageRequest page = 1; string search = 2; }
+message ListContactsResponse { repeated ContactRecord contacts = 1; PageInfo page_info = 2; }
+message GetContactRequest { string id = 1; }
+message CreateContactRequest { string name = 1; string email = 2; string phone = 3; }
+message UpdateContactRequest { string id = 1; string name = 2; string email = 3; string phone = 4; int32 if_match_version = 5; }
+message ArchiveContactRequest { string id = 1; int32 if_match_version = 2; }
+message ContactResponse { ContactRecord contact = 1; }
+
+// Change stream (replaces NDJSON polling)
+message WatchChangesRequest { int64 cursor = 1; }
+message ChangeEvent {
+  string entity = 1;
+  string entity_id = 2;
+  string op = 3;       // create | update | archive
+  int64 cursor = 4;
+  string payload_json = 5;
+  int32 version = 6;
+}
+
+// Auth
+message HeartbeatRequest { string licence_jwt = 1; }
+message HeartbeatResponse { string status = 1; string fresh_jwt = 2; }
+
+service SAEBooks {
+  rpc ListContacts(ListContactsRequest) returns (ListContactsResponse);
+  rpc GetContact(GetContactRequest) returns (ContactResponse);
+  rpc CreateContact(CreateContactRequest) returns (ContactResponse);
+  rpc UpdateContact(UpdateContactRequest) returns (ContactResponse);
+  rpc ArchiveContact(ArchiveContactRequest) returns (ContactResponse);
+  rpc WatchChanges(WatchChangesRequest) returns (stream ChangeEvent);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+}
