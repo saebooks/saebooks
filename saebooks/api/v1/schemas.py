@@ -966,3 +966,69 @@ class CreditNoteListOut(BaseModel):
 class CreditNoteConflictBody(BaseModel):
     detail: str
     current: CreditNoteOut
+
+
+# ---------------------------------------------------------------------------
+# Bank Accounts — Phase 1 tier-4
+#
+# View over accounts where bsb IS NOT NULL.  Exposes BSB, account number,
+# account title, APCA user ID, and bank abbreviation (ABA fields).
+# ---------------------------------------------------------------------------
+
+
+class BankAccountCreate(BaseModel):
+    """POST body for creating a new bank account."""
+
+    code: str = Field(min_length=1, max_length=32)
+    name: str = Field(min_length=1, max_length=255)
+    bsb: str = Field(min_length=6, max_length=7, description="BSB formatted 'xxx-xxx'")
+    bank_account_number: str | None = Field(default=None, max_length=9)
+    bank_account_title: str | None = Field(default=None, max_length=32)
+    apca_user_id: str | None = Field(default=None, max_length=6)
+    bank_abbreviation: str | None = Field(default=None, max_length=3)
+
+
+class BankAccountUpdate(BaseModel):
+    """PATCH body — every field optional."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    code: str | None = Field(default=None, min_length=1, max_length=32)
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    bsb: str | None = Field(default=None, min_length=6, max_length=7)
+    bank_account_number: str | None = None
+    bank_account_title: str | None = None
+    apca_user_id: str | None = None
+    bank_abbreviation: str | None = None
+
+
+class BankAccountOut(BaseModel):
+    """Full bank account response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    tenant_id: uuid.UUID
+    code: str
+    name: str
+    bsb: str | None = None
+    bank_account_number: str | None = None
+    bank_account_title: str | None = None
+    apca_user_id: str | None = None
+    bank_abbreviation: str | None = None
+    version: int
+    created_at: datetime
+    archived_at: datetime | None = None
+
+
+class BankAccountListOut(BaseModel):
+    items: list[BankAccountOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class BankAccountConflictBody(BaseModel):
+    detail: str
+    current: BankAccountOut

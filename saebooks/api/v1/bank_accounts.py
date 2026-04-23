@@ -1,0 +1,288 @@
+"""JSON router — ``/api/v1/bank_accounts``.
+
+Phase 1 tier-4 bank-accounts endpoint.
+
+Design (a): bank accounts are a view over the ``accounts`` table — rows
+where ``bsb IS NOT NULL``.  No new table is needed.
+
+* Bearer-token auth via ``SAEBOOKS_DEV_API_TOKEN``.
+* Optimistic locking via ``If-Match: <version>`` on update/delete.
+* Retry-safe writes via ``X-Idempotency-Key: <uuid>`` on POST.
+* Every write appends a row to ``change_log``.
+* ``DELETE`` is a soft-archive (archived_at set) returning 204.
+"""
+from __future__ import annotations
+
+import json
+from typing import Any
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi.responses import JSONResponse, Response
+from sqlalchemy import select
+
+from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
+from saebooks.api.v1.schemas import (
+    BankAccountConflictBody,
+    BankAccountCreate,
+    BankAccountListOut,
+    BankAccountOut,
+    BankAccountUpdate,
+)
+from saebooks.db import AsyncSessionLocal
+from saebooks.models.company import Company
+from saebooks.models.idempotency_key import IdempotencyKey
+from saebooks.services import bank_accounts as svc
+
+router = APIRouter(
+    prefix="/bank_accounts",
+    tags=["bank_accounts"],
+    dependencies=[Depends(require_bearer)],
+)
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+
+async def _first_company_id(session) -> UUID:
+    """Return the first active company — Phase 1 single-company assumption."""
+    result = await session.execute(
+        select(Company).where(Company.archived_at.is_(None)).order_by(Company.created_at)
+    )
+    company = result.scalars().first()
+    if company is None:
+        raise HTTPException(500, "No active company")
+    return company.id
+
+
+def _parse_if_match(header: str | None) -> int | None:
+    if header is None:
+        return None
+    cleaned = header.strip().strip('"').strip("W/").strip('"')
+    try:
+        return int(cleaned)
+    except ValueError as exc:
+        raise HTTPException(
+            400, f"If-Match must be an integer version, got '{header}'"
+        ) from exc
+
+
+def _parse_idempotency_key(header: str | None) -> UUID | None:
+    if header is None or not header.strip():
+        return None
+    try:
+        return UUID(header.strip())
+    except ValueError as exc:
+        raise HTTPException(400, "X-Idempotency-Key must be a UUID") from exc
+
+
+async def _idempotent_replay(session, key: UUID) -> JSONResponse | None:
+    existing = await session.get(IdempotencyKey, key)
+    if existing is None:
+        return None
+    return JSONResponse(content=existing.response_body, status_code=existing.response_status)
+
+
+async def _remember_idempotent(
+    session, key: UUID, body: dict[str, Any], status_code: int
+) -> None:
+    row = IdempotencyKey(key=key, response_body=body, response_status=status_code)
+    session.add(row)
+    await session.flush()
+
+
+def _dump(account: Any) -> dict[str, Any]:
+    return json.loads(BankAccountOut.model_validate(account).model_dump_json())
+
+
+# ---------------------------------------------------------------------------
+# List
+# ---------------------------------------------------------------------------
+
+
+@router.get("", response_model=BankAccountListOut)
+async def list_bank_accounts(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> BankAccountListOut:
+    offset = (page - 1) * page_size
+    async with AsyncSessionLocal() as session:
+        company_id = await _first_company_id(session)
+        tenant_id = resolve_tenant_id()
+        items, total = await svc.list_active(
+            session,
+            company_id,
+            tenant_id,
+            limit=page_size,
+            offset=offset,
+        )
+        return BankAccountListOut(
+            items=[BankAccountOut.model_validate(a) for a in items],
+            total=total,
+            limit=page_size,
+            offset=offset,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Get one
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{bank_account_id}", response_model=BankAccountOut)
+async def get_bank_account(bank_account_id: UUID) -> BankAccountOut:
+    async with AsyncSessionLocal() as session:
+        account = await svc.api_get(session, bank_account_id)
+        if account is None:
+            raise HTTPException(404, "Bank account not found")
+        return BankAccountOut.model_validate(account)
+
+
+# ---------------------------------------------------------------------------
+# Create
+# ---------------------------------------------------------------------------
+
+
+@router.post("", response_model=BankAccountOut, status_code=201)
+async def create_bank_account(
+    payload: BankAccountCreate,
+    idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
+    bearer: str = Depends(require_bearer),
+) -> Any:
+    key = _parse_idempotency_key(idempotency_key)
+    async with AsyncSessionLocal() as session:
+        if key is not None:
+            replay = await _idempotent_replay(session, key)
+            if replay is not None:
+                return replay
+
+        company_id = await _first_company_id(session)
+        tenant_id = resolve_tenant_id()
+        try:
+            account = await svc.api_create(
+                session,
+                company_id,
+                tenant_id,
+                actor=f"api:{bearer[:8]}…",
+                code=payload.code,
+                name=payload.name,
+                bsb=payload.bsb,
+                bank_account_number=payload.bank_account_number,
+                bank_account_title=payload.bank_account_title,
+                apca_user_id=payload.apca_user_id,
+                bank_abbreviation=payload.bank_abbreviation,
+            )
+        except (ValueError, svc.BankAccountError) as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+        body = _dump(account)
+        if key is not None:
+            await _remember_idempotent(session, key, body, 201)
+            await session.commit()
+    return JSONResponse(body, status_code=201)
+
+
+# ---------------------------------------------------------------------------
+# Update (PATCH with If-Match)
+# ---------------------------------------------------------------------------
+
+
+@router.patch(
+    "/{bank_account_id}",
+    responses={
+        200: {"model": BankAccountOut},
+        409: {"model": BankAccountConflictBody, "description": "Version mismatch"},
+    },
+)
+async def update_bank_account(
+    bank_account_id: UUID,
+    payload: BankAccountUpdate,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+    idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
+    bearer: str = Depends(require_bearer),
+) -> Any:
+    expected = _parse_if_match(if_match)
+    if expected is None:
+        raise HTTPException(428, "If-Match header with bank account version is required")
+    key = _parse_idempotency_key(idempotency_key)
+
+    async with AsyncSessionLocal() as session:
+        if key is not None:
+            replay = await _idempotent_replay(session, key)
+            if replay is not None:
+                return replay
+
+        try:
+            account = await svc.api_update(
+                session,
+                bank_account_id,
+                actor=f"api:{bearer[:8]}…",
+                expected_version=expected,
+                **payload.model_dump(exclude_unset=True),
+            )
+        except svc.VersionConflict as exc:
+            body = BankAccountConflictBody(
+                detail="version mismatch",
+                current=BankAccountOut.model_validate(exc.current),
+            ).model_dump(mode="json")
+            if key is not None:
+                await _remember_idempotent(session, key, body, 409)
+                await session.commit()
+            return JSONResponse(body, status_code=409)
+        except (ValueError, svc.BankAccountError) as exc:
+            msg = str(exc)
+            if "not found" in msg.lower():
+                raise HTTPException(404, msg) from exc
+            raise HTTPException(422, msg) from exc
+
+        body = _dump(account)
+        if key is not None:
+            await _remember_idempotent(session, key, body, 200)
+            await session.commit()
+    return JSONResponse(body, status_code=200)
+
+
+# ---------------------------------------------------------------------------
+# Delete (soft-archive → 204)
+# ---------------------------------------------------------------------------
+
+
+@router.delete(
+    "/{bank_account_id}",
+    responses={
+        204: {"description": "Archived"},
+        409: {"model": BankAccountConflictBody, "description": "Version mismatch"},
+    },
+)
+async def delete_bank_account(
+    bank_account_id: UUID,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+    bearer: str = Depends(require_bearer),
+) -> Any:
+    expected = _parse_if_match(if_match)
+    if expected is None:
+        raise HTTPException(428, "If-Match header with bank account version is required")
+
+    async with AsyncSessionLocal() as session:
+        try:
+            await svc.api_delete(
+                session,
+                bank_account_id,
+                actor=f"api:{bearer[:8]}…",
+                expected_version=expected,
+            )
+        except svc.VersionConflict as exc:
+            body = BankAccountConflictBody(
+                detail="version mismatch",
+                current=BankAccountOut.model_validate(exc.current),
+            ).model_dump(mode="json")
+            return JSONResponse(body, status_code=409)
+        except (ValueError, svc.BankAccountError) as exc:
+            msg = str(exc)
+            if "not found" in msg.lower():
+                raise HTTPException(404, msg) from exc
+            raise HTTPException(422, msg) from exc
+
+    return Response(status_code=204)
