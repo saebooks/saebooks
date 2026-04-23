@@ -42,6 +42,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from saebooks.db import Base
 from saebooks.models._scope import CompanyScoped
 
+_DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
 
 class RecurrenceFrequency(enum.StrEnum):
     WEEKLY = "WEEKLY"
@@ -68,6 +70,13 @@ class RecurringInvoice(CompanyScoped, Base):
         ForeignKey("companies.id", ondelete="CASCADE"),
         nullable=False,
     )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        default=lambda: _DEFAULT_TENANT_ID,
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     contact_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("contacts.id", ondelete="RESTRICT"),

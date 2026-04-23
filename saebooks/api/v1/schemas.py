@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from saebooks.models.contact import ContactType
 from saebooks.models.account import AccountType
+from saebooks.models.recurring_invoice import RecurrenceFrequency, RecurrenceStatus
 
 
 class ContactBase(BaseModel):
@@ -1293,3 +1294,119 @@ class FixedAssetListOut(BaseModel):
 class FixedAssetConflictBody(BaseModel):
     detail: str
     current: FixedAssetOut
+
+
+# ---------------------------------------------------------------------------
+# Recurring Invoices — ``/api/v1/recurring_invoices``
+# Templates that carry a schedule + line items. Invoice spawning is out of scope
+# here — this is CRUD + list only.
+# Status enum: ACTIVE | PAUSED | ENDED (model values)
+# Frequency enum: WEEKLY | FORTNIGHTLY | MONTHLY | QUARTERLY | YEARLY
+# Archive is terminal (archived_at set); lifecycle transitions via PATCH status.
+# ---------------------------------------------------------------------------
+
+
+class RecurringInvoiceLineCreate(BaseModel):
+    """One line in a recurring invoice template (create / replace)."""
+
+    description: str = Field(min_length=1)
+    account_id: uuid.UUID
+    tax_code_id: uuid.UUID | None = None
+    quantity: Decimal = Decimal("1")
+    unit_price: Decimal = Decimal("0")
+    discount_pct: Decimal = Decimal("0")
+
+
+class RecurringInvoiceCreate(BaseModel):
+    """POST body for creating a recurring invoice template."""
+
+    name: str = Field(min_length=1, max_length=128)
+    contact_id: uuid.UUID
+    frequency: RecurrenceFrequency
+    next_run: date
+    status: RecurrenceStatus = RecurrenceStatus.ACTIVE
+    anchor_day: int | None = None
+    end_date: date | None = None
+    due_days: int = 30
+    payment_terms: str | None = None
+    notes: str | None = None
+    auto_post: bool = False
+    lines: list[RecurringInvoiceLineCreate] = Field(default_factory=list)
+
+
+class RecurringInvoiceUpdate(BaseModel):
+    """PATCH body — every field optional.
+
+    If ``lines`` is present, existing lines are replaced in full.
+    If ``lines`` is absent, existing lines are left untouched.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    contact_id: uuid.UUID | None = None
+    frequency: RecurrenceFrequency | None = None
+    next_run: date | None = None
+    status: RecurrenceStatus | None = None
+    anchor_day: int | None = None
+    end_date: date | None = None
+    due_days: int | None = None
+    payment_terms: str | None = None
+    notes: str | None = None
+    auto_post: bool | None = None
+    lines: list[RecurringInvoiceLineCreate] | None = None
+
+
+class RecurringInvoiceLineOut(BaseModel):
+    """Line item in a recurring invoice template response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    line_no: int
+    description: str
+    account_id: uuid.UUID
+    tax_code_id: uuid.UUID | None = None
+    quantity: Decimal
+    unit_price: Decimal
+    discount_pct: Decimal
+
+
+class RecurringInvoiceOut(BaseModel):
+    """Full recurring invoice template response — lines nested."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    tenant_id: uuid.UUID
+    contact_id: uuid.UUID
+    name: str
+    frequency: RecurrenceFrequency
+    status: RecurrenceStatus
+    anchor_day: int | None = None
+    next_run: date
+    end_date: date | None = None
+    last_run: date | None = None
+    due_days: int
+    payment_terms: str | None = None
+    notes: str | None = None
+    auto_post: bool
+    invoices_generated: int
+    version: int
+    created_at: datetime
+    updated_at: datetime
+    archived_at: datetime | None = None
+    lines: list[RecurringInvoiceLineOut] = Field(default_factory=list)
+
+
+class RecurringInvoiceListOut(BaseModel):
+    items: list[RecurringInvoiceOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class RecurringInvoiceConflictBody(BaseModel):
+    detail: str
+    current: RecurringInvoiceOut
