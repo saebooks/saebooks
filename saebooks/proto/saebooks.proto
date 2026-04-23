@@ -87,6 +87,46 @@ message ListJournalEntriesResponse { repeated JournalEntryRecord entries = 1; Pa
 message GetJournalEntryRequest { string id = 1; }
 message JournalEntryResponse { JournalEntryRecord entry = 1; }
 
+// Collaborative presence
+message PresenceRequest {
+  string tenant_id = 1;
+  string user_id = 2;        // who is watching
+  string entity_type = 3;    // e.g. "invoice"
+  string entity_id = 4;      // which entity they're viewing (empty = global)
+}
+
+message PresenceEvent {
+  string user_id = 1;
+  string user_name = 2;
+  string entity_type = 3;
+  string entity_id = 4;
+  string action = 5;          // "viewing" | "editing" | "left"
+  string timestamp = 6;       // ISO8601
+}
+
+message AcquireLockRequest {
+  string tenant_id = 1;
+  string entity_type = 2;
+  string entity_id = 3;
+  string user_id = 4;
+  int32 ttl_seconds = 5;      // default 30; auto-released if not renewed
+}
+
+message LockResponse {
+  bool acquired = 1;
+  string locked_by = 2;       // if acquired=false, who holds the lock
+  string expires_at = 3;
+}
+
+message ReleaseLockRequest {
+  string tenant_id = 1;
+  string entity_type = 2;
+  string entity_id = 3;
+  string user_id = 4;
+}
+
+message ReleaseLockResponse { bool released = 1; }
+
 // Change stream (replaces NDJSON polling)
 message WatchChangesRequest { int64 cursor = 1; }
 message ChangeEvent {
@@ -118,4 +158,7 @@ service SAEBooks {
   rpc GetJournalEntry(GetJournalEntryRequest) returns (JournalEntryResponse);
   rpc WatchChanges(WatchChangesRequest) returns (stream ChangeEvent);
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc WatchPresence(PresenceRequest) returns (stream PresenceEvent);
+  rpc AcquireLock(AcquireLockRequest) returns (LockResponse);
+  rpc ReleaseLock(ReleaseLockRequest) returns (ReleaseLockResponse);
 }

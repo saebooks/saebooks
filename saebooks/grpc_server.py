@@ -21,6 +21,7 @@ follow-up once the portal JWT JWKS is in scope.
 from __future__ import annotations
 
 import asyncio
+import datetime
 import json
 import logging
 import uuid
@@ -136,6 +137,30 @@ def _extract_actor(context: aio.ServicerContext) -> str:
         if key == "authorization":
             return value[:80]  # truncate for log safety
     return "grpc-anonymous"
+
+
+# ---------------------------------------------------------------------------
+# In-memory presence and lock stores (v1 — reset on server restart)
+# ---------------------------------------------------------------------------
+
+# presence_store: {tenant_id: {scope_key: {user_id: user_name}}}
+# scope_key = f"{entity_type}:{entity_id}"  (entity_id may be "")
+_presence_store: dict[str, dict[str, dict[str, str]]] = {}
+
+# lock_store: {(tenant_id, entity_type, entity_id): (user_id, expires_at)}
+_lock_store: dict[tuple[str, str, str], tuple[str, datetime.datetime]] = {}
+
+# event queue per (tenant_id, scope_key): list of PresenceEvent args
+# Presence subscribers register an asyncio.Queue to receive new events.
+_presence_queues: dict[str, list[asyncio.Queue]] = {}  # key = tenant_id
+
+
+def _now_utc() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def _scope_key(entity_type: str, entity_id: str) -> str:
+    return f"{entity_type}:{entity_id}"
 
 
 # ---------------------------------------------------------------------------
@@ -642,12 +667,161 @@ class SAEBooksServicer(saebooks_pb2_grpc.SAEBooksServicer):
         return saebooks_pb2.HeartbeatResponse(status="ok", fresh_jwt="")
 
     # ------------------------------------------------------------------
-    # Presence / locking — UNIMPLEMENTED stubs
+    # Collaborative presence
     # ------------------------------------------------------------------
 
-    # WatchPresence, AcquireLock, ReleaseLock are not in the proto yet;
-    # they will be added in a follow-up cycle once the presence schema
-    # is defined.
+    async def WatchPresence(
+        self,
+        request: saebooks_pb2.PresenceRequest,
+        context: aio.ServicerContext,
+    ) -> AsyncIterator[saebooks_pb2.PresenceEvent]:
+        """Stream presence events for a tenant+entity scope.
+
+        On connect: yield one "viewing" event for every currently active user
+        in the same scope, then register for new events (polled every 5 s).
+        On disconnect (CancelledError): remove the viewer from the store and
+        fan out a "left" event to remaining subscribers.
+        """
+        tenant_id = request.tenant_id
+        user_id = request.user_id
+        entity_type = request.entity_type
+        entity_id = request.entity_id
+        scope = _scope_key(entity_type, entity_id)
+        timestamp = _now_utc().isoformat()
+
+        # Register this viewer in the presence store.
+        _presence_store.setdefault(tenant_id, {}).setdefault(scope, {})[user_id] = user_id
+
+        # Register a queue to receive future presence events for this tenant.
+        queue: asyncio.Queue = asyncio.Queue()
+        _presence_queues.setdefault(tenant_id, []).append(queue)
+
+        # Helper: fan-out an event to all queues in this tenant.
+        def _fan_out(event: saebooks_pb2.PresenceEvent) -> None:
+            for q in list(_presence_queues.get(tenant_id, [])):
+                try:
+                    q.put_nowait(event)
+                except asyncio.QueueFull:
+                    pass
+
+        try:
+            # Emit initial "viewing" snapshot for all active users in scope.
+            for existing_uid in list(
+                _presence_store.get(tenant_id, {}).get(scope, {}).keys()
+            ):
+                yield saebooks_pb2.PresenceEvent(
+                    user_id=existing_uid,
+                    user_name=existing_uid,
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    action="viewing",
+                    timestamp=timestamp,
+                )
+
+            # Fan-out join event to other subscribers.
+            _fan_out(
+                saebooks_pb2.PresenceEvent(
+                    user_id=user_id,
+                    user_name=user_id,
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    action="viewing",
+                    timestamp=timestamp,
+                )
+            )
+
+            # Stream loop: yield events from queue, poll every 5 s.
+            while not context.cancelled():
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=5.0)
+                    # Only yield events relevant to this subscriber's scope.
+                    if event.entity_type == entity_type and event.entity_id == entity_id:
+                        yield event
+                except asyncio.TimeoutError:
+                    # Heartbeat — keep the stream alive.
+                    continue
+                except asyncio.CancelledError:
+                    break
+
+        except asyncio.CancelledError:
+            pass
+        finally:
+            # Clean up: remove viewer from store and notify others.
+            scope_map = _presence_store.get(tenant_id, {}).get(scope, {})
+            scope_map.pop(user_id, None)
+
+            queues = _presence_queues.get(tenant_id, [])
+            if queue in queues:
+                queues.remove(queue)
+
+            left_event = saebooks_pb2.PresenceEvent(
+                user_id=user_id,
+                user_name=user_id,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                action="left",
+                timestamp=_now_utc().isoformat(),
+            )
+            _fan_out(left_event)
+
+    # ------------------------------------------------------------------
+    # Optimistic locking
+    # ------------------------------------------------------------------
+
+    async def AcquireLock(
+        self,
+        request: saebooks_pb2.AcquireLockRequest,
+        context: aio.ServicerContext,
+    ) -> saebooks_pb2.LockResponse:
+        """Attempt to acquire an entity lock. Lazy-expires stale locks.
+
+        TTL defaults to 30 s if not specified (or <= 0).
+        """
+        tenant_id = request.tenant_id
+        entity_type = request.entity_type
+        entity_id = request.entity_id
+        user_id = request.user_id
+        ttl = request.ttl_seconds if request.ttl_seconds > 0 else 30
+
+        lock_key = (tenant_id, entity_type, entity_id)
+        now = _now_utc()
+        expires_at = now + datetime.timedelta(seconds=ttl)
+
+        existing = _lock_store.get(lock_key)
+        if existing is not None:
+            existing_user, existing_expires = existing
+            if existing_expires <= now:
+                # Expired — clear it.
+                del _lock_store[lock_key]
+                existing = None
+            elif existing_user != user_id:
+                # Another user holds a live lock.
+                return saebooks_pb2.LockResponse(
+                    acquired=False,
+                    locked_by=existing_user,
+                    expires_at=existing_expires.isoformat(),
+                )
+            # else: same user re-acquiring — refresh TTL below.
+
+        _lock_store[lock_key] = (user_id, expires_at)
+        return saebooks_pb2.LockResponse(
+            acquired=True,
+            locked_by=user_id,
+            expires_at=expires_at.isoformat(),
+        )
+
+    async def ReleaseLock(
+        self,
+        request: saebooks_pb2.ReleaseLockRequest,
+        context: aio.ServicerContext,
+    ) -> saebooks_pb2.ReleaseLockResponse:
+        """Release a lock if it belongs to the requesting user."""
+        lock_key = (request.tenant_id, request.entity_type, request.entity_id)
+        existing = _lock_store.get(lock_key)
+        if existing is not None and existing[0] == request.user_id:
+            del _lock_store[lock_key]
+            return saebooks_pb2.ReleaseLockResponse(released=True)
+        return saebooks_pb2.ReleaseLockResponse(released=False)
 
 
 # ---------------------------------------------------------------------------
