@@ -130,7 +130,9 @@ async def test_archived_user_is_gated_off(
     # Pre-create as archived
     async with AsyncSessionLocal() as session:
         from datetime import datetime
+        import uuid as _uuid
         u = User(
+            tenant_id=_uuid.UUID("00000000-0000-0000-0000-000000000001"),
             username=unique_username,
             role="admin",
             archived_at=datetime.now(UTC),

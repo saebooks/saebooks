@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from saebooks.api.v1.auth import require_bearer
+from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.schemas import (
     ConflictBody,
     ContactCreate,
@@ -201,11 +201,13 @@ async def create_contact(
                 return replay
 
         company_id = await _first_company_id(session)
+        tenant_id = resolve_tenant_id()
         try:
             contact = await svc.create(
                 session,
                 company_id,
                 actor=f"api:{bearer[:8]}…",
+                tenant_id=tenant_id,
                 **payload.model_dump(exclude_unset=False, exclude={"bank_bsb", "bank_account_number", "bank_account_title"}),
             )
         except ValueError as exc:

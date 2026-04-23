@@ -25,6 +25,12 @@ class Contact(CompanyScoped, Base):
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False
     )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        default=uuid.UUID("00000000-0000-0000-0000-000000000001"),
+    )
     name: Mapped[str] = mapped_column(String, nullable=False)
     contact_type: Mapped[ContactType] = mapped_column(
         Enum(ContactType, name="contact_type_enum"), nullable=False

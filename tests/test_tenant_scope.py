@@ -46,18 +46,22 @@ async def two_companies() -> AsyncGenerator[tuple[uuid.UUID, uuid.UUID], None]:
     contact_a_name = f"Customer-A-{tag}"
     contact_b_name = f"Customer-B-{tag}"
 
+    _DEFAULT_TENANT = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
     async with AsyncSessionLocal() as session:
-        company_a = Company(name=name_a, base_currency="AUD")
-        company_b = Company(name=name_b, base_currency="AUD")
+        company_a = Company(name=name_a, base_currency="AUD", tenant_id=_DEFAULT_TENANT)
+        company_b = Company(name=name_b, base_currency="AUD", tenant_id=_DEFAULT_TENANT)
         session.add_all([company_a, company_b])
         await session.flush()
         contact_a = Contact(
             company_id=company_a.id,
+            tenant_id=_DEFAULT_TENANT,
             name=contact_a_name,
             contact_type=ContactType.CUSTOMER,
         )
         contact_b = Contact(
             company_id=company_b.id,
+            tenant_id=_DEFAULT_TENANT,
             name=contact_b_name,
             contact_type=ContactType.CUSTOMER,
         )

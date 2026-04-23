@@ -225,6 +225,9 @@ async def archive(
 # ---------------------------------------------------------------------------
 
 
+_DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+
 async def create_for_api(
     session: AsyncSession,
     company_id: uuid.UUID,
@@ -236,10 +239,12 @@ async def create_for_api(
     reporting_type: str = "taxable",
     description: str | None = None,
     actor: str = "api",
+    tenant_id: uuid.UUID = _DEFAULT_TENANT_ID,
 ) -> TaxCode:
     """Create a new tax code and append a change_log row."""
     tax_code = TaxCode(
         company_id=company_id,
+        tenant_id=tenant_id,
         code=code.strip(),
         name=name.strip(),
         rate=rate,

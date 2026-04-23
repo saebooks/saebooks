@@ -98,6 +98,7 @@ async def ensure_seed_company(session: AsyncSession) -> Company:
         return existing
 
     company = Company(
+        tenant_id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
         name=name,
         legal_name=settings.seed_company_legal_name or None,
         trading_name=settings.seed_company_trading_name or None,
@@ -112,6 +113,9 @@ async def ensure_seed_company(session: AsyncSession) -> Company:
     return company
 
 
+_DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+
 async def create_company(
     session: AsyncSession,
     *,
@@ -122,6 +126,7 @@ async def create_company(
     acn: str | None = None,
     base_currency: str = "AUD",
     fin_year_start_month: int = 7,
+    tenant_id: uuid.UUID = _DEFAULT_TENANT_ID,
 ) -> Company:
     """Create a new company, enforcing the edition cap.
 
@@ -140,6 +145,7 @@ async def create_company(
         )
 
     company = Company(
+        tenant_id=tenant_id,
         name=name,
         legal_name=legal_name,
         trading_name=trading_name,

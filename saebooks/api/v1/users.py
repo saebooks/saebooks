@@ -26,7 +26,7 @@ from fastapi.responses import JSONResponse, Response
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from saebooks.api.v1.auth import require_bearer
+from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.schemas import (
     PermissionOut,
     UserConflictBody,
@@ -144,6 +144,7 @@ async def create_user(
             role=payload.role,
             preferred_theme=payload.preferred_theme,
             actor=f"api:{bearer[:8]}…",
+            tenant_id=resolve_tenant_id(),
         )
         await session.refresh(user)
         body = _dump(user)

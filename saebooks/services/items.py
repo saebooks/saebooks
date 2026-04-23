@@ -386,6 +386,9 @@ def _serialise(item: Item) -> dict[str, Any]:
     return data
 
 
+_DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+
 async def create_for_api(
     session: AsyncSession,
     company_id: uuid.UUID,
@@ -403,6 +406,7 @@ async def create_for_api(
     default_sale_price: Decimal = Decimal("0"),
     extra: dict[str, Any] | None = None,
     actor: str = "api",
+    tenant_id: uuid.UUID = _DEFAULT_TENANT_ID,
 ) -> Item:
     """Create an item and append a change_log row."""
     if cost_method != CostMethod.WAC:
@@ -416,6 +420,7 @@ async def create_for_api(
 
     item = Item(
         company_id=company_id,
+        tenant_id=tenant_id,
         sku=sku.strip(),
         item_type=item_type,
         name=name.strip(),

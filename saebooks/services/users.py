@@ -150,6 +150,9 @@ async def get_by_username(session: AsyncSession, username: str) -> User | None:
     return result.scalars().first()
 
 
+_DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+
 async def create_for_api(
     session: AsyncSession,
     *,
@@ -159,9 +162,11 @@ async def create_for_api(
     role: str = UserRole.READONLY.value,
     preferred_theme: str | None = None,
     actor: str = "api",
+    tenant_id: uuid.UUID = _DEFAULT_TENANT_ID,
 ) -> User:
     """Create a new user and append a change_log row."""
     user = User(
+        tenant_id=tenant_id,
         username=username.strip(),
         display_name=display_name,
         email=email,

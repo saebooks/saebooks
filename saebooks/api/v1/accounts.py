@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from saebooks.api.v1.auth import require_bearer
+from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.schemas import (
     AccountConflictBody,
     AccountCreate,
@@ -169,11 +169,13 @@ async def create_account(
                 return replay
 
         company_id = await _first_company_id(session)
+        tenant_id = resolve_tenant_id()
         try:
             account = await svc.create(
                 session,
                 company_id,
                 actor=f"api:{bearer[:8]}…",
+                tenant_id=tenant_id,
                 code=payload.code,
                 name=payload.name,
                 account_type=payload.account_type,

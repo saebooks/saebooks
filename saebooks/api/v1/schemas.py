@@ -69,6 +69,7 @@ class ContactUpdate(BaseModel):
 class ContactOut(ContactBase):
     id: uuid.UUID
     company_id: uuid.UUID
+    tenant_id: uuid.UUID
     version: int
     archived_at: datetime | None
     created_at: datetime
@@ -140,6 +141,7 @@ class AccountUpdate(BaseModel):
 class AccountOut(AccountBase):
     id: uuid.UUID
     company_id: uuid.UUID
+    tenant_id: uuid.UUID
     version: int
     system_managed: bool
     bsb: str | None = None
@@ -172,6 +174,7 @@ class CompanyOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    tenant_id: uuid.UUID
     name: str
     legal_name: str | None = None
     trading_name: str | None = None
@@ -246,6 +249,7 @@ class TaxCodeUpdate(BaseModel):
 class TaxCodeOut(TaxCodeBase):
     id: uuid.UUID
     company_id: uuid.UUID
+    tenant_id: uuid.UUID
     version: int
     created_at: datetime
     archived_at: datetime | None = None
@@ -300,6 +304,7 @@ class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    tenant_id: uuid.UUID
     username: str
     display_name: str | None = None
     email: str | None = None
@@ -376,6 +381,7 @@ class ItemUpdate(BaseModel):
 class ItemOut(ItemBase):
     id: uuid.UUID
     company_id: uuid.UUID
+    tenant_id: uuid.UUID
     on_hand_qty: Decimal
     wac_cost: Decimal
     version: int

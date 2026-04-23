@@ -476,6 +476,9 @@ async def get(session: AsyncSession, account_id: uuid.UUID) -> Account | None:
     return await session.get(Account, account_id)
 
 
+_DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+
 async def create(
     session: AsyncSession,
     company_id: uuid.UUID,
@@ -488,6 +491,7 @@ async def create(
     tax_code_default: str | None = None,
     skip_validation: bool = False,
     actor: str = "web",
+    tenant_id: uuid.UUID = _DEFAULT_TENANT_ID,
 ) -> Account:
     code = code.strip()
 
@@ -501,6 +505,7 @@ async def create(
 
     account = Account(
         company_id=company_id,
+        tenant_id=tenant_id,
         code=code,
         name=name.strip(),
         account_type=account_type,

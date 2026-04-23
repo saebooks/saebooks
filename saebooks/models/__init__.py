@@ -23,6 +23,7 @@ from saebooks.models.project import Project, ProjectStatus
 from saebooks.models.settings import Setting
 from saebooks.models.sql_query import SqlQuery
 from saebooks.models.tax_code import TaxCode
+from saebooks.models.tenant import Tenant
 from saebooks.models.user import User, UserRole
 
 __all__ = [
@@ -58,6 +59,7 @@ __all__ = [
     "SqlQuery",
     "StatementLineStatus",
     "TaxCode",
+    "Tenant",
     "User",
     "UserRole",
 ]

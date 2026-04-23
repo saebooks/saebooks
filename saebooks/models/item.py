@@ -81,6 +81,12 @@ class Item(CompanyScoped, Base):
         ForeignKey("companies.id", ondelete="CASCADE"),
         nullable=False,
     )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        default=uuid.UUID("00000000-0000-0000-0000-000000000001"),
+    )
     sku: Mapped[str] = mapped_column(String(64), nullable=False)
     item_type: Mapped[ItemType] = mapped_column(
         String(16), nullable=False, default=ItemType.INVENTORY

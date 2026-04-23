@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import logging
 import os
+import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
@@ -157,6 +158,7 @@ async def _upsert_user(
                 else:
                     role = UserRole.READONLY.value
                 user = User(
+                    tenant_id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
                     username=username,
                     display_name=display_name,
                     email=email,

@@ -125,11 +125,15 @@ async def get(session: AsyncSession, contact_id: uuid.UUID) -> Contact | None:
     return await session.get(Contact, contact_id)
 
 
+_DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+
 async def create(
     session: AsyncSession,
     company_id: uuid.UUID,
     *,
     actor: str = "web",
+    tenant_id: uuid.UUID = _DEFAULT_TENANT_ID,
     name: str,
     contact_type: ContactType,
     email: str | None = None,
@@ -151,6 +155,7 @@ async def create(
 
     contact = Contact(
         company_id=company_id,
+        tenant_id=tenant_id,
         name=name.strip(),
         contact_type=contact_type,
         email=email,
