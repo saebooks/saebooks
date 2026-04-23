@@ -64,7 +64,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
-from saebooks.api.v1.schemas import AgedReport, BSReport, PnLReport
+from saebooks.api.v1.schemas import AgedReport, BSReport, BASSummary, CashflowStatement, PnLReport
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
 from saebooks.models.bill import Bill, BillStatus
@@ -72,6 +72,7 @@ from saebooks.models.company import Company
 from saebooks.models.contact import Contact
 from saebooks.models.invoice import Invoice, InvoiceStatus
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
+from saebooks.models.tax_code import TaxCode
 
 router = APIRouter(
     prefix="/reports",
@@ -533,4 +534,286 @@ async def balance_sheet(
         equity={"EQUITY": equity, "total_equity": total_equity},
         balanced=difference < 0.01,
         difference=round(difference, 2),
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/reports/bas_summary
+# ---------------------------------------------------------------------------
+
+# Reporting types that contribute to taxable BAS buckets.
+_TAXABLE_REPORTING_TYPE = "taxable"
+_GST_FREE_REPORTING_TYPE = "gst_free"
+
+# GST rate used for 1A calculation (sales).
+_GST_RATE = Decimal("0.10")
+
+# GST fraction used for 1B (tax-inclusive purchases): 1/11.
+_GST_INCLUSIVE_FRACTION = Decimal("1") / Decimal("11")
+
+
+@router.get("/bas_summary", response_model=BASSummary)
+async def bas_summary(
+    from_date: date = Query(...),
+    to_date: date = Query(...),
+) -> BASSummary:
+    """Australian BAS summary for a date range.
+
+    Queries POSTED JournalLine rows for the period joined to Account
+    and (outer-joined) to TaxCode via ``tax_code_id`` on the line.
+    Lines without a tax code are treated as out-of-scope and contribute
+    nothing to BAS buckets.
+
+    BAS logic:
+    * G1  — lines on INCOME/OTHER_INCOME accounts with reporting_type
+             "taxable": net = credit - debit.
+    * G3  — lines on INCOME/OTHER_INCOME accounts with reporting_type
+             "gst_free": net = credit - debit.
+    * G11 — lines on EXPENSE/COST_OF_SALES/OTHER_EXPENSE accounts with
+             reporting_type "taxable": net = debit - credit.
+    * 1A  = G1 × 10%  (GST collected, calculated from GST-exclusive base).
+    * 1B  = G11 × 1/11 (GST credits, tax-inclusive component of purchase).
+    * G2/G10 are always 0 in v1 (no export or capital acquisition tracking).
+    """
+    async with AsyncSessionLocal() as session:
+        tenant_id = resolve_tenant_id()
+        company_id = await _first_company_id(session)
+
+        stmt = (
+            select(
+                Account.account_type,
+                TaxCode.reporting_type,
+                func.sum(JournalLine.debit).label("total_debit"),
+                func.sum(JournalLine.credit).label("total_credit"),
+            )
+            .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+            .join(Account, JournalLine.account_id == Account.id)
+            .outerjoin(TaxCode, JournalLine.tax_code_id == TaxCode.id)
+            .where(
+                and_(
+                    JournalEntry.company_id == company_id,
+                    JournalEntry.tenant_id == tenant_id,
+                    JournalEntry.status == EntryStatus.POSTED,
+                    JournalEntry.archived_at.is_(None),
+                    JournalEntry.entry_date >= from_date,
+                    JournalEntry.entry_date <= to_date,
+                )
+            )
+            .group_by(Account.account_type, TaxCode.reporting_type)
+        )
+        rows = (await session.execute(stmt)).all()
+
+    g1 = Decimal("0")
+    g3 = Decimal("0")
+    g11 = Decimal("0")
+
+    for acc_type, reporting_type, total_debit, total_credit in rows:
+        total_debit = Decimal(total_debit or "0")
+        total_credit = Decimal(total_credit or "0")
+        rt = reporting_type or ""  # None when no tax code attached — skip
+
+        if acc_type in _INCOME_TYPES:
+            net = total_credit - total_debit  # income is credit-normal
+            if rt == _TAXABLE_REPORTING_TYPE:
+                g1 += net
+            elif rt == _GST_FREE_REPORTING_TYPE:
+                g3 += net
+        elif acc_type in _EXPENSE_TYPES:
+            net = total_debit - total_credit  # expenses are debit-normal
+            if rt == _TAXABLE_REPORTING_TYPE:
+                g11 += net
+
+    # 1A: GST collected on taxable sales (10% of GST-exclusive base).
+    label_1a = (g1 * _GST_RATE).quantize(Decimal("0.01"))
+
+    # 1B: GST credits on taxable purchases (1/11 of GST-inclusive amount).
+    # G11 represents the gross (GST-inclusive) purchase amount on the
+    # expense line.  The embedded GST component is gross × 1/11.
+    label_1b = (g11 * _GST_INCLUSIVE_FRACTION).quantize(Decimal("0.01"))
+
+    net_gst = label_1a - label_1b
+
+    return BASSummary(
+        from_date=from_date,
+        to_date=to_date,
+        g1_total_sales=float(g1),
+        g2_export_sales=0.0,
+        g3_other_gst_free_sales=float(g3),
+        g10_capital_acquisitions=0.0,
+        g11_other_acquisitions=float(g11),
+        label_1a_gst_on_sales=float(label_1a),
+        label_1b_gst_on_purchases=float(label_1b),
+        net_gst=float(net_gst),
+        remit_or_refund="REMIT" if net_gst > Decimal("0") else "REFUND",
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/reports/cashflow
+# ---------------------------------------------------------------------------
+
+# ASSET account name/code substrings used to identify cash/bank accounts
+# for opening/closing cash computation (heuristic, v1).
+_CASH_KEYWORDS = ("cash", "bank")
+
+
+@router.get("/cashflow", response_model=CashflowStatement)
+async def cashflow(
+    from_date: date = Query(...),
+    to_date: date = Query(...),
+) -> CashflowStatement:
+    """Indirect-method cashflow statement for a date range.
+
+    Operating section re-uses the same GL query helper as the P&L route
+    to compute net_profit. Investing and financing movements are derived
+    from ASSET and LIABILITY/EQUITY account movements in the GL for the
+    period. Opening/closing cash is a heuristic sum of ASSET accounts
+    whose name or code contains "cash" or "bank".
+
+    TODO (v2): replace heuristic cash identification with an explicit
+    ``is_cash`` flag on the Account model, and add proper adjustment
+    line items (depreciation, AR/AP movement) to the operating section.
+    """
+    async with AsyncSessionLocal() as session:
+        tenant_id = resolve_tenant_id()
+        company_id = await _first_company_id(session)
+
+        # --- Single GL query for the period covering all account types ---
+        stmt = (
+            select(
+                Account.id,
+                Account.name,
+                Account.code,
+                Account.account_type,
+                func.sum(JournalLine.debit).label("total_debit"),
+                func.sum(JournalLine.credit).label("total_credit"),
+            )
+            .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+            .join(Account, JournalLine.account_id == Account.id)
+            .where(
+                and_(
+                    JournalEntry.company_id == company_id,
+                    JournalEntry.tenant_id == tenant_id,
+                    JournalEntry.status == EntryStatus.POSTED,
+                    JournalEntry.archived_at.is_(None),
+                    JournalEntry.entry_date >= from_date,
+                    JournalEntry.entry_date <= to_date,
+                )
+            )
+            .group_by(Account.id, Account.name, Account.code, Account.account_type)
+            .order_by(Account.code)
+        )
+        period_rows = (await session.execute(stmt)).all()
+
+        # --- Opening cash: cumulative ASSET (cash/bank) movements before from_date ---
+        opening_stmt = (
+            select(
+                func.sum(JournalLine.debit - JournalLine.credit).label("net")
+            )
+            .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+            .join(Account, JournalLine.account_id == Account.id)
+            .where(
+                and_(
+                    JournalEntry.company_id == company_id,
+                    JournalEntry.tenant_id == tenant_id,
+                    JournalEntry.status == EntryStatus.POSTED,
+                    JournalEntry.archived_at.is_(None),
+                    JournalEntry.entry_date < from_date,
+                    Account.account_type == AccountType.ASSET,
+                )
+            )
+        )
+        opening_raw = (await session.execute(opening_stmt)).scalar()
+
+    # --- Accumulate movements from period rows ---
+    total_income = Decimal("0")
+    total_expenses = Decimal("0")
+    asset_purchases = Decimal("0")  # net debit on ASSET accounts (purchases)
+    asset_disposals = Decimal("0")  # net credit on ASSET accounts (disposals)
+    loan_proceeds = Decimal("0")    # net credit on LIABILITY accounts
+    loan_repayments = Decimal("0")  # net debit on LIABILITY accounts
+    equity_inflows = Decimal("0")   # net credit on EQUITY accounts
+    equity_outflows = Decimal("0")  # net debit on EQUITY accounts
+    period_cash_net = Decimal("0")  # net movement on cash/bank ASSET accounts
+
+    for row in period_rows:
+        acc_id, acc_name, acc_code, acc_type, total_debit, total_credit = row
+        total_debit = Decimal(total_debit or "0")
+        total_credit = Decimal(total_credit or "0")
+
+        if acc_type in _INCOME_TYPES:
+            net = total_credit - total_debit
+            if net > 0:
+                total_income += net
+
+        elif acc_type in _EXPENSE_TYPES:
+            net = total_debit - total_credit
+            if net > 0:
+                total_expenses += net
+
+        elif acc_type == AccountType.ASSET:
+            net_debit = total_debit - total_credit
+            # Identify cash/bank accounts by name or code heuristic
+            name_lower = acc_name.lower()
+            code_lower = acc_code.lower()
+            is_cash = any(kw in name_lower or kw in code_lower for kw in _CASH_KEYWORDS)
+
+            if is_cash:
+                period_cash_net += net_debit
+            else:
+                # Non-cash asset: debit movement = purchase, credit = disposal
+                if net_debit > 0:
+                    asset_purchases += net_debit
+                elif net_debit < 0:
+                    asset_disposals += -net_debit  # make positive
+
+        elif acc_type == AccountType.LIABILITY:
+            net_credit = total_credit - total_debit
+            if net_credit > 0:
+                loan_proceeds += net_credit
+            elif net_credit < 0:
+                loan_repayments += -net_credit
+
+        elif acc_type == AccountType.EQUITY:
+            net_credit = total_credit - total_debit
+            if net_credit > 0:
+                equity_inflows += net_credit
+            elif net_credit < 0:
+                equity_outflows += -net_credit
+
+    net_profit = float(total_income - total_expenses)
+    total_operating = net_profit  # v1: no working-capital adjustments
+
+    total_investing = float(asset_disposals - asset_purchases)
+    total_financing = float(loan_proceeds - loan_repayments + equity_inflows - equity_outflows)
+
+    net_change = total_operating + total_investing + total_financing
+
+    # Opening cash: cumulative ASSET (cash/bank) debit - credit before period.
+    # We use all ASSET accounts for the opening balance as a v1 simplification
+    # (proper implementation needs the is_cash flag on Account).
+    opening_cash = float(Decimal(str(opening_raw or "0")))
+    closing_cash = opening_cash + net_change
+
+    return CashflowStatement(
+        from_date=from_date,
+        to_date=to_date,
+        operating=dict(
+            net_profit=net_profit,
+            adjustments=[],
+            total_operating=total_operating,
+        ),
+        investing=dict(
+            asset_purchases=float(-asset_purchases),  # sign: outflow is negative
+            asset_disposals=float(asset_disposals),
+            total_investing=total_investing,
+        ),
+        financing=dict(
+            loan_proceeds=float(loan_proceeds),
+            loan_repayments=float(-loan_repayments),  # sign: outflow is negative
+            total_financing=total_financing,
+        ),
+        net_change=net_change,
+        opening_cash=opening_cash,
+        closing_cash=closing_cash,
     )

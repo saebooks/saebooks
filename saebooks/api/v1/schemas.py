@@ -1597,3 +1597,70 @@ class AgedReport(BaseModel):
     buckets: list[str]
     contacts: list[dict]
     totals: dict
+
+
+# ---------------------------------------------------------------------------
+# BAS Summary — tier-5 (cycle 20)
+# ---------------------------------------------------------------------------
+
+
+class BASSummary(BaseModel):
+    """Australian Business Activity Statement summary for a date range.
+
+    BAS labels follow ATO nomenclature:
+      G1  — Total taxable sales (inc. GST)
+      G2  — Export sales (always 0 in v1 — no export tracking)
+      G3  — Other GST-free sales
+      G10 — Capital acquisitions (always 0 in v1 — no capital tracking)
+      G11 — Other (non-capital) acquisitions (taxable expenses)
+      1A  — GST collected on sales (G1 × 10%)
+      1B  — GST credits on purchases (G11 × 1/11, i.e. tax-inclusive component)
+    """
+
+    from_date: date
+    to_date: date
+    g1_total_sales: float
+    g2_export_sales: float
+    g3_other_gst_free_sales: float
+    g10_capital_acquisitions: float
+    g11_other_acquisitions: float
+    label_1a_gst_on_sales: float
+    label_1b_gst_on_purchases: float
+    net_gst: float
+    remit_or_refund: str  # "REMIT" | "REFUND"
+
+
+# ---------------------------------------------------------------------------
+# Cashflow Statement (indirect method) — tier-5 (cycle 20)
+# ---------------------------------------------------------------------------
+
+
+class CashflowOperating(BaseModel):
+    net_profit: float
+    adjustments: list = Field(default_factory=list)
+    total_operating: float
+
+
+class CashflowInvesting(BaseModel):
+    asset_purchases: float
+    asset_disposals: float
+    total_investing: float
+
+
+class CashflowFinancing(BaseModel):
+    loan_proceeds: float
+    loan_repayments: float
+    total_financing: float
+
+
+class CashflowStatement(BaseModel):
+    """Indirect-method cashflow statement for a date range."""
+
+    from_date: date
+    to_date: date
+    operating: CashflowOperating
+    investing: CashflowInvesting
+    financing: CashflowFinancing
+    net_change: float
+    opening_cash: float
+    closing_cash: float
