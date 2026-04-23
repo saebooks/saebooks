@@ -1745,3 +1745,98 @@ class FixedAssetDispose(BaseModel):
     disposal_date: date
     proceeds: Decimal
     notes: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Trial Balance — tier-5 (cycle 27)
+# ---------------------------------------------------------------------------
+
+
+class TrialBalanceLine(BaseModel):
+    """One account row in the trial balance."""
+
+    account_id: uuid.UUID
+    code: str
+    name: str
+    account_type: AccountType
+    debit_total: float
+    credit_total: float
+    balance: float
+
+
+class TrialBalanceReport(BaseModel):
+    """Full trial balance as at a given date."""
+
+    as_of_date: date
+    accounts: list[TrialBalanceLine]
+    total_debits: float
+    total_credits: float
+    balanced: bool
+
+
+# ---------------------------------------------------------------------------
+# Budget vs Actual — tier-5 (cycle 27)
+# ---------------------------------------------------------------------------
+
+
+class BudgetVsActualLine(BaseModel):
+    """One account row in the budget vs actual report."""
+
+    account_id: uuid.UUID
+    account_code: str
+    account_name: str
+    budget: float
+    actual: float
+    variance: float
+    variance_pct: float | None  # None when budget is zero
+
+
+class BudgetVsActualReport(BaseModel):
+    """Budget vs actual report for a year (optionally a single month)."""
+
+    year: int
+    month: int | None  # None means full year
+    lines: list[BudgetVsActualLine]
+    total_budget: float
+    total_actual: float
+    total_variance: float
+
+
+# ---------------------------------------------------------------------------
+# P&L by Segment — tier-5 (cycle 27)
+# ---------------------------------------------------------------------------
+
+
+class PLSegmentAccountLine(BaseModel):
+    """One account line within a segment section."""
+
+    account_id: uuid.UUID
+    code: str
+    name: str
+    amount: float  # natural-sign positive (income=credit-debit, expense=debit-credit)
+
+
+class PLSegmentSection(BaseModel):
+    """One account-type grouping within a segment."""
+
+    account_type: str
+    lines: list[PLSegmentAccountLine]
+    total: float
+
+
+class PLSegmentRow(BaseModel):
+    """One project segment's P&L."""
+
+    segment_id: uuid.UUID | None
+    segment_label: str
+    sections: list[PLSegmentSection]
+    net_profit: float
+
+
+class PLBySegmentReport(BaseModel):
+    """P&L by segment (project) for a date range."""
+
+    from_date: date
+    to_date: date
+    segment_type: str
+    segments: list[PLSegmentRow]

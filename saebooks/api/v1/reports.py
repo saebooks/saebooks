@@ -68,12 +68,20 @@ from saebooks.api.v1.schemas import (
     AgedReport,
     BASSummary,
     BSReport,
+    BudgetVsActualLine,
+    BudgetVsActualReport,
     CashflowStatement,
     DepreciationAssetLine,
     DepreciationSchedule,
     FXRevaluationItem,
     FXRevaluationReport,
+    PLBySegmentReport,
+    PLSegmentAccountLine,
+    PLSegmentRow,
+    PLSegmentSection,
     PnLReport,
+    TrialBalanceLine,
+    TrialBalanceReport,
 )
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
@@ -81,11 +89,13 @@ from saebooks.models.bill import Bill, BillStatus
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact
 from saebooks.models.depreciation_model import DepreciationModel
+from saebooks.models.budget import Budget
 from saebooks.models.fixed_asset import FixedAsset
 from saebooks.models.invoice import Invoice, InvoiceStatus
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import assets as assets_svc
+from saebooks.services import reports as reports_svc
 
 router = APIRouter(
     prefix="/reports",
@@ -1121,4 +1131,329 @@ async def fx_revaluation(
         items=items,
         total_items=len(items),
         note=_FX_REPORT_NOTE,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/reports/trial_balance — tier-5 (cycle 27)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/trial_balance", response_model=TrialBalanceReport)
+async def trial_balance(
+    as_of_date: date | None = Query(default=None),
+    include_zero_balance: bool = Query(default=False),
+) -> TrialBalanceReport:
+    """Trial balance as at ``as_of_date`` (default today).
+
+    Sums ALL POSTED JournalLine entries where ``entry_date <= as_of_date``
+    (cumulative from inception), grouped by account.  Only accounts with a
+    non-zero balance appear unless ``include_zero_balance=True``.
+
+    ``balanced`` is True when ``abs(total_debits - total_credits) < 0.01``.
+    """
+    as_of = as_of_date or date.today()
+
+    async with AsyncSessionLocal() as session:
+        tenant_id = resolve_tenant_id()
+        company_id = await _first_company_id(session)
+
+        stmt = (
+            select(
+                Account.id,
+                Account.code,
+                Account.name,
+                Account.account_type,
+                func.sum(JournalLine.debit).label("total_debit"),
+                func.sum(JournalLine.credit).label("total_credit"),
+            )
+            .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+            .join(Account, JournalLine.account_id == Account.id)
+            .where(
+                and_(
+                    JournalEntry.company_id == company_id,
+                    JournalEntry.tenant_id == tenant_id,
+                    JournalEntry.status == EntryStatus.POSTED,
+                    JournalEntry.archived_at.is_(None),
+                    JournalEntry.entry_date <= as_of,
+                )
+            )
+            .group_by(Account.id, Account.code, Account.name, Account.account_type)
+            .order_by(Account.code)
+        )
+        rows = (await session.execute(stmt)).all()
+
+    lines: list[TrialBalanceLine] = []
+    total_debits = Decimal("0")
+    total_credits = Decimal("0")
+
+    for acc_id, acc_code, acc_name, acc_type, raw_debit, raw_credit in rows:
+        debit_total = Decimal(raw_debit or "0")
+        credit_total = Decimal(raw_credit or "0")
+        balance = debit_total - credit_total
+
+        if not include_zero_balance and balance == Decimal("0"):
+            continue
+
+        lines.append(
+            TrialBalanceLine(
+                account_id=acc_id,
+                code=acc_code,
+                name=acc_name,
+                account_type=acc_type,
+                debit_total=float(debit_total),
+                credit_total=float(credit_total),
+                balance=float(balance),
+            )
+        )
+        total_debits += debit_total
+        total_credits += credit_total
+
+    return TrialBalanceReport(
+        as_of_date=as_of,
+        accounts=lines,
+        total_debits=float(total_debits),
+        total_credits=float(total_credits),
+        balanced=abs(total_debits - total_credits) < Decimal("0.01"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/reports/budget_vs_actual — tier-5 (cycle 27)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/budget_vs_actual", response_model=BudgetVsActualReport)
+async def budget_vs_actual(
+    year: int = Query(...),
+    month: int | None = Query(default=None),
+) -> BudgetVsActualReport:
+    """Budget vs actual for a year (or a single month within that year).
+
+    When ``month`` is omitted the full year is aggregated (budget and
+    actual are summed across all 12 months).  When ``month`` is supplied
+    only that calendar month is compared.
+
+    Accounts that have a budget row or GL activity for the period are
+    included (outer join logic).  Variance = actual - budget.
+    ``variance_pct`` is null when the budget is zero.
+    """
+    if month is not None and not 1 <= month <= 12:
+        raise HTTPException(422, "month must be between 1 and 12")
+
+    async with AsyncSessionLocal() as session:
+        tenant_id = resolve_tenant_id()
+        company_id = await _first_company_id(session)
+
+        # --- Actuals ---
+        actual_conditions: list[Any] = [
+            JournalEntry.company_id == company_id,
+            JournalEntry.tenant_id == tenant_id,
+            JournalEntry.status == EntryStatus.POSTED,
+            JournalEntry.archived_at.is_(None),
+            func.extract("year", JournalEntry.entry_date) == year,
+        ]
+        if month is not None:
+            actual_conditions.append(
+                func.extract("month", JournalEntry.entry_date) == month
+            )
+
+        actual_stmt = (
+            select(
+                Account.id,
+                Account.code,
+                Account.name,
+                Account.account_type,
+                func.sum(JournalLine.debit).label("total_debit"),
+                func.sum(JournalLine.credit).label("total_credit"),
+            )
+            .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+            .join(Account, JournalLine.account_id == Account.id)
+            .where(and_(*actual_conditions))
+            .group_by(Account.id, Account.code, Account.name, Account.account_type)
+            .order_by(Account.code)
+        )
+        actual_rows = (await session.execute(actual_stmt)).all()
+
+        # --- Budgets ---
+        budget_conditions: list[Any] = [
+            Budget.company_id == company_id,
+            Budget.year == year,
+            Budget.archived_at.is_(None),
+        ]
+        if month is not None:
+            budget_conditions.append(Budget.month == month)
+
+        budget_stmt = (
+            select(
+                Budget.account_id,
+                func.sum(Budget.amount).label("total_budget"),
+            )
+            .where(and_(*budget_conditions))
+            .group_by(Budget.account_id)
+        )
+        budget_rows = (await session.execute(budget_stmt)).all()
+
+        # Resolve account metadata for budget-only accounts
+        actual_account_ids = {r[0] for r in actual_rows}
+        budget_account_ids = {r[0] for r in budget_rows}
+        missing_ids = budget_account_ids - actual_account_ids
+
+        meta: dict[Any, tuple[str, str, Any]] = {
+            r[0]: (r[1], r[2], r[3]) for r in actual_rows
+        }
+        if missing_ids:
+            meta_stmt = select(
+                Account.id, Account.code, Account.name, Account.account_type
+            ).where(Account.id.in_(missing_ids))
+            for aid, code, name, atype in (await session.execute(meta_stmt)).all():
+                meta[aid] = (code, name, atype)
+
+    # Build lookup maps
+    actuals_by_account: dict[Any, tuple[Decimal, Decimal]] = {
+        r[0]: (Decimal(r[4] or "0"), Decimal(r[5] or "0"))
+        for r in actual_rows
+    }
+    budgets_by_account: dict[Any, Decimal] = {
+        r[0]: Decimal(r[1] or "0") for r in budget_rows
+    }
+
+    all_account_ids = sorted(
+        actual_account_ids | budget_account_ids,
+        key=lambda aid: meta.get(aid, ("", "", None))[0],
+    )
+
+    lines: list[BudgetVsActualLine] = []
+    total_budget = Decimal("0")
+    total_actual = Decimal("0")
+
+    for aid in all_account_ids:
+        if aid not in meta:
+            continue
+        code, name, acc_type = meta[aid]
+
+        raw_debit, raw_credit = actuals_by_account.get(aid, (Decimal("0"), Decimal("0")))
+        # Natural-sign: income = credit-debit, expenses/assets = debit-credit
+        if acc_type in _INCOME_TYPES:
+            actual_val = raw_credit - raw_debit
+        else:
+            actual_val = raw_debit - raw_credit
+
+        budget_val = budgets_by_account.get(aid, Decimal("0"))
+        variance = actual_val - budget_val
+        variance_pct = (
+            float((variance / budget_val * 100).quantize(Decimal("0.01")))
+            if budget_val != Decimal("0")
+            else None
+        )
+
+        lines.append(
+            BudgetVsActualLine(
+                account_id=aid,
+                account_code=code,
+                account_name=name,
+                budget=float(budget_val),
+                actual=float(actual_val),
+                variance=float(variance),
+                variance_pct=variance_pct,
+            )
+        )
+        total_budget += budget_val
+        total_actual += actual_val
+
+    return BudgetVsActualReport(
+        year=year,
+        month=month,
+        lines=lines,
+        total_budget=float(total_budget),
+        total_actual=float(total_actual),
+        total_variance=float(total_actual - total_budget),
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/reports/pl_by_segment — tier-5 (cycle 27)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/pl_by_segment", response_model=PLBySegmentReport)
+async def pl_by_segment(
+    from_date: date = Query(...),
+    to_date: date = Query(...),
+    segment_type: str = Query(default="project"),
+) -> PLBySegmentReport:
+    """P&L by segment (project) for a date range.
+
+    v1 supports ``segment_type="project"`` only.  JournalLine.project_id
+    is used for grouping; lines with no project tag appear under the
+    "Unassigned" segment.
+
+    Returns HTTP 501 if an unsupported segment_type is requested.
+    """
+    if segment_type != "project":
+        raise HTTPException(
+            501,
+            {
+                "status": "not_implemented",
+                "note": (
+                    f"Segment type {segment_type!r} is not implemented in v1. "
+                    "Only 'project' is supported."
+                ),
+            },
+        )
+
+    async with AsyncSessionLocal() as session:
+        tenant_id = resolve_tenant_id()
+        company_id = await _first_company_id(session)
+
+        segment_rows = await reports_svc.pl_by_segment(
+            session,
+            company_id,
+            from_date=from_date,
+            to_date=to_date,
+            segment="project",
+        )
+
+    # Convert service dataclasses to API schema
+    output_segments: list[PLSegmentRow] = []
+    for row in segment_rows:
+        sections: list[PLSegmentSection] = []
+        for section in row.sections:
+            section_lines = [
+                PLSegmentAccountLine(
+                    account_id=bal.account_id,
+                    code=bal.code,
+                    name=bal.name,
+                    amount=float(
+                        # Natural sign: income=credit-debit, expense=debit-credit
+                        bal.credit - bal.debit
+                        if section.account_type
+                        in {AccountType.INCOME, AccountType.OTHER_INCOME}
+                        else bal.debit - bal.credit
+                    ),
+                )
+                for bal in section.rows
+            ]
+            section_total = sum(line.amount for line in section_lines)
+            sections.append(
+                PLSegmentSection(
+                    account_type=section.account_type.value,
+                    lines=section_lines,
+                    total=section_total,
+                )
+            )
+        output_segments.append(
+            PLSegmentRow(
+                segment_id=row.segment_id,
+                segment_label=row.segment_label,
+                sections=sections,
+                net_profit=float(row.net_profit),
+            )
+        )
+
+    return PLBySegmentReport(
+        from_date=from_date,
+        to_date=to_date,
+        segment_type=segment_type,
+        segments=output_segments,
     )
