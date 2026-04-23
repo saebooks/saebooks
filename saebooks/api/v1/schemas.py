@@ -863,3 +863,106 @@ class PaymentListOut(BaseModel):
 class PaymentConflictBody(BaseModel):
     detail: str
     current: PaymentOut
+
+
+# ---------------------------------------------------------------------------
+# Credit Notes — Phase 1 tier-3 (cycle 10)
+# ---------------------------------------------------------------------------
+
+
+class CreditNoteLineOut(BaseModel):
+    """One line of a credit note (nested in CreditNoteOut)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    line_no: int
+    description: str
+    account_id: uuid.UUID
+    tax_code_id: uuid.UUID | None = None
+    quantity: Decimal
+    unit_price: Decimal
+    discount_pct: Decimal
+    line_subtotal: Decimal
+    line_tax: Decimal
+    line_total: Decimal
+
+
+class CreditNoteLineCreate(BaseModel):
+    """One line in a POST/PATCH payload."""
+
+    description: str = Field(min_length=1)
+    account_id: uuid.UUID
+    tax_code_id: uuid.UUID | None = None
+    quantity: Decimal = Decimal("1")
+    unit_price: Decimal = Decimal("0")
+    discount_pct: Decimal = Decimal("0")
+
+
+class CreditNoteBase(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    contact_id: uuid.UUID
+    issue_date: date
+    reason: str | None = None
+    notes: str | None = None
+    original_invoice_id: uuid.UUID | None = None
+
+
+class CreditNoteCreate(CreditNoteBase):
+    """POST body."""
+
+    lines: list[CreditNoteLineCreate] = Field(default_factory=list)
+
+
+class CreditNoteUpdate(BaseModel):
+    """PATCH body — every field optional."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    contact_id: uuid.UUID | None = None
+    issue_date: date | None = None
+    reason: str | None = None
+    notes: str | None = None
+    original_invoice_id: uuid.UUID | None = None
+    lines: list[CreditNoteLineCreate] | None = None
+
+
+class CreditNoteOut(BaseModel):
+    """Full credit note response — includes nested lines, tenant_id, version."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    tenant_id: uuid.UUID
+    contact_id: uuid.UUID
+    number: str | None = None
+    issue_date: date
+    status: str
+    original_invoice_id: uuid.UUID | None = None
+    subtotal: Decimal
+    tax_total: Decimal
+    total: Decimal
+    amount_allocated: Decimal
+    reason: str | None = None
+    notes: str | None = None
+    posted_at: datetime | None = None
+    posted_by: str | None = None
+    version: int
+    created_at: datetime
+    updated_at: datetime
+    archived_at: datetime | None = None
+    lines: list[CreditNoteLineOut] = Field(default_factory=list)
+
+
+class CreditNoteListOut(BaseModel):
+    items: list[CreditNoteOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class CreditNoteConflictBody(BaseModel):
+    detail: str
+    current: CreditNoteOut

@@ -393,3 +393,320 @@ async def archive(
     cn.archived_at = datetime.now(UTC)
     await session.commit()
     return cn
+
+
+# ==========================================================================
+# API-oriented service (cycle 10) — optimistic locking + change_log
+#
+# These functions are the API surface for /api/v1/credit_notes.  They are
+# intentionally separate from the legacy posting pipeline above so the
+# two surfaces can evolve independently.
+# ==========================================================================
+
+from saebooks.services import change_log as change_log_svc  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# Exceptions
+# ---------------------------------------------------------------------------
+
+
+class VersionConflict(Exception):
+    """Raised when expected_version does not match the stored value."""
+
+    def __init__(self, current: CreditNote) -> None:
+        super().__init__(
+            f"CreditNote {current.id} is at version {current.version}, "
+            "not the expected version"
+        )
+        self.current = current
+
+
+# ---------------------------------------------------------------------------
+# Columns serialised into change_log.payload
+# ---------------------------------------------------------------------------
+
+_CN_COLUMNS: tuple[str, ...] = (
+    "id",
+    "company_id",
+    "tenant_id",
+    "contact_id",
+    "number",
+    "issue_date",
+    "status",
+    "original_invoice_id",
+    "subtotal",
+    "tax_total",
+    "total",
+    "amount_allocated",
+    "reason",
+    "notes",
+    "version",
+    "created_at",
+    "updated_at",
+    "archived_at",
+)
+
+
+def _serialise_cn(cn: CreditNote) -> dict:
+    data: dict = {}
+    for key in _CN_COLUMNS:
+        val = getattr(cn, key, None)
+        if isinstance(val, uuid.UUID):
+            val = str(val)
+        elif isinstance(val, datetime):
+            val = val.isoformat()
+        elif isinstance(val, date):
+            val = val.isoformat()
+        elif isinstance(val, Decimal):
+            val = str(val)
+        elif hasattr(val, "value"):  # StrEnum
+            val = val.value
+        data[key] = val
+    return data
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+_DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+
+async def _get_api(
+    session: AsyncSession, credit_note_id: uuid.UUID
+) -> CreditNote | None:
+    """Fetch a single credit note with lines. Returns None if not found."""
+    result = await session.execute(
+        select(CreditNote)
+        .options(selectinload(CreditNote.lines))
+        .where(CreditNote.id == credit_note_id)
+    )
+    return result.scalar_one_or_none()
+
+
+# ---------------------------------------------------------------------------
+# Read operations (API layer)
+# ---------------------------------------------------------------------------
+
+
+async def list_active(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    *,
+    contact_id: uuid.UUID | None = None,
+    status: CreditNoteStatus | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[CreditNote], int]:
+    """Return (credit_notes, total_count) — excludes archived credit notes."""
+    from sqlalchemy import func as sa_func
+    base_where = [
+        CreditNote.company_id == company_id,
+        CreditNote.archived_at.is_(None),
+    ]
+    if contact_id is not None:
+        base_where.append(CreditNote.contact_id == contact_id)
+    if status is not None:
+        base_where.append(CreditNote.status == status)
+    if date_from is not None:
+        base_where.append(CreditNote.issue_date >= date_from)
+    if date_to is not None:
+        base_where.append(CreditNote.issue_date <= date_to)
+
+    count_stmt = select(sa_func.count()).select_from(CreditNote).where(*base_where)
+    total = (await session.execute(count_stmt)).scalar_one()
+
+    stmt = (
+        select(CreditNote)
+        .options(selectinload(CreditNote.lines))
+        .where(*base_where)
+        .order_by(CreditNote.issue_date.desc(), CreditNote.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    notes = list((await session.execute(stmt)).scalars().unique().all())
+    return notes, total
+
+
+async def api_get(
+    session: AsyncSession, credit_note_id: uuid.UUID
+) -> CreditNote | None:
+    """Fetch a single credit note with its lines. Returns None if not found."""
+    return await _get_api(session, credit_note_id)
+
+
+# ---------------------------------------------------------------------------
+# Write operations (API layer)
+# ---------------------------------------------------------------------------
+
+
+async def api_create(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    actor: str,
+    *,
+    contact_id: uuid.UUID,
+    issue_date: date,
+    lines: list[dict],
+    original_invoice_id: uuid.UUID | None = None,
+    reference: str | None = None,
+    reason: str | None = None,
+    notes: str | None = None,
+) -> CreditNote:
+    """Create a credit note draft with version=1 and a change_log row."""
+    cn = CreditNote(
+        company_id=company_id,
+        tenant_id=tenant_id,
+        contact_id=contact_id,
+        issue_date=issue_date,
+        status=CreditNoteStatus.DRAFT,
+        original_invoice_id=original_invoice_id,
+        reason=reason,
+        notes=notes,
+        subtotal=Decimal("0"),
+        tax_total=Decimal("0"),
+        total=Decimal("0"),
+        amount_allocated=Decimal("0"),
+        version=1,
+    )
+    session.add(cn)
+    await session.flush()
+    await session.refresh(cn)
+
+    # Assign a credit note number
+    cn.number = await numbering.next_number(session, company_id, "credit_note")
+
+    # Write lines
+    if lines:
+        await _replace_lines(session, cn, lines)
+    await _recalc(session, cn)
+    await session.flush()
+
+    cn_loaded = await _get_api(session, cn.id)
+    assert cn_loaded is not None
+
+    await change_log_svc.append(
+        session,
+        entity="credit_note",
+        entity_id=cn_loaded.id,
+        op="create",
+        actor=actor,
+        payload=_serialise_cn(cn_loaded),
+        version=cn_loaded.version,
+    )
+    await session.commit()
+    return await _get_api(session, cn_loaded.id)  # type: ignore[return-value]
+
+
+async def api_update(
+    session: AsyncSession,
+    credit_note_id: uuid.UUID,
+    actor: str,
+    expected_version: int,
+    *,
+    contact_id: uuid.UUID | None = None,
+    issue_date: date | None = None,
+    lines: list[dict] | None = None,
+    original_invoice_id: uuid.UUID | None = None,
+    reason: str | None = None,
+    notes: str | None = None,
+) -> CreditNote:
+    """Update a credit note draft with optimistic locking + change_log."""
+    cn = await _get_api(session, credit_note_id)
+    if cn is None:
+        raise CreditNoteError(f"CreditNote {credit_note_id} not found")
+    if cn.version != expected_version:
+        raise VersionConflict(cn)
+
+    if contact_id is not None:
+        cn.contact_id = contact_id
+    if issue_date is not None:
+        cn.issue_date = issue_date
+    if original_invoice_id is not None:
+        cn.original_invoice_id = original_invoice_id
+    if reason is not None:
+        cn.reason = reason
+    if notes is not None:
+        cn.notes = notes
+
+    if lines is not None:
+        await _replace_lines(session, cn, lines)
+        await _recalc(session, cn)
+
+    cn.version = cn.version + 1
+    await session.flush()
+    await session.refresh(cn)
+
+    cn_loaded = await _get_api(session, credit_note_id)
+    assert cn_loaded is not None
+
+    await change_log_svc.append(
+        session,
+        entity="credit_note",
+        entity_id=cn_loaded.id,
+        op="update",
+        actor=actor,
+        payload=_serialise_cn(cn_loaded),
+        version=cn_loaded.version,
+    )
+    await session.commit()
+    return await _get_api(session, credit_note_id)  # type: ignore[return-value]
+
+
+async def api_void(
+    session: AsyncSession,
+    credit_note_id: uuid.UUID,
+    actor: str,
+    expected_version: int,
+) -> CreditNote:
+    """Soft-delete (archive/void) a credit note with optimistic locking + change_log."""
+    cn = await _get_api(session, credit_note_id)
+    if cn is None:
+        raise CreditNoteError(f"CreditNote {credit_note_id} not found")
+    if cn.version != expected_version:
+        raise VersionConflict(cn)
+
+    cn.archived_at = datetime.now(UTC)
+    cn.status = CreditNoteStatus.VOIDED
+    cn.version = cn.version + 1
+    await session.flush()
+    await session.refresh(cn)
+
+    cn_loaded = await _get_api(session, credit_note_id)
+    assert cn_loaded is not None
+
+    await change_log_svc.append(
+        session,
+        entity="credit_note",
+        entity_id=cn_loaded.id,
+        op="archive",
+        actor=actor,
+        payload=_serialise_cn(cn_loaded),
+        version=cn_loaded.version,
+    )
+    await session.commit()
+    return await _get_api(session, credit_note_id)  # type: ignore[return-value]
+
+
+__all__ = [
+    "CreditNoteError",
+    "CreditNoteStatus",
+    "VersionConflict",
+    "api_create",
+    "api_get",
+    "api_update",
+    "api_void",
+    "archive",
+    "create_draft",
+    "get",
+    "list_active",
+    "list_credit_notes",
+    "post_credit_note",
+    "update_draft",
+    "void_credit_note",
+]
