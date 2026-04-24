@@ -167,7 +167,7 @@ async def test_items_list_filter_by_item_type(
     )
     assert r2.status_code == 201
 
-    r = await api_client.get("/api/v1/items", params={"item_type": "service"})
+    r = await api_client.get("/api/v1/items", params={"item_type": "service", "limit": 10000})
     assert r.status_code == 200
     body = r.json()
     for item in body["items"]:
