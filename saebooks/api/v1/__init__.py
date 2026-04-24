@@ -17,6 +17,7 @@ Phase 1 tier-5: ``/api/v1/reports/aged_receivables``,
 """
 from fastapi import APIRouter
 
+from saebooks.api.v1.account_ranges import router as account_ranges_router
 from saebooks.api.v1.accounts import router as accounts_router
 from saebooks.api.v1.bank_accounts import router as bank_accounts_router
 from saebooks.api.v1.depreciation_models import router as depreciation_models_router
@@ -33,6 +34,7 @@ from saebooks.api.v1.recurring_invoices import router as recurring_invoices_rout
 from saebooks.api.v1.reports import router as reports_router
 from saebooks.api.v1.search import router as search_router
 from saebooks.api.v1.invoices import router as invoices_router
+from saebooks.api.v1.journal_templates import router as journal_templates_router
 from saebooks.api.v1.items import router as items_router
 from saebooks.api.v1.journal_entries import router as journal_entries_router
 from saebooks.api.v1.payments import router as payments_router
@@ -48,6 +50,7 @@ router = APIRouter(prefix="/api/v1")
 # router with a router-level dependency.
 router.include_router(health_router)
 router.include_router(contacts_router)
+router.include_router(account_ranges_router)
 router.include_router(accounts_router)
 router.include_router(bank_accounts_router)
 router.include_router(bank_statement_lines_router)
@@ -59,6 +62,7 @@ router.include_router(users_router)
 router.include_router(permissions_router)
 router.include_router(journal_entries_router)
 router.include_router(invoices_router)
+router.include_router(journal_templates_router)
 router.include_router(bills_router)
 router.include_router(payments_router)
 router.include_router(credit_notes_router)

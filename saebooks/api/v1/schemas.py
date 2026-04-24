@@ -1913,6 +1913,139 @@ class PLBySegmentReport(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Journal Templates — cycle 40
+# ---------------------------------------------------------------------------
+
+
+class JournalTemplateLineCreate(BaseModel):
+    """One line in a journal template (create / replace)."""
+
+    account_id: uuid.UUID
+    description: str | None = None
+    debit: Decimal = Decimal("0")
+    credit: Decimal = Decimal("0")
+    tax_code_id: uuid.UUID | None = None
+
+
+class JournalTemplateCreate(BaseModel):
+    """POST body for creating a journal template."""
+
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+    lines: list[JournalTemplateLineCreate] = Field(default_factory=list)
+
+
+class JournalTemplateUpdate(BaseModel):
+    """PATCH body — every field optional."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = None
+    lines: list[JournalTemplateLineCreate] | None = None
+
+
+class JournalTemplateLineOut(BaseModel):
+    """One line in a journal template response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    account_id: uuid.UUID
+    description: str | None = None
+    debit: Decimal = Decimal("0")
+    credit: Decimal = Decimal("0")
+    tax_code_id: uuid.UUID | None = None
+
+
+class JournalTemplateOut(BaseModel):
+    """Full journal template response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    name: str
+    description: str | None = None
+    lines: list[dict] = Field(default_factory=list)
+    created_at: datetime
+    archived_at: datetime | None = None
+
+
+class JournalTemplateListOut(BaseModel):
+    items: list[JournalTemplateOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class JournalTemplateApplyOut(BaseModel):
+    """Response body for POST /journal_templates/{id}/apply.
+
+    Returns the suggested pre-filled lines; the caller POSTs these
+    to /api/v1/journal_entries to create the actual entry.
+    """
+
+    template_id: uuid.UUID
+    template_name: str
+    suggested_lines: list[JournalTemplateLineOut]
+
+
+# ---------------------------------------------------------------------------
+# Account Ranges — cycle 40
+# ---------------------------------------------------------------------------
+
+
+class AccountRangeCreate(BaseModel):
+    """POST body for creating an account range."""
+
+    prefix: str = Field(min_length=1, max_length=16)
+    label: str = Field(min_length=1, max_length=255)
+    account_types: list[str]
+    sort_order: int = 0
+
+
+class AccountRangeUpdate(BaseModel):
+    """PATCH body — prefix is immutable; every other field optional."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    label: str | None = Field(default=None, min_length=1, max_length=255)
+    account_types: list[str] | None = None
+    sort_order: int | None = None
+
+
+class AccountRangeOut(BaseModel):
+    """Full account range response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    prefix: str
+    label: str
+    account_types: list[str]
+    sort_order: int
+    created_at: datetime
+
+
+class AccountRangeListOut(BaseModel):
+    items: list[AccountRangeOut]
+    total: int
+
+
+class PrefixModeOut(BaseModel):
+    """Response body for GET /account_ranges/prefix_mode."""
+
+    mode: str
+
+
+class PrefixModeUpdate(BaseModel):
+    """PATCH body for /account_ranges/prefix_mode."""
+
+    mode: str = Field(min_length=1)
+
+
+# ---------------------------------------------------------------------------
 # Search — global across contacts/invoices/bills/accounts (cycle 36)
 # ---------------------------------------------------------------------------
 
