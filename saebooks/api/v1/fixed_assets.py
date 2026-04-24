@@ -20,6 +20,7 @@ disposal flow, and the monthly batch are separate cycles.
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -29,6 +30,9 @@ from sqlalchemy import select
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.schemas import (
+    DepreciationRunAllRequest,
+    DepreciationRunAllResponse,
+    DepreciationRunAllResultItem,
     FixedAssetConflictBody,
     FixedAssetCreate,
     FixedAssetDepreciationRunRequest,
@@ -40,6 +44,7 @@ from saebooks.api.v1.schemas import (
 )
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
+from saebooks.models.fixed_asset import FixedAsset
 from saebooks.models.idempotency_key import IdempotencyKey
 from saebooks.services import assets as legacy_assets_svc
 from saebooks.services import fixed_assets as svc
@@ -140,6 +145,86 @@ async def list_fixed_assets(
             limit=page_size,
             offset=offset,
         )
+
+
+# ---------------------------------------------------------------------------
+# Batch depreciation run — MUST be before /{asset_id} routes
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/depreciation_run_all",
+    response_model=DepreciationRunAllResponse,
+)
+async def depreciation_run_all(
+    body: DepreciationRunAllRequest,
+    bearer: str = Depends(require_bearer),
+) -> Any:
+    """Run depreciation for all active, non-disposed assets up to ``through``.
+
+    Iterates every active asset for the company. Calls
+    ``legacy_assets_svc.post_depreciation`` for each one and collects
+    results. Per-asset errors are caught and added to the ``errors`` list
+    rather than aborting the whole batch.
+
+    Returns 200 with a :class:`DepreciationRunAllResponse` regardless of
+    whether any assets had errors — the caller inspects the ``errors``
+    field to handle partial failures.
+    """
+    actor = f"api:{bearer[:8]}…"
+
+    async with AsyncSessionLocal() as session:
+        company_id = await _first_company_id(session)
+
+        # Fetch all active, non-archived assets for this company.
+        result = await session.execute(
+            select(FixedAsset).where(
+                FixedAsset.company_id == company_id,
+                FixedAsset.status == "active",
+                FixedAsset.archived_at.is_(None),
+            ).order_by(FixedAsset.code)
+        )
+        assets = list(result.scalars().all())
+
+        results: list[DepreciationRunAllResultItem] = []
+        errors: list[str] = []
+        total_amount = Decimal("0")
+
+        for asset in assets:
+            try:
+                _updated_asset, amount_posted = await legacy_assets_svc.post_depreciation(
+                    session,
+                    asset.id,
+                    body.through,
+                    posted_by=actor,
+                )
+                if amount_posted > 0:
+                    note = f"Posted AUD {amount_posted}"
+                else:
+                    note = "No depreciation to post"
+                results.append(
+                    DepreciationRunAllResultItem(
+                        asset_id=asset.id,
+                        asset_code=asset.code,
+                        amount_posted=amount_posted,
+                        note=note,
+                    )
+                )
+                total_amount += amount_posted
+            except Exception as exc:
+                errors.append(f"{asset.code}: {exc}")
+
+    response_body = DepreciationRunAllResponse(
+        through=body.through,
+        total_assets=len(results),
+        total_amount=total_amount,
+        results=results,
+        errors=errors,
+    )
+    return JSONResponse(
+        json.loads(response_body.model_dump_json()),
+        status_code=200,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -1792,6 +1792,31 @@ class FixedAssetDepreciationRunResponse(BaseModel):
     note: str
 
 
+class DepreciationRunAllRequest(BaseModel):
+    """POST body for POST /depreciation_run_all — batch run across all active assets."""
+
+    through: date
+
+
+class DepreciationRunAllResultItem(BaseModel):
+    """One asset's result row in a batch depreciation run."""
+
+    asset_id: uuid.UUID
+    asset_code: str
+    amount_posted: Decimal
+    note: str  # e.g. "Posted AUD 500.00" or "No depreciation to post"
+
+
+class DepreciationRunAllResponse(BaseModel):
+    """Response body for POST /depreciation_run_all."""
+
+    through: date
+    total_assets: int
+    total_amount: Decimal
+    results: list[DepreciationRunAllResultItem]
+    errors: list[str]  # any assets that failed (asset code + error message)
+
+
 # ---------------------------------------------------------------------------
 # Trial Balance — tier-5 (cycle 27)
 # ---------------------------------------------------------------------------

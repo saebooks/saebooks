@@ -763,3 +763,64 @@ async def test_fixed_asset_depreciation_run_stale_409(
     body = r2.json()
     assert body["detail"] == "version mismatch"
     assert body["current"]["id"] == asset_id
+
+
+# ---------------------------------------------------------------------------
+# POST /depreciation_run_all
+# ---------------------------------------------------------------------------
+
+
+async def test_depreciation_run_all_returns_results(
+    api_client: AsyncClient, gl: dict
+) -> None:
+    """POST /depreciation_run_all with a future through-date → 200, valid shape.
+
+    Creates one asset so there is at least one active asset in the DB.
+    Uses a no_depreciation model so no period-lock check fires.
+    """
+    # Create an asset with the no_depreciation model so the batch run
+    # never hits a posting error regardless of the period lock.
+    r = await api_client.post(
+        "/api/v1/fixed_assets",
+        json=_asset_payload(
+            gl,
+            depreciation_model_id="asset_no_depreciation",
+            purchase_date="2024-01-01",
+            cost="1000.00",
+        ),
+    )
+    assert r.status_code == 201, r.text
+
+    r2 = await api_client.post(
+        "/api/v1/fixed_assets/depreciation_run_all",
+        json={"through": "2026-04-30"},
+    )
+    assert r2.status_code == 200, r2.text
+    body = r2.json()
+    assert "through" in body
+    assert "total_assets" in body
+    assert "total_amount" in body
+    assert "results" in body
+    assert "errors" in body
+    assert isinstance(body["results"], list)
+    assert isinstance(body["errors"], list)
+    assert body["total_assets"] >= 0
+    # total_assets == len(results)
+    assert body["total_assets"] == len(body["results"])
+
+
+async def test_depreciation_run_all_no_active_assets_ok(
+    api_client: AsyncClient,
+) -> None:
+    """POST /depreciation_run_all still returns 200 even if there happen to
+    be zero active assets (empty results, no errors)."""
+    # We cannot guarantee the DB has zero assets, but we can verify the
+    # endpoint always returns 200 with the expected shape.
+    r = await api_client.post(
+        "/api/v1/fixed_assets/depreciation_run_all",
+        json={"through": "2099-12-31"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["total_assets"] == len(body["results"])
+    assert isinstance(body["errors"], list)
