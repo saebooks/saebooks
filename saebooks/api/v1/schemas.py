@@ -1096,6 +1096,8 @@ class BankStatementLineOut(BaseModel):
     matched_entry_id: uuid.UUID | None = None
     matched_at: datetime | None = None
     matched_by: str | None = None
+    matched_to_type: str | None = None
+    matched_to_id: uuid.UUID | None = None
     contact_id: uuid.UUID | None = None
     bank_rule_id: uuid.UUID | None = None
     bank_feed_account_id: uuid.UUID | None = None
@@ -1115,6 +1117,17 @@ class BankStatementLineListOut(BaseModel):
 class BankStatementLineConflictBody(BaseModel):
     detail: str
     current: BankStatementLineOut
+
+
+class BankStatementLineMatchRequest(BaseModel):
+    """POST body for /bank_statement_lines/{id}/match."""
+
+    matched_to_type: str = Field(
+        ..., description="PAYMENT or JOURNAL_ENTRY"
+    )
+    matched_to_id: uuid.UUID = Field(
+        ..., description="UUID of the matching payment or journal entry"
+    )
 
 
 # ---------------------------------------------------------------------------

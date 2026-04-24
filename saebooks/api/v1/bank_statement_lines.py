@@ -28,6 +28,7 @@ from saebooks.api.v1.schemas import (
     BankStatementLineConflictBody,
     BankStatementLineCreate,
     BankStatementLineListOut,
+    BankStatementLineMatchRequest,
     BankStatementLineOut,
     BankStatementLineUpdate,
 )
@@ -319,3 +320,72 @@ async def delete_bank_statement_line(
             raise HTTPException(422, msg) from exc
 
     return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
+# Match (reconcile to a payment or journal entry)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{line_id}/match", response_model=BankStatementLineOut)
+async def match_bank_statement_line(
+    line_id: UUID,
+    payload: BankStatementLineMatchRequest,
+    bearer: str = Depends(require_bearer),
+) -> Any:
+    """Match a bank statement line to a payment or journal entry.
+
+    Sets status=MATCHED, records matched_to_type, matched_to_id, matched_at,
+    and bumps the version.
+    """
+    async with AsyncSessionLocal() as session:
+        tenant_id = resolve_tenant_id()
+        try:
+            line = await svc.api_match(
+                session,
+                line_id,
+                actor=f"api:{bearer[:8]}…",
+                matched_to_type=payload.matched_to_type.upper(),
+                matched_to_id=payload.matched_to_id,
+                tenant_id=tenant_id,
+            )
+        except (ValueError, svc.BankStatementLineError) as exc:
+            msg = str(exc)
+            if "not found" in msg.lower():
+                raise HTTPException(404, msg) from exc
+            raise HTTPException(422, msg) from exc
+
+    return JSONResponse(_dump(line), status_code=200)
+
+
+# ---------------------------------------------------------------------------
+# Unmatch (clear reconciliation)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{line_id}/unmatch", response_model=BankStatementLineOut)
+async def unmatch_bank_statement_line(
+    line_id: UUID,
+    bearer: str = Depends(require_bearer),
+) -> Any:
+    """Clear the reconciliation match on a bank statement line.
+
+    Sets status=UNMATCHED and clears matched_to_type, matched_to_id,
+    matched_entry_id, matched_at, matched_by.
+    """
+    async with AsyncSessionLocal() as session:
+        tenant_id = resolve_tenant_id()
+        try:
+            line = await svc.api_unmatch(
+                session,
+                line_id,
+                actor=f"api:{bearer[:8]}…",
+                tenant_id=tenant_id,
+            )
+        except (ValueError, svc.BankStatementLineError) as exc:
+            msg = str(exc)
+            if "not found" in msg.lower():
+                raise HTTPException(404, msg) from exc
+            raise HTTPException(422, msg) from exc
+
+    return JSONResponse(_dump(line), status_code=200)

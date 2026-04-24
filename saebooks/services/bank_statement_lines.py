@@ -41,6 +41,8 @@ _BSL_COLUMNS: tuple[str, ...] = (
     "matched_entry_id",
     "matched_at",
     "matched_by",
+    "matched_to_type",
+    "matched_to_id",
     "contact_id",
     "bank_rule_id",
     "bank_feed_account_id",
@@ -313,12 +315,100 @@ async def api_delete(
     return line
 
 
+_VALID_MATCHED_TO_TYPES = {"PAYMENT", "JOURNAL_ENTRY"}
+
+
+async def api_match(
+    session: AsyncSession,
+    line_id: uuid.UUID,
+    actor: str,
+    matched_to_type: str,
+    matched_to_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+) -> BankStatementLine:
+    """Set a bank statement line to MATCHED, recording what it was matched to.
+
+    matched_to_type must be 'PAYMENT' or 'JOURNAL_ENTRY'.
+    matched_to_id is the UUID of the matching record (not FK-constrained).
+    """
+    if matched_to_type not in _VALID_MATCHED_TO_TYPES:
+        valid = ", ".join(sorted(_VALID_MATCHED_TO_TYPES))
+        raise BankStatementLineError(
+            f"matched_to_type must be one of {valid}, got '{matched_to_type}'"
+        )
+
+    line = await session.get(BankStatementLine, line_id)
+    if line is None or line.archived_at is not None:
+        raise BankStatementLineError(f"BankStatementLine {line_id} not found")
+
+    line.status = StatementLineStatus.MATCHED
+    line.matched_to_type = matched_to_type
+    line.matched_to_id = matched_to_id
+    line.matched_at = datetime.now(UTC)
+    line.matched_by = actor
+    line.version = line.version + 1
+
+    await session.flush()
+    await session.refresh(line)
+
+    await change_log_svc.append(
+        session,
+        entity="bank_statement_line",
+        entity_id=line.id,
+        op="matched",
+        actor=actor,
+        payload=_serialise(line),
+        version=line.version,
+    )
+    await session.commit()
+    await session.refresh(line)
+    return line
+
+
+async def api_unmatch(
+    session: AsyncSession,
+    line_id: uuid.UUID,
+    actor: str,
+    tenant_id: uuid.UUID,
+) -> BankStatementLine:
+    """Clear all match fields and set status back to UNMATCHED."""
+    line = await session.get(BankStatementLine, line_id)
+    if line is None or line.archived_at is not None:
+        raise BankStatementLineError(f"BankStatementLine {line_id} not found")
+
+    line.status = StatementLineStatus.UNMATCHED
+    line.matched_to_type = None
+    line.matched_to_id = None
+    line.matched_entry_id = None
+    line.matched_at = None
+    line.matched_by = None
+    line.version = line.version + 1
+
+    await session.flush()
+    await session.refresh(line)
+
+    await change_log_svc.append(
+        session,
+        entity="bank_statement_line",
+        entity_id=line.id,
+        op="unmatched",
+        actor=actor,
+        payload=_serialise(line),
+        version=line.version,
+    )
+    await session.commit()
+    await session.refresh(line)
+    return line
+
+
 __all__ = [
     "BankStatementLineError",
     "VersionConflict",
     "api_create",
     "api_delete",
     "api_get",
+    "api_match",
+    "api_unmatch",
     "api_update",
     "list_active",
 ]

@@ -59,6 +59,14 @@ class BankStatementLine(CompanyScoped, Base):
     )
     matched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     matched_by: Mapped[str | None] = mapped_column(String)
+    matched_to_type: Mapped[str | None] = mapped_column(
+        String(32),
+        comment="PAYMENT or JOURNAL_ENTRY — type of the matched transaction",
+    )
+    matched_to_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        comment="UUID of the matched payment or journal entry (no FK constraint)",
+    )
     contact_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("contacts.id", ondelete="SET NULL"),
         comment="Optional contact (customer/supplier) inferred from rule or manual",

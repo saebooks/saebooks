@@ -574,3 +574,73 @@ async def test_bank_statement_lines_change_log_full_sequence(
     assert "updated" in ops
     assert "deleted" in ops
     assert versions == sorted(versions)  # monotonically increasing
+
+
+# ---------------------------------------------------------------------------
+# Reconciliation — match / unmatch
+# ---------------------------------------------------------------------------
+
+
+async def test_match_bsl_to_payment(
+    api_client: AsyncClient, bank_account_id: str
+) -> None:
+    """POST /match sets status=MATCHED and records matched_to_type/id."""
+    r = await api_client.post(
+        "/api/v1/bank_statement_lines", json=_line_payload(bank_account_id)
+    )
+    assert r.status_code == 201, r.text
+    line_id = r.json()["id"]
+
+    payment_id = str(uuid.uuid4())
+    r2 = await api_client.post(
+        f"/api/v1/bank_statement_lines/{line_id}/match",
+        json={"matched_to_type": "PAYMENT", "matched_to_id": payment_id},
+    )
+    assert r2.status_code == 200, r2.text
+    body = r2.json()
+    assert body["status"] == "MATCHED"
+    assert body["matched_to_type"] == "PAYMENT"
+    assert body["matched_to_id"] == payment_id
+    assert body["matched_at"] is not None
+    assert body["version"] == 2
+
+
+async def test_unmatch_bsl(
+    api_client: AsyncClient, bank_account_id: str
+) -> None:
+    """POST /unmatch clears match fields and sets status=UNMATCHED."""
+    # Create and match first
+    r = await api_client.post(
+        "/api/v1/bank_statement_lines", json=_line_payload(bank_account_id)
+    )
+    assert r.status_code == 201
+    line_id = r.json()["id"]
+
+    payment_id = str(uuid.uuid4())
+    r2 = await api_client.post(
+        f"/api/v1/bank_statement_lines/{line_id}/match",
+        json={"matched_to_type": "PAYMENT", "matched_to_id": payment_id},
+    )
+    assert r2.status_code == 200
+
+    # Now unmatch
+    r3 = await api_client.post(
+        f"/api/v1/bank_statement_lines/{line_id}/unmatch"
+    )
+    assert r3.status_code == 200, r3.text
+    body = r3.json()
+    assert body["status"] == "UNMATCHED"
+    assert body["matched_to_type"] is None
+    assert body["matched_to_id"] is None
+    assert body["matched_at"] is None
+    assert body["version"] == 3
+
+
+async def test_match_nonexistent_bsl_404(api_client: AsyncClient) -> None:
+    """POST /match on an unknown UUID returns 404."""
+    random_id = str(uuid.uuid4())
+    r = await api_client.post(
+        f"/api/v1/bank_statement_lines/{random_id}/match",
+        json={"matched_to_type": "PAYMENT", "matched_to_id": str(uuid.uuid4())},
+    )
+    assert r.status_code == 404
