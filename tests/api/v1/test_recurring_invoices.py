@@ -676,3 +676,85 @@ async def test_recurring_invoices_frequency_enum_round_trip(
     )
     assert r.status_code == 201, r.text
     assert r.json()["frequency"] == frequency
+
+
+# ---------------------------------------------------------------------------
+# Manual generation — POST /{id}/generate
+# ---------------------------------------------------------------------------
+
+
+async def test_ri_generate_creates_invoice(
+    api_client: AsyncClient, deps: dict
+) -> None:
+    """ACTIVE RI with lines → 201, invoice_id and invoice body returned."""
+    r = await api_client.post("/api/v1/recurring_invoices", json=_ri_payload(deps))
+    assert r.status_code == 201, r.text
+    ri_id = r.json()["id"]
+    version = r.json()["version"]
+    next_run = r.json()["next_run"]
+
+    r2 = await api_client.post(
+        f"/api/v1/recurring_invoices/{ri_id}/generate",
+        headers={"If-Match": str(version)},
+    )
+    assert r2.status_code == 201, r2.text
+    body = r2.json()
+    assert "invoice_id" in body
+    assert "invoice" in body
+    invoice = body["invoice"]
+    assert invoice["id"] == body["invoice_id"]
+    assert invoice["status"] in ("DRAFT", "POSTED")
+    assert invoice["contact_id"] == deps["contact_id"]
+    assert invoice["issue_date"] == next_run
+    assert len(invoice["lines"]) == 1
+
+    # Template version should have advanced (next_run changed, invoices_generated++).
+    r3 = await api_client.get(f"/api/v1/recurring_invoices/{ri_id}")
+    assert r3.status_code == 200
+    updated_ri = r3.json()
+    assert updated_ri["invoices_generated"] == 1
+    assert updated_ri["next_run"] != next_run
+
+
+async def test_ri_generate_paused_422(
+    api_client: AsyncClient, deps: dict
+) -> None:
+    """PAUSED recurring invoice → 422 on generate."""
+    r = await api_client.post("/api/v1/recurring_invoices", json=_ri_payload(deps))
+    assert r.status_code == 201
+    ri_id = r.json()["id"]
+    v = r.json()["version"]
+
+    # Pause it.
+    rp = await api_client.post(
+        f"/api/v1/recurring_invoices/{ri_id}/pause",
+        headers={"If-Match": str(v)},
+    )
+    assert rp.status_code == 200
+    paused_version = rp.json()["version"]
+
+    r2 = await api_client.post(
+        f"/api/v1/recurring_invoices/{ri_id}/generate",
+        headers={"If-Match": str(paused_version)},
+    )
+    assert r2.status_code == 422
+    assert "PAUSED" in r2.json()["detail"]
+
+
+async def test_ri_generate_stale_409(
+    api_client: AsyncClient, deps: dict
+) -> None:
+    """Wrong If-Match version on generate → 409 with current state."""
+    r = await api_client.post("/api/v1/recurring_invoices", json=_ri_payload(deps))
+    assert r.status_code == 201
+    ri_id = r.json()["id"]
+
+    r2 = await api_client.post(
+        f"/api/v1/recurring_invoices/{ri_id}/generate",
+        headers={"If-Match": "99"},
+    )
+    assert r2.status_code == 409
+    body = r2.json()
+    assert body["detail"] == "version mismatch"
+    assert body["current"]["id"] == ri_id
+    assert body["current"]["version"] == 1

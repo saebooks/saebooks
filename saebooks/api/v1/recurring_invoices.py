@@ -28,8 +28,10 @@ from sqlalchemy import select
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.schemas import (
+    InvoiceOut,
     RecurringInvoiceConflictBody,
     RecurringInvoiceCreate,
+    RecurringInvoiceGenerateResponse,
     RecurringInvoiceListOut,
     RecurringInvoiceOut,
     RecurringInvoiceUpdate,
@@ -37,6 +39,8 @@ from saebooks.api.v1.schemas import (
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 from saebooks.models.idempotency_key import IdempotencyKey
+from saebooks.models.recurring_invoice import RecurrenceStatus
+from saebooks.services import recurrence as recurrence_svc
 from saebooks.services import recurring_invoices as svc
 
 router = APIRouter(
@@ -451,3 +455,87 @@ async def end_recurring_invoice(
 
         body = _dump(ri)
     return JSONResponse(body, status_code=200)
+
+
+# ---------------------------------------------------------------------------
+# Manual invoice generation
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/{ri_id}/generate",
+    response_model=RecurringInvoiceGenerateResponse,
+    status_code=201,
+    responses={
+        201: {"model": RecurringInvoiceGenerateResponse},
+        409: {"description": "Version mismatch (stale If-Match)"},
+        422: {"description": "Template not ACTIVE or generation error"},
+    },
+)
+async def generate_invoice(
+    ri_id: UUID,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+    idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
+    bearer: str = Depends(require_bearer),
+) -> Any:
+    """Manually materialise one invoice from an ACTIVE recurring template.
+
+    Requires ``If-Match: <version>`` for optimistic locking — if the
+    template has been modified since the client last fetched it, 409 is
+    returned. Provide ``X-Idempotency-Key`` to make the call retry-safe.
+
+    Only ACTIVE templates may be triggered. PAUSED, ENDED, or archived
+    templates return 422. Generation uses the template's ``next_run`` as
+    the issue date so the cadence advances correctly.
+    """
+    expected = _parse_if_match(if_match)
+    if expected is None:
+        raise HTTPException(428, "If-Match header with template version is required")
+    key = _parse_idempotency_key(idempotency_key)
+
+    async with AsyncSessionLocal() as session:
+        if key is not None:
+            replay = await _idempotent_replay(session, key)
+            if replay is not None:
+                return replay
+
+        ri = await svc.get(session, ri_id)
+        if ri is None:
+            raise HTTPException(404, "Recurring invoice not found")
+
+        if ri.version != expected:
+            body = RecurringInvoiceConflictBody(
+                detail="version mismatch",
+                current=RecurringInvoiceOut.model_validate(ri),
+            ).model_dump(mode="json")
+            if key is not None:
+                await _remember_idempotent(session, key, body, 409)
+                await session.commit()
+            return JSONResponse(body, status_code=409)
+
+        if ri.archived_at is not None:
+            raise HTTPException(422, "Cannot generate from an archived recurring invoice")
+
+        if ri.status != RecurrenceStatus.ACTIVE:
+            raise HTTPException(
+                422,
+                f"Cannot generate: recurring invoice status is {ri.status.value!r}, expected ACTIVE",
+            )
+
+        try:
+            invoice = await recurrence_svc.materialise_one(
+                session, ri, as_of=ri.next_run
+            )
+        except recurrence_svc.RecurrenceError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+        invoice_body = json.loads(InvoiceOut.model_validate(invoice).model_dump_json())
+        body = {
+            "invoice_id": str(invoice.id),
+            "invoice": invoice_body,
+        }
+        if key is not None:
+            await _remember_idempotent(session, key, body, 201)
+            await session.commit()
+
+    return JSONResponse(body, status_code=201)

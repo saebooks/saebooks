@@ -1440,6 +1440,13 @@ class RecurringInvoiceConflictBody(BaseModel):
     current: RecurringInvoiceOut
 
 
+class RecurringInvoiceGenerateResponse(BaseModel):
+    """Response body for POST /{id}/generate — the newly created invoice."""
+
+    invoice_id: uuid.UUID
+    invoice: InvoiceOut
+
+
 # ---------------------------------------------------------------------------
 # Budgets — Phase 1 tier-4 (cycle 16)
 #
