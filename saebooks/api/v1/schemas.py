@@ -2066,3 +2066,74 @@ class SearchResponse(BaseModel):
     query: str
     hits: list[SearchHitOut]
     total: int
+
+
+# ---------------------------------------------------------------------------
+# Bank Rules — cycle 41
+# ---------------------------------------------------------------------------
+
+
+class BankRuleCreate(BaseModel):
+    """POST body for creating a bank rule."""
+
+    name: str = Field(min_length=1, max_length=255)
+    match_pattern: str = Field(min_length=1)
+    match_type: str = "CONTAINS"
+    account_id: uuid.UUID
+    tax_code: str | None = None
+    contact_id: uuid.UUID | None = None
+    description_template: str | None = None
+    auto_create: bool = False
+    priority: int = 0
+    is_active: bool = True
+
+
+class BankRuleUpdate(BaseModel):
+    """PATCH body — every field optional."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    match_pattern: str | None = None
+    match_type: str | None = None
+    account_id: uuid.UUID | None = None
+    tax_code: str | None = None
+    contact_id: uuid.UUID | None = None
+    description_template: str | None = None
+    auto_create: bool | None = None
+    priority: int | None = None
+    is_active: bool | None = None
+
+
+class BankRuleOut(BaseModel):
+    """Full bank rule response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    name: str
+    match_pattern: str
+    match_type: str
+    account_id: uuid.UUID
+    tax_code: str | None = None
+    contact_id: uuid.UUID | None = None
+    description_template: str | None = None
+    auto_create: bool
+    priority: int
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class BankRuleListOut(BaseModel):
+    items: list[BankRuleOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class BankRuleApplyOut(BaseModel):
+    """Response body for POST /bank_rules/apply and POST /bank_rules/{id}/apply."""
+
+    applied: int
