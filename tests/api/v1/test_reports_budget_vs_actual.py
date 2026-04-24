@@ -97,7 +97,9 @@ async def asset_account_id() -> str:
 
 
 async def _create_budget(account_id: str, year: int, month: int, amount: str) -> str:
-    """Insert a Budget row directly and return its id."""
+    """Insert a Budget row directly (upsert: delete any existing row first)."""
+    from sqlalchemy import delete as sa_delete
+
     async with AsyncSessionLocal() as session:
         company = (
             await session.execute(
@@ -111,6 +113,17 @@ async def _create_budget(account_id: str, year: int, month: int, amount: str) ->
         # Resolve tenant_id from the company row
         from saebooks.api.v1.auth import resolve_tenant_id
         tenant_id = resolve_tenant_id()
+
+        # Remove any pre-existing row to avoid uq_budgets_company_account_year_month
+        await session.execute(
+            sa_delete(Budget).where(
+                Budget.company_id == company.id,
+                Budget.account_id == uuid.UUID(account_id),
+                Budget.year == year,
+                Budget.month == month,
+            )
+        )
+        await session.flush()
 
         budget = Budget(
             id=uuid.uuid4(),
