@@ -28,6 +28,7 @@ from saebooks.api.v1.companies import router as companies_router
 from saebooks.api.v1.contacts import router as contacts_router
 from saebooks.api.v1.credit_notes import router as credit_notes_router
 from saebooks.api.v1.fixed_assets import router as fixed_assets_router
+from saebooks.api.v1.health import router as health_router
 from saebooks.api.v1.recurring_invoices import router as recurring_invoices_router
 from saebooks.api.v1.reports import router as reports_router
 from saebooks.api.v1.search import router as search_router
@@ -42,6 +43,10 @@ from saebooks.api.v1.users import permissions_router, router as users_router
 
 # One umbrella router — main.py mounts this at /api/v1.
 router = APIRouter(prefix="/api/v1")
+# health first — /api/v1/healthz + /api/v1/version are deliberately
+# unauthenticated (no require_bearer), so they must mount before any
+# router with a router-level dependency.
+router.include_router(health_router)
 router.include_router(contacts_router)
 router.include_router(accounts_router)
 router.include_router(bank_accounts_router)
