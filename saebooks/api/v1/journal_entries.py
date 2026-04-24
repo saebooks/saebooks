@@ -7,6 +7,10 @@ Phase 1 tier-3 general ledger endpoint.
 * Every write appends a row to ``change_log``.
 * ``DELETE`` is a soft-void (archived_at) returning 204.
 * Lines are nested in the response.
+* Status transitions go through dedicated endpoints:
+    POST /{id}/post    — DRAFT → POSTED
+    POST /{id}/reverse — POSTED → REVERSED (creates mirror reversal entry)
+* Retry-safe writes via ``X-Idempotency-Key: <uuid>`` on transition endpoints.
 """
 from __future__ import annotations
 
@@ -30,6 +34,7 @@ from saebooks.api.v1.schemas import (
 )
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
+from saebooks.models.idempotency_key import IdempotencyKey
 from saebooks.models.journal import EntryStatus
 from saebooks.services import journal_entries as svc
 
@@ -64,6 +69,30 @@ def _parse_if_match(header: str | None) -> int | None:
         return int(cleaned)
     except ValueError as exc:
         raise HTTPException(400, f"If-Match must be an integer version, got '{header}'") from exc
+
+
+def _parse_idempotency_key(header: str | None) -> UUID | None:
+    if header is None or not header.strip():
+        return None
+    try:
+        return UUID(header.strip())
+    except ValueError as exc:
+        raise HTTPException(400, "X-Idempotency-Key must be a UUID") from exc
+
+
+async def _idempotent_replay(session: AsyncSession, key: UUID) -> JSONResponse | None:
+    existing = await session.get(IdempotencyKey, key)
+    if existing is None:
+        return None
+    return JSONResponse(content=existing.response_body, status_code=existing.response_status)
+
+
+async def _remember_idempotent(
+    session: AsyncSession, key: UUID, body: dict[str, Any], status_code: int
+) -> None:
+    row = IdempotencyKey(key=key, response_body=body, response_status=status_code)
+    session.add(row)
+    await session.flush()
 
 
 def _dump(entry: Any) -> dict[str, Any]:
@@ -255,3 +284,128 @@ async def void_journal_entry(
             raise HTTPException(422, msg) from exc
 
     return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
+# Post / status transition (POST /{id}/post → POSTED)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/{entry_id}/post",
+    responses={
+        200: {"model": JournalEntryOut},
+        409: {"model": JournalEntryConflictBody, "description": "Version mismatch"},
+    },
+)
+async def post_journal_entry(
+    entry_id: UUID,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+    idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
+    bearer: str = Depends(require_bearer),
+) -> Any:
+    """Transition journal entry DRAFT → POSTED.
+
+    Checks period lock, auto-posts GST lines, verifies balance.
+    Returns 422 if the entry is already POSTED or REVERSED.
+    """
+    expected = _parse_if_match(if_match)
+    if expected is None:
+        raise HTTPException(428, "If-Match header with entry version is required")
+
+    idem_key = _parse_idempotency_key(idempotency_key)
+
+    async with AsyncSessionLocal() as session:
+        if idem_key is not None:
+            cached = await _idempotent_replay(session, idem_key)
+            if cached is not None:
+                return cached
+
+        try:
+            entry = await svc.api_post(
+                session,
+                entry_id,
+                actor=f"api:{bearer[:8]}…",
+                expected_version=expected,
+            )
+        except svc.VersionConflict as exc:
+            body = JournalEntryConflictBody(
+                detail="version mismatch",
+                current=JournalEntryOut.model_validate(exc.current),
+            ).model_dump(mode="json")
+            return JSONResponse(body, status_code=409)
+        except (ValueError, svc.JournalEntryError) as exc:
+            msg = str(exc)
+            if "not found" in msg.lower():
+                raise HTTPException(404, msg) from exc
+            raise HTTPException(422, msg) from exc
+
+        body = _dump(entry)
+        if idem_key is not None:
+            await _remember_idempotent(session, idem_key, body, 200)
+            await session.commit()
+    return JSONResponse(body, status_code=200)
+
+
+# ---------------------------------------------------------------------------
+# Reverse (POST /{id}/reverse → creates new reversal JE, marks original REVERSED)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/{entry_id}/reverse",
+    responses={
+        201: {"model": JournalEntryOut},
+        409: {"model": JournalEntryConflictBody, "description": "Version mismatch"},
+    },
+    status_code=201,
+)
+async def reverse_journal_entry(
+    entry_id: UUID,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+    idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
+    bearer: str = Depends(require_bearer),
+) -> Any:
+    """Create a reversal of a POSTED journal entry (POSTED → REVERSED).
+
+    Creates a new JournalEntry with all debit/credit lines swapped,
+    auto-posts it, and marks the original entry as REVERSED. The new
+    reversal entry is returned. Only POSTED entries can be reversed;
+    returns 422 for any other status.
+    """
+    expected = _parse_if_match(if_match)
+    if expected is None:
+        raise HTTPException(428, "If-Match header with entry version is required")
+
+    idem_key = _parse_idempotency_key(idempotency_key)
+
+    async with AsyncSessionLocal() as session:
+        if idem_key is not None:
+            cached = await _idempotent_replay(session, idem_key)
+            if cached is not None:
+                return cached
+
+        try:
+            reversal = await svc.api_reverse(
+                session,
+                entry_id,
+                actor=f"api:{bearer[:8]}…",
+                expected_version=expected,
+            )
+        except svc.VersionConflict as exc:
+            body = JournalEntryConflictBody(
+                detail="version mismatch",
+                current=JournalEntryOut.model_validate(exc.current),
+            ).model_dump(mode="json")
+            return JSONResponse(body, status_code=409)
+        except (ValueError, svc.JournalEntryError) as exc:
+            msg = str(exc)
+            if "not found" in msg.lower():
+                raise HTTPException(404, msg) from exc
+            raise HTTPException(422, msg) from exc
+
+        body = _dump(reversal)
+        if idem_key is not None:
+            await _remember_idempotent(session, idem_key, body, 201)
+            await session.commit()
+    return JSONResponse(body, status_code=201)

@@ -12,6 +12,8 @@ Covers:
 * DELETE with stale If-Match → 409
 * DELETE without If-Match → 428
 * change_log sequence: create + update = 2 rows; full create+update+archive = 3 rows
+* POST /{id}/post: DRAFT → POSTED, already-POSTED → 422, stale If-Match → 409
+* POST /{id}/reverse: POSTED → REVERSED + new reversal entry, DRAFT → 422
 """
 from __future__ import annotations
 
@@ -434,3 +436,157 @@ async def test_journal_entries_change_log_full_sequence(
     assert [row.op for row in rows] == ["create", "update", "archive"]
     assert [row.version for row in rows] == [1, 2, 3]
     assert rows[0].entity == "journal_entry"
+
+
+# ---------------------------------------------------------------------------
+# POST /{id}/post — status transition tests
+# ---------------------------------------------------------------------------
+
+
+async def test_je_post_transitions_to_posted(
+    api_client: AsyncClient, account_ids: dict[str, str]
+) -> None:
+    """DRAFT → POSTED via /post: returns 200 with POSTED status and bumped version."""
+    r = await api_client.post("/api/v1/journal_entries", json=_entry_payload(account_ids))
+    assert r.status_code == 201, r.text
+    entry_id = r.json()["id"]
+    version = r.json()["version"]
+
+    r2 = await api_client.post(
+        f"/api/v1/journal_entries/{entry_id}/post",
+        headers={"If-Match": str(version)},
+    )
+    assert r2.status_code == 200, r2.text
+    posted = r2.json()
+    assert posted["status"] == "POSTED"
+    assert posted["version"] == version + 1
+    assert posted["id"] == entry_id
+    assert posted["posted_at"] is not None
+
+
+async def test_je_post_already_posted_422(
+    api_client: AsyncClient, account_ids: dict[str, str]
+) -> None:
+    """Posting an already-POSTED entry must return 422."""
+    r = await api_client.post("/api/v1/journal_entries", json=_entry_payload(account_ids))
+    assert r.status_code == 201, r.text
+    entry_id = r.json()["id"]
+
+    # First post
+    r1 = await api_client.post(
+        f"/api/v1/journal_entries/{entry_id}/post",
+        headers={"If-Match": str(r.json()["version"])},
+    )
+    assert r1.status_code == 200, r1.text
+    posted_version = r1.json()["version"]
+
+    # Second post — should fail
+    r2 = await api_client.post(
+        f"/api/v1/journal_entries/{entry_id}/post",
+        headers={"If-Match": str(posted_version)},
+    )
+    assert r2.status_code == 422
+
+
+async def test_je_post_stale_version_409(
+    api_client: AsyncClient, account_ids: dict[str, str]
+) -> None:
+    """Posting with a stale If-Match must return 409 with current state."""
+    r = await api_client.post("/api/v1/journal_entries", json=_entry_payload(account_ids))
+    assert r.status_code == 201, r.text
+    entry_id = r.json()["id"]
+
+    r2 = await api_client.post(
+        f"/api/v1/journal_entries/{entry_id}/post",
+        headers={"If-Match": "99"},
+    )
+    assert r2.status_code == 409
+    conflict = r2.json()
+    assert conflict["detail"] == "version mismatch"
+    assert conflict["current"]["id"] == entry_id
+
+
+# ---------------------------------------------------------------------------
+# POST /{id}/reverse — status transition tests
+# ---------------------------------------------------------------------------
+
+
+async def test_je_reverse_creates_reversal(
+    api_client: AsyncClient, account_ids: dict[str, str]
+) -> None:
+    """POSTED JE → /reverse returns 201 with a new reversal entry."""
+    # Create and post an entry
+    r = await api_client.post("/api/v1/journal_entries", json=_entry_payload(account_ids))
+    assert r.status_code == 201, r.text
+    entry_id = r.json()["id"]
+
+    r1 = await api_client.post(
+        f"/api/v1/journal_entries/{entry_id}/post",
+        headers={"If-Match": str(r.json()["version"])},
+    )
+    assert r1.status_code == 200, r1.text
+    posted_version = r1.json()["version"]
+
+    # Now reverse
+    r2 = await api_client.post(
+        f"/api/v1/journal_entries/{entry_id}/reverse",
+        headers={"If-Match": str(posted_version)},
+    )
+    assert r2.status_code == 201, r2.text
+    reversal = r2.json()
+
+    # The reversal is a new entry (different id)
+    assert reversal["id"] != entry_id
+    assert reversal["status"] == "POSTED"
+    assert reversal["reversal_of_id"] == entry_id
+
+    # Debit/credit lines must be swapped
+    original_lines = sorted(r1.json()["lines"], key=lambda l: l["line_no"])
+    reversal_lines = sorted(reversal["lines"], key=lambda l: l["line_no"])
+    assert len(reversal_lines) == len(original_lines)
+    for orig, rev in zip(original_lines, reversal_lines):
+        assert orig["account_id"] == rev["account_id"]
+        assert orig["debit"] == rev["credit"]
+        assert orig["credit"] == rev["debit"]
+
+
+async def test_je_reverse_marks_original_reversed(
+    api_client: AsyncClient, account_ids: dict[str, str]
+) -> None:
+    """After /reverse, fetching the original entry shows REVERSED status."""
+    r = await api_client.post("/api/v1/journal_entries", json=_entry_payload(account_ids))
+    assert r.status_code == 201, r.text
+    entry_id = r.json()["id"]
+
+    r1 = await api_client.post(
+        f"/api/v1/journal_entries/{entry_id}/post",
+        headers={"If-Match": str(r.json()["version"])},
+    )
+    assert r1.status_code == 200, r1.text
+
+    r2 = await api_client.post(
+        f"/api/v1/journal_entries/{entry_id}/reverse",
+        headers={"If-Match": str(r1.json()["version"])},
+    )
+    assert r2.status_code == 201, r2.text
+
+    # Fetch the original
+    r3 = await api_client.get(f"/api/v1/journal_entries/{entry_id}")
+    assert r3.status_code == 200, r3.text
+    assert r3.json()["status"] == "REVERSED"
+
+
+async def test_je_reverse_only_works_on_posted_422(
+    api_client: AsyncClient, account_ids: dict[str, str]
+) -> None:
+    """Attempting to reverse a DRAFT entry must return 422."""
+    r = await api_client.post("/api/v1/journal_entries", json=_entry_payload(account_ids))
+    assert r.status_code == 201, r.text
+    entry_id = r.json()["id"]
+    version = r.json()["version"]
+
+    r2 = await api_client.post(
+        f"/api/v1/journal_entries/{entry_id}/reverse",
+        headers={"If-Match": str(version)},
+    )
+    assert r2.status_code == 422

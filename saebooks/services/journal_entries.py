@@ -320,3 +320,131 @@ async def void(
     )
     await session.commit()
     return await _get_with_lines(session, entry_id)  # type: ignore[return-value]
+
+
+async def api_post(
+    session: AsyncSession,
+    entry_id: uuid.UUID,
+    actor: str,
+    expected_version: int,
+) -> JournalEntry:
+    """Transition DRAFT → POSTED with optimistic locking + change_log.
+
+    Delegates to ``services.journal.post()`` which checks period locks,
+    auto-posts GST lines, and verifies balance. After that completes, we
+    bump ``version`` and append a change_log row.
+    """
+    from saebooks.services import journal as journal_svc  # avoid circular at module level
+
+    entry = await _get_with_lines(session, entry_id)
+    if entry is None:
+        raise JournalEntryError(f"Journal entry {entry_id} not found")
+    if entry.version != expected_version:
+        raise VersionConflict(entry)
+    if entry.status == EntryStatus.POSTED:
+        raise JournalEntryError(
+            f"Journal entry {entry.ref} is already POSTED"
+        )
+    if entry.status == EntryStatus.REVERSED:
+        raise JournalEntryError(
+            f"Journal entry {entry.ref} is REVERSED and cannot be re-posted"
+        )
+
+    # Delegate to legacy journal service (checks period lock, GST, balance, commits).
+    entry = await journal_svc.post(session, entry_id, posted_by=actor)
+
+    # Bump version + append change_log in a second transaction.
+    entry.version = entry.version + 1
+    await session.flush()
+    await session.refresh(entry)
+
+    entry = await _get_with_lines(session, entry_id)
+    assert entry is not None
+
+    await change_log_svc.append(
+        session,
+        entity="journal_entry",
+        entity_id=entry.id,
+        op="posted",
+        actor=actor,
+        payload=_serialise(entry),
+        version=entry.version,
+    )
+    await session.commit()
+    return await _get_with_lines(session, entry_id)  # type: ignore[return-value]
+
+
+async def api_reverse(
+    session: AsyncSession,
+    entry_id: uuid.UUID,
+    actor: str,
+    expected_version: int,
+) -> JournalEntry:
+    """Create a reversal of a POSTED journal entry.
+
+    Fetches the original entry, verifies it is POSTED and the version
+    matches, then delegates to ``services.journal.reverse()`` which:
+    - creates a new JournalEntry with debit/credit swapped
+    - auto-posts the reversal
+    - marks the original as REVERSED
+
+    Returns the new reversal entry. The original's status change is
+    committed inside ``journal_svc.reverse()``.
+
+    After the legacy pipeline commits we bump ``version`` on the original
+    and append change_log rows for both the reversal creation and the
+    original's REVERSED transition.
+    """
+    from saebooks.services import journal as journal_svc  # avoid circular at module level
+
+    entry = await _get_with_lines(session, entry_id)
+    if entry is None:
+        raise JournalEntryError(f"Journal entry {entry_id} not found")
+    if entry.version != expected_version:
+        raise VersionConflict(entry)
+    if entry.status != EntryStatus.POSTED:
+        raise JournalEntryError(
+            f"Journal entry {entry.ref} must be POSTED to reverse "
+            f"(current status: {entry.status})"
+        )
+
+    # Delegate to legacy pipeline — creates reversal JE, posts it, marks
+    # original REVERSED, and commits. Returns the new reversal entry.
+    reversal = await journal_svc.reverse(session, entry_id, posted_by=actor)
+
+    # Re-fetch the original (now REVERSED) and bump its version so that
+    # callers get a consistent If-Match token after the transition.
+    original = await _get_with_lines(session, entry_id)
+    assert original is not None
+    original.version = original.version + 1
+    await session.flush()
+    await session.refresh(original)
+    original = await _get_with_lines(session, entry_id)
+    assert original is not None
+
+    await change_log_svc.append(
+        session,
+        entity="journal_entry",
+        entity_id=original.id,
+        op="reversed",
+        actor=actor,
+        payload=_serialise(original),
+        version=original.version,
+    )
+
+    # Also log the new reversal entry as a create.
+    reversal_loaded = await _get_with_lines(session, reversal.id)
+    assert reversal_loaded is not None
+
+    await change_log_svc.append(
+        session,
+        entity="journal_entry",
+        entity_id=reversal_loaded.id,
+        op="create",
+        actor=actor,
+        payload=_serialise(reversal_loaded),
+        version=reversal_loaded.version,
+    )
+
+    await session.commit()
+    return await _get_with_lines(session, reversal.id)  # type: ignore[return-value]
