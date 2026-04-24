@@ -19,6 +19,7 @@ from fastapi import APIRouter
 
 from saebooks.api.v1.accounts import router as accounts_router
 from saebooks.api.v1.bank_accounts import router as bank_accounts_router
+from saebooks.api.v1.depreciation_models import router as depreciation_models_router
 from saebooks.api.v1.bank_statement_lines import router as bank_statement_lines_router
 from saebooks.api.v1.bills import router as bills_router
 from saebooks.api.v1.budgets import router as budgets_router
@@ -57,6 +58,7 @@ router.include_router(payments_router)
 router.include_router(credit_notes_router)
 router.include_router(projects_router)
 router.include_router(fixed_assets_router)
+router.include_router(depreciation_models_router)
 router.include_router(recurring_invoices_router)
 router.include_router(reports_router)
 router.include_router(changes_router)

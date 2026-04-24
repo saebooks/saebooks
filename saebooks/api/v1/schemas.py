@@ -1239,7 +1239,8 @@ class FixedAssetUpdate(BaseModel):
 
 
 class DepreciationModelOut(BaseModel):
-    """Embedded depreciation model info for FixedAssetOut UX."""
+    """Full depreciation model response — used both embedded in FixedAssetOut
+    and as the list-endpoint item schema for ``/api/v1/depreciation_models``."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -1247,6 +1248,16 @@ class DepreciationModelOut(BaseModel):
     method: str
     method_number: int
     method_period: int
+    method_progress_factor: Decimal | None = None
+    rate_pct: Decimal | None = None
+    created_at: datetime
+
+
+class DepreciationModelListOut(BaseModel):
+    items: list[DepreciationModelOut]
+    total: int
+    limit: int
+    offset: int
 
 
 class FixedAssetOut(BaseModel):
