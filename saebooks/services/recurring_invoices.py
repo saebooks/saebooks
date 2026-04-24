@@ -195,7 +195,7 @@ async def list_recurring_invoices(
     return items, total
 
 
-async def api_get(
+async def get(
     session: AsyncSession,
     ri_id: uuid.UUID,
 ) -> RecurringInvoice | None:
@@ -208,7 +208,7 @@ async def api_get(
 # ---------------------------------------------------------------------------
 
 
-async def api_create(
+async def create(
     session: AsyncSession,
     company_id: uuid.UUID,
     tenant_id: uuid.UUID,
@@ -269,7 +269,7 @@ async def api_create(
     return await _get_with_lines(session, ri.id)  # type: ignore[return-value]
 
 
-async def api_update(
+async def update(
     session: AsyncSession,
     ri_id: uuid.UUID,
     actor: str,
@@ -344,7 +344,7 @@ async def api_update(
     return await _get_with_lines(session, ri_id)  # type: ignore[return-value]
 
 
-async def api_delete(
+async def delete(
     session: AsyncSession,
     ri_id: uuid.UUID,
     actor: str,
@@ -378,7 +378,7 @@ async def api_delete(
     return ri
 
 
-async def api_pause(
+async def pause(
     session: AsyncSession,
     ri_id: uuid.UUID,
     actor: str,
@@ -421,7 +421,7 @@ async def api_pause(
     return await _get_with_lines(session, ri_id)  # type: ignore[return-value]
 
 
-async def api_resume(
+async def resume(
     session: AsyncSession,
     ri_id: uuid.UUID,
     actor: str,
@@ -464,7 +464,7 @@ async def api_resume(
     return await _get_with_lines(session, ri_id)  # type: ignore[return-value]
 
 
-async def api_end(
+async def end(
     session: AsyncSession,
     ri_id: uuid.UUID,
     actor: str,
@@ -510,12 +510,12 @@ async def api_end(
 __all__ = [
     "RecurringInvoiceApiError",
     "VersionConflict",
-    "api_create",
-    "api_delete",
-    "api_end",
-    "api_get",
-    "api_pause",
-    "api_resume",
-    "api_update",
+    "create",
+    "delete",
+    "end",
+    "get",
     "list_recurring_invoices",
+    "pause",
+    "resume",
+    "update",
 ]

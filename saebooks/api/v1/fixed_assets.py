@@ -147,7 +147,7 @@ async def list_fixed_assets(
 @router.get("/{asset_id}", response_model=FixedAssetOut)
 async def get_fixed_asset(asset_id: UUID) -> FixedAssetOut:
     async with AsyncSessionLocal() as session:
-        asset = await svc.api_get(session, asset_id)
+        asset = await svc.get(session, asset_id)
         if asset is None:
             raise HTTPException(404, "Fixed asset not found")
         return FixedAssetOut.model_validate(asset)
@@ -174,7 +174,7 @@ async def create_fixed_asset(
         company_id = await _first_company_id(session)
         tenant_id = resolve_tenant_id()
         try:
-            asset = await svc.api_create(
+            asset = await svc.create(
                 session,
                 company_id,
                 tenant_id,
@@ -240,7 +240,7 @@ async def update_fixed_asset(
                 return replay
 
         try:
-            asset = await svc.api_update(
+            asset = await svc.update(
                 session,
                 asset_id,
                 actor=f"api:{bearer[:8]}…",
@@ -302,7 +302,7 @@ async def dispose_fixed_asset(
 
     async with AsyncSessionLocal() as session:
         try:
-            asset = await svc.api_dispose(
+            asset = await svc.dispose(
                 session,
                 asset_id,
                 actor=f"api:{bearer[:8]}…",
@@ -349,7 +349,7 @@ async def delete_fixed_asset(
 
     async with AsyncSessionLocal() as session:
         try:
-            await svc.api_delete(
+            await svc.delete(
                 session,
                 asset_id,
                 actor=f"api:{bearer[:8]}…",

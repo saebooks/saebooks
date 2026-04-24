@@ -179,7 +179,7 @@ async def list_fixed_assets(
     return items, total
 
 
-async def api_get(
+async def get(
     session: AsyncSession,
     asset_id: uuid.UUID,
 ) -> FixedAsset | None:
@@ -198,7 +198,7 @@ async def api_get(
 # ---------------------------------------------------------------------------
 
 
-async def api_create(
+async def create(
     session: AsyncSession,
     company_id: uuid.UUID,
     tenant_id: uuid.UUID,
@@ -285,10 +285,10 @@ async def api_create(
     )
     await session.commit()
     # Reload with depreciation model for response.
-    return await api_get(session, asset.id)  # type: ignore[return-value]
+    return await get(session, asset.id)  # type: ignore[return-value]
 
 
-async def api_update(
+async def update(
     session: AsyncSession,
     asset_id: uuid.UUID,
     actor: str,
@@ -300,7 +300,7 @@ async def api_update(
     If the asset is ``disposed``, only ``description`` and ``extra`` may
     be changed. Any other field in kwargs raises ``FixedAssetApiError``.
     """
-    asset = await api_get(session, asset_id)
+    asset = await get(session, asset_id)
     if asset is None:
         raise FixedAssetApiError(f"FixedAsset {asset_id} not found")
     if asset.version != expected_version:
@@ -345,10 +345,10 @@ async def api_update(
         version=asset.version,
     )
     await session.commit()
-    return await api_get(session, asset_id)  # type: ignore[return-value]
+    return await get(session, asset_id)  # type: ignore[return-value]
 
 
-async def api_delete(
+async def delete(
     session: AsyncSession,
     asset_id: uuid.UUID,
     actor: str,
@@ -361,7 +361,7 @@ async def api_delete(
       cannot be archived — caller must dispose it first.
     - A ``disposed`` asset can be archived freely.
     """
-    asset = await api_get(session, asset_id)
+    asset = await get(session, asset_id)
     if asset is None:
         raise FixedAssetApiError(f"FixedAsset {asset_id} not found")
     if asset.version != expected_version:
@@ -390,7 +390,7 @@ async def api_delete(
     return asset
 
 
-async def api_dispose(
+async def dispose(
     session: AsyncSession,
     asset_id: uuid.UUID,
     actor: str,
@@ -412,7 +412,7 @@ async def api_dispose(
         FixedAssetApiError: asset not found, or already disposed.
         VersionConflict: ``expected_version`` does not match stored value.
     """
-    asset = await api_get(session, asset_id)
+    asset = await get(session, asset_id)
     if asset is None:
         raise FixedAssetApiError(f"FixedAsset {asset_id} not found")
     if asset.status == "disposed":
@@ -439,16 +439,16 @@ async def api_dispose(
         version=asset.version,
     )
     await session.commit()
-    return await api_get(session, asset_id)  # type: ignore[return-value]
+    return await get(session, asset_id)  # type: ignore[return-value]
 
 
 __all__ = [
     "FixedAssetApiError",
     "VersionConflict",
-    "api_create",
-    "api_delete",
-    "api_dispose",
-    "api_get",
-    "api_update",
+    "create",
+    "delete",
+    "dispose",
+    "get",
     "list_fixed_assets",
+    "update",
 ]

@@ -147,7 +147,7 @@ async def list_recurring_invoices(
 @router.get("/{ri_id}", response_model=RecurringInvoiceOut)
 async def get_recurring_invoice(ri_id: UUID) -> RecurringInvoiceOut:
     async with AsyncSessionLocal() as session:
-        ri = await svc.api_get(session, ri_id)
+        ri = await svc.get(session, ri_id)
         if ri is None:
             raise HTTPException(404, "Recurring invoice not found")
         return RecurringInvoiceOut.model_validate(ri)
@@ -174,7 +174,7 @@ async def create_recurring_invoice(
         company_id = await _first_company_id(session)
         tenant_id = resolve_tenant_id()
         try:
-            ri = await svc.api_create(
+            ri = await svc.create(
                 session,
                 company_id,
                 tenant_id,
@@ -251,7 +251,7 @@ async def update_recurring_invoice(
                 raw[enum_field] = raw[enum_field].value
 
         try:
-            ri = await svc.api_update(
+            ri = await svc.update(
                 session,
                 ri_id,
                 actor=f"api:{bearer[:8]}…",
@@ -304,7 +304,7 @@ async def delete_recurring_invoice(
 
     async with AsyncSessionLocal() as session:
         try:
-            await svc.api_delete(
+            await svc.delete(
                 session,
                 ri_id,
                 actor=f"api:{bearer[:8]}…",
@@ -349,7 +349,7 @@ async def pause_recurring_invoice(
 
     async with AsyncSessionLocal() as session:
         try:
-            ri = await svc.api_pause(
+            ri = await svc.pause(
                 session,
                 ri_id,
                 actor=f"api:{bearer[:8]}…",
@@ -390,7 +390,7 @@ async def resume_recurring_invoice(
 
     async with AsyncSessionLocal() as session:
         try:
-            ri = await svc.api_resume(
+            ri = await svc.resume(
                 session,
                 ri_id,
                 actor=f"api:{bearer[:8]}…",
@@ -431,7 +431,7 @@ async def end_recurring_invoice(
 
     async with AsyncSessionLocal() as session:
         try:
-            ri = await svc.api_end(
+            ri = await svc.end(
                 session,
                 ri_id,
                 actor=f"api:{bearer[:8]}…",
