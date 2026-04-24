@@ -659,3 +659,107 @@ async def test_fixed_assets_change_log_full_sequence(
     assert "updated" in ops
     assert "deleted" in ops
     assert versions == sorted(versions)  # monotonically increasing
+
+
+# ---------------------------------------------------------------------------
+# POST /{id}/post_depreciation
+# ---------------------------------------------------------------------------
+
+
+async def test_fixed_asset_depreciation_run_posts_amount(
+    api_client: AsyncClient, gl: dict
+) -> None:
+    """Active linear asset → 200; amount_posted >= 0 and version bumped.
+
+    Uses a through-date after the period lock (locked through 2026-03-31).
+    Purchase date is set to 2024-01-01 so more than a year of depreciation
+    has accumulated by 2026-04-30.
+    """
+    # Create an asset that has been in service for over a year so depreciation > 0.
+    r = await api_client.post(
+        "/api/v1/fixed_assets",
+        json=_asset_payload(
+            gl,
+            depreciation_model_id="asset_3_year_linear",
+            purchase_date="2024-01-01",
+            cost="3000.00",
+        ),
+    )
+    assert r.status_code == 201, r.text
+    asset_id = r.json()["id"]
+    v = r.json()["version"]
+
+    # through must be after the period lock (locked through 2026-03-31)
+    r2 = await api_client.post(
+        f"/api/v1/fixed_assets/{asset_id}/post_depreciation",
+        json={"through": "2026-04-30"},
+        headers={"If-Match": str(v)},
+    )
+    assert r2.status_code == 200, r2.text
+    body = r2.json()
+    assert "asset" in body
+    assert "amount_posted" in body
+    assert "note" in body
+    # amount_posted is non-negative
+    from decimal import Decimal
+    amount_posted = Decimal(str(body["amount_posted"]))
+    assert amount_posted >= Decimal("0")
+    # Version must have been bumped
+    assert body["asset"]["version"] == v + 1
+    assert body["asset"]["id"] == asset_id
+    # last_depreciation_posted_through must be set
+    assert body["asset"]["last_depreciation_posted_through"] is not None
+
+
+async def test_fixed_asset_depreciation_run_no_dep_model(
+    api_client: AsyncClient, gl: dict
+) -> None:
+    """Asset with no_depreciation model → 200, amount_posted == 0.
+
+    No journal is posted so no period-lock check occurs — any through-date works.
+    """
+    r = await api_client.post(
+        "/api/v1/fixed_assets",
+        json=_asset_payload(
+            gl,
+            depreciation_model_id="asset_no_depreciation",
+            purchase_date="2024-01-01",
+            cost="5000.00",
+        ),
+    )
+    assert r.status_code == 201, r.text
+    asset_id = r.json()["id"]
+    v = r.json()["version"]
+
+    r2 = await api_client.post(
+        f"/api/v1/fixed_assets/{asset_id}/post_depreciation",
+        json={"through": "2026-04-30"},
+        headers={"If-Match": str(v)},
+    )
+    assert r2.status_code == 200, r2.text
+    body = r2.json()
+    from decimal import Decimal
+    assert Decimal(str(body["amount_posted"])) == Decimal("0")
+    assert body["asset"]["version"] == v + 1
+
+
+async def test_fixed_asset_depreciation_run_stale_409(
+    api_client: AsyncClient, gl: dict
+) -> None:
+    """Wrong If-Match → 409 with current state in body."""
+    r = await api_client.post(
+        "/api/v1/fixed_assets",
+        json=_asset_payload(gl, purchase_date="2024-01-01", cost="3000.00"),
+    )
+    assert r.status_code == 201, r.text
+    asset_id = r.json()["id"]
+
+    r2 = await api_client.post(
+        f"/api/v1/fixed_assets/{asset_id}/post_depreciation",
+        json={"through": "2026-04-30"},
+        headers={"If-Match": "99"},
+    )
+    assert r2.status_code == 409
+    body = r2.json()
+    assert body["detail"] == "version mismatch"
+    assert body["current"]["id"] == asset_id

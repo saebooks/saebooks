@@ -31,6 +31,8 @@ from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.schemas import (
     FixedAssetConflictBody,
     FixedAssetCreate,
+    FixedAssetDepreciationRunRequest,
+    FixedAssetDepreciationRunResponse,
     FixedAssetDispose,
     FixedAssetListOut,
     FixedAssetOut,
@@ -39,6 +41,7 @@ from saebooks.api.v1.schemas import (
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 from saebooks.models.idempotency_key import IdempotencyKey
+from saebooks.services import assets as legacy_assets_svc
 from saebooks.services import fixed_assets as svc
 
 router = APIRouter(
@@ -324,6 +327,102 @@ async def dispose_fixed_asset(
             raise HTTPException(422, msg) from exc
 
     return JSONResponse(_dump(asset), status_code=200)
+
+
+# ---------------------------------------------------------------------------
+# Post depreciation (GL run → 200 with FixedAssetDepreciationRunResponse)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/{asset_id}/post_depreciation",
+    responses={
+        200: {"model": FixedAssetDepreciationRunResponse},
+        409: {"model": FixedAssetConflictBody, "description": "Version mismatch"},
+    },
+)
+async def post_depreciation(
+    asset_id: UUID,
+    payload: FixedAssetDepreciationRunRequest,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+    bearer: str = Depends(require_bearer),
+) -> Any:
+    """Run a depreciation posting for a fixed asset up to ``through``.
+
+    Computes the incremental depreciation from
+    ``last_depreciation_posted_through`` to ``through``, creates and
+    posts a GL journal entry (Dr dep_expense, Cr accum_dep), advances
+    the cursor, and bumps the asset version.
+
+    Returns 422 if the asset is not ``active`` or if the service raises
+    a ValueError (e.g. asset not found, bad model config).
+    Returns 409 on version mismatch (with current state in body).
+    """
+    expected = _parse_if_match(if_match)
+    if expected is None:
+        raise HTTPException(428, "If-Match header with asset version is required")
+
+    actor = f"api:{bearer[:8]}…"
+
+    async with AsyncSessionLocal() as session:
+        asset = await svc.get(session, asset_id)
+        if asset is None:
+            raise HTTPException(404, "Fixed asset not found")
+        if asset.version != expected:
+            body = FixedAssetConflictBody(
+                detail="version mismatch",
+                current=FixedAssetOut.model_validate(asset),
+            ).model_dump(mode="json")
+            return JSONResponse(body, status_code=409)
+        if asset.status != "active":
+            raise HTTPException(
+                422,
+                f"Cannot depreciate asset in status {asset.status!r} — must be active",
+            )
+
+        try:
+            updated_asset, amount_posted = await legacy_assets_svc.post_depreciation(
+                session,
+                asset_id,
+                payload.through,
+                posted_by=actor,
+            )
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+        # Bump version and append change_log after the GL posting.
+        updated_asset.version = updated_asset.version + 1
+        await session.flush()
+        await session.refresh(updated_asset)
+
+        from saebooks.services import change_log as change_log_svc  # local import avoids circular
+
+        await change_log_svc.append(
+            session,
+            entity="fixed_asset",
+            entity_id=updated_asset.id,
+            op="depreciation_run",
+            actor=actor,
+            payload={"amount_posted": str(amount_posted), "through": str(payload.through)},
+            version=updated_asset.version,
+        )
+        await session.commit()
+        await session.refresh(updated_asset)
+
+    note = (
+        f"Depreciation posted: {amount_posted} through {payload.through}"
+        if amount_posted > 0
+        else f"No depreciation to post through {payload.through} (cursor already at or past date)"
+    )
+    response_body = FixedAssetDepreciationRunResponse(
+        asset=FixedAssetOut.model_validate(updated_asset),
+        amount_posted=amount_posted,
+        note=note,
+    )
+    return JSONResponse(
+        json.loads(response_body.model_dump_json()),
+        status_code=200,
+    )
 
 
 # ---------------------------------------------------------------------------

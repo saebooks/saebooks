@@ -1778,6 +1778,20 @@ class FixedAssetDispose(BaseModel):
     notes: str | None = None
 
 
+class FixedAssetDepreciationRunRequest(BaseModel):
+    """POST body for running a depreciation posting on a fixed asset."""
+
+    through: date
+
+
+class FixedAssetDepreciationRunResponse(BaseModel):
+    """Response body for POST /{id}/post_depreciation."""
+
+    asset: FixedAssetOut
+    amount_posted: Decimal
+    note: str
+
+
 # ---------------------------------------------------------------------------
 # Trial Balance — tier-5 (cycle 27)
 # ---------------------------------------------------------------------------
