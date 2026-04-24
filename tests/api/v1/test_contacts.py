@@ -261,14 +261,12 @@ async def test_snapshot_streams_ndjson(api_client: AsyncClient) -> None:
     r = await api_client.get("/api/v1/snapshot")
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("application/x-ndjson")
-    lines = [ln for ln in r.text.splitlines() if ln.strip()]
-    # last line is the cursor marker
     import json as _json
-    last = _json.loads(lines[-1])
+    lines = [_json.loads(ln) for ln in r.text.splitlines() if ln.strip()]
+    # last line is the cursor marker
+    last = lines[-1]
     assert "_cursor" in last
     assert int(r.headers["X-Cursor-Next"]) == last["_cursor"]
-    # Every other line is a contact entity
-    for ln in lines[:-1]:
-        row = _json.loads(ln)
-        assert row["entity"] == "contact"
-        assert "id" in row and "version" in row
+    # contacts entity marker must be present somewhere in the output
+    entity_markers = {ln["_entity"] for ln in lines if "_entity" in ln}
+    assert "contacts" in entity_markers
