@@ -1,0 +1,81 @@
+name: Build saebooks-api image
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+
+env:
+  # TODO: configure REGISTRY_URL — e.g. ghcr.io/sauer/saebooks-api
+  # or a self-hosted registry at registry.sauer.com.au/saebooks/api
+  IMAGE_NAME: saebooks-api
+
+jobs:
+  build:
+    name: Build multi-arch image
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write  # needed for ghcr.io push when registry is configured
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          # linux/amd64,linux/arm64 are Tier-1. linux/riscv64 is Tier-2
+          # (best-effort, no SLA — known-buildable but slow via QEMU).
+          # Uncomment to include riscv64:
+          # platforms: linux/amd64,linux/arm64,linux/riscv64
+          platforms: linux/amd64,linux/arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # TODO: configure registry login when REGISTRY_URL is set.
+      # Example for GHCR:
+      # - name: Log in to GHCR
+      #   if: github.event_name != 'pull_request'
+      #   uses: docker/login-action@v3
+      #   with:
+      #     registry: ghcr.io
+      #     username: ${{ github.actor }}
+      #     password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-,format=short
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          # Tier-2 riscv64 (uncomment to enable — expect slow CI times):
+          # platforms: linux/amd64,linux/arm64,linux/riscv64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Push only on tag events. Branch builds prove the build works
+          # but don't pollute the registry with every commit.
+          # TODO: replace 'false' with a registry-conditional once REGISTRY_URL
+          # is configured:
+          #   push: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
