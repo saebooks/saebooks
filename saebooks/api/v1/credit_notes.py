@@ -262,3 +262,98 @@ async def void_credit_note(
             raise HTTPException(422, msg) from exc
 
     return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
+# Post / status transition (POST /{id}/post → POSTED)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/{credit_note_id}/post",
+    responses={
+        200: {"model": CreditNoteOut},
+        409: {"model": CreditNoteConflictBody, "description": "Version mismatch"},
+    },
+)
+async def post_credit_note(
+    credit_note_id: UUID,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+    bearer: str = Depends(require_bearer),
+) -> Any:
+    """Transition credit note DRAFT → POSTED, generating journal entry lines."""
+    expected = _parse_if_match(if_match)
+    if expected is None:
+        raise HTTPException(428, "If-Match header with credit note version is required")
+
+    async with AsyncSessionLocal() as session:
+        tenant_id = resolve_tenant_id()
+        try:
+            cn = await svc.api_post_credit_note(
+                session,
+                credit_note_id,
+                actor=f"api:{bearer[:8]}…",
+                expected_version=expected,
+                tenant_id=tenant_id,
+            )
+        except svc.VersionConflict as exc:
+            body = CreditNoteConflictBody(
+                detail="version mismatch",
+                current=CreditNoteOut.model_validate(exc.current),
+            ).model_dump(mode="json")
+            return JSONResponse(body, status_code=409)
+        except (ValueError, svc.CreditNoteError) as exc:
+            msg = str(exc)
+            if "not found" in msg.lower():
+                raise HTTPException(404, msg) from exc
+            raise HTTPException(422, msg) from exc
+
+        body = _dump(cn)
+    return JSONResponse(body, status_code=200)
+
+
+# ---------------------------------------------------------------------------
+# Void via status transition (POST /{id}/void → VOIDED with JE reversal)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/{credit_note_id}/void",
+    responses={
+        204: {"description": "Voided"},
+        409: {"model": CreditNoteConflictBody, "description": "Version mismatch"},
+    },
+)
+async def void_credit_note_transition(
+    credit_note_id: UUID,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+    bearer: str = Depends(require_bearer),
+) -> Any:
+    """Transition POSTED credit note → VOIDED, reversing the journal entry."""
+    expected = _parse_if_match(if_match)
+    if expected is None:
+        raise HTTPException(428, "If-Match header with credit note version is required")
+
+    async with AsyncSessionLocal() as session:
+        tenant_id = resolve_tenant_id()
+        try:
+            await svc.api_void_credit_note(
+                session,
+                credit_note_id,
+                actor=f"api:{bearer[:8]}…",
+                expected_version=expected,
+                tenant_id=tenant_id,
+            )
+        except svc.VersionConflict as exc:
+            body = CreditNoteConflictBody(
+                detail="version mismatch",
+                current=CreditNoteOut.model_validate(exc.current),
+            ).model_dump(mode="json")
+            return JSONResponse(body, status_code=409)
+        except (ValueError, svc.CreditNoteError) as exc:
+            msg = str(exc)
+            if "not found" in msg.lower():
+                raise HTTPException(404, msg) from exc
+            raise HTTPException(422, msg) from exc
+
+    return Response(status_code=204)

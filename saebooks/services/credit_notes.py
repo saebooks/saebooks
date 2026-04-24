@@ -693,14 +693,136 @@ async def api_void(
     return await _get_api(session, credit_note_id)  # type: ignore[return-value]
 
 
+async def api_post_credit_note(
+    session: AsyncSession,
+    credit_note_id: uuid.UUID,
+    actor: str,
+    expected_version: int,
+    *,
+    tenant_id: uuid.UUID | None = None,
+) -> CreditNote:
+    """Transition DRAFT → POSTED with JE generation, optimistic locking + change_log.
+
+    Wraps the legacy ``post_credit_note()`` pipeline which mints the credit note
+    number, builds journal lines (Dr Income / Dr GST / Cr AR), calls
+    ``journal_svc.post()``, and stamps ``journal_entry_id`` + ``posted_at``.
+    After that legacy call completes and commits, we bump ``version`` and
+    append a change_log row in a second transaction.
+    """
+    cn = await _get_api(session, credit_note_id)
+    if cn is None:
+        raise CreditNoteError(f"CreditNote {credit_note_id} not found")
+    if tenant_id is not None and cn.tenant_id != tenant_id:
+        raise CreditNoteError(f"CreditNote {credit_note_id} not found")
+    if cn.version != expected_version:
+        raise VersionConflict(cn)
+    if cn.status == CreditNoteStatus.VOIDED:
+        raise CreditNoteError(
+            f"Credit note {cn.id} is VOIDED and cannot be posted"
+        )
+    if cn.status == CreditNoteStatus.POSTED:
+        raise CreditNoteError(
+            f"Credit note {cn.id} is already POSTED"
+        )
+
+    # Delegate to the legacy pipeline (mints number, builds JE, posts it,
+    # commits internally). After this call the session is in a fresh state.
+    cn = await post_credit_note(
+        session,
+        credit_note_id,
+        posted_by=actor,
+    )
+
+    # Bump version + append change_log in the same transaction.
+    cn.version = cn.version + 1
+    await session.flush()
+    await session.refresh(cn)
+
+    cn_loaded = await _get_api(session, credit_note_id)
+    assert cn_loaded is not None
+
+    await change_log_svc.append(
+        session,
+        entity="credit_note",
+        entity_id=cn_loaded.id,
+        op="post",
+        actor=actor,
+        payload=_serialise_cn(cn_loaded),
+        version=cn_loaded.version,
+    )
+    await session.commit()
+    return await _get_api(session, credit_note_id)  # type: ignore[return-value]
+
+
+async def api_void_credit_note(
+    session: AsyncSession,
+    credit_note_id: uuid.UUID,
+    actor: str,
+    expected_version: int,
+    *,
+    tenant_id: uuid.UUID | None = None,
+) -> CreditNote:
+    """Transition POSTED → VOIDED with JE reversal, optimistic locking + change_log.
+
+    Wraps the legacy ``void_credit_note()`` pipeline which handles the
+    POSTED case (reversal JE via ``journal_svc.reverse()``).
+
+    Only POSTED credit notes may be voided via this endpoint; DRAFT credit
+    notes must be archived via DELETE, and already-VOIDED notes raise 422.
+    """
+    cn = await _get_api(session, credit_note_id)
+    if cn is None:
+        raise CreditNoteError(f"CreditNote {credit_note_id} not found")
+    if tenant_id is not None and cn.tenant_id != tenant_id:
+        raise CreditNoteError(f"CreditNote {credit_note_id} not found")
+    if cn.version != expected_version:
+        raise VersionConflict(cn)
+    if cn.status == CreditNoteStatus.VOIDED:
+        raise CreditNoteError(f"Credit note {cn.id} is already VOIDED")
+    if cn.status == CreditNoteStatus.DRAFT:
+        raise CreditNoteError(
+            f"Credit note {cn.id} is DRAFT — use DELETE to archive a draft"
+        )
+
+    # Delegate to legacy pipeline (handles JE reversal, commits).
+    cn = await void_credit_note(
+        session,
+        credit_note_id,
+        posted_by=actor,
+        override_reason=f"API void by {actor}",
+    )
+
+    # Bump version + append change_log.
+    cn.version = cn.version + 1
+    await session.flush()
+    await session.refresh(cn)
+
+    cn_loaded = await _get_api(session, credit_note_id)
+    assert cn_loaded is not None
+
+    await change_log_svc.append(
+        session,
+        entity="credit_note",
+        entity_id=cn_loaded.id,
+        op="void",
+        actor=actor,
+        payload=_serialise_cn(cn_loaded),
+        version=cn_loaded.version,
+    )
+    await session.commit()
+    return await _get_api(session, credit_note_id)  # type: ignore[return-value]
+
+
 __all__ = [
     "CreditNoteError",
     "CreditNoteStatus",
     "VersionConflict",
     "api_create",
     "api_get",
+    "api_post_credit_note",
     "api_update",
     "api_void",
+    "api_void_credit_note",
     "archive",
     "create_draft",
     "get",

@@ -427,3 +427,144 @@ async def test_credit_notes_change_log_full_sequence(
     assert [row.op for row in rows] == ["create", "update", "archive"]
     assert [row.version for row in rows] == [1, 2, 3]
     assert rows[0].entity == "credit_note"
+
+
+# ---------------------------------------------------------------------------
+# POST /{id}/post — status transitions
+# ---------------------------------------------------------------------------
+
+
+async def test_cn_post_transitions_to_posted(
+    api_client: AsyncClient, cn_deps: dict[str, str]
+) -> None:
+    """DRAFT → POSTED via /post: returns 200 with POSTED status and bumped version."""
+    r = await api_client.post("/api/v1/credit_notes", json=_cn_payload(cn_deps))
+    assert r.status_code == 201, r.text
+    cn_id = r.json()["id"]
+    v = r.json()["version"]
+
+    r2 = await api_client.post(
+        f"/api/v1/credit_notes/{cn_id}/post",
+        headers={"If-Match": str(v)},
+    )
+    assert r2.status_code == 200, r2.text
+    body = r2.json()
+    assert body["status"] == "POSTED"
+    assert body["version"] == v + 1
+    assert body["id"] == cn_id
+
+
+async def test_cn_post_already_posted_422(
+    api_client: AsyncClient, cn_deps: dict[str, str]
+) -> None:
+    """Posting an already-POSTED credit note must return 422."""
+    r = await api_client.post("/api/v1/credit_notes", json=_cn_payload(cn_deps))
+    assert r.status_code == 201, r.text
+    cn_id = r.json()["id"]
+    v = r.json()["version"]
+
+    # First post — should succeed
+    r2 = await api_client.post(
+        f"/api/v1/credit_notes/{cn_id}/post",
+        headers={"If-Match": str(v)},
+    )
+    assert r2.status_code == 200, r2.text
+    v2 = r2.json()["version"]
+
+    # Second post — already POSTED, must 422
+    r3 = await api_client.post(
+        f"/api/v1/credit_notes/{cn_id}/post",
+        headers={"If-Match": str(v2)},
+    )
+    assert r3.status_code == 422
+
+
+async def test_cn_post_stale_version_409(
+    api_client: AsyncClient, cn_deps: dict[str, str]
+) -> None:
+    """Posting with a stale If-Match header must return 409."""
+    r = await api_client.post("/api/v1/credit_notes", json=_cn_payload(cn_deps))
+    assert r.status_code == 201, r.text
+    cn_id = r.json()["id"]
+
+    r2 = await api_client.post(
+        f"/api/v1/credit_notes/{cn_id}/post",
+        headers={"If-Match": "99"},
+    )
+    assert r2.status_code == 409
+    body = r2.json()
+    assert body["detail"] == "version mismatch"
+    assert body["current"]["id"] == cn_id
+
+
+# ---------------------------------------------------------------------------
+# POST /{id}/void — status transitions
+# ---------------------------------------------------------------------------
+
+
+async def test_cn_void_transitions(
+    api_client: AsyncClient, cn_deps: dict[str, str]
+) -> None:
+    """POSTED → VOIDED via /void: returns 204."""
+    r = await api_client.post("/api/v1/credit_notes", json=_cn_payload(cn_deps))
+    assert r.status_code == 201, r.text
+    cn_id = r.json()["id"]
+    v = r.json()["version"]
+
+    # First post to POSTED
+    r2 = await api_client.post(
+        f"/api/v1/credit_notes/{cn_id}/post",
+        headers={"If-Match": str(v)},
+    )
+    assert r2.status_code == 200, r2.text
+    v2 = r2.json()["version"]
+
+    # Now void
+    r3 = await api_client.post(
+        f"/api/v1/credit_notes/{cn_id}/void",
+        headers={"If-Match": str(v2)},
+    )
+    assert r3.status_code == 204
+
+
+async def test_cn_void_draft_422(
+    api_client: AsyncClient, cn_deps: dict[str, str]
+) -> None:
+    """Voiding a DRAFT credit note via /void must return 422."""
+    r = await api_client.post("/api/v1/credit_notes", json=_cn_payload(cn_deps))
+    assert r.status_code == 201, r.text
+    cn_id = r.json()["id"]
+    v = r.json()["version"]
+
+    r2 = await api_client.post(
+        f"/api/v1/credit_notes/{cn_id}/void",
+        headers={"If-Match": str(v)},
+    )
+    assert r2.status_code == 422
+
+
+async def test_cn_void_stale_409(
+    api_client: AsyncClient, cn_deps: dict[str, str]
+) -> None:
+    """Voiding with a stale If-Match header must return 409."""
+    r = await api_client.post("/api/v1/credit_notes", json=_cn_payload(cn_deps))
+    assert r.status_code == 201, r.text
+    cn_id = r.json()["id"]
+    v = r.json()["version"]
+
+    # Post the credit note first
+    r2 = await api_client.post(
+        f"/api/v1/credit_notes/{cn_id}/post",
+        headers={"If-Match": str(v)},
+    )
+    assert r2.status_code == 200, r2.text
+
+    # Attempt void with stale version
+    r3 = await api_client.post(
+        f"/api/v1/credit_notes/{cn_id}/void",
+        headers={"If-Match": "99"},
+    )
+    assert r3.status_code == 409
+    body = r3.json()
+    assert body["detail"] == "version mismatch"
+    assert body["current"]["id"] == cn_id
