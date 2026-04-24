@@ -91,6 +91,8 @@ COPY --from=builder /opt/venv /opt/venv
 COPY --chown=saebooks:saebooks saebooks/ ./saebooks/
 COPY --chown=saebooks:saebooks alembic.ini ./
 COPY --chown=saebooks:saebooks alembic/ ./alembic/
+COPY --chown=saebooks:saebooks entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
 
 USER saebooks
 
@@ -101,8 +103,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
     CMD curl -fsS http://localhost:8000/api/v1/healthz || exit 1
 
-# uvicorn in production: 1 worker, no --reload.
-# Worker count and bind port can be overridden via environment:
-#   SAEBOOKS_BIND_HOST (default 0.0.0.0)
-#   SAEBOOKS_BIND_PORT (default 8000)
-CMD ["uvicorn", "saebooks.main:app", "--host", "0.0.0.0", "--port", "8000"]
+ENTRYPOINT ["./entrypoint.sh"]
