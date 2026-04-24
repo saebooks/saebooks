@@ -108,3 +108,8 @@ class User(Base):
         default=1,
         server_default="1",
     )
+    # Hashed password for the /auth/login endpoint (PBKDF2-HMAC-SHA256).
+    # NULL means the user is managed via Authentik forward-auth only and
+    # cannot log in via the password endpoint.
+    # Added by migration 0053_user_password_hash.
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)

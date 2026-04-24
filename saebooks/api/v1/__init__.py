@@ -31,6 +31,7 @@ from saebooks.api.v1.contacts import router as contacts_router
 from saebooks.api.v1.credit_notes import router as credit_notes_router
 from saebooks.api.v1.fixed_assets import router as fixed_assets_router
 from saebooks.api.v1.health import router as health_router
+from saebooks.api.v1.login import router as login_router
 from saebooks.api.v1.reconciliation import router as reconciliation_router
 from saebooks.api.v1.recurring_invoices import router as recurring_invoices_router
 from saebooks.api.v1.reports import router as reports_router
@@ -51,6 +52,10 @@ router = APIRouter(prefix="/api/v1")
 # unauthenticated (no require_bearer), so they must mount before any
 # router with a router-level dependency.
 router.include_router(health_router)
+# JWT login endpoints — unauthenticated entry points; must come before
+# any router with a router-level bearer dependency so /auth/login etc.
+# are never gated by require_bearer.
+router.include_router(login_router)
 router.include_router(contacts_router)
 router.include_router(account_ranges_router)
 router.include_router(accounts_router)

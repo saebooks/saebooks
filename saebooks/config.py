@@ -153,6 +153,15 @@ class Settings(BaseSettings):
     # ``validate_startup_theme`` coerces "" back to ``DEFAULT_THEME`` at boot.
     frontend: str = Field(default="", alias="SAEBOOKS_FRONTEND")
 
+    # ---------------------------------------------------------------- #
+    # JWT auth (B/43)                                                  #
+    # ---------------------------------------------------------------- #
+    # Secret key used to sign /auth/login JWT tokens (HMAC-SHA256).
+    # If unset, a per-process random key is generated at startup — safe
+    # for single-process dev/test; production must set this to a stable
+    # value so tokens survive restarts.
+    secret_key: str = Field(default="", alias="SAEBOOKS_SECRET_KEY")
+
     # Stripe webhook — public /webhooks/stripe endpoint. When
     # STRIPE_WEBHOOK_SECRET is empty the webhook handler returns 503
     # so an unconfigured instance doesn't silently accept forged
