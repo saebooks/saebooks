@@ -1885,3 +1885,26 @@ class PLBySegmentReport(BaseModel):
     to_date: date
     segment_type: str
     segments: list[PLSegmentRow]
+
+
+# ---------------------------------------------------------------------------
+# Search — global across contacts/invoices/bills/accounts (cycle 36)
+# ---------------------------------------------------------------------------
+
+
+class SearchHitOut(BaseModel):
+    """One search result row."""
+
+    id: uuid.UUID
+    kind: str  # "contact", "invoice", "bill", "account"
+    title: str
+    subtitle: str | None
+    url: str
+
+
+class SearchResponse(BaseModel):
+    """Response body for GET /api/v1/search."""
+
+    query: str
+    hits: list[SearchHitOut]
+    total: int

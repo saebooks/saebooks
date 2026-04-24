@@ -30,6 +30,7 @@ from saebooks.api.v1.credit_notes import router as credit_notes_router
 from saebooks.api.v1.fixed_assets import router as fixed_assets_router
 from saebooks.api.v1.recurring_invoices import router as recurring_invoices_router
 from saebooks.api.v1.reports import router as reports_router
+from saebooks.api.v1.search import router as search_router
 from saebooks.api.v1.invoices import router as invoices_router
 from saebooks.api.v1.items import router as items_router
 from saebooks.api.v1.journal_entries import router as journal_entries_router
@@ -61,6 +62,7 @@ router.include_router(fixed_assets_router)
 router.include_router(depreciation_models_router)
 router.include_router(recurring_invoices_router)
 router.include_router(reports_router)
+router.include_router(search_router)
 router.include_router(changes_router)
 router.include_router(snapshot_router)
 
