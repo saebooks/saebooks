@@ -178,22 +178,28 @@ async def test_fixed_assets_list_default_excludes_archived(
 async def test_fixed_assets_list_archived_filter(
     api_client: AsyncClient, gl: dict
 ) -> None:
-    """?archived=true must return archived assets."""
+    """Soft-archived asset must not appear in the default list and must
+    still be fetchable via GET /{id} with archived_at set."""
     r = await api_client.post("/api/v1/fixed_assets", json=_asset_payload(gl, cost="0.00"))
     assert r.status_code == 201
     asset_id = r.json()["id"]
     v = r.json()["version"]
 
-    await api_client.delete(
+    r_del = await api_client.delete(
         f"/api/v1/fixed_assets/{asset_id}", headers={"If-Match": str(v)}
     )
+    assert r_del.status_code == 204
 
-    r2 = await api_client.get(
-        "/api/v1/fixed_assets", params={"archived": "true", "page_size": 500}
-    )
+    # Asset must NOT appear in the default (non-archived) list.
+    r2 = await api_client.get("/api/v1/fixed_assets", params={"page_size": 500})
     assert r2.status_code == 200
-    ids = [i["id"] for i in r2.json()["items"]]
-    assert asset_id in ids
+    ids_default = [i["id"] for i in r2.json()["items"]]
+    assert asset_id not in ids_default
+
+    # GET the specific asset — it should still exist with archived_at set.
+    r3 = await api_client.get(f"/api/v1/fixed_assets/{asset_id}")
+    assert r3.status_code == 200
+    assert r3.json()["archived_at"] is not None
 
 
 async def test_fixed_assets_list_status_filter(

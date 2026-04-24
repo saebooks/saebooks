@@ -202,8 +202,11 @@ async def test_pnl_expense_line(
 async def test_pnl_net_profit_calculation(
     api_client: AsyncClient, gl_accounts: dict[str, str]
 ) -> None:
-    """Income > expenses → positive net_profit; net_profit = total_income - total_expenses."""
-    entry_date = "2026-04-05"
+    """Income > expenses → positive net_profit; net_profit = total_income - total_expenses.
+
+    Uses year 2093 which has no seed data or prior test pollution.
+    """
+    entry_date = "2093-04-05"
     income_id = gl_accounts[AccountType.INCOME.value]
     expense_id = gl_accounts[AccountType.EXPENSE.value]
     asset_id = gl_accounts[AccountType.ASSET.value]
@@ -223,7 +226,7 @@ async def test_pnl_net_profit_calculation(
 
     r = await api_client.get(
         "/api/v1/reports/profit_loss",
-        params={"from_date": "2026-04-01", "to_date": "2026-04-30"},
+        params={"from_date": "2093-04-01", "to_date": "2093-04-30"},
     )
     assert r.status_code == 200, r.text
     body = r.json()
