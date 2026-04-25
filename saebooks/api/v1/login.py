@@ -256,3 +256,63 @@ async def me(
         role=user.role,
         tenant_id=str(user.tenant_id),
     )
+
+
+# ---------------------------------------------------------------------------
+# POST /auth/change-password
+# ---------------------------------------------------------------------------
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+@router.post("/change-password", status_code=204)
+async def change_password(
+    body: ChangePasswordRequest,
+    authorization: str | None = Header(default=None),
+) -> None:
+    """Change the authenticated user's password.
+
+    Requires a valid JWT and the correct current password.
+    Returns 204 on success, 401 on bad token or wrong current password.
+    """
+    from saebooks.services.jwt_tokens import (  # noqa: PLC0415
+        JWTError,
+        decode_access_token,
+        hash_password,
+        verify_password,
+    )
+
+    raw_token = _extract_bearer(authorization)
+    if not raw_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or malformed Authorization header",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        claims = decode_access_token(raw_token)
+    except JWTError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+
+    user = await _user_by_id(claims.get("sub", ""))
+    if user is None or user.archived_at is not None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+
+    if user.password_hash is None or not verify_password(body.current_password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is incorrect")
+
+    if len(body.new_password) < 8:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Password must be at least 8 characters")
+
+    async with AsyncSessionLocal() as session:
+        db_user = await session.get(type(user), user.id)
+        db_user.password_hash = hash_password(body.new_password)
+        await session.commit()
