@@ -55,6 +55,17 @@ COPY saebooks/ ./saebooks/
 COPY alembic.ini ./
 COPY alembic/ ./alembic/
 
+# Compile gRPC stubs. grpcio-tools is a declared runtime dep so protoc is
+# available in the venv. The grpc_gen directory is gitignored (generated code)
+# so we produce it here rather than relying on a checked-in copy.
+RUN mkdir -p saebooks/grpc_gen \
+    && touch saebooks/grpc_gen/__init__.py \
+    && python -m grpc_tools.protoc \
+        -I saebooks/proto \
+        --python_out=saebooks/grpc_gen \
+        --grpc_python_out=saebooks/grpc_gen \
+        saebooks/proto/saebooks.proto
+
 # Re-install in editable-equivalent mode so package metadata is registered.
 # We copy the egg-info directory to the venv so importlib.metadata can find
 # the package version at runtime.
@@ -89,6 +100,8 @@ COPY --from=builder /opt/venv /opt/venv
 # Copy application source. We don't mount volumes in production —
 # the entire app is baked in.
 COPY --chown=saebooks:saebooks saebooks/ ./saebooks/
+# Bring in the generated gRPC stubs from the builder stage.
+COPY --from=builder --chown=saebooks:saebooks /build/saebooks/grpc_gen/ ./saebooks/grpc_gen/
 COPY --chown=saebooks:saebooks alembic.ini ./
 COPY --chown=saebooks:saebooks alembic/ ./alembic/
 COPY --chown=saebooks:saebooks entrypoint.sh ./entrypoint.sh
