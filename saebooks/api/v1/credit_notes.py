@@ -15,12 +15,13 @@ from datetime import date
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
+from saebooks.api.v1.deps import get_session
 from saebooks.api.v1.schemas import (
     CreditNoteConflictBody,
     CreditNoteCreate,
@@ -28,7 +29,6 @@ from saebooks.api.v1.schemas import (
     CreditNoteOut,
     CreditNoteUpdate,
 )
-from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 from saebooks.models.credit_note import CreditNoteStatus
 from saebooks.services import credit_notes as svc
@@ -45,14 +45,19 @@ router = APIRouter(
 # ---------------------------------------------------------------------------
 
 
-async def _first_company_id(session: AsyncSession) -> UUID:
-    """Return the first active company — Phase 1 single-company assumption."""
+async def _first_company_id(session: AsyncSession, tenant_id: UUID) -> UUID:
+    """Return the first active company for the request tenant."""
     result = await session.execute(
-        select(Company).where(Company.archived_at.is_(None)).order_by(Company.created_at)
+        select(Company)
+        .where(
+            Company.tenant_id == tenant_id,
+            Company.archived_at.is_(None),
+        )
+        .order_by(Company.created_at)
     )
     company = result.scalars().first()
     if company is None:
-        raise HTTPException(500, "No active company")
+        raise HTTPException(404, "No active company for tenant")
     return company.id
 
 
@@ -79,12 +84,14 @@ def _dump(cn: Any) -> dict[str, Any]:
 
 @router.get("", response_model=CreditNoteListOut)
 async def list_credit_notes(
+    request: Request,
     contact_id: UUID | None = Query(default=None),
     status: str | None = Query(default=None),
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
+    session: AsyncSession = Depends(get_session),
 ) -> CreditNoteListOut:
     offset = (page - 1) * page_size
     status_enum: CreditNoteStatus | None = None
@@ -94,26 +101,25 @@ async def list_credit_notes(
         except ValueError as exc:
             raise HTTPException(400, f"Invalid status '{status}'") from exc
 
-    async with AsyncSessionLocal() as session:
-        company_id = await _first_company_id(session)
-        tenant_id = resolve_tenant_id()
-        notes, total = await svc.list_active(
-            session,
-            company_id,
-            tenant_id,
-            contact_id=contact_id,
-            status=status_enum,
-            date_from=date_from,
-            date_to=date_to,
-            limit=page_size,
-            offset=offset,
-        )
-        return CreditNoteListOut(
-            items=[CreditNoteOut.model_validate(cn) for cn in notes],
-            total=total,
-            limit=page_size,
-            offset=offset,
-        )
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
+    notes, total = await svc.list_active(
+        session,
+        company_id,
+        tenant_id,
+        contact_id=contact_id,
+        status=status_enum,
+        date_from=date_from,
+        date_to=date_to,
+        limit=page_size,
+        offset=offset,
+    )
+    return CreditNoteListOut(
+        items=[CreditNoteOut.model_validate(cn) for cn in notes],
+        total=total,
+        limit=page_size,
+        offset=offset,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -122,12 +128,16 @@ async def list_credit_notes(
 
 
 @router.get("/{credit_note_id}", response_model=CreditNoteOut)
-async def get_credit_note(credit_note_id: UUID) -> CreditNoteOut:
-    async with AsyncSessionLocal() as session:
-        cn = await svc.api_get(session, credit_note_id)
-        if cn is None:
-            raise HTTPException(404, "Credit note not found")
-        return CreditNoteOut.model_validate(cn)
+async def get_credit_note(
+    request: Request,
+    credit_note_id: UUID,
+    session: AsyncSession = Depends(get_session),
+) -> CreditNoteOut:
+    tenant_id = resolve_tenant_id(request)
+    cn = await svc.api_get(session, credit_note_id, tenant_id=tenant_id)
+    if cn is None:
+        raise HTTPException(404, "Credit note not found")
+    return CreditNoteOut.model_validate(cn)
 
 
 # ---------------------------------------------------------------------------
@@ -137,29 +147,30 @@ async def get_credit_note(credit_note_id: UUID) -> CreditNoteOut:
 
 @router.post("", response_model=CreditNoteOut, status_code=201)
 async def create_credit_note(
+    request: Request,
     payload: CreditNoteCreate,
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
-    async with AsyncSessionLocal() as session:
-        company_id = await _first_company_id(session)
-        tenant_id = resolve_tenant_id()
-        try:
-            cn = await svc.api_create(
-                session,
-                company_id,
-                tenant_id,
-                actor=f"api:{bearer[:8]}…",
-                contact_id=payload.contact_id,
-                issue_date=payload.issue_date,
-                lines=[line.model_dump() for line in payload.lines],
-                original_invoice_id=payload.original_invoice_id,
-                reason=payload.reason,
-                notes=payload.notes,
-            )
-        except (ValueError, svc.CreditNoteError) as exc:
-            raise HTTPException(422, str(exc)) from exc
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
+    try:
+        cn = await svc.api_create(
+            session,
+            company_id,
+            tenant_id,
+            actor=f"api:{bearer[:8]}…",
+            contact_id=payload.contact_id,
+            issue_date=payload.issue_date,
+            lines=[line.model_dump() for line in payload.lines],
+            original_invoice_id=payload.original_invoice_id,
+            reason=payload.reason,
+            notes=payload.notes,
+        )
+    except (ValueError, svc.CreditNoteError) as exc:
+        raise HTTPException(422, str(exc)) from exc
 
-        body = _dump(cn)
+    body = _dump(cn)
     return JSONResponse(body, status_code=201)
 
 
@@ -176,47 +187,52 @@ async def create_credit_note(
     },
 )
 async def update_credit_note(
+    request: Request,
     credit_note_id: UUID,
     payload: CreditNoteUpdate,
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with credit note version is required")
 
-    async with AsyncSessionLocal() as session:
-        try:
-            lines_data = (
-                [line.model_dump() for line in payload.lines]
-                if payload.lines is not None
-                else None
-            )
-            cn = await svc.api_update(
-                session,
-                credit_note_id,
-                actor=f"api:{bearer[:8]}…",
-                expected_version=expected,
-                contact_id=payload.contact_id,
-                issue_date=payload.issue_date,
-                lines=lines_data,
-                original_invoice_id=payload.original_invoice_id,
-                reason=payload.reason,
-                notes=payload.notes,
-            )
-        except svc.VersionConflict as exc:
-            body = CreditNoteConflictBody(
-                detail="version mismatch",
-                current=CreditNoteOut.model_validate(exc.current),
-            ).model_dump(mode="json")
-            return JSONResponse(body, status_code=409)
-        except (ValueError, svc.CreditNoteError) as exc:
-            msg = str(exc)
-            if "not found" in msg.lower():
-                raise HTTPException(404, msg) from exc
-            raise HTTPException(422, msg) from exc
+    tenant_id = resolve_tenant_id(request)
+    if await svc.api_get(session, credit_note_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Credit note not found")
 
-        body = _dump(cn)
+    try:
+        lines_data = (
+            [line.model_dump() for line in payload.lines]
+            if payload.lines is not None
+            else None
+        )
+        cn = await svc.api_update(
+            session,
+            credit_note_id,
+            actor=f"api:{bearer[:8]}…",
+            expected_version=expected,
+            contact_id=payload.contact_id,
+            issue_date=payload.issue_date,
+            lines=lines_data,
+            original_invoice_id=payload.original_invoice_id,
+            reason=payload.reason,
+            notes=payload.notes,
+        )
+    except svc.VersionConflict as exc:
+        body = CreditNoteConflictBody(
+            detail="version mismatch",
+            current=CreditNoteOut.model_validate(exc.current),
+        ).model_dump(mode="json")
+        return JSONResponse(body, status_code=409)
+    except (ValueError, svc.CreditNoteError) as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
+
+    body = _dump(cn)
     return JSONResponse(body, status_code=200)
 
 
@@ -233,33 +249,38 @@ async def update_credit_note(
     },
 )
 async def void_credit_note(
+    request: Request,
     credit_note_id: UUID,
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with credit note version is required")
 
-    async with AsyncSessionLocal() as session:
-        try:
-            await svc.api_void(
-                session,
-                credit_note_id,
-                actor=f"api:{bearer[:8]}…",
-                expected_version=expected,
-            )
-        except svc.VersionConflict as exc:
-            body = CreditNoteConflictBody(
-                detail="version mismatch",
-                current=CreditNoteOut.model_validate(exc.current),
-            ).model_dump(mode="json")
-            return JSONResponse(body, status_code=409)
-        except (ValueError, svc.CreditNoteError) as exc:
-            msg = str(exc)
-            if "not found" in msg.lower():
-                raise HTTPException(404, msg) from exc
-            raise HTTPException(422, msg) from exc
+    tenant_id = resolve_tenant_id(request)
+    if await svc.api_get(session, credit_note_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Credit note not found")
+
+    try:
+        await svc.api_void(
+            session,
+            credit_note_id,
+            actor=f"api:{bearer[:8]}…",
+            expected_version=expected,
+        )
+    except svc.VersionConflict as exc:
+        body = CreditNoteConflictBody(
+            detail="version mismatch",
+            current=CreditNoteOut.model_validate(exc.current),
+        ).model_dump(mode="json")
+        return JSONResponse(body, status_code=409)
+    except (ValueError, svc.CreditNoteError) as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
 
     return Response(status_code=204)
 
@@ -277,38 +298,42 @@ async def void_credit_note(
     },
 )
 async def post_credit_note(
+    request: Request,
     credit_note_id: UUID,
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     """Transition credit note DRAFT → POSTED, generating journal entry lines."""
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with credit note version is required")
 
-    async with AsyncSessionLocal() as session:
-        tenant_id = resolve_tenant_id()
-        try:
-            cn = await svc.api_post_credit_note(
-                session,
-                credit_note_id,
-                actor=f"api:{bearer[:8]}…",
-                expected_version=expected,
-                tenant_id=tenant_id,
-            )
-        except svc.VersionConflict as exc:
-            body = CreditNoteConflictBody(
-                detail="version mismatch",
-                current=CreditNoteOut.model_validate(exc.current),
-            ).model_dump(mode="json")
-            return JSONResponse(body, status_code=409)
-        except (ValueError, svc.CreditNoteError) as exc:
-            msg = str(exc)
-            if "not found" in msg.lower():
-                raise HTTPException(404, msg) from exc
-            raise HTTPException(422, msg) from exc
+    tenant_id = resolve_tenant_id(request)
+    if await svc.api_get(session, credit_note_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Credit note not found")
 
-        body = _dump(cn)
+    try:
+        cn = await svc.api_post_credit_note(
+            session,
+            credit_note_id,
+            actor=f"api:{bearer[:8]}…",
+            expected_version=expected,
+            tenant_id=tenant_id,
+        )
+    except svc.VersionConflict as exc:
+        body = CreditNoteConflictBody(
+            detail="version mismatch",
+            current=CreditNoteOut.model_validate(exc.current),
+        ).model_dump(mode="json")
+        return JSONResponse(body, status_code=409)
+    except (ValueError, svc.CreditNoteError) as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
+
+    body = _dump(cn)
     return JSONResponse(body, status_code=200)
 
 
@@ -325,35 +350,39 @@ async def post_credit_note(
     },
 )
 async def void_credit_note_transition(
+    request: Request,
     credit_note_id: UUID,
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     """Transition POSTED credit note → VOIDED, reversing the journal entry."""
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with credit note version is required")
 
-    async with AsyncSessionLocal() as session:
-        tenant_id = resolve_tenant_id()
-        try:
-            await svc.api_void_credit_note(
-                session,
-                credit_note_id,
-                actor=f"api:{bearer[:8]}…",
-                expected_version=expected,
-                tenant_id=tenant_id,
-            )
-        except svc.VersionConflict as exc:
-            body = CreditNoteConflictBody(
-                detail="version mismatch",
-                current=CreditNoteOut.model_validate(exc.current),
-            ).model_dump(mode="json")
-            return JSONResponse(body, status_code=409)
-        except (ValueError, svc.CreditNoteError) as exc:
-            msg = str(exc)
-            if "not found" in msg.lower():
-                raise HTTPException(404, msg) from exc
-            raise HTTPException(422, msg) from exc
+    tenant_id = resolve_tenant_id(request)
+    if await svc.api_get(session, credit_note_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Credit note not found")
+
+    try:
+        await svc.api_void_credit_note(
+            session,
+            credit_note_id,
+            actor=f"api:{bearer[:8]}…",
+            expected_version=expected,
+            tenant_id=tenant_id,
+        )
+    except svc.VersionConflict as exc:
+        body = CreditNoteConflictBody(
+            detail="version mismatch",
+            current=CreditNoteOut.model_validate(exc.current),
+        ).model_dump(mode="json")
+        return JSONResponse(body, status_code=409)
+    except (ValueError, svc.CreditNoteError) as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
 
     return Response(status_code=204)

@@ -166,9 +166,23 @@ async def list_active(
 async def api_get(
     session: AsyncSession,
     line_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
 ) -> BankStatementLine | None:
-    """Fetch a single bank statement line. Returns None if not found."""
-    return await session.get(BankStatementLine, line_id)
+    """Fetch a single bank statement line. Returns None if not found.
+
+    When ``tenant_id`` is supplied the lookup is filtered by tenant —
+    a foreign-tenant id returns ``None`` even if the row exists.
+    """
+    if tenant_id is None:
+        return await session.get(BankStatementLine, line_id)
+    result = await session.execute(
+        select(BankStatementLine).where(
+            BankStatementLine.id == line_id,
+            BankStatementLine.tenant_id == tenant_id,
+        )
+    )
+    return result.scalars().first()
 
 
 # ---------------------------------------------------------------------------

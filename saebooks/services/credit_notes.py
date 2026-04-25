@@ -533,10 +533,24 @@ async def list_active(
 
 
 async def api_get(
-    session: AsyncSession, credit_note_id: uuid.UUID
+    session: AsyncSession,
+    credit_note_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
 ) -> CreditNote | None:
-    """Fetch a single credit note with its lines. Returns None if not found."""
-    return await _get_api(session, credit_note_id)
+    """Fetch a single credit note with its lines. Returns None if not found.
+
+    When ``tenant_id`` is supplied the lookup is filtered by tenant —
+    a foreign-tenant id returns ``None`` even if the row exists.
+    """
+    if tenant_id is None:
+        return await _get_api(session, credit_note_id)
+    result = await session.execute(
+        select(CreditNote)
+        .options(selectinload(CreditNote.lines))
+        .where(CreditNote.id == credit_note_id, CreditNote.tenant_id == tenant_id)
+    )
+    return result.scalar_one_or_none()
 
 
 # ---------------------------------------------------------------------------

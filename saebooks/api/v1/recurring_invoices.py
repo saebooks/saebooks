@@ -22,11 +22,13 @@ import json
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
+from saebooks.api.v1.deps import get_session
 from saebooks.api.v1.schemas import (
     InvoiceOut,
     RecurringInvoiceConflictBody,
@@ -36,7 +38,6 @@ from saebooks.api.v1.schemas import (
     RecurringInvoiceOut,
     RecurringInvoiceUpdate,
 )
-from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 from saebooks.models.idempotency_key import IdempotencyKey
 from saebooks.models.recurring_invoice import RecurrenceStatus
@@ -55,14 +56,19 @@ router = APIRouter(
 # ---------------------------------------------------------------------------
 
 
-async def _first_company_id(session) -> UUID:
-    """Return the first active company — Phase 1 single-company assumption."""
+async def _first_company_id(session: AsyncSession, tenant_id: UUID) -> UUID:
+    """Return the first active company for the request tenant."""
     result = await session.execute(
-        select(Company).where(Company.archived_at.is_(None)).order_by(Company.created_at)
+        select(Company)
+        .where(
+            Company.tenant_id == tenant_id,
+            Company.archived_at.is_(None),
+        )
+        .order_by(Company.created_at)
     )
     company = result.scalars().first()
     if company is None:
-        raise HTTPException(500, "No active company")
+        raise HTTPException(404, "No active company for tenant")
     return company.id
 
 
@@ -113,34 +119,35 @@ def _dump(ri: Any) -> dict[str, Any]:
 
 @router.get("", response_model=RecurringInvoiceListOut)
 async def list_recurring_invoices(
+    request: Request,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
     status: str | None = Query(default=None),
     contact_id: str | None = Query(default=None),
     frequency: str | None = Query(default=None),
     archived: bool = Query(default=False),
+    session: AsyncSession = Depends(get_session),
 ) -> RecurringInvoiceListOut:
     offset = (page - 1) * page_size
-    async with AsyncSessionLocal() as session:
-        company_id = await _first_company_id(session)
-        tenant_id = resolve_tenant_id()
-        items, total = await svc.list_recurring_invoices(
-            session,
-            company_id,
-            tenant_id,
-            status=status,
-            contact_id=contact_id,
-            frequency=frequency,
-            archived=archived,
-            limit=page_size,
-            offset=offset,
-        )
-        return RecurringInvoiceListOut(
-            items=[RecurringInvoiceOut.model_validate(ri) for ri in items],
-            total=total,
-            limit=page_size,
-            offset=offset,
-        )
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
+    items, total = await svc.list_recurring_invoices(
+        session,
+        company_id,
+        tenant_id,
+        status=status,
+        contact_id=contact_id,
+        frequency=frequency,
+        archived=archived,
+        limit=page_size,
+        offset=offset,
+    )
+    return RecurringInvoiceListOut(
+        items=[RecurringInvoiceOut.model_validate(ri) for ri in items],
+        total=total,
+        limit=page_size,
+        offset=offset,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -149,12 +156,16 @@ async def list_recurring_invoices(
 
 
 @router.get("/{ri_id}", response_model=RecurringInvoiceOut)
-async def get_recurring_invoice(ri_id: UUID) -> RecurringInvoiceOut:
-    async with AsyncSessionLocal() as session:
-        ri = await svc.get(session, ri_id)
-        if ri is None:
-            raise HTTPException(404, "Recurring invoice not found")
-        return RecurringInvoiceOut.model_validate(ri)
+async def get_recurring_invoice(
+    request: Request,
+    ri_id: UUID,
+    session: AsyncSession = Depends(get_session),
+) -> RecurringInvoiceOut:
+    tenant_id = resolve_tenant_id(request)
+    ri = await svc.get(session, ri_id, tenant_id=tenant_id)
+    if ri is None:
+        raise HTTPException(404, "Recurring invoice not found")
+    return RecurringInvoiceOut.model_validate(ri)
 
 
 # ---------------------------------------------------------------------------
@@ -164,45 +175,46 @@ async def get_recurring_invoice(ri_id: UUID) -> RecurringInvoiceOut:
 
 @router.post("", response_model=RecurringInvoiceOut, status_code=201)
 async def create_recurring_invoice(
+    request: Request,
     payload: RecurringInvoiceCreate,
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     key = _parse_idempotency_key(idempotency_key)
-    async with AsyncSessionLocal() as session:
-        if key is not None:
-            replay = await _idempotent_replay(session, key)
-            if replay is not None:
-                return replay
+    if key is not None:
+        replay = await _idempotent_replay(session, key)
+        if replay is not None:
+            return replay
 
-        company_id = await _first_company_id(session)
-        tenant_id = resolve_tenant_id()
-        try:
-            ri = await svc.create(
-                session,
-                company_id,
-                tenant_id,
-                actor=f"api:{bearer[:8]}…",
-                contact_id=payload.contact_id,
-                name=payload.name,
-                frequency=payload.frequency.value,
-                next_run=payload.next_run,
-                status=payload.status.value,
-                anchor_day=payload.anchor_day,
-                end_date=payload.end_date,
-                due_days=payload.due_days,
-                payment_terms=payload.payment_terms,
-                notes=payload.notes,
-                auto_post=payload.auto_post,
-                lines=[ln.model_dump() for ln in payload.lines],
-            )
-        except (ValueError, svc.RecurringInvoiceApiError) as exc:
-            raise HTTPException(422, str(exc)) from exc
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
+    try:
+        ri = await svc.create(
+            session,
+            company_id,
+            tenant_id,
+            actor=f"api:{bearer[:8]}…",
+            contact_id=payload.contact_id,
+            name=payload.name,
+            frequency=payload.frequency.value,
+            next_run=payload.next_run,
+            status=payload.status.value,
+            anchor_day=payload.anchor_day,
+            end_date=payload.end_date,
+            due_days=payload.due_days,
+            payment_terms=payload.payment_terms,
+            notes=payload.notes,
+            auto_post=payload.auto_post,
+            lines=[ln.model_dump() for ln in payload.lines],
+        )
+    except (ValueError, svc.RecurringInvoiceApiError) as exc:
+        raise HTTPException(422, str(exc)) from exc
 
-        body = _dump(ri)
-        if key is not None:
-            await _remember_idempotent(session, key, body, 201)
-            await session.commit()
+    body = _dump(ri)
+    if key is not None:
+        await _remember_idempotent(session, key, body, 201)
+        await session.commit()
     return JSONResponse(body, status_code=201)
 
 
@@ -219,69 +231,75 @@ async def create_recurring_invoice(
     },
 )
 async def update_recurring_invoice(
+    request: Request,
     ri_id: UUID,
     payload: RecurringInvoiceUpdate,
     if_match: str | None = Header(default=None, alias="If-Match"),
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with template version is required")
     key = _parse_idempotency_key(idempotency_key)
 
-    async with AsyncSessionLocal() as session:
+    tenant_id = resolve_tenant_id(request)
+    # Belt-and-braces: verify template belongs to this tenant
+    if await svc.get(session, ri_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Recurring invoice not found")
+
+    if key is not None:
+        replay = await _idempotent_replay(session, key)
+        if replay is not None:
+            return replay
+
+    # Extract lines separately; pass remaining fields as kwargs.
+    raw = payload.model_dump(exclude_unset=True)
+    lines_payload = raw.pop("lines", None)
+    # Convert lines dicts if present.
+    if lines_payload is not None:
+        lines_to_pass = [
+            {k: (str(v) if hasattr(v, "__class__") and v.__class__.__name__ in ("UUID",) else v)
+             for k, v in ln.items()}
+            for ln in lines_payload
+        ]
+    else:
+        lines_to_pass = None
+
+    # Convert enum values to their string values for the service.
+    for enum_field in ("frequency", "status"):
+        if enum_field in raw and raw[enum_field] is not None:
+            raw[enum_field] = raw[enum_field].value
+
+    try:
+        ri = await svc.update(
+            session,
+            ri_id,
+            actor=f"api:{bearer[:8]}…",
+            expected_version=expected,
+            lines=lines_to_pass,
+            **raw,
+        )
+    except svc.VersionConflict as exc:
+        body = RecurringInvoiceConflictBody(
+            detail="version mismatch",
+            current=RecurringInvoiceOut.model_validate(exc.current),
+        ).model_dump(mode="json")
         if key is not None:
-            replay = await _idempotent_replay(session, key)
-            if replay is not None:
-                return replay
-
-        # Extract lines separately; pass remaining fields as kwargs.
-        raw = payload.model_dump(exclude_unset=True)
-        lines_payload = raw.pop("lines", None)
-        # Convert lines dicts if present.
-        if lines_payload is not None:
-            lines_to_pass = [
-                {k: (str(v) if hasattr(v, "__class__") and v.__class__.__name__ in ("UUID",) else v)
-                 for k, v in ln.items()}
-                for ln in lines_payload
-            ]
-        else:
-            lines_to_pass = None
-
-        # Convert enum values to their string values for the service.
-        for enum_field in ("frequency", "status"):
-            if enum_field in raw and raw[enum_field] is not None:
-                raw[enum_field] = raw[enum_field].value
-
-        try:
-            ri = await svc.update(
-                session,
-                ri_id,
-                actor=f"api:{bearer[:8]}…",
-                expected_version=expected,
-                lines=lines_to_pass,
-                **raw,
-            )
-        except svc.VersionConflict as exc:
-            body = RecurringInvoiceConflictBody(
-                detail="version mismatch",
-                current=RecurringInvoiceOut.model_validate(exc.current),
-            ).model_dump(mode="json")
-            if key is not None:
-                await _remember_idempotent(session, key, body, 409)
-                await session.commit()
-            return JSONResponse(body, status_code=409)
-        except (ValueError, svc.RecurringInvoiceApiError) as exc:
-            msg = str(exc)
-            if "not found" in msg.lower():
-                raise HTTPException(404, msg) from exc
-            raise HTTPException(422, msg) from exc
-
-        body = _dump(ri)
-        if key is not None:
-            await _remember_idempotent(session, key, body, 200)
+            await _remember_idempotent(session, key, body, 409)
             await session.commit()
+        return JSONResponse(body, status_code=409)
+    except (ValueError, svc.RecurringInvoiceApiError) as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
+
+    body = _dump(ri)
+    if key is not None:
+        await _remember_idempotent(session, key, body, 200)
+        await session.commit()
     return JSONResponse(body, status_code=200)
 
 
@@ -298,33 +316,38 @@ async def update_recurring_invoice(
     },
 )
 async def delete_recurring_invoice(
+    request: Request,
     ri_id: UUID,
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with template version is required")
 
-    async with AsyncSessionLocal() as session:
-        try:
-            await svc.delete(
-                session,
-                ri_id,
-                actor=f"api:{bearer[:8]}…",
-                expected_version=expected,
-            )
-        except svc.VersionConflict as exc:
-            body = RecurringInvoiceConflictBody(
-                detail="version mismatch",
-                current=RecurringInvoiceOut.model_validate(exc.current),
-            ).model_dump(mode="json")
-            return JSONResponse(body, status_code=409)
-        except (ValueError, svc.RecurringInvoiceApiError) as exc:
-            msg = str(exc)
-            if "not found" in msg.lower():
-                raise HTTPException(404, msg) from exc
-            raise HTTPException(422, msg) from exc
+    tenant_id = resolve_tenant_id(request)
+    if await svc.get(session, ri_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Recurring invoice not found")
+
+    try:
+        await svc.delete(
+            session,
+            ri_id,
+            actor=f"api:{bearer[:8]}…",
+            expected_version=expected,
+        )
+    except svc.VersionConflict as exc:
+        body = RecurringInvoiceConflictBody(
+            detail="version mismatch",
+            current=RecurringInvoiceOut.model_validate(exc.current),
+        ).model_dump(mode="json")
+        return JSONResponse(body, status_code=409)
+    except (ValueError, svc.RecurringInvoiceApiError) as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
 
     return Response(status_code=204)
 
@@ -342,37 +365,41 @@ async def delete_recurring_invoice(
     },
 )
 async def pause_recurring_invoice(
+    request: Request,
     ri_id: UUID,
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     """Transition ACTIVE → PAUSED."""
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with template version is required")
 
-    async with AsyncSessionLocal() as session:
-        try:
-            ri = await svc.pause(
-                session,
-                ri_id,
-                actor=f"api:{bearer[:8]}…",
-                expected_version=expected,
-            )
-        except svc.VersionConflict as exc:
-            body = RecurringInvoiceConflictBody(
-                detail="version mismatch",
-                current=RecurringInvoiceOut.model_validate(exc.current),
-            ).model_dump(mode="json")
-            return JSONResponse(body, status_code=409)
-        except (ValueError, svc.RecurringInvoiceApiError) as exc:
-            msg = str(exc)
-            if "not found" in msg.lower():
-                raise HTTPException(404, msg) from exc
-            raise HTTPException(422, msg) from exc
+    tenant_id = resolve_tenant_id(request)
+    if await svc.get(session, ri_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Recurring invoice not found")
 
-        body = _dump(ri)
-    return JSONResponse(body, status_code=200)
+    try:
+        ri = await svc.pause(
+            session,
+            ri_id,
+            actor=f"api:{bearer[:8]}…",
+            expected_version=expected,
+        )
+    except svc.VersionConflict as exc:
+        body = RecurringInvoiceConflictBody(
+            detail="version mismatch",
+            current=RecurringInvoiceOut.model_validate(exc.current),
+        ).model_dump(mode="json")
+        return JSONResponse(body, status_code=409)
+    except (ValueError, svc.RecurringInvoiceApiError) as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
+
+    return JSONResponse(_dump(ri), status_code=200)
 
 
 @router.post(
@@ -383,37 +410,41 @@ async def pause_recurring_invoice(
     },
 )
 async def resume_recurring_invoice(
+    request: Request,
     ri_id: UUID,
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     """Transition PAUSED → ACTIVE."""
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with template version is required")
 
-    async with AsyncSessionLocal() as session:
-        try:
-            ri = await svc.resume(
-                session,
-                ri_id,
-                actor=f"api:{bearer[:8]}…",
-                expected_version=expected,
-            )
-        except svc.VersionConflict as exc:
-            body = RecurringInvoiceConflictBody(
-                detail="version mismatch",
-                current=RecurringInvoiceOut.model_validate(exc.current),
-            ).model_dump(mode="json")
-            return JSONResponse(body, status_code=409)
-        except (ValueError, svc.RecurringInvoiceApiError) as exc:
-            msg = str(exc)
-            if "not found" in msg.lower():
-                raise HTTPException(404, msg) from exc
-            raise HTTPException(422, msg) from exc
+    tenant_id = resolve_tenant_id(request)
+    if await svc.get(session, ri_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Recurring invoice not found")
 
-        body = _dump(ri)
-    return JSONResponse(body, status_code=200)
+    try:
+        ri = await svc.resume(
+            session,
+            ri_id,
+            actor=f"api:{bearer[:8]}…",
+            expected_version=expected,
+        )
+    except svc.VersionConflict as exc:
+        body = RecurringInvoiceConflictBody(
+            detail="version mismatch",
+            current=RecurringInvoiceOut.model_validate(exc.current),
+        ).model_dump(mode="json")
+        return JSONResponse(body, status_code=409)
+    except (ValueError, svc.RecurringInvoiceApiError) as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
+
+    return JSONResponse(_dump(ri), status_code=200)
 
 
 @router.post(
@@ -424,37 +455,41 @@ async def resume_recurring_invoice(
     },
 )
 async def end_recurring_invoice(
+    request: Request,
     ri_id: UUID,
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     """Transition any non-ENDED status → ENDED (terminal)."""
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with template version is required")
 
-    async with AsyncSessionLocal() as session:
-        try:
-            ri = await svc.end(
-                session,
-                ri_id,
-                actor=f"api:{bearer[:8]}…",
-                expected_version=expected,
-            )
-        except svc.VersionConflict as exc:
-            body = RecurringInvoiceConflictBody(
-                detail="version mismatch",
-                current=RecurringInvoiceOut.model_validate(exc.current),
-            ).model_dump(mode="json")
-            return JSONResponse(body, status_code=409)
-        except (ValueError, svc.RecurringInvoiceApiError) as exc:
-            msg = str(exc)
-            if "not found" in msg.lower():
-                raise HTTPException(404, msg) from exc
-            raise HTTPException(422, msg) from exc
+    tenant_id = resolve_tenant_id(request)
+    if await svc.get(session, ri_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Recurring invoice not found")
 
-        body = _dump(ri)
-    return JSONResponse(body, status_code=200)
+    try:
+        ri = await svc.end(
+            session,
+            ri_id,
+            actor=f"api:{bearer[:8]}…",
+            expected_version=expected,
+        )
+    except svc.VersionConflict as exc:
+        body = RecurringInvoiceConflictBody(
+            detail="version mismatch",
+            current=RecurringInvoiceOut.model_validate(exc.current),
+        ).model_dump(mode="json")
+        return JSONResponse(body, status_code=409)
+    except (ValueError, svc.RecurringInvoiceApiError) as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
+
+    return JSONResponse(_dump(ri), status_code=200)
 
 
 # ---------------------------------------------------------------------------
@@ -473,10 +508,12 @@ async def end_recurring_invoice(
     },
 )
 async def generate_invoice(
+    request: Request,
     ri_id: UUID,
     if_match: str | None = Header(default=None, alias="If-Match"),
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     """Manually materialise one invoice from an ACTIVE recurring template.
 
@@ -493,49 +530,49 @@ async def generate_invoice(
         raise HTTPException(428, "If-Match header with template version is required")
     key = _parse_idempotency_key(idempotency_key)
 
-    async with AsyncSessionLocal() as session:
+    if key is not None:
+        replay = await _idempotent_replay(session, key)
+        if replay is not None:
+            return replay
+
+    tenant_id = resolve_tenant_id(request)
+    ri = await svc.get(session, ri_id, tenant_id=tenant_id)
+    if ri is None:
+        raise HTTPException(404, "Recurring invoice not found")
+
+    if ri.version != expected:
+        body = RecurringInvoiceConflictBody(
+            detail="version mismatch",
+            current=RecurringInvoiceOut.model_validate(ri),
+        ).model_dump(mode="json")
         if key is not None:
-            replay = await _idempotent_replay(session, key)
-            if replay is not None:
-                return replay
-
-        ri = await svc.get(session, ri_id)
-        if ri is None:
-            raise HTTPException(404, "Recurring invoice not found")
-
-        if ri.version != expected:
-            body = RecurringInvoiceConflictBody(
-                detail="version mismatch",
-                current=RecurringInvoiceOut.model_validate(ri),
-            ).model_dump(mode="json")
-            if key is not None:
-                await _remember_idempotent(session, key, body, 409)
-                await session.commit()
-            return JSONResponse(body, status_code=409)
-
-        if ri.archived_at is not None:
-            raise HTTPException(422, "Cannot generate from an archived recurring invoice")
-
-        if ri.status != RecurrenceStatus.ACTIVE:
-            raise HTTPException(
-                422,
-                f"Cannot generate: recurring invoice status is {ri.status.value!r}, expected ACTIVE",
-            )
-
-        try:
-            invoice = await recurrence_svc.materialise_one(
-                session, ri, as_of=ri.next_run
-            )
-        except recurrence_svc.RecurrenceError as exc:
-            raise HTTPException(422, str(exc)) from exc
-
-        invoice_body = json.loads(InvoiceOut.model_validate(invoice).model_dump_json())
-        body = {
-            "invoice_id": str(invoice.id),
-            "invoice": invoice_body,
-        }
-        if key is not None:
-            await _remember_idempotent(session, key, body, 201)
+            await _remember_idempotent(session, key, body, 409)
             await session.commit()
+        return JSONResponse(body, status_code=409)
+
+    if ri.archived_at is not None:
+        raise HTTPException(422, "Cannot generate from an archived recurring invoice")
+
+    if ri.status != RecurrenceStatus.ACTIVE:
+        raise HTTPException(
+            422,
+            f"Cannot generate: recurring invoice status is {ri.status.value!r}, expected ACTIVE",
+        )
+
+    try:
+        invoice = await recurrence_svc.materialise_one(
+            session, ri, as_of=ri.next_run
+        )
+    except recurrence_svc.RecurrenceError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+    invoice_body = json.loads(InvoiceOut.model_validate(invoice).model_dump_json())
+    body = {
+        "invoice_id": str(invoice.id),
+        "invoice": invoice_body,
+    }
+    if key is not None:
+        await _remember_idempotent(session, key, body, 201)
+        await session.commit()
 
     return JSONResponse(body, status_code=201)

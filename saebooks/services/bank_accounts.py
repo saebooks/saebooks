@@ -131,9 +131,24 @@ async def list_active(
 async def api_get(
     session: AsyncSession,
     bank_account_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
 ) -> Account | None:
-    """Fetch a single bank account. Returns None if not found or not a bank acct."""
-    account = await session.get(Account, bank_account_id)
+    """Fetch a single bank account. Returns None if not found or not a bank acct.
+
+    When ``tenant_id`` is supplied the lookup is filtered by tenant —
+    a foreign-tenant id returns ``None`` even if the row exists.
+    """
+    if tenant_id is not None:
+        result = await session.execute(
+            select(Account).where(
+                Account.id == bank_account_id,
+                Account.tenant_id == tenant_id,
+            )
+        )
+        account = result.scalars().first()
+    else:
+        account = await session.get(Account, bank_account_id)
     if account is None or not _is_bank_account(account):
         return None
     return account

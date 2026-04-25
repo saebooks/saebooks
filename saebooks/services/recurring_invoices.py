@@ -198,9 +198,22 @@ async def list_recurring_invoices(
 async def get(
     session: AsyncSession,
     ri_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
 ) -> RecurringInvoice | None:
-    """Fetch a single recurring invoice template with its lines."""
-    return await _get_with_lines(session, ri_id)
+    """Fetch a single recurring invoice template with its lines.
+
+    When ``tenant_id`` is supplied the lookup is filtered by tenant —
+    a foreign-tenant id returns ``None`` even if the row exists.
+    """
+    if tenant_id is None:
+        return await _get_with_lines(session, ri_id)
+    result = await session.execute(
+        select(RecurringInvoice)
+        .options(selectinload(RecurringInvoice.lines))
+        .where(RecurringInvoice.id == ri_id, RecurringInvoice.tenant_id == tenant_id)
+    )
+    return result.scalar_one_or_none()
 
 
 # ---------------------------------------------------------------------------

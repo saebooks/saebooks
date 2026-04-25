@@ -17,11 +17,13 @@ import json
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
+from saebooks.api.v1.deps import get_session
 from saebooks.api.v1.schemas import (
     BankAccountConflictBody,
     BankAccountCreate,
@@ -29,7 +31,6 @@ from saebooks.api.v1.schemas import (
     BankAccountOut,
     BankAccountUpdate,
 )
-from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 from saebooks.models.idempotency_key import IdempotencyKey
 from saebooks.services import bank_accounts as svc
@@ -46,14 +47,19 @@ router = APIRouter(
 # ---------------------------------------------------------------------------
 
 
-async def _first_company_id(session) -> UUID:
-    """Return the first active company — Phase 1 single-company assumption."""
+async def _first_company_id(session: AsyncSession, tenant_id: UUID) -> UUID:
+    """Return the first active company for the request tenant."""
     result = await session.execute(
-        select(Company).where(Company.archived_at.is_(None)).order_by(Company.created_at)
+        select(Company)
+        .where(
+            Company.tenant_id == tenant_id,
+            Company.archived_at.is_(None),
+        )
+        .order_by(Company.created_at)
     )
     company = result.scalars().first()
     if company is None:
-        raise HTTPException(500, "No active company")
+        raise HTTPException(404, "No active company for tenant")
     return company.id
 
 
@@ -104,26 +110,27 @@ def _dump(account: Any) -> dict[str, Any]:
 
 @router.get("", response_model=BankAccountListOut)
 async def list_bank_accounts(
+    request: Request,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
+    session: AsyncSession = Depends(get_session),
 ) -> BankAccountListOut:
     offset = (page - 1) * page_size
-    async with AsyncSessionLocal() as session:
-        company_id = await _first_company_id(session)
-        tenant_id = resolve_tenant_id()
-        items, total = await svc.list_active(
-            session,
-            company_id,
-            tenant_id,
-            limit=page_size,
-            offset=offset,
-        )
-        return BankAccountListOut(
-            items=[BankAccountOut.model_validate(a) for a in items],
-            total=total,
-            limit=page_size,
-            offset=offset,
-        )
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
+    items, total = await svc.list_active(
+        session,
+        company_id,
+        tenant_id,
+        limit=page_size,
+        offset=offset,
+    )
+    return BankAccountListOut(
+        items=[BankAccountOut.model_validate(a) for a in items],
+        total=total,
+        limit=page_size,
+        offset=offset,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -132,12 +139,16 @@ async def list_bank_accounts(
 
 
 @router.get("/{bank_account_id}", response_model=BankAccountOut)
-async def get_bank_account(bank_account_id: UUID) -> BankAccountOut:
-    async with AsyncSessionLocal() as session:
-        account = await svc.api_get(session, bank_account_id)
-        if account is None:
-            raise HTTPException(404, "Bank account not found")
-        return BankAccountOut.model_validate(account)
+async def get_bank_account(
+    request: Request,
+    bank_account_id: UUID,
+    session: AsyncSession = Depends(get_session),
+) -> BankAccountOut:
+    tenant_id = resolve_tenant_id(request)
+    account = await svc.api_get(session, bank_account_id, tenant_id=tenant_id)
+    if account is None:
+        raise HTTPException(404, "Bank account not found")
+    return BankAccountOut.model_validate(account)
 
 
 # ---------------------------------------------------------------------------
@@ -147,40 +158,41 @@ async def get_bank_account(bank_account_id: UUID) -> BankAccountOut:
 
 @router.post("", response_model=BankAccountOut, status_code=201)
 async def create_bank_account(
+    request: Request,
     payload: BankAccountCreate,
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     key = _parse_idempotency_key(idempotency_key)
-    async with AsyncSessionLocal() as session:
-        if key is not None:
-            replay = await _idempotent_replay(session, key)
-            if replay is not None:
-                return replay
+    if key is not None:
+        replay = await _idempotent_replay(session, key)
+        if replay is not None:
+            return replay
 
-        company_id = await _first_company_id(session)
-        tenant_id = resolve_tenant_id()
-        try:
-            account = await svc.api_create(
-                session,
-                company_id,
-                tenant_id,
-                actor=f"api:{bearer[:8]}…",
-                code=payload.code,
-                name=payload.name,
-                bsb=payload.bsb,
-                bank_account_number=payload.bank_account_number,
-                bank_account_title=payload.bank_account_title,
-                apca_user_id=payload.apca_user_id,
-                bank_abbreviation=payload.bank_abbreviation,
-            )
-        except (ValueError, svc.BankAccountError) as exc:
-            raise HTTPException(422, str(exc)) from exc
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
+    try:
+        account = await svc.api_create(
+            session,
+            company_id,
+            tenant_id,
+            actor=f"api:{bearer[:8]}…",
+            code=payload.code,
+            name=payload.name,
+            bsb=payload.bsb,
+            bank_account_number=payload.bank_account_number,
+            bank_account_title=payload.bank_account_title,
+            apca_user_id=payload.apca_user_id,
+            bank_abbreviation=payload.bank_abbreviation,
+        )
+    except (ValueError, svc.BankAccountError) as exc:
+        raise HTTPException(422, str(exc)) from exc
 
-        body = _dump(account)
-        if key is not None:
-            await _remember_idempotent(session, key, body, 201)
-            await session.commit()
+    body = _dump(account)
+    if key is not None:
+        await _remember_idempotent(session, key, body, 201)
+        await session.commit()
     return JSONResponse(body, status_code=201)
 
 
@@ -197,50 +209,56 @@ async def create_bank_account(
     },
 )
 async def update_bank_account(
+    request: Request,
     bank_account_id: UUID,
     payload: BankAccountUpdate,
     if_match: str | None = Header(default=None, alias="If-Match"),
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with bank account version is required")
     key = _parse_idempotency_key(idempotency_key)
 
-    async with AsyncSessionLocal() as session:
-        if key is not None:
-            replay = await _idempotent_replay(session, key)
-            if replay is not None:
-                return replay
+    tenant_id = resolve_tenant_id(request)
+    # Belt-and-braces: verify bank account belongs to this tenant
+    if await svc.api_get(session, bank_account_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Bank account not found")
 
-        try:
-            account = await svc.api_update(
-                session,
-                bank_account_id,
-                actor=f"api:{bearer[:8]}…",
-                expected_version=expected,
-                **payload.model_dump(exclude_unset=True),
-            )
-        except svc.VersionConflict as exc:
-            body = BankAccountConflictBody(
-                detail="version mismatch",
-                current=BankAccountOut.model_validate(exc.current),
-            ).model_dump(mode="json")
-            if key is not None:
-                await _remember_idempotent(session, key, body, 409)
-                await session.commit()
-            return JSONResponse(body, status_code=409)
-        except (ValueError, svc.BankAccountError) as exc:
-            msg = str(exc)
-            if "not found" in msg.lower():
-                raise HTTPException(404, msg) from exc
-            raise HTTPException(422, msg) from exc
+    if key is not None:
+        replay = await _idempotent_replay(session, key)
+        if replay is not None:
+            return replay
 
-        body = _dump(account)
+    try:
+        account = await svc.api_update(
+            session,
+            bank_account_id,
+            actor=f"api:{bearer[:8]}…",
+            expected_version=expected,
+            **payload.model_dump(exclude_unset=True),
+        )
+    except svc.VersionConflict as exc:
+        body = BankAccountConflictBody(
+            detail="version mismatch",
+            current=BankAccountOut.model_validate(exc.current),
+        ).model_dump(mode="json")
         if key is not None:
-            await _remember_idempotent(session, key, body, 200)
+            await _remember_idempotent(session, key, body, 409)
             await session.commit()
+        return JSONResponse(body, status_code=409)
+    except (ValueError, svc.BankAccountError) as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
+
+    body = _dump(account)
+    if key is not None:
+        await _remember_idempotent(session, key, body, 200)
+        await session.commit()
     return JSONResponse(body, status_code=200)
 
 
@@ -257,32 +275,37 @@ async def update_bank_account(
     },
 )
 async def delete_bank_account(
+    request: Request,
     bank_account_id: UUID,
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with bank account version is required")
 
-    async with AsyncSessionLocal() as session:
-        try:
-            await svc.api_delete(
-                session,
-                bank_account_id,
-                actor=f"api:{bearer[:8]}…",
-                expected_version=expected,
-            )
-        except svc.VersionConflict as exc:
-            body = BankAccountConflictBody(
-                detail="version mismatch",
-                current=BankAccountOut.model_validate(exc.current),
-            ).model_dump(mode="json")
-            return JSONResponse(body, status_code=409)
-        except (ValueError, svc.BankAccountError) as exc:
-            msg = str(exc)
-            if "not found" in msg.lower():
-                raise HTTPException(404, msg) from exc
-            raise HTTPException(422, msg) from exc
+    tenant_id = resolve_tenant_id(request)
+    if await svc.api_get(session, bank_account_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Bank account not found")
+
+    try:
+        await svc.api_delete(
+            session,
+            bank_account_id,
+            actor=f"api:{bearer[:8]}…",
+            expected_version=expected,
+        )
+    except svc.VersionConflict as exc:
+        body = BankAccountConflictBody(
+            detail="version mismatch",
+            current=BankAccountOut.model_validate(exc.current),
+        ).model_dump(mode="json")
+        return JSONResponse(body, status_code=409)
+    except (ValueError, svc.BankAccountError) as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
 
     return Response(status_code=204)
