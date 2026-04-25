@@ -26,6 +26,7 @@ dependencies = [
     "cryptography>=43.0",
     "grpcio>=1.62",
     "grpcio-tools>=1.62",
+    "anthropic>=0.40",
 ]
 
 [project.optional-dependencies]

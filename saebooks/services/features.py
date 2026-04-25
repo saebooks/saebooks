@@ -88,6 +88,12 @@ FLAG_SQL_TOOL = "sql_tool"
 FLAG_AUDIT_SNAPSHOTS = "audit_snapshots"
 FLAG_SCHEDULED_BACKUPS = "scheduled_backups"
 
+# --- B/46 (AI document extraction via Claude Haiku vision) --------------- #
+# Requires a live Anthropic API call per document — costs real money, so
+# Community (free) and Offline (perpetual / no-phone-home) tiers never get
+# it. Business+ only.
+FLAG_AI_EXTRACTION = "ai_extraction"
+
 ALL_FLAGS: tuple[str, ...] = (
     FLAG_BANK_FEEDS,
     FLAG_ABR_LOOKUP,
@@ -110,6 +116,7 @@ ALL_FLAGS: tuple[str, ...] = (
     FLAG_SQL_TOOL,
     FLAG_AUDIT_SNAPSHOTS,
     FLAG_SCHEDULED_BACKUPS,
+    FLAG_AI_EXTRACTION,
 )
 
 _ALL_FLAGS_SET: frozenset[str] = frozenset(ALL_FLAGS)
@@ -142,6 +149,7 @@ _BUSINESS_FLAGS: frozenset[str] = _OFFLINE_FLAGS | frozenset({
     FLAG_ABR_LOOKUP,
     FLAG_STRIPE_INTEGRATION,
     FLAG_PAPERLESS_INTEGRATION,
+    FLAG_AI_EXTRACTION,
 })
 
 _PRO_FLAGS: frozenset[str] = _BUSINESS_FLAGS | frozenset({

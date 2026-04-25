@@ -24,6 +24,7 @@ from saebooks.config import Settings
 from saebooks.services.features import (
     ALL_FLAGS,
     FLAG_ABR_LOOKUP,
+    FLAG_AI_EXTRACTION,
     FLAG_ASSET_V2,
     FLAG_ATO_SBR,
     FLAG_AUDIT_SNAPSHOTS,
@@ -83,6 +84,7 @@ EXPECTED_BUSINESS = EXPECTED_OFFLINE | frozenset({
     FLAG_ABR_LOOKUP,
     FLAG_STRIPE_INTEGRATION,
     FLAG_PAPERLESS_INTEGRATION,
+    FLAG_AI_EXTRACTION,
 })
 
 EXPECTED_PRO = EXPECTED_BUSINESS | frozenset({

@@ -14,10 +14,12 @@ Phase 1 tier-4: ``/api/v1/bank_accounts``,
 ``/api/v1/budgets``.
 Phase 1 tier-5: ``/api/v1/reports/aged_receivables``,
 ``/api/v1/reports/aged_payables``.
+B/46: ``/api/v1/documents/extract`` (AI document extraction).
 """
 from fastapi import APIRouter
 
 from saebooks.api.v1.account_ranges import router as account_ranges_router
+from saebooks.api.v1.ai_extraction import router as ai_extraction_router
 from saebooks.api.v1.accounts import router as accounts_router
 from saebooks.api.v1.bank_accounts import router as bank_accounts_router
 from saebooks.api.v1.bank_rules import router as bank_rules_router
@@ -83,5 +85,8 @@ router.include_router(reports_router)
 router.include_router(search_router)
 router.include_router(changes_router)
 router.include_router(snapshot_router)
+# B/46: AI document extraction — feature-gated to Business+ via
+# FLAG_AI_EXTRACTION. Mounted last to stay after the auth/login routers.
+router.include_router(ai_extraction_router)
 
 __all__ = ["router"]
