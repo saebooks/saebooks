@@ -1,31 +1,35 @@
 """Parse + introspect an ATO RAM Machine Credential keystore.
 
 The Machine Credential Downloader Chrome extension exports a
-``keystore.xml`` file containing the certificate + private key
-protected by a user-chosen password. In practice the format is a
-PKCS12 (PFX) blob wrapped in an XML envelope, though some RAM
-exports produce a bare PKCS12 binary with the ``.xml`` extension.
+``keystore.xml`` file in the ATO's proprietary SBRCredentialStore XML
+format (namespace ``http://auth.abr.gov.au/credential/xsd/SBRCredentialStore``).
+The file contains:
 
-This module intentionally tolerates both shapes without hard-coding
-the exact XML schema (RAM's XML structure has changed at least once
-historically, and we haven't yet round-tripped a real credential
-through this code — the goal is to store + display metadata, not to
-be picky about the envelope).
+* ``publicCertificate``  — the cert chain, PKCS7 SignedData (DER, BER indefinite-length)
+* ``protectedPrivateKey`` — the private key, encrypted PKCS8 using a custom
+  ATO key-derivation scheme (password + per-credential salt).
+* ``salt``, ``credentialSalt`` — used for private-key decryption (not needed
+  for cert-metadata display).
+
+This module extracts cert metadata from ``publicCertificate`` without needing
+the password (PKCS7 is unencrypted).  The password is stored encrypted at rest
+and passed to the lodgement layer when STP/BAS submissions are made; if it is
+wrong the first EVTE ping will surface the error.
+
+Older code expected a PKCS12 blob (either bare or XML-wrapped).  Those paths
+are preserved for compatibility with non-ATO keystores.
 
 Flow:
 
 1. ``load_keystore(data, password)`` tries to parse ``data`` as
-   PKCS12 directly. If that fails, strips any XML envelope by
-   walking the DOM, base64-decoding the largest text chunk found,
-   and retrying PKCS12 on the result.
+   bare PKCS12. If that fails, tries the ATO SBR CredentialStore XML
+   format (PKCS7 publicCertificate). If that also fails, tries the
+   generic XML-wrapped-PKCS12 pattern.
 2. Success returns a ``LoadedKeystore`` dataclass with the cert's
    subject CN, issuer CN, serial, and validity window already
-   extracted — the caller never needs to touch the private key in
-   normal onboarding use (that's for the lodgement layer).
+   extracted.
 
-Callers handle ``KeystoreError`` for anything unparseable or wrong
-password. The onboarding router surfaces the error message verbatim;
-nothing here is user-input-sensitive enough to need redaction.
+Callers handle ``KeystoreError`` for anything unparseable.
 """
 from __future__ import annotations
 
@@ -38,6 +42,8 @@ from xml.etree import ElementTree
 
 from cryptography import x509
 from cryptography.hazmat.primitives.serialization import pkcs12
+
+_SBR_NS = "http://auth.abr.gov.au/credential/xsd/SBRCredentialStore"
 
 
 class KeystoreError(Exception):
@@ -56,9 +62,7 @@ class LoadedKeystore:
 def load_keystore(data: bytes, password: str) -> LoadedKeystore:
     """Parse a RAM Machine Credential keystore and surface its cert metadata.
 
-    Raises ``KeystoreError`` if neither the bare-PKCS12 nor the
-    XML-wrapped-PKCS12 parse succeeds — typically wrong password,
-    wrong file, or corrupted bytes.
+    Raises ``KeystoreError`` if no supported format can be parsed.
     """
     cert = _extract_cert(data, password)
     return LoadedKeystore(
@@ -81,7 +85,15 @@ def _extract_cert(data: bytes, password: str) -> x509.Certificate:
     if cert is not None:
         return cert
 
-    # Path 2: XML envelope around a base64 PKCS12 blob.
+    # Path 2: ATO SBR CredentialStore XML (RAM Machine Credential).
+    # The publicCertificate element holds a PKCS7 SignedData cert chain —
+    # no password needed. The private key is encrypted separately; the
+    # password will be verified on the first EVTE ping.
+    sbr_cert = _extract_ato_sbr_cert(data)
+    if sbr_cert is not None:
+        return sbr_cert
+
+    # Path 3: generic XML envelope around a base64 PKCS12 blob.
     pkcs12_bytes = _unwrap_xml_envelope(data)
     if pkcs12_bytes is None:
         raise KeystoreError(
@@ -100,14 +112,48 @@ def _extract_cert(data: bytes, password: str) -> x509.Certificate:
     return cert
 
 
+def _extract_ato_sbr_cert(data: bytes) -> x509.Certificate | None:
+    """Extract the end-entity cert from an ATO SBR CredentialStore XML.
+
+    Returns ``None`` when the data is not in that format so the caller can
+    fall through to the next parser.
+    """
+    try:
+        root = ElementTree.fromstring(data)
+    except ElementTree.ParseError:
+        return None
+    if root.tag != f"{{{_SBR_NS}}}credentialStore":
+        return None
+    elem = root.find(f".//{{{_SBR_NS}}}publicCertificate")
+    if elem is None or not (elem.text or "").strip():
+        return None
+    stripped = re.sub(r"\s+", "", elem.text.strip())
+    try:
+        cert_bytes = base64.b64decode(stripped, validate=True)
+    except (ValueError, binascii.Error):
+        return None
+
+    # publicCertificate is PKCS7 SignedData (DER with BER indefinite length).
+    from cryptography.hazmat.primitives.serialization import pkcs7
+    try:
+        certs = pkcs7.load_der_pkcs7_certificates(cert_bytes)
+        if certs:
+            return certs[0]
+    except Exception:
+        pass
+
+    # Fallback: bare DER X.509 (not expected for RAM creds but tolerate it).
+    try:
+        return x509.load_der_x509_certificate(cert_bytes)
+    except Exception:
+        return None
+
+
 def _unwrap_xml_envelope(data: bytes) -> bytes | None:
     """Best-effort: pull a base64 PKCS12 blob out of an XML document.
 
     Returns ``None`` if the bytes don't even look like XML or no
-    plausible blob is found. We don't assert a specific RAM schema
-    because we've seen multiple shapes reported (``<Keystore>...``,
-    ``<CredentialData>...``); instead we look for the largest base64
-    chunk inside any text node and hope it decodes.
+    plausible blob is found.
     """
     try:
         root = ElementTree.fromstring(data)

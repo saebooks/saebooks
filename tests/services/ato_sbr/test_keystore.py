@@ -87,6 +87,46 @@ def test_xml_without_pkcs12_blob_raises() -> None:
         load_keystore(data, "pw")
 
 
+def test_loads_ato_sbr_credential_store() -> None:
+    """ATO RAM Machine Credential (SBRCredentialStore XML with PKCS7 publicCertificate)."""
+    from cryptography.hazmat.primitives.serialization import pkcs7 as pkcs7_mod
+
+    key = rsa.generate_private_key(65537, 2048)
+    subject = x509.Name([
+        x509.NameAttribute(x509.NameOID.COUNTRY_NAME, "AU"),
+        x509.NameAttribute(x509.NameOID.ORGANIZATION_NAME, "87744586592"),
+        x509.NameAttribute(x509.NameOID.COMMON_NAME, "SAE-Books"),
+    ])
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(subject)
+        .public_key(key.public_key())
+        .serial_number(0x1234ABCD)
+        .not_valid_before(datetime.now(UTC) - timedelta(days=1))
+        .not_valid_after(datetime.now(UTC) + timedelta(days=730))
+        .sign(key, hashes.SHA256())
+    )
+    pkcs7_der = pkcs7_mod.serialize_certificates([cert], serialization.Encoding.DER)
+    b64 = base64.b64encode(pkcs7_der).decode("ascii")
+    ns = "http://auth.abr.gov.au/credential/xsd/SBRCredentialStore"
+    xml = (
+        f'<?xml version="1.0" encoding="UTF-8"?>\n'
+        f'<credentialStore xmlns="{ns}">\n'
+        f'  <salt>dGVzdHNhbHQ=</salt>\n'
+        f'  <credentials><credential credentialType="D"\n'
+        f'    id="ABRD:87744586592_SAE-Books"\n'
+        f'    credentialSalt="dGVzdA==" integrityValue="dGVzdA==">\n'
+        f'    <publicCertificate>{b64}</publicCertificate>\n'
+        f'    <protectedPrivateKey>dGVzdA==</protectedPrivateKey>\n'
+        f'  </credential></credentials>\n'
+        f'</credentialStore>\n'
+    ).encode("utf-8")
+    loaded = load_keystore(xml, "password-not-needed-for-cert-read")
+    assert loaded.subject_cn == "SAE-Books"
+    assert loaded.not_after > datetime.now(UTC)
+
+
 def test_multi_rdn_subject_picks_cn() -> None:
     key = rsa.generate_private_key(65537, 2048)
     subject = issuer = x509.Name([
