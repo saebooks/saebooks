@@ -182,13 +182,21 @@ async def list_fixed_assets(
 async def get(
     session: AsyncSession,
     asset_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
 ) -> FixedAsset | None:
-    """Fetch a single fixed asset by primary key (with depreciation model eager-loaded)."""
+    """Fetch a single fixed asset by primary key (with depreciation model eager-loaded).
+
+    When ``tenant_id`` is supplied the lookup is filtered by tenant —
+    a foreign-tenant id returns ``None`` even if the row exists.
+    """
     stmt = (
         select(FixedAsset)
         .options(selectinload(FixedAsset.depreciation_model))
         .where(FixedAsset.id == asset_id)
     )
+    if tenant_id is not None:
+        stmt = stmt.where(FixedAsset.tenant_id == tenant_id)
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
 

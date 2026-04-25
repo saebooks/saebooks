@@ -17,11 +17,13 @@ import json
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
+from saebooks.api.v1.deps import get_session
 from saebooks.api.v1.schemas import (
     ProjectConflictBody,
     ProjectCreate,
@@ -29,7 +31,6 @@ from saebooks.api.v1.schemas import (
     ProjectOut,
     ProjectUpdate,
 )
-from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 from saebooks.models.idempotency_key import IdempotencyKey
 from saebooks.services import projects as svc
@@ -46,14 +47,19 @@ router = APIRouter(
 # ---------------------------------------------------------------------------
 
 
-async def _first_company_id(session) -> UUID:
-    """Return the first active company — Phase 1 single-company assumption."""
+async def _first_company_id(session: AsyncSession, tenant_id: UUID) -> UUID:
+    """Return the first active company for the request tenant."""
     result = await session.execute(
-        select(Company).where(Company.archived_at.is_(None)).order_by(Company.created_at)
+        select(Company)
+        .where(
+            Company.tenant_id == tenant_id,
+            Company.archived_at.is_(None),
+        )
+        .order_by(Company.created_at)
     )
     company = result.scalars().first()
     if company is None:
-        raise HTTPException(500, "No active company")
+        raise HTTPException(404, "No active company for tenant")
     return company.id
 
 
@@ -104,30 +110,31 @@ def _dump(project: Any) -> dict[str, Any]:
 
 @router.get("", response_model=ProjectListOut)
 async def list_projects(
+    request: Request,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
     status: str | None = Query(default=None),
     archived: bool = Query(default=False),
+    session: AsyncSession = Depends(get_session),
 ) -> ProjectListOut:
     offset = (page - 1) * page_size
-    async with AsyncSessionLocal() as session:
-        company_id = await _first_company_id(session)
-        tenant_id = resolve_tenant_id()
-        items, total = await svc.list_projects(
-            session,
-            company_id,
-            tenant_id,
-            status=status,
-            archived=archived,
-            limit=page_size,
-            offset=offset,
-        )
-        return ProjectListOut(
-            items=[ProjectOut.model_validate(p) for p in items],
-            total=total,
-            limit=page_size,
-            offset=offset,
-        )
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
+    items, total = await svc.list_projects(
+        session,
+        company_id,
+        tenant_id,
+        status=status,
+        archived=archived,
+        limit=page_size,
+        offset=offset,
+    )
+    return ProjectListOut(
+        items=[ProjectOut.model_validate(p) for p in items],
+        total=total,
+        limit=page_size,
+        offset=offset,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -136,12 +143,16 @@ async def list_projects(
 
 
 @router.get("/{project_id}", response_model=ProjectOut)
-async def get_project(project_id: UUID) -> ProjectOut:
-    async with AsyncSessionLocal() as session:
-        project = await svc.api_get(session, project_id)
-        if project is None:
-            raise HTTPException(404, "Project not found")
-        return ProjectOut.model_validate(project)
+async def get_project(
+    request: Request,
+    project_id: UUID,
+    session: AsyncSession = Depends(get_session),
+) -> ProjectOut:
+    tenant_id = resolve_tenant_id(request)
+    project = await svc.api_get(session, project_id, tenant_id=tenant_id)
+    if project is None:
+        raise HTTPException(404, "Project not found")
+    return ProjectOut.model_validate(project)
 
 
 # ---------------------------------------------------------------------------
@@ -151,40 +162,41 @@ async def get_project(project_id: UUID) -> ProjectOut:
 
 @router.post("", response_model=ProjectOut, status_code=201)
 async def create_project(
+    request: Request,
     payload: ProjectCreate,
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     key = _parse_idempotency_key(idempotency_key)
-    async with AsyncSessionLocal() as session:
-        if key is not None:
-            replay = await _idempotent_replay(session, key)
-            if replay is not None:
-                return replay
+    if key is not None:
+        replay = await _idempotent_replay(session, key)
+        if replay is not None:
+            return replay
 
-        company_id = await _first_company_id(session)
-        tenant_id = resolve_tenant_id()
-        try:
-            project = await svc.api_create(
-                session,
-                company_id,
-                tenant_id,
-                actor=f"api:{bearer[:8]}…",
-                code=payload.code,
-                name=payload.name,
-                status=payload.status,
-                start_date=payload.start_date,
-                end_date=payload.end_date,
-                notes=payload.notes,
-                extra=payload.extra,
-            )
-        except (ValueError, svc.ProjectApiError) as exc:
-            raise HTTPException(422, str(exc)) from exc
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
+    try:
+        project = await svc.api_create(
+            session,
+            company_id,
+            tenant_id,
+            actor=f"api:{bearer[:8]}…",
+            code=payload.code,
+            name=payload.name,
+            status=payload.status,
+            start_date=payload.start_date,
+            end_date=payload.end_date,
+            notes=payload.notes,
+            extra=payload.extra,
+        )
+    except (ValueError, svc.ProjectApiError) as exc:
+        raise HTTPException(422, str(exc)) from exc
 
-        body = _dump(project)
-        if key is not None:
-            await _remember_idempotent(session, key, body, 201)
-            await session.commit()
+    body = _dump(project)
+    if key is not None:
+        await _remember_idempotent(session, key, body, 201)
+        await session.commit()
     return JSONResponse(body, status_code=201)
 
 
@@ -201,50 +213,56 @@ async def create_project(
     },
 )
 async def update_project(
+    request: Request,
     project_id: UUID,
     payload: ProjectUpdate,
     if_match: str | None = Header(default=None, alias="If-Match"),
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with project version is required")
     key = _parse_idempotency_key(idempotency_key)
 
-    async with AsyncSessionLocal() as session:
-        if key is not None:
-            replay = await _idempotent_replay(session, key)
-            if replay is not None:
-                return replay
+    tenant_id = resolve_tenant_id(request)
+    # Belt-and-braces: verify project belongs to this tenant
+    if await svc.api_get(session, project_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Project not found")
 
-        try:
-            project = await svc.api_update(
-                session,
-                project_id,
-                actor=f"api:{bearer[:8]}…",
-                expected_version=expected,
-                **payload.model_dump(exclude_unset=True),
-            )
-        except svc.VersionConflict as exc:
-            body = ProjectConflictBody(
-                detail="version mismatch",
-                current=ProjectOut.model_validate(exc.current),
-            ).model_dump(mode="json")
-            if key is not None:
-                await _remember_idempotent(session, key, body, 409)
-                await session.commit()
-            return JSONResponse(body, status_code=409)
-        except (ValueError, svc.ProjectApiError) as exc:
-            msg = str(exc)
-            if "not found" in msg.lower():
-                raise HTTPException(404, msg) from exc
-            raise HTTPException(422, msg) from exc
+    if key is not None:
+        replay = await _idempotent_replay(session, key)
+        if replay is not None:
+            return replay
 
-        body = _dump(project)
+    try:
+        project = await svc.api_update(
+            session,
+            project_id,
+            actor=f"api:{bearer[:8]}…",
+            expected_version=expected,
+            **payload.model_dump(exclude_unset=True),
+        )
+    except svc.VersionConflict as exc:
+        body = ProjectConflictBody(
+            detail="version mismatch",
+            current=ProjectOut.model_validate(exc.current),
+        ).model_dump(mode="json")
         if key is not None:
-            await _remember_idempotent(session, key, body, 200)
+            await _remember_idempotent(session, key, body, 409)
             await session.commit()
+        return JSONResponse(body, status_code=409)
+    except (ValueError, svc.ProjectApiError) as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
+
+    body = _dump(project)
+    if key is not None:
+        await _remember_idempotent(session, key, body, 200)
+        await session.commit()
     return JSONResponse(body, status_code=200)
 
 
@@ -261,32 +279,38 @@ async def update_project(
     },
 )
 async def delete_project(
+    request: Request,
     project_id: UUID,
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with project version is required")
 
-    async with AsyncSessionLocal() as session:
-        try:
-            await svc.api_delete(
-                session,
-                project_id,
-                actor=f"api:{bearer[:8]}…",
-                expected_version=expected,
-            )
-        except svc.VersionConflict as exc:
-            body = ProjectConflictBody(
-                detail="version mismatch",
-                current=ProjectOut.model_validate(exc.current),
-            ).model_dump(mode="json")
-            return JSONResponse(body, status_code=409)
-        except (ValueError, svc.ProjectApiError) as exc:
-            msg = str(exc)
-            if "not found" in msg.lower():
-                raise HTTPException(404, msg) from exc
-            raise HTTPException(422, msg) from exc
+    tenant_id = resolve_tenant_id(request)
+    # Belt-and-braces: verify project belongs to this tenant
+    if await svc.api_get(session, project_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Project not found")
+
+    try:
+        await svc.api_delete(
+            session,
+            project_id,
+            actor=f"api:{bearer[:8]}…",
+            expected_version=expected,
+        )
+    except svc.VersionConflict as exc:
+        body = ProjectConflictBody(
+            detail="version mismatch",
+            current=ProjectOut.model_validate(exc.current),
+        ).model_dump(mode="json")
+        return JSONResponse(body, status_code=409)
+    except (ValueError, svc.ProjectApiError) as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
 
     return Response(status_code=204)

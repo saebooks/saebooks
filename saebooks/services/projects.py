@@ -260,9 +260,23 @@ async def list_projects(
 async def api_get(
     session: AsyncSession,
     project_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
 ) -> Project | None:
-    """Fetch a single project by primary key. Returns None if not found."""
-    return await session.get(Project, project_id)
+    """Fetch a single project by primary key.
+
+    When ``tenant_id`` is supplied the lookup is filtered by tenant —
+    a foreign-tenant id returns ``None`` even if the row exists.
+    """
+    if tenant_id is None:
+        return await session.get(Project, project_id)
+    result = await session.execute(
+        select(Project).where(
+            Project.id == project_id,
+            Project.tenant_id == tenant_id,
+        )
+    )
+    return result.scalars().first()
 
 
 # ---------------------------------------------------------------------------

@@ -242,9 +242,23 @@ async def delete_budget(
 async def api_get(
     session: AsyncSession,
     budget_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
 ) -> Budget | None:
-    """Fetch a single budget row by primary key."""
-    return await session.get(Budget, budget_id)
+    """Fetch a single budget row by primary key.
+
+    When ``tenant_id`` is supplied the lookup is filtered by tenant —
+    a foreign-tenant id returns ``None`` even if the row exists.
+    """
+    if tenant_id is None:
+        return await session.get(Budget, budget_id)
+    result = await session.execute(
+        select(Budget).where(
+            Budget.id == budget_id,
+            Budget.tenant_id == tenant_id,
+        )
+    )
+    return result.scalars().first()
 
 
 async def list_budgets(

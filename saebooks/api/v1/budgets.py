@@ -19,11 +19,13 @@ import json
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
+from saebooks.api.v1.deps import get_session
 from saebooks.api.v1.schemas import (
     BudgetConflictBody,
     BudgetCreate,
@@ -31,7 +33,6 @@ from saebooks.api.v1.schemas import (
     BudgetOut,
     BudgetUpdate,
 )
-from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 from saebooks.models.idempotency_key import IdempotencyKey
 from saebooks.services import budgets as svc
@@ -48,14 +49,19 @@ router = APIRouter(
 # ---------------------------------------------------------------------------
 
 
-async def _first_company_id(session) -> UUID:
-    """Return the first active company — Phase 1 single-company assumption."""
+async def _first_company_id(session: AsyncSession, tenant_id: UUID) -> UUID:
+    """Return the first active company for the request tenant."""
     result = await session.execute(
-        select(Company).where(Company.archived_at.is_(None)).order_by(Company.created_at)
+        select(Company)
+        .where(
+            Company.tenant_id == tenant_id,
+            Company.archived_at.is_(None),
+        )
+        .order_by(Company.created_at)
     )
     company = result.scalars().first()
     if company is None:
-        raise HTTPException(500, "No active company")
+        raise HTTPException(404, "No active company for tenant")
     return company.id
 
 
@@ -106,34 +112,35 @@ def _dump(b: Any) -> dict[str, Any]:
 
 @router.get("", response_model=BudgetListOut)
 async def list_budgets(
+    request: Request,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
     year: int | None = Query(default=None),
     month: int | None = Query(default=None),
     account_id: str | None = Query(default=None),
     archived: bool = Query(default=False),
+    session: AsyncSession = Depends(get_session),
 ) -> BudgetListOut:
     offset = (page - 1) * page_size
-    async with AsyncSessionLocal() as session:
-        company_id = await _first_company_id(session)
-        tenant_id = resolve_tenant_id()
-        items, total = await svc.list_budgets(
-            session,
-            company_id,
-            tenant_id,
-            year=year,
-            month=month,
-            account_id=account_id,
-            archived=archived,
-            limit=page_size,
-            offset=offset,
-        )
-        return BudgetListOut(
-            items=[BudgetOut.model_validate(b) for b in items],
-            total=total,
-            limit=page_size,
-            offset=offset,
-        )
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
+    items, total = await svc.list_budgets(
+        session,
+        company_id,
+        tenant_id,
+        year=year,
+        month=month,
+        account_id=account_id,
+        archived=archived,
+        limit=page_size,
+        offset=offset,
+    )
+    return BudgetListOut(
+        items=[BudgetOut.model_validate(b) for b in items],
+        total=total,
+        limit=page_size,
+        offset=offset,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -142,12 +149,16 @@ async def list_budgets(
 
 
 @router.get("/{budget_id}", response_model=BudgetOut)
-async def get_budget(budget_id: UUID) -> BudgetOut:
-    async with AsyncSessionLocal() as session:
-        b = await svc.api_get(session, budget_id)
-        if b is None:
-            raise HTTPException(404, "Budget not found")
-        return BudgetOut.model_validate(b)
+async def get_budget(
+    request: Request,
+    budget_id: UUID,
+    session: AsyncSession = Depends(get_session),
+) -> BudgetOut:
+    tenant_id = resolve_tenant_id(request)
+    b = await svc.api_get(session, budget_id, tenant_id=tenant_id)
+    if b is None:
+        raise HTTPException(404, "Budget not found")
+    return BudgetOut.model_validate(b)
 
 
 # ---------------------------------------------------------------------------
@@ -157,38 +168,39 @@ async def get_budget(budget_id: UUID) -> BudgetOut:
 
 @router.post("", response_model=BudgetOut, status_code=201)
 async def create_budget(
+    request: Request,
     payload: BudgetCreate,
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     key = _parse_idempotency_key(idempotency_key)
-    async with AsyncSessionLocal() as session:
-        if key is not None:
-            replay = await _idempotent_replay(session, key)
-            if replay is not None:
-                return replay
+    if key is not None:
+        replay = await _idempotent_replay(session, key)
+        if replay is not None:
+            return replay
 
-        company_id = await _first_company_id(session)
-        tenant_id = resolve_tenant_id()
-        try:
-            b = await svc.api_create(
-                session,
-                company_id,
-                tenant_id,
-                actor=f"api:{bearer[:8]}…",
-                account_id=payload.account_id,
-                year=payload.year,
-                month=payload.month,
-                amount=payload.amount,
-                notes=payload.notes,
-            )
-        except (ValueError, svc.BudgetApiError) as exc:
-            raise HTTPException(422, str(exc)) from exc
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
+    try:
+        b = await svc.api_create(
+            session,
+            company_id,
+            tenant_id,
+            actor=f"api:{bearer[:8]}…",
+            account_id=payload.account_id,
+            year=payload.year,
+            month=payload.month,
+            amount=payload.amount,
+            notes=payload.notes,
+        )
+    except (ValueError, svc.BudgetApiError) as exc:
+        raise HTTPException(422, str(exc)) from exc
 
-        body = _dump(b)
-        if key is not None:
-            await _remember_idempotent(session, key, body, 201)
-            await session.commit()
+    body = _dump(b)
+    if key is not None:
+        await _remember_idempotent(session, key, body, 201)
+        await session.commit()
     return JSONResponse(body, status_code=201)
 
 
@@ -205,52 +217,58 @@ async def create_budget(
     },
 )
 async def update_budget(
+    request: Request,
     budget_id: UUID,
     payload: BudgetUpdate,
     if_match: str | None = Header(default=None, alias="If-Match"),
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with budget version is required")
     key = _parse_idempotency_key(idempotency_key)
 
-    async with AsyncSessionLocal() as session:
+    tenant_id = resolve_tenant_id(request)
+    # Belt-and-braces: verify budget belongs to this tenant
+    if await svc.api_get(session, budget_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Budget not found")
+
+    if key is not None:
+        replay = await _idempotent_replay(session, key)
+        if replay is not None:
+            return replay
+
+    raw = payload.model_dump(exclude_unset=True)
+
+    try:
+        b = await svc.api_update(
+            session,
+            budget_id,
+            actor=f"api:{bearer[:8]}…",
+            expected_version=expected,
+            **raw,
+        )
+    except svc.VersionConflict as exc:
+        body = BudgetConflictBody(
+            detail="version mismatch",
+            current=BudgetOut.model_validate(exc.current),
+        ).model_dump(mode="json")
         if key is not None:
-            replay = await _idempotent_replay(session, key)
-            if replay is not None:
-                return replay
-
-        raw = payload.model_dump(exclude_unset=True)
-
-        try:
-            b = await svc.api_update(
-                session,
-                budget_id,
-                actor=f"api:{bearer[:8]}…",
-                expected_version=expected,
-                **raw,
-            )
-        except svc.VersionConflict as exc:
-            body = BudgetConflictBody(
-                detail="version mismatch",
-                current=BudgetOut.model_validate(exc.current),
-            ).model_dump(mode="json")
-            if key is not None:
-                await _remember_idempotent(session, key, body, 409)
-                await session.commit()
-            return JSONResponse(body, status_code=409)
-        except (ValueError, svc.BudgetApiError) as exc:
-            msg = str(exc)
-            if "not found" in msg.lower():
-                raise HTTPException(404, msg) from exc
-            raise HTTPException(422, msg) from exc
-
-        body = _dump(b)
-        if key is not None:
-            await _remember_idempotent(session, key, body, 200)
+            await _remember_idempotent(session, key, body, 409)
             await session.commit()
+        return JSONResponse(body, status_code=409)
+    except (ValueError, svc.BudgetApiError) as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
+
+    body = _dump(b)
+    if key is not None:
+        await _remember_idempotent(session, key, body, 200)
+        await session.commit()
     return JSONResponse(body, status_code=200)
 
 
@@ -267,32 +285,37 @@ async def update_budget(
     },
 )
 async def delete_budget(
+    request: Request,
     budget_id: UUID,
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with budget version is required")
 
-    async with AsyncSessionLocal() as session:
-        try:
-            await svc.api_delete(
-                session,
-                budget_id,
-                actor=f"api:{bearer[:8]}…",
-                expected_version=expected,
-            )
-        except svc.VersionConflict as exc:
-            body = BudgetConflictBody(
-                detail="version mismatch",
-                current=BudgetOut.model_validate(exc.current),
-            ).model_dump(mode="json")
-            return JSONResponse(body, status_code=409)
-        except (ValueError, svc.BudgetApiError) as exc:
-            msg = str(exc)
-            if "not found" in msg.lower():
-                raise HTTPException(404, msg) from exc
-            raise HTTPException(422, msg) from exc
+    tenant_id = resolve_tenant_id(request)
+    if await svc.api_get(session, budget_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Budget not found")
+
+    try:
+        await svc.api_delete(
+            session,
+            budget_id,
+            actor=f"api:{bearer[:8]}…",
+            expected_version=expected,
+        )
+    except svc.VersionConflict as exc:
+        body = BudgetConflictBody(
+            detail="version mismatch",
+            current=BudgetOut.model_validate(exc.current),
+        ).model_dump(mode="json")
+        return JSONResponse(body, status_code=409)
+    except (ValueError, svc.BudgetApiError) as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
 
     return Response(status_code=204)

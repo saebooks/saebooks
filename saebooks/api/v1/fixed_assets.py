@@ -24,11 +24,13 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
+from saebooks.api.v1.deps import get_session
 from saebooks.api.v1.schemas import (
     DepreciationRunAllRequest,
     DepreciationRunAllResponse,
@@ -42,7 +44,6 @@ from saebooks.api.v1.schemas import (
     FixedAssetOut,
     FixedAssetUpdate,
 )
-from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 from saebooks.models.fixed_asset import FixedAsset
 from saebooks.models.idempotency_key import IdempotencyKey
@@ -61,14 +62,19 @@ router = APIRouter(
 # ---------------------------------------------------------------------------
 
 
-async def _first_company_id(session) -> UUID:
-    """Return the first active company — Phase 1 single-company assumption."""
+async def _first_company_id(session: AsyncSession, tenant_id: UUID) -> UUID:
+    """Return the first active company for the request tenant."""
     result = await session.execute(
-        select(Company).where(Company.archived_at.is_(None)).order_by(Company.created_at)
+        select(Company)
+        .where(
+            Company.tenant_id == tenant_id,
+            Company.archived_at.is_(None),
+        )
+        .order_by(Company.created_at)
     )
     company = result.scalars().first()
     if company is None:
-        raise HTTPException(500, "No active company")
+        raise HTTPException(404, "No active company for tenant")
     return company.id
 
 
@@ -119,32 +125,33 @@ def _dump(asset: Any) -> dict[str, Any]:
 
 @router.get("", response_model=FixedAssetListOut)
 async def list_fixed_assets(
+    request: Request,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
     status: str | None = Query(default=None),
     depreciation_model_id: str | None = Query(default=None),
     archived: bool = Query(default=False),
+    session: AsyncSession = Depends(get_session),
 ) -> FixedAssetListOut:
     offset = (page - 1) * page_size
-    async with AsyncSessionLocal() as session:
-        company_id = await _first_company_id(session)
-        tenant_id = resolve_tenant_id()
-        items, total = await svc.list_fixed_assets(
-            session,
-            company_id,
-            tenant_id,
-            status=status,
-            depreciation_model_id=depreciation_model_id,
-            archived=archived,
-            limit=page_size,
-            offset=offset,
-        )
-        return FixedAssetListOut(
-            items=[FixedAssetOut.model_validate(a) for a in items],
-            total=total,
-            limit=page_size,
-            offset=offset,
-        )
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
+    items, total = await svc.list_fixed_assets(
+        session,
+        company_id,
+        tenant_id,
+        status=status,
+        depreciation_model_id=depreciation_model_id,
+        archived=archived,
+        limit=page_size,
+        offset=offset,
+    )
+    return FixedAssetListOut(
+        items=[FixedAssetOut.model_validate(a) for a in items],
+        total=total,
+        limit=page_size,
+        offset=offset,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -157,8 +164,10 @@ async def list_fixed_assets(
     response_model=DepreciationRunAllResponse,
 )
 async def depreciation_run_all(
+    request: Request,
     body: DepreciationRunAllRequest,
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     """Run depreciation for all active, non-disposed assets up to ``through``.
 
@@ -172,47 +181,43 @@ async def depreciation_run_all(
     field to handle partial failures.
     """
     actor = f"api:{bearer[:8]}…"
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
 
-    async with AsyncSessionLocal() as session:
-        company_id = await _first_company_id(session)
+    # Fetch all active, non-archived assets for this company.
+    result = await session.execute(
+        select(FixedAsset).where(
+            FixedAsset.company_id == company_id,
+            FixedAsset.status == "active",
+            FixedAsset.archived_at.is_(None),
+        ).order_by(FixedAsset.code)
+    )
+    assets = list(result.scalars().all())
 
-        # Fetch all active, non-archived assets for this company.
-        result = await session.execute(
-            select(FixedAsset).where(
-                FixedAsset.company_id == company_id,
-                FixedAsset.status == "active",
-                FixedAsset.archived_at.is_(None),
-            ).order_by(FixedAsset.code)
-        )
-        assets = list(result.scalars().all())
+    results: list[DepreciationRunAllResultItem] = []
+    errors: list[str] = []
+    total_amount = Decimal("0")
 
-        results: list[DepreciationRunAllResultItem] = []
-        errors: list[str] = []
-        total_amount = Decimal("0")
-
-        for asset in assets:
-            try:
-                _updated_asset, amount_posted = await legacy_assets_svc.post_depreciation(
-                    session,
-                    asset.id,
-                    body.through,
-                    posted_by=actor,
+    for asset in assets:
+        try:
+            _updated_asset, amount_posted = await legacy_assets_svc.post_depreciation(
+                session,
+                asset.id,
+                body.through,
+                posted_by=actor,
+            )
+            note = f"Posted AUD {amount_posted}" if amount_posted > 0 else "No depreciation to post"
+            results.append(
+                DepreciationRunAllResultItem(
+                    asset_id=asset.id,
+                    asset_code=asset.code,
+                    amount_posted=amount_posted,
+                    note=note,
                 )
-                if amount_posted > 0:
-                    note = f"Posted AUD {amount_posted}"
-                else:
-                    note = "No depreciation to post"
-                results.append(
-                    DepreciationRunAllResultItem(
-                        asset_id=asset.id,
-                        asset_code=asset.code,
-                        amount_posted=amount_posted,
-                        note=note,
-                    )
-                )
-                total_amount += amount_posted
-            except Exception as exc:
-                errors.append(f"{asset.code}: {exc}")
+            )
+            total_amount += amount_posted
+        except Exception as exc:
+            errors.append(f"{asset.code}: {exc}")
 
     response_body = DepreciationRunAllResponse(
         through=body.through,
@@ -233,12 +238,16 @@ async def depreciation_run_all(
 
 
 @router.get("/{asset_id}", response_model=FixedAssetOut)
-async def get_fixed_asset(asset_id: UUID) -> FixedAssetOut:
-    async with AsyncSessionLocal() as session:
-        asset = await svc.get(session, asset_id)
-        if asset is None:
-            raise HTTPException(404, "Fixed asset not found")
-        return FixedAssetOut.model_validate(asset)
+async def get_fixed_asset(
+    request: Request,
+    asset_id: UUID,
+    session: AsyncSession = Depends(get_session),
+) -> FixedAssetOut:
+    tenant_id = resolve_tenant_id(request)
+    asset = await svc.get(session, asset_id, tenant_id=tenant_id)
+    if asset is None:
+        raise HTTPException(404, "Fixed asset not found")
+    return FixedAssetOut.model_validate(asset)
 
 
 # ---------------------------------------------------------------------------
@@ -248,52 +257,53 @@ async def get_fixed_asset(asset_id: UUID) -> FixedAssetOut:
 
 @router.post("", response_model=FixedAssetOut, status_code=201)
 async def create_fixed_asset(
+    request: Request,
     payload: FixedAssetCreate,
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     key = _parse_idempotency_key(idempotency_key)
-    async with AsyncSessionLocal() as session:
-        if key is not None:
-            replay = await _idempotent_replay(session, key)
-            if replay is not None:
-                return replay
+    if key is not None:
+        replay = await _idempotent_replay(session, key)
+        if replay is not None:
+            return replay
 
-        company_id = await _first_company_id(session)
-        tenant_id = resolve_tenant_id()
-        try:
-            asset = await svc.create(
-                session,
-                company_id,
-                tenant_id,
-                actor=f"api:{bearer[:8]}…",
-                name=payload.name,
-                depreciation_model_id=payload.depreciation_model_id,
-                cost_account_id=payload.cost_account_id,
-                accum_dep_account_id=payload.accum_dep_account_id,
-                dep_expense_account_id=payload.dep_expense_account_id,
-                purchase_date=payload.purchase_date,
-                cost=payload.cost,
-                in_service_date=payload.in_service_date,
-                residual_value=payload.residual_value,
-                code=payload.code,
-                description=payload.description,
-                tax_model_id=payload.tax_model_id,
-                serial_number=payload.serial_number,
-                manufacturer=payload.manufacturer,
-                model_number=payload.model_number,
-                location=payload.location,
-                custody_person=payload.custody_person,
-                warranty_end=payload.warranty_end,
-                extra=payload.extra,
-            )
-        except (ValueError, svc.FixedAssetApiError) as exc:
-            raise HTTPException(422, str(exc)) from exc
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
+    try:
+        asset = await svc.create(
+            session,
+            company_id,
+            tenant_id,
+            actor=f"api:{bearer[:8]}…",
+            name=payload.name,
+            depreciation_model_id=payload.depreciation_model_id,
+            cost_account_id=payload.cost_account_id,
+            accum_dep_account_id=payload.accum_dep_account_id,
+            dep_expense_account_id=payload.dep_expense_account_id,
+            purchase_date=payload.purchase_date,
+            cost=payload.cost,
+            in_service_date=payload.in_service_date,
+            residual_value=payload.residual_value,
+            code=payload.code,
+            description=payload.description,
+            tax_model_id=payload.tax_model_id,
+            serial_number=payload.serial_number,
+            manufacturer=payload.manufacturer,
+            model_number=payload.model_number,
+            location=payload.location,
+            custody_person=payload.custody_person,
+            warranty_end=payload.warranty_end,
+            extra=payload.extra,
+        )
+    except (ValueError, svc.FixedAssetApiError) as exc:
+        raise HTTPException(422, str(exc)) from exc
 
-        body = _dump(asset)
-        if key is not None:
-            await _remember_idempotent(session, key, body, 201)
-            await session.commit()
+    body = _dump(asset)
+    if key is not None:
+        await _remember_idempotent(session, key, body, 201)
+        await session.commit()
     return JSONResponse(body, status_code=201)
 
 
@@ -310,50 +320,56 @@ async def create_fixed_asset(
     },
 )
 async def update_fixed_asset(
+    request: Request,
     asset_id: UUID,
     payload: FixedAssetUpdate,
     if_match: str | None = Header(default=None, alias="If-Match"),
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with asset version is required")
     key = _parse_idempotency_key(idempotency_key)
 
-    async with AsyncSessionLocal() as session:
-        if key is not None:
-            replay = await _idempotent_replay(session, key)
-            if replay is not None:
-                return replay
+    tenant_id = resolve_tenant_id(request)
+    # Belt-and-braces: verify asset belongs to this tenant
+    if await svc.get(session, asset_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Fixed asset not found")
 
-        try:
-            asset = await svc.update(
-                session,
-                asset_id,
-                actor=f"api:{bearer[:8]}…",
-                expected_version=expected,
-                **payload.model_dump(exclude_unset=True),
-            )
-        except svc.VersionConflict as exc:
-            body = FixedAssetConflictBody(
-                detail="version mismatch",
-                current=FixedAssetOut.model_validate(exc.current),
-            ).model_dump(mode="json")
-            if key is not None:
-                await _remember_idempotent(session, key, body, 409)
-                await session.commit()
-            return JSONResponse(body, status_code=409)
-        except (ValueError, svc.FixedAssetApiError) as exc:
-            msg = str(exc)
-            if "not found" in msg.lower():
-                raise HTTPException(404, msg) from exc
-            raise HTTPException(422, msg) from exc
+    if key is not None:
+        replay = await _idempotent_replay(session, key)
+        if replay is not None:
+            return replay
 
-        body = _dump(asset)
+    try:
+        asset = await svc.update(
+            session,
+            asset_id,
+            actor=f"api:{bearer[:8]}…",
+            expected_version=expected,
+            **payload.model_dump(exclude_unset=True),
+        )
+    except svc.VersionConflict as exc:
+        body = FixedAssetConflictBody(
+            detail="version mismatch",
+            current=FixedAssetOut.model_validate(exc.current),
+        ).model_dump(mode="json")
         if key is not None:
-            await _remember_idempotent(session, key, body, 200)
+            await _remember_idempotent(session, key, body, 409)
             await session.commit()
+        return JSONResponse(body, status_code=409)
+    except (ValueError, svc.FixedAssetApiError) as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
+
+    body = _dump(asset)
+    if key is not None:
+        await _remember_idempotent(session, key, body, 200)
+        await session.commit()
     return JSONResponse(body, status_code=200)
 
 
@@ -370,10 +386,12 @@ async def update_fixed_asset(
     },
 )
 async def dispose_fixed_asset(
+    request: Request,
     asset_id: UUID,
     payload: FixedAssetDispose,
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     """Dispose a fixed asset.
 
@@ -388,28 +406,32 @@ async def dispose_fixed_asset(
     if expected is None:
         raise HTTPException(428, "If-Match header with asset version is required")
 
-    async with AsyncSessionLocal() as session:
-        try:
-            asset = await svc.dispose(
-                session,
-                asset_id,
-                actor=f"api:{bearer[:8]}…",
-                expected_version=expected,
-                disposal_date=payload.disposal_date,
-                proceeds=payload.proceeds,
-                notes=payload.notes,
-            )
-        except svc.VersionConflict as exc:
-            body = FixedAssetConflictBody(
-                detail="version mismatch",
-                current=FixedAssetOut.model_validate(exc.current),
-            ).model_dump(mode="json")
-            return JSONResponse(body, status_code=409)
-        except (ValueError, svc.FixedAssetApiError) as exc:
-            msg = str(exc)
-            if "not found" in msg.lower():
-                raise HTTPException(404, msg) from exc
-            raise HTTPException(422, msg) from exc
+    tenant_id = resolve_tenant_id(request)
+    # Belt-and-braces: verify asset belongs to this tenant
+    if await svc.get(session, asset_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Fixed asset not found")
+
+    try:
+        asset = await svc.dispose(
+            session,
+            asset_id,
+            actor=f"api:{bearer[:8]}…",
+            expected_version=expected,
+            disposal_date=payload.disposal_date,
+            proceeds=payload.proceeds,
+            notes=payload.notes,
+        )
+    except svc.VersionConflict as exc:
+        body = FixedAssetConflictBody(
+            detail="version mismatch",
+            current=FixedAssetOut.model_validate(exc.current),
+        ).model_dump(mode="json")
+        return JSONResponse(body, status_code=409)
+    except (ValueError, svc.FixedAssetApiError) as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
 
     return JSONResponse(_dump(asset), status_code=200)
 
@@ -427,10 +449,12 @@ async def dispose_fixed_asset(
     },
 )
 async def post_depreciation(
+    request: Request,
     asset_id: UUID,
     payload: FixedAssetDepreciationRunRequest,
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     """Run a depreciation posting for a fixed asset up to ``through``.
 
@@ -448,51 +472,50 @@ async def post_depreciation(
         raise HTTPException(428, "If-Match header with asset version is required")
 
     actor = f"api:{bearer[:8]}…"
-
-    async with AsyncSessionLocal() as session:
-        asset = await svc.get(session, asset_id)
-        if asset is None:
-            raise HTTPException(404, "Fixed asset not found")
-        if asset.version != expected:
-            body = FixedAssetConflictBody(
-                detail="version mismatch",
-                current=FixedAssetOut.model_validate(asset),
-            ).model_dump(mode="json")
-            return JSONResponse(body, status_code=409)
-        if asset.status != "active":
-            raise HTTPException(
-                422,
-                f"Cannot depreciate asset in status {asset.status!r} — must be active",
-            )
-
-        try:
-            updated_asset, amount_posted = await legacy_assets_svc.post_depreciation(
-                session,
-                asset_id,
-                payload.through,
-                posted_by=actor,
-            )
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
-
-        # Bump version and append change_log after the GL posting.
-        updated_asset.version = updated_asset.version + 1
-        await session.flush()
-        await session.refresh(updated_asset)
-
-        from saebooks.services import change_log as change_log_svc  # local import avoids circular
-
-        await change_log_svc.append(
-            session,
-            entity="fixed_asset",
-            entity_id=updated_asset.id,
-            op="depreciation_run",
-            actor=actor,
-            payload={"amount_posted": str(amount_posted), "through": str(payload.through)},
-            version=updated_asset.version,
+    tenant_id = resolve_tenant_id(request)
+    asset = await svc.get(session, asset_id, tenant_id=tenant_id)
+    if asset is None:
+        raise HTTPException(404, "Fixed asset not found")
+    if asset.version != expected:
+        body = FixedAssetConflictBody(
+            detail="version mismatch",
+            current=FixedAssetOut.model_validate(asset),
+        ).model_dump(mode="json")
+        return JSONResponse(body, status_code=409)
+    if asset.status != "active":
+        raise HTTPException(
+            422,
+            f"Cannot depreciate asset in status {asset.status!r} — must be active",
         )
-        await session.commit()
-        await session.refresh(updated_asset)
+
+    try:
+        updated_asset, amount_posted = await legacy_assets_svc.post_depreciation(
+            session,
+            asset_id,
+            payload.through,
+            posted_by=actor,
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+    # Bump version and append change_log after the GL posting.
+    updated_asset.version = updated_asset.version + 1
+    await session.flush()
+    await session.refresh(updated_asset)
+
+    from saebooks.services import change_log as change_log_svc  # local import avoids circular
+
+    await change_log_svc.append(
+        session,
+        entity="fixed_asset",
+        entity_id=updated_asset.id,
+        op="depreciation_run",
+        actor=actor,
+        payload={"amount_posted": str(amount_posted), "through": str(payload.through)},
+        version=updated_asset.version,
+    )
+    await session.commit()
+    await session.refresh(updated_asset)
 
     note = (
         f"Depreciation posted: {amount_posted} through {payload.through}"
@@ -523,32 +546,38 @@ async def post_depreciation(
     },
 )
 async def delete_fixed_asset(
+    request: Request,
     asset_id: UUID,
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with asset version is required")
 
-    async with AsyncSessionLocal() as session:
-        try:
-            await svc.delete(
-                session,
-                asset_id,
-                actor=f"api:{bearer[:8]}…",
-                expected_version=expected,
-            )
-        except svc.VersionConflict as exc:
-            body = FixedAssetConflictBody(
-                detail="version mismatch",
-                current=FixedAssetOut.model_validate(exc.current),
-            ).model_dump(mode="json")
-            return JSONResponse(body, status_code=409)
-        except (ValueError, svc.FixedAssetApiError) as exc:
-            msg = str(exc)
-            if "not found" in msg.lower():
-                raise HTTPException(404, msg) from exc
-            raise HTTPException(422, msg) from exc
+    tenant_id = resolve_tenant_id(request)
+    # Belt-and-braces: verify asset belongs to this tenant
+    if await svc.get(session, asset_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Fixed asset not found")
+
+    try:
+        await svc.delete(
+            session,
+            asset_id,
+            actor=f"api:{bearer[:8]}…",
+            expected_version=expected,
+        )
+    except svc.VersionConflict as exc:
+        body = FixedAssetConflictBody(
+            detail="version mismatch",
+            current=FixedAssetOut.model_validate(exc.current),
+        ).model_dump(mode="json")
+        return JSONResponse(body, status_code=409)
+    except (ValueError, svc.FixedAssetApiError) as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
 
     return Response(status_code=204)
