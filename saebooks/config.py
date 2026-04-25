@@ -28,6 +28,24 @@ class Settings(BaseSettings):
         alias="DATABASE_URL",
     )
 
+    # ---------------------------------------------------------------- #
+    # Multi-tenant — runtime DB role (P0 cross-tenant leak fix)        #
+    # ---------------------------------------------------------------- #
+    # See migration 0056_split_db_role.py. The schema-owner role
+    # (``saebooks``) is a superuser and bypasses RLS, so the API
+    # container connects as the non-superuser ``saebooks_app`` for all
+    # request-time queries. ``SAEBOOKS_APP_DATABASE_URL`` overrides
+    # ``DATABASE_URL`` for the runtime engine; if unset, the engine
+    # falls back to ``DATABASE_URL`` (development convenience —
+    # production MUST set this).
+    #
+    # The migration entrypoint deliberately does NOT use this URL so
+    # alembic can keep using the owner role for DDL.
+    app_database_url: str = Field(default="", alias="SAEBOOKS_APP_DATABASE_URL")
+    # Convenience: just the password, lets ops set the URL once and
+    # rotate the password without rebuilding the URL string.
+    app_db_password: str = Field(default="", alias="SAEBOOKS_APP_DB_PASSWORD")
+
     seed_company_name: str = Field(default="", alias="SEED_COMPANY_NAME")
     seed_company_legal_name: str = Field(default="", alias="SEED_COMPANY_LEGAL_NAME")
     seed_company_trading_name: str = Field(default="", alias="SEED_COMPANY_TRADING_NAME")
