@@ -17,7 +17,7 @@ from saebooks.services import settings as svc
 from saebooks.services import sql_tool as sql_svc
 from saebooks.services import theme as theme_svc
 from saebooks.services import users as users_svc
-from saebooks.services.authz import require_role, require_user
+from saebooks.services.authz import require_role, require_staff, require_user
 from saebooks.services.licence import (
     has_capacity_for_role_change,
     resolve_licence,
@@ -326,6 +326,7 @@ async def sql_index(
     request: Request,
     q: str | None = Query(None),
     rerun: str | None = Query(None),
+    _staff: User = Depends(require_staff()),  # noqa: B008
 ) -> HTMLResponse:
     """SQL browser: form + optional query result + history + schema sidebar."""
     async with AsyncSessionLocal() as session:
@@ -363,6 +364,7 @@ async def sql_index(
 async def sql_run(
     request: Request,
     sql: str = Form(...),
+    _staff: User = Depends(require_staff()),  # noqa: B008
 ) -> HTMLResponse:
     """Execute a read-only query and render results."""
     result = None
@@ -397,6 +399,7 @@ async def sql_run(
 async def sql_export(
     request: Request,
     sql: str = Form(...),
+    _staff: User = Depends(require_staff()),  # noqa: B008
 ) -> PlainTextResponse:
     """Run a query and return the whole result (no 500-row cap) as CSV.
 

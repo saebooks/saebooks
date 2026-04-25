@@ -28,6 +28,7 @@ self-service routes.
 """
 from __future__ import annotations
 
+import os
 from collections.abc import Awaitable, Callable
 
 from fastapi import HTTPException, Request, status
@@ -35,6 +36,43 @@ from fastapi import HTTPException, Request, status
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.user import User, UserRole, has_at_least
 from saebooks.services import permissions as perm_svc
+
+
+def _staff_allowlist() -> frozenset[str]:
+    """Usernames + emails permitted to use SAE-staff-only routes.
+
+    Read from ``SAE_STAFF_USERNAMES`` (comma-separated). Lower-cased.
+    Empty allowlist = everyone is denied (correct fail-closed default).
+    """
+    raw = os.environ.get("SAE_STAFF_USERNAMES", "")
+    return frozenset(p.strip().lower() for p in raw.split(",") if p.strip())
+
+
+def require_staff() -> Callable[[Request], Awaitable[User]]:
+    """Dep: 401 if no user, 403 unless user is in ``SAE_STAFF_USERNAMES``.
+
+    For routes that bypass tenant RLS (raw SQL, cross-tenant tooling).
+    A tenant admin must NOT be enough — those routes can read every
+    tenant's data, so we gate by an explicit operator allowlist.
+    """
+    async def _dep(request: Request) -> User:
+        user = current_user(request)
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication required",
+            )
+        allow = _staff_allowlist()
+        username = (user.username or "").lower()
+        email = (user.email or "").lower()
+        if username not in allow and email not in allow:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="SAE staff only",
+            )
+        return user
+
+    return _dep
 
 
 def current_user(request: Request) -> User | None:
