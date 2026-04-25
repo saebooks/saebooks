@@ -115,13 +115,20 @@ async def list_active(
     limit: int = 200,
     offset: int = 0,
     role: str | None = None,
+    tenant_id: uuid.UUID | None = None,
 ) -> tuple[list[User], int]:
-    """Return (page, total) for active (non-archived) users."""
+    """Return (page, total) for active (non-archived) users.
+
+    When ``tenant_id`` is supplied queries are filtered to that tenant.
+    Keyword-only + optional so existing callers keep working unchanged.
+    """
     count_stmt = (
         select(func.count())
         .select_from(User)
         .where(User.archived_at.is_(None))
     )
+    if tenant_id is not None:
+        count_stmt = count_stmt.where(User.tenant_id == tenant_id)
     if role is not None:
         count_stmt = count_stmt.where(User.role == role)
     total = (await session.execute(count_stmt)).scalar_one()
@@ -133,14 +140,35 @@ async def list_active(
         .offset(offset)
         .limit(limit)
     )
+    if tenant_id is not None:
+        stmt = stmt.where(User.tenant_id == tenant_id)
     if role is not None:
         stmt = stmt.where(User.role == role)
     items = list((await session.execute(stmt)).scalars().all())
     return items, int(total)
 
 
-async def get(session: AsyncSession, user_id: uuid.UUID) -> User | None:
-    return await session.get(User, user_id)
+async def get(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
+) -> User | None:
+    """Fetch a user by id.
+
+    When ``tenant_id`` is supplied the lookup is filtered by tenant —
+    a foreign-tenant id returns ``None`` even if the row exists.
+    Keyword-only + optional so existing callers keep working unchanged.
+    """
+    if tenant_id is None:
+        return await session.get(User, user_id)
+    result = await session.execute(
+        select(User).where(
+            User.id == user_id,
+            User.tenant_id == tenant_id,
+        )
+    )
+    return result.scalars().first()
 
 
 async def get_by_username(session: AsyncSession, username: str) -> User | None:

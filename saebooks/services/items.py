@@ -125,8 +125,27 @@ async def list_items(
     return list(result.scalars().all())
 
 
-async def get(session: AsyncSession, item_id: uuid.UUID) -> Item | None:
-    return await session.get(Item, item_id)
+async def get(
+    session: AsyncSession,
+    item_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
+) -> Item | None:
+    """Fetch an item by id.
+
+    When ``tenant_id`` is supplied the lookup is filtered by tenant —
+    a foreign-tenant id returns ``None`` even if the row exists.
+    Keyword-only + optional so existing callers keep working unchanged.
+    """
+    if tenant_id is None:
+        return await session.get(Item, item_id)
+    result = await session.execute(
+        select(Item).where(
+            Item.id == item_id,
+            Item.tenant_id == tenant_id,
+        )
+    )
+    return result.scalars().first()
 
 
 async def create(
