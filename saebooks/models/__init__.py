@@ -15,7 +15,7 @@ from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
 from saebooks.models.depreciation_model import DepreciationModel
 from saebooks.models.fixed_asset import FixedAsset
-from saebooks.models.idempotency_key import IdempotencyKey
+from saebooks.models.idempotency_key import IdempotencyKey, IdempotencyRecord
 from saebooks.models.item import CostMethod, Item
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine, PeriodLock
 from saebooks.models.journal_template import JournalTemplate
@@ -47,6 +47,7 @@ __all__ = [
     "EntryStatus",
     "FixedAsset",
     "IdempotencyKey",
+    "IdempotencyRecord",
     "Item",
     "JournalEntry",
     "JournalLine",
