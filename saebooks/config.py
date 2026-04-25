@@ -186,11 +186,16 @@ class Settings(BaseSettings):
     # ---------------------------------------------------------------- #
     # AI document extraction (B/46)                                    #
     # ---------------------------------------------------------------- #
-    # Anthropic API key for Claude Haiku vision extraction. When empty
-    # the ai_extraction service raises AiExtractionNotConfiguredError
-    # on use so a misconfigured install can't silently fail. Only
-    # reached on Business+ editions (FLAG_AI_EXTRACTION gate).
-    anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
+    # LiteLLM proxy for Claude Haiku vision extraction. When
+    # litellm_api_key is empty the ai_extraction service raises
+    # AiExtractionNotConfiguredError on use so a misconfigured install
+    # can't silently fail. Only reached on Business+ editions
+    # (FLAG_AI_EXTRACTION gate).
+    litellm_api_key: str = Field(default="", alias="LITELLM_API_KEY")
+    litellm_base_url: str = Field(
+        default="https://litellm.sauer.com.au/v1",
+        alias="LITELLM_BASE_URL",
+    )
 
     # ---------------------------------------------------------------- #
     # ATO SBR (Batch II.5)                                             #

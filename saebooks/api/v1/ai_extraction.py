@@ -37,8 +37,8 @@ _SUPPORTED_MIME_TYPES: frozenset[str] = frozenset({
     "application/pdf",
 })
 
-# Maximum upload size: 10 MiB. Anthropic's vision API can handle larger
-# files but we cap here to avoid holding giant payloads in memory.
+# Maximum upload size: 10 MiB. The LiteLLM proxy and underlying model
+# can handle larger files but we cap here to avoid holding giant payloads in memory.
 _MAX_BYTES = 10 * 1024 * 1024
 
 router = APIRouter(

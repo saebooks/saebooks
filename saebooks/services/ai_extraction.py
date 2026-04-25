@@ -2,7 +2,7 @@
 
 Accepts a raw file (receipt, supplier invoice, bank statement) and
 returns structured accounting data extracted by Claude Haiku via the
-Anthropic vision API.
+LiteLLM proxy (OpenAI-compatible endpoint).
 
 The caller is responsible for checking ``FLAG_AI_EXTRACTION`` before
 reaching this module. The endpoint router does that via
@@ -36,18 +36,10 @@ import json
 import logging
 from typing import Any
 
+import httpx
+
 from saebooks.config import Settings
 from saebooks.config import settings as _default_settings
-
-# Import anthropic at module level so the mock path
-# ``saebooks.services.ai_extraction.anthropic`` is stable in tests.
-# We catch ImportError here so Community builds (which never install
-# the package) can still import this module — the missing-package path
-# is the same as the missing-API-key path: raises on first use.
-try:
-    import anthropic  # type: ignore[import-untyped]
-except ImportError:
-    anthropic = None  # type: ignore[assignment]
 
 logger = logging.getLogger("saebooks.ai_extraction")
 
@@ -61,7 +53,7 @@ class AiExtractionError(RuntimeError):
 
 
 class AiExtractionNotConfiguredError(AiExtractionError):
-    """Raised when ANTHROPIC_API_KEY is not set."""
+    """Raised when LITELLM_API_KEY is not set."""
 
 
 # ---------------------------------------------------------------------- #
@@ -128,58 +120,67 @@ async def extract_document(
     -------
     dict
         Structured extraction result. ``extraction_error`` key is present
-        and non-None only when the Anthropic call failed; in that case
+        and non-None only when the LiteLLM call failed; in that case
         all other fields default to ``None`` and ``line_items`` to ``[]``.
     """
     effective = settings if settings is not None else _default_settings
 
-    if not effective.anthropic_api_key:
+    if not effective.litellm_api_key:
         raise AiExtractionNotConfiguredError(
-            "ANTHROPIC_API_KEY is not configured; cannot reach the Anthropic API."
-        )
-
-    if anthropic is None:
-        raise AiExtractionNotConfiguredError(
-            "The 'anthropic' package is not installed. "
-            "Add it to the project dependencies for Business+ builds."
+            "LITELLM_API_KEY is not configured; cannot reach the LiteLLM proxy."
         )
 
     b64_data = base64.standard_b64encode(file_bytes).decode()
+    data_url = f"data:{mime_type};base64,{b64_data}"
 
-    # Anthropic vision source block
-    source: dict[str, Any] = {
-        "type": "base64",
-        "media_type": mime_type,
-        "data": b64_data,
+    payload: dict[str, Any] = {
+        "model": _MODEL,
+        "max_tokens": 1024,
+        "messages": [
+            {
+                "role": "system",
+                "content": _SYSTEM_PROMPT,
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": data_url},
+                    },
+                    {
+                        "type": "text",
+                        "text": (
+                            "Extract the accounting data from this document "
+                            "and return it as JSON per the system instructions."
+                        ),
+                    },
+                ],
+            },
+        ],
+    }
+
+    url = effective.litellm_base_url.rstrip("/") + "/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {effective.litellm_api_key}",
+        "Content-Type": "application/json",
     }
 
     try:
-        client = anthropic.AsyncAnthropic(api_key=effective.anthropic_api_key)
-        message = await client.messages.create(
-            model=_MODEL,
-            max_tokens=1024,
-            system=_SYSTEM_PROMPT,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "image", "source": source},
-                        {
-                            "type": "text",
-                            "text": (
-                                "Extract the accounting data from this document "
-                                "and return it as JSON per the system instructions."
-                            ),
-                        },
-                    ],
-                }
-            ],
-        )
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+            data = response.json()
     except Exception as exc:
-        logger.warning("Anthropic API error during document extraction: %s", exc)
+        logger.warning("LiteLLM API error during document extraction: %s", exc)
         return _error_result(str(exc))
 
-    raw_text = message.content[0].text if message.content else ""
+    try:
+        raw_text = data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        logger.warning("Unexpected LiteLLM response shape: %s — data: %.200s", exc, data)
+        return _error_result(f"Unexpected response shape: {exc}")
+
     return _parse_response(raw_text)
 
 

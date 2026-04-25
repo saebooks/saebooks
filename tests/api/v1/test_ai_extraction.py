@@ -7,7 +7,7 @@ Coverage:
 * Business edition + PDF upload → 200 with extraction result
 * Business edition + PNG upload → 200 with extraction result
 * Unsupported MIME type → 422
-* Anthropic API error → 200 with partial result + extraction_error field
+* LiteLLM API error → 200 with partial result + extraction_error field
 * Missing bearer token → 401
 * extraction_confidence is "ok" on success, "partial" on API error
 * AiExtractionNotConfiguredError (missing API key) → 503
@@ -17,10 +17,10 @@ from __future__ import annotations
 import io
 import json
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from httpx import ASGITransport, AsyncClient
+import respx
+from httpx import ASGITransport, AsyncClient, Response
 
 from saebooks.api.v1.auth import current_token
 from saebooks.main import app
@@ -28,6 +28,8 @@ from saebooks.main import app
 # ---------------------------------------------------------------------- #
 # Fixtures                                                                #
 # ---------------------------------------------------------------------- #
+
+_LITELLM_URL = "https://litellm.sauer.com.au/v1/chat/completions"
 
 
 @pytest.fixture
@@ -116,13 +118,23 @@ def _fake_pdf() -> bytes:
     return b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF"
 
 
-def _make_anthropic_response(payload: dict[str, Any]) -> MagicMock:
-    """Build a mock that looks like an ``anthropic.types.Message``."""
-    content_block = MagicMock()
-    content_block.text = json.dumps(payload)
-    msg = MagicMock()
-    msg.content = [content_block]
-    return msg
+def _litellm_response(payload: dict[str, Any]) -> Response:
+    """Build an httpx Response that looks like a LiteLLM chat/completions reply."""
+    body = {
+        "id": "chatcmpl-test",
+        "object": "chat.completion",
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": json.dumps(payload),
+                },
+                "finish_reason": "stop",
+            }
+        ],
+    }
+    return Response(200, json=body)
 
 
 _GOOD_EXTRACTION = {
@@ -194,31 +206,22 @@ async def test_missing_bearer_returns_401(monkeypatch: pytest.MonkeyPatch) -> No
 # ---------------------------------------------------------------------- #
 
 
+@respx.mock
 async def test_jpeg_upload_returns_extraction(
     business_client: AsyncClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """JPEG upload on Business tier → 200 with structured extraction data."""
-    mock_response = _make_anthropic_response(_GOOD_EXTRACTION)
+    monkeypatch.setattr(
+        "saebooks.services.ai_extraction._default_settings.litellm_api_key",
+        "test-key",
+    )
+    respx.post(_LITELLM_URL).mock(return_value=_litellm_response(_GOOD_EXTRACTION))
 
-    mock_create = AsyncMock(return_value=mock_response)
-    mock_messages = MagicMock()
-    mock_messages.create = mock_create
-    mock_client_instance = MagicMock()
-    mock_client_instance.messages = mock_messages
-
-    with patch(
-        "saebooks.services.ai_extraction.anthropic.AsyncAnthropic",
-        return_value=mock_client_instance,
-    ):
-        monkeypatch.setattr(
-            "saebooks.services.ai_extraction._default_settings.anthropic_api_key",
-            "test-key",
-        )
-        resp = await business_client.post(
-            "/api/v1/documents/extract",
-            files={"file": ("invoice.jpg", _fake_jpg(), "image/jpeg")},
-        )
+    resp = await business_client.post(
+        "/api/v1/documents/extract",
+        files={"file": ("invoice.jpg", _fake_jpg(), "image/jpeg")},
+    )
 
     assert resp.status_code == 200
     body = resp.json()
@@ -237,31 +240,22 @@ async def test_jpeg_upload_returns_extraction(
 # ---------------------------------------------------------------------- #
 
 
+@respx.mock
 async def test_pdf_upload_returns_extraction(
     business_client: AsyncClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """PDF upload on Business tier → 200 with structured extraction data."""
-    mock_response = _make_anthropic_response(_GOOD_EXTRACTION)
+    monkeypatch.setattr(
+        "saebooks.services.ai_extraction._default_settings.litellm_api_key",
+        "test-key",
+    )
+    respx.post(_LITELLM_URL).mock(return_value=_litellm_response(_GOOD_EXTRACTION))
 
-    mock_create = AsyncMock(return_value=mock_response)
-    mock_messages = MagicMock()
-    mock_messages.create = mock_create
-    mock_client_instance = MagicMock()
-    mock_client_instance.messages = mock_messages
-
-    with patch(
-        "saebooks.services.ai_extraction.anthropic.AsyncAnthropic",
-        return_value=mock_client_instance,
-    ):
-        monkeypatch.setattr(
-            "saebooks.services.ai_extraction._default_settings.anthropic_api_key",
-            "test-key",
-        )
-        resp = await business_client.post(
-            "/api/v1/documents/extract",
-            files={"file": ("statement.pdf", io.BytesIO(_fake_pdf()), "application/pdf")},
-        )
+    resp = await business_client.post(
+        "/api/v1/documents/extract",
+        files={"file": ("statement.pdf", io.BytesIO(_fake_pdf()), "application/pdf")},
+    )
 
     assert resp.status_code == 200
     body = resp.json()
@@ -274,31 +268,22 @@ async def test_pdf_upload_returns_extraction(
 # ---------------------------------------------------------------------- #
 
 
+@respx.mock
 async def test_png_upload_returns_extraction(
     business_client: AsyncClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """PNG upload → 200."""
-    mock_response = _make_anthropic_response(_GOOD_EXTRACTION)
+    monkeypatch.setattr(
+        "saebooks.services.ai_extraction._default_settings.litellm_api_key",
+        "test-key",
+    )
+    respx.post(_LITELLM_URL).mock(return_value=_litellm_response(_GOOD_EXTRACTION))
 
-    mock_create = AsyncMock(return_value=mock_response)
-    mock_messages = MagicMock()
-    mock_messages.create = mock_create
-    mock_client_instance = MagicMock()
-    mock_client_instance.messages = mock_messages
-
-    with patch(
-        "saebooks.services.ai_extraction.anthropic.AsyncAnthropic",
-        return_value=mock_client_instance,
-    ):
-        monkeypatch.setattr(
-            "saebooks.services.ai_extraction._default_settings.anthropic_api_key",
-            "test-key",
-        )
-        resp = await business_client.post(
-            "/api/v1/documents/extract",
-            files={"file": ("receipt.png", io.BytesIO(_fake_png()), "image/png")},
-        )
+    resp = await business_client.post(
+        "/api/v1/documents/extract",
+        files={"file": ("receipt.png", io.BytesIO(_fake_png()), "image/png")},
+    )
 
     assert resp.status_code == 200
     assert resp.json()["extraction_confidence"] == "ok"
@@ -315,7 +300,7 @@ async def test_unsupported_mime_type_returns_422(
 ) -> None:
     """text/plain upload → 422 with a clear detail message."""
     monkeypatch.setattr(
-        "saebooks.services.ai_extraction._default_settings.anthropic_api_key",
+        "saebooks.services.ai_extraction._default_settings.litellm_api_key",
         "test-key",
     )
     resp = await business_client.post(
@@ -329,39 +314,32 @@ async def test_unsupported_mime_type_returns_422(
 
 
 # ---------------------------------------------------------------------- #
-# Anthropic API error → graceful degradation                             #
+# LiteLLM API error → graceful degradation                               #
 # ---------------------------------------------------------------------- #
 
 
-async def test_anthropic_api_error_returns_partial_result(
+@respx.mock
+async def test_litellm_api_error_returns_partial_result(
     business_client: AsyncClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When the Anthropic API raises, endpoint returns 200 with extraction_error set."""
-    mock_create = AsyncMock(side_effect=RuntimeError("connection timeout"))
-    mock_messages = MagicMock()
-    mock_messages.create = mock_create
-    mock_client_instance = MagicMock()
-    mock_client_instance.messages = mock_messages
+    """When the LiteLLM API returns a 500 error, endpoint returns 200 with extraction_error set."""
+    monkeypatch.setattr(
+        "saebooks.services.ai_extraction._default_settings.litellm_api_key",
+        "test-key",
+    )
+    respx.post(_LITELLM_URL).mock(return_value=Response(500, text="connection timeout"))
 
-    with patch(
-        "saebooks.services.ai_extraction.anthropic.AsyncAnthropic",
-        return_value=mock_client_instance,
-    ):
-        monkeypatch.setattr(
-            "saebooks.services.ai_extraction._default_settings.anthropic_api_key",
-            "test-key",
-        )
-        resp = await business_client.post(
-            "/api/v1/documents/extract",
-            files={"file": ("invoice.jpg", _fake_jpg(), "image/jpeg")},
-        )
+    resp = await business_client.post(
+        "/api/v1/documents/extract",
+        files={"file": ("invoice.jpg", _fake_jpg(), "image/jpeg")},
+    )
 
     assert resp.status_code == 200
     body = resp.json()
     assert body["extraction_confidence"] == "partial"
     assert body["extraction_error"] is not None
-    assert "connection timeout" in body["extraction_error"]
+    assert "500" in body["extraction_error"]
     # Core fields are None on partial result
     assert body["vendor_name"] is None
     assert body["total"] is None
@@ -377,9 +355,9 @@ async def test_missing_api_key_returns_503(
     business_client: AsyncClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """If ANTHROPIC_API_KEY is empty the service raises; endpoint must return 503."""
+    """If LITELLM_API_KEY is empty the service raises; endpoint must return 503."""
     monkeypatch.setattr(
-        "saebooks.services.ai_extraction._default_settings.anthropic_api_key",
+        "saebooks.services.ai_extraction._default_settings.litellm_api_key",
         "",
     )
     resp = await business_client.post(
@@ -387,4 +365,4 @@ async def test_missing_api_key_returns_503(
         files={"file": ("invoice.jpg", _fake_jpg(), "image/jpeg")},
     )
     assert resp.status_code == 503
-    assert "ANTHROPIC_API_KEY" in resp.json()["detail"]
+    assert "LITELLM_API_KEY" in resp.json()["detail"]
