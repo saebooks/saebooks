@@ -107,11 +107,10 @@ async def set_tenant_on_connection(tenant_id: uuid.UUID) -> None:
 async def require_bearer(
     authorization: str | None = Header(default=None),
 ) -> str:
-    """FastAPI dependency: enforce Bearer auth on every write endpoint.
+    """FastAPI dependency: enforce Bearer auth on every v1 endpoint.
 
-    Also resolves and stores the current tenant ID in the process-level
-    default for this request.  Phase 1 will derive tenant_id from the
-    JWT claims instead.
+    Accepts either a JWT issued by POST /auth/login or the static
+    SAEBOOKS_DEV_API_TOKEN (backward-compat for scripts and tests).
     """
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(
@@ -120,6 +119,16 @@ async def require_bearer(
             headers={"WWW-Authenticate": "Bearer"},
         )
     presented = authorization.split(None, 1)[1].strip()
+
+    # Accept valid JWTs issued by /auth/login.
+    from saebooks.services.jwt_tokens import JWTError, decode_access_token  # noqa: PLC0415
+    try:
+        decode_access_token(presented)
+        return presented
+    except JWTError:
+        pass
+
+    # Fall back to static dev token (scripts, tests, direct API access).
     expected = current_token()
     if not secrets.compare_digest(presented, expected):
         raise HTTPException(
