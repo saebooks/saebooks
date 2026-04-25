@@ -19,21 +19,22 @@ import json
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from saebooks.api.v1.auth import require_bearer
+from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
+from saebooks.api.v1.deps import get_session
 from saebooks.api.v1.schemas import (
     CompanyConflictBody,
     CompanyListOut,
     CompanyOut,
     CompanyUpdate,
 )
-from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 from saebooks.models.idempotency_key import IdempotencyKey
 from saebooks.services import companies as svc
-from sqlalchemy import func, select
 
 router = APIRouter(
     prefix="/companies",
@@ -45,6 +46,22 @@ router = APIRouter(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+async def _first_company_id(session: AsyncSession, tenant_id: UUID) -> UUID:
+    """Return the first active company for the request tenant."""
+    result = await session.execute(
+        select(Company)
+        .where(
+            Company.tenant_id == tenant_id,
+            Company.archived_at.is_(None),
+        )
+        .order_by(Company.created_at)
+    )
+    company = result.scalars().first()
+    if company is None:
+        raise HTTPException(404, "No active company for tenant")
+    return company.id
 
 
 def _parse_if_match(header: str | None) -> int | None:
@@ -92,28 +109,36 @@ def _dump(company: Company) -> dict[str, Any]:
 
 @router.get("", response_model=CompanyListOut)
 async def list_companies(
+    request: Request,
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_session),
 ) -> CompanyListOut:
-    async with AsyncSessionLocal() as session:
-        total_stmt = (
-            select(func.count())
-            .select_from(Company)
-            .where(Company.archived_at.is_(None))
+    tenant_id = resolve_tenant_id(request)
+    total_stmt = (
+        select(func.count())
+        .select_from(Company)
+        .where(
+            Company.tenant_id == tenant_id,
+            Company.archived_at.is_(None),
         )
-        total = (await session.execute(total_stmt)).scalar_one()
-        stmt = (
-            select(Company)
-            .where(Company.archived_at.is_(None))
-            .order_by(Company.name)
-            .offset(offset)
-            .limit(limit)
+    )
+    total = (await session.execute(total_stmt)).scalar_one()
+    stmt = (
+        select(Company)
+        .where(
+            Company.tenant_id == tenant_id,
+            Company.archived_at.is_(None),
         )
-        companies = list((await session.execute(stmt)).scalars().all())
-        return CompanyListOut(
-            items=[CompanyOut.model_validate(c) for c in companies],
-            total=total,
-        )
+        .order_by(Company.name)
+        .offset(offset)
+        .limit(limit)
+    )
+    companies = list((await session.execute(stmt)).scalars().all())
+    return CompanyListOut(
+        items=[CompanyOut.model_validate(c) for c in companies],
+        total=total,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -122,12 +147,18 @@ async def list_companies(
 
 
 @router.get("/{company_id}", response_model=CompanyOut)
-async def get_company(company_id: UUID) -> CompanyOut:
-    async with AsyncSessionLocal() as session:
-        company = await svc.get(session, company_id)
-        if company is None or company.archived_at is not None:
-            raise HTTPException(404, "Company not found")
-        return CompanyOut.model_validate(company)
+async def get_company(
+    request: Request,
+    company_id: UUID,
+    session: AsyncSession = Depends(get_session),
+) -> CompanyOut:
+    tenant_id = resolve_tenant_id(request)
+    company = await svc.get(session, company_id)
+    if company is None or company.archived_at is not None:
+        raise HTTPException(404, "Company not found")
+    if company.tenant_id != tenant_id:
+        raise HTTPException(404, "Company not found")
+    return CompanyOut.model_validate(company)
 
 
 # ---------------------------------------------------------------------------
@@ -143,50 +174,57 @@ async def get_company(company_id: UUID) -> CompanyOut:
     },
 )
 async def update_company(
+    request: Request,
     company_id: UUID,
     payload: CompanyUpdate,
     if_match: str | None = Header(default=None, alias="If-Match"),
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with company version is required")
     key = _parse_idempotency_key(idempotency_key)
 
-    async with AsyncSessionLocal() as session:
-        if key is not None:
-            replay = await _idempotent_replay(session, key)
-            if replay is not None:
-                return replay
+    # Belt-and-braces tenant check before write
+    tenant_id = resolve_tenant_id(request)
+    existing = await svc.get(session, company_id)
+    if existing is None or existing.archived_at is not None or existing.tenant_id != tenant_id:
+        raise HTTPException(404, "Company not found")
 
-        try:
-            company = await svc.update(
-                session,
-                company_id,
-                actor=f"api:{bearer[:8]}…",
-                expected_version=expected,
-                **payload.model_dump(exclude_unset=True),
-            )
-        except svc.VersionConflict as exc:
-            await session.refresh(exc.current)
-            body = CompanyConflictBody(
-                detail="version mismatch",
-                current=CompanyOut.model_validate(exc.current),
-            ).model_dump(mode="json")
-            if key is not None:
-                await _remember_idempotent(session, key, body, 409)
-                await session.commit()
-            return JSONResponse(body, status_code=409)
-        except ValueError as exc:
-            msg = str(exc)
-            if "not found" in msg.lower():
-                raise HTTPException(404, msg) from exc
-            raise HTTPException(422, msg) from exc
+    if key is not None:
+        replay = await _idempotent_replay(session, key)
+        if replay is not None:
+            return replay
 
-        await session.refresh(company)
-        body = _dump(company)
+    try:
+        company = await svc.update(
+            session,
+            company_id,
+            actor=f"api:{bearer[:8]}…",
+            expected_version=expected,
+            **payload.model_dump(exclude_unset=True),
+        )
+    except svc.VersionConflict as exc:
+        await session.refresh(exc.current)
+        body = CompanyConflictBody(
+            detail="version mismatch",
+            current=CompanyOut.model_validate(exc.current),
+        ).model_dump(mode="json")
         if key is not None:
-            await _remember_idempotent(session, key, body, 200)
+            await _remember_idempotent(session, key, body, 409)
             await session.commit()
+        return JSONResponse(body, status_code=409)
+    except ValueError as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
+
+    await session.refresh(company)
+    body = _dump(company)
+    if key is not None:
+        await _remember_idempotent(session, key, body, 200)
+        await session.commit()
     return JSONResponse(body, status_code=200)

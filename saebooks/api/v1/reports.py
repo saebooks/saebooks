@@ -59,11 +59,12 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
+from saebooks.api.v1.deps import get_session
 from saebooks.api.v1.schemas import (
     AgedReport,
     BASSummary,
@@ -83,13 +84,12 @@ from saebooks.api.v1.schemas import (
     TrialBalanceLine,
     TrialBalanceReport,
 )
-from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
 from saebooks.models.bill import Bill, BillStatus
+from saebooks.models.budget import Budget
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact
 from saebooks.models.depreciation_model import DepreciationModel
-from saebooks.models.budget import Budget
 from saebooks.models.fixed_asset import FixedAsset
 from saebooks.models.invoice import Invoice, InvoiceStatus
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
@@ -109,16 +109,19 @@ router = APIRouter(
 # ---------------------------------------------------------------------------
 
 
-async def _first_company_id(session: AsyncSession) -> UUID:
-    """Return the first active company — phase-1 single-company assumption."""
+async def _first_company_id(session: AsyncSession, tenant_id: UUID) -> UUID:
+    """Return the first active company for the request tenant."""
     result = await session.execute(
         select(Company)
-        .where(Company.archived_at.is_(None))
+        .where(
+            Company.tenant_id == tenant_id,
+            Company.archived_at.is_(None),
+        )
         .order_by(Company.created_at)
     )
     company = result.scalars().first()
     if company is None:
-        raise HTTPException(500, "No active company")
+        raise HTTPException(404, "No active company for tenant")
     return company.id
 
 
@@ -237,8 +240,10 @@ def _build_report(
 
 @router.get("/aged_receivables", response_model=AgedReport)
 async def aged_receivables(
+    request: Request,
     as_of_date: date | None = Query(default=None),
     bucket_days: list[int] = Query(default=[0, 30, 60, 90]),
+    session: AsyncSession = Depends(get_session),
 ) -> AgedReport:
     """Aged receivables as at ``as_of_date`` (default today).
 
@@ -253,26 +258,25 @@ async def aged_receivables(
     bd = _validate_bucket_days(bucket_days)
     labels = _build_bucket_labels(bd)
 
-    async with AsyncSessionLocal() as session:
-        tenant_id = resolve_tenant_id()
-        company_id = await _first_company_id(session)
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
 
-        stmt = (
-            select(Invoice, Contact.name)
-            .join(Contact, Invoice.contact_id == Contact.id)
-            .where(
-                and_(
-                    Invoice.company_id == company_id,
-                    Invoice.tenant_id == tenant_id,
-                    Invoice.status == InvoiceStatus.POSTED,
-                    Invoice.archived_at.is_(None),
-                    Invoice.total > Invoice.amount_paid,
-                    Invoice.issue_date <= as_of,
-                )
+    stmt = (
+        select(Invoice, Contact.name)
+        .join(Contact, Invoice.contact_id == Contact.id)
+        .where(
+            and_(
+                Invoice.company_id == company_id,
+                Invoice.tenant_id == tenant_id,
+                Invoice.status == InvoiceStatus.POSTED,
+                Invoice.archived_at.is_(None),
+                Invoice.total > Invoice.amount_paid,
+                Invoice.issue_date <= as_of,
             )
-            .order_by(Contact.name, Invoice.due_date)
         )
-        rows = (await session.execute(stmt)).all()
+        .order_by(Contact.name, Invoice.due_date)
+    )
+    rows = (await session.execute(stmt)).all()
 
     return _build_report(rows, as_of, bd, labels)
 
@@ -284,8 +288,10 @@ async def aged_receivables(
 
 @router.get("/aged_payables", response_model=AgedReport)
 async def aged_payables(
+    request: Request,
     as_of_date: date | None = Query(default=None),
     bucket_days: list[int] = Query(default=[0, 30, 60, 90]),
+    session: AsyncSession = Depends(get_session),
 ) -> AgedReport:
     """Aged payables as at ``as_of_date`` (default today).
 
@@ -299,26 +305,25 @@ async def aged_payables(
     bd = _validate_bucket_days(bucket_days)
     labels = _build_bucket_labels(bd)
 
-    async with AsyncSessionLocal() as session:
-        tenant_id = resolve_tenant_id()
-        company_id = await _first_company_id(session)
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
 
-        stmt = (
-            select(Bill, Contact.name)
-            .join(Contact, Bill.contact_id == Contact.id)
-            .where(
-                and_(
-                    Bill.company_id == company_id,
-                    Bill.tenant_id == tenant_id,
-                    Bill.status == BillStatus.POSTED,
-                    Bill.archived_at.is_(None),
-                    Bill.total > Bill.amount_paid,
-                    Bill.issue_date <= as_of,
-                )
+    stmt = (
+        select(Bill, Contact.name)
+        .join(Contact, Bill.contact_id == Contact.id)
+        .where(
+            and_(
+                Bill.company_id == company_id,
+                Bill.tenant_id == tenant_id,
+                Bill.status == BillStatus.POSTED,
+                Bill.archived_at.is_(None),
+                Bill.total > Bill.amount_paid,
+                Bill.issue_date <= as_of,
             )
-            .order_by(Contact.name, Bill.due_date)
         )
-        rows = (await session.execute(stmt)).all()
+        .order_by(Contact.name, Bill.due_date)
+        )
+    rows = (await session.execute(stmt)).all()
 
     return _build_report(rows, as_of, bd, labels)
 
@@ -336,9 +341,11 @@ _EXPENSE_TYPES = {AccountType.EXPENSE, AccountType.COST_OF_SALES, AccountType.OT
 
 @router.get("/profit_loss", response_model=PnLReport)
 async def profit_loss(
+    request: Request,
     from_date: date = Query(...),
     to_date: date = Query(...),
     include_draft: bool = Query(default=False),
+    session: AsyncSession = Depends(get_session),
 ) -> PnLReport:
     """Profit & Loss for a date range.
 
@@ -354,35 +361,34 @@ async def profit_loss(
     if include_draft:
         statuses.append(EntryStatus.DRAFT)
 
-    async with AsyncSessionLocal() as session:
-        tenant_id = resolve_tenant_id()
-        company_id = await _first_company_id(session)
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
 
-        stmt = (
-            select(
-                Account.id,
-                Account.name,
-                Account.code,
-                Account.account_type,
-                func.sum(JournalLine.debit).label("total_debit"),
-                func.sum(JournalLine.credit).label("total_credit"),
-            )
-            .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
-            .join(Account, JournalLine.account_id == Account.id)
-            .where(
-                and_(
-                    JournalEntry.company_id == company_id,
-                    JournalEntry.tenant_id == tenant_id,
-                    JournalEntry.status.in_(statuses),
-                    JournalEntry.archived_at.is_(None),
-                    JournalEntry.entry_date >= from_date,
-                    JournalEntry.entry_date <= to_date,
-                )
-            )
-            .group_by(Account.id, Account.name, Account.code, Account.account_type)
-            .order_by(Account.code)
+    stmt = (
+        select(
+            Account.id,
+            Account.name,
+            Account.code,
+            Account.account_type,
+            func.sum(JournalLine.debit).label("total_debit"),
+            func.sum(JournalLine.credit).label("total_credit"),
         )
-        rows = (await session.execute(stmt)).all()
+        .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+        .join(Account, JournalLine.account_id == Account.id)
+        .where(
+            and_(
+                JournalEntry.company_id == company_id,
+                JournalEntry.tenant_id == tenant_id,
+                JournalEntry.status.in_(statuses),
+                JournalEntry.archived_at.is_(None),
+                JournalEntry.entry_date >= from_date,
+                JournalEntry.entry_date <= to_date,
+            )
+        )
+        .group_by(Account.id, Account.name, Account.code, Account.account_type)
+        .order_by(Account.code)
+    )
+    rows = (await session.execute(stmt)).all()
 
     # Accumulate per account-type
     income_by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -459,7 +465,9 @@ _EQUITY_TYPES = {AccountType.EQUITY}
 
 @router.get("/balance_sheet", response_model=BSReport)
 async def balance_sheet(
+    request: Request,
     as_of_date: date = Query(...),
+    session: AsyncSession = Depends(get_session),
 ) -> BSReport:
     """Balance sheet as at ``as_of_date``.
 
@@ -479,34 +487,33 @@ async def balance_sheet(
     ``balanced`` is True when
     ``abs(total_assets - total_liabilities - total_equity) < 0.01``.
     """
-    async with AsyncSessionLocal() as session:
-        tenant_id = resolve_tenant_id()
-        company_id = await _first_company_id(session)
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
 
-        stmt = (
-            select(
-                Account.id,
-                Account.name,
-                Account.code,
-                Account.account_type,
-                func.sum(JournalLine.debit).label("total_debit"),
-                func.sum(JournalLine.credit).label("total_credit"),
-            )
-            .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
-            .join(Account, JournalLine.account_id == Account.id)
-            .where(
-                and_(
-                    JournalEntry.company_id == company_id,
-                    JournalEntry.tenant_id == tenant_id,
-                    JournalEntry.status == EntryStatus.POSTED,
-                    JournalEntry.archived_at.is_(None),
-                    JournalEntry.entry_date <= as_of_date,
-                )
-            )
-            .group_by(Account.id, Account.name, Account.code, Account.account_type)
-            .order_by(Account.code)
+    stmt = (
+        select(
+            Account.id,
+            Account.name,
+            Account.code,
+            Account.account_type,
+            func.sum(JournalLine.debit).label("total_debit"),
+            func.sum(JournalLine.credit).label("total_credit"),
         )
-        rows = (await session.execute(stmt)).all()
+        .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+        .join(Account, JournalLine.account_id == Account.id)
+        .where(
+            and_(
+                JournalEntry.company_id == company_id,
+                JournalEntry.tenant_id == tenant_id,
+                JournalEntry.status == EntryStatus.POSTED,
+                JournalEntry.archived_at.is_(None),
+                JournalEntry.entry_date <= as_of_date,
+            )
+        )
+        .group_by(Account.id, Account.name, Account.code, Account.account_type)
+        .order_by(Account.code)
+    )
+    rows = (await session.execute(stmt)).all()
 
     assets: list[dict[str, Any]] = []
     liabilities: list[dict[str, Any]] = []
@@ -608,8 +615,10 @@ _GST_INCLUSIVE_FRACTION = Decimal("1") / Decimal("11")
 
 @router.get("/bas_summary", response_model=BASSummary)
 async def bas_summary(
+    request: Request,
     from_date: date = Query(...),
     to_date: date = Query(...),
+    session: AsyncSession = Depends(get_session),
 ) -> BASSummary:
     """Australian BAS summary for a date range.
 
@@ -629,33 +638,32 @@ async def bas_summary(
     * 1B  = G11 × 1/11 (GST credits, tax-inclusive component of purchase).
     * G2/G10 are always 0 in v1 (no export or capital acquisition tracking).
     """
-    async with AsyncSessionLocal() as session:
-        tenant_id = resolve_tenant_id()
-        company_id = await _first_company_id(session)
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
 
-        stmt = (
-            select(
-                Account.account_type,
-                TaxCode.reporting_type,
-                func.sum(JournalLine.debit).label("total_debit"),
-                func.sum(JournalLine.credit).label("total_credit"),
-            )
-            .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
-            .join(Account, JournalLine.account_id == Account.id)
-            .outerjoin(TaxCode, JournalLine.tax_code_id == TaxCode.id)
-            .where(
-                and_(
-                    JournalEntry.company_id == company_id,
-                    JournalEntry.tenant_id == tenant_id,
-                    JournalEntry.status == EntryStatus.POSTED,
-                    JournalEntry.archived_at.is_(None),
-                    JournalEntry.entry_date >= from_date,
-                    JournalEntry.entry_date <= to_date,
-                )
-            )
-            .group_by(Account.account_type, TaxCode.reporting_type)
+    stmt = (
+        select(
+            Account.account_type,
+            TaxCode.reporting_type,
+            func.sum(JournalLine.debit).label("total_debit"),
+            func.sum(JournalLine.credit).label("total_credit"),
         )
-        rows = (await session.execute(stmt)).all()
+        .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+        .join(Account, JournalLine.account_id == Account.id)
+        .outerjoin(TaxCode, JournalLine.tax_code_id == TaxCode.id)
+        .where(
+            and_(
+                JournalEntry.company_id == company_id,
+                JournalEntry.tenant_id == tenant_id,
+                JournalEntry.status == EntryStatus.POSTED,
+                JournalEntry.archived_at.is_(None),
+                JournalEntry.entry_date >= from_date,
+                JournalEntry.entry_date <= to_date,
+            )
+        )
+        .group_by(Account.account_type, TaxCode.reporting_type)
+    )
+    rows = (await session.execute(stmt)).all()
 
     g1 = Decimal("0")
     g3 = Decimal("0")
@@ -713,8 +721,10 @@ _CASH_KEYWORDS = ("cash", "bank")
 
 @router.get("/cashflow", response_model=CashflowStatement)
 async def cashflow(
+    request: Request,
     from_date: date = Query(...),
     to_date: date = Query(...),
+    session: AsyncSession = Depends(get_session),
 ) -> CashflowStatement:
     """Indirect-method cashflow statement for a date range.
 
@@ -728,56 +738,55 @@ async def cashflow(
     ``is_cash`` flag on the Account model, and add proper adjustment
     line items (depreciation, AR/AP movement) to the operating section.
     """
-    async with AsyncSessionLocal() as session:
-        tenant_id = resolve_tenant_id()
-        company_id = await _first_company_id(session)
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
 
-        # --- Single GL query for the period covering all account types ---
-        stmt = (
-            select(
-                Account.id,
-                Account.name,
-                Account.code,
-                Account.account_type,
-                func.sum(JournalLine.debit).label("total_debit"),
-                func.sum(JournalLine.credit).label("total_credit"),
-            )
-            .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
-            .join(Account, JournalLine.account_id == Account.id)
-            .where(
-                and_(
-                    JournalEntry.company_id == company_id,
-                    JournalEntry.tenant_id == tenant_id,
-                    JournalEntry.status == EntryStatus.POSTED,
-                    JournalEntry.archived_at.is_(None),
-                    JournalEntry.entry_date >= from_date,
-                    JournalEntry.entry_date <= to_date,
-                )
-            )
-            .group_by(Account.id, Account.name, Account.code, Account.account_type)
-            .order_by(Account.code)
+    # --- Single GL query for the period covering all account types ---
+    stmt = (
+        select(
+            Account.id,
+            Account.name,
+            Account.code,
+            Account.account_type,
+            func.sum(JournalLine.debit).label("total_debit"),
+            func.sum(JournalLine.credit).label("total_credit"),
         )
-        period_rows = (await session.execute(stmt)).all()
-
-        # --- Opening cash: cumulative ASSET (cash/bank) movements before from_date ---
-        opening_stmt = (
-            select(
-                func.sum(JournalLine.debit - JournalLine.credit).label("net")
-            )
-            .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
-            .join(Account, JournalLine.account_id == Account.id)
-            .where(
-                and_(
-                    JournalEntry.company_id == company_id,
-                    JournalEntry.tenant_id == tenant_id,
-                    JournalEntry.status == EntryStatus.POSTED,
-                    JournalEntry.archived_at.is_(None),
-                    JournalEntry.entry_date < from_date,
-                    Account.account_type == AccountType.ASSET,
-                )
+        .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+        .join(Account, JournalLine.account_id == Account.id)
+        .where(
+            and_(
+                JournalEntry.company_id == company_id,
+                JournalEntry.tenant_id == tenant_id,
+                JournalEntry.status == EntryStatus.POSTED,
+                JournalEntry.archived_at.is_(None),
+                JournalEntry.entry_date >= from_date,
+                JournalEntry.entry_date <= to_date,
             )
         )
-        opening_raw = (await session.execute(opening_stmt)).scalar()
+        .group_by(Account.id, Account.name, Account.code, Account.account_type)
+        .order_by(Account.code)
+    )
+    period_rows = (await session.execute(stmt)).all()
+
+    # --- Opening cash: cumulative ASSET (cash/bank) movements before from_date ---
+    opening_stmt = (
+        select(
+            func.sum(JournalLine.debit - JournalLine.credit).label("net")
+        )
+        .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+        .join(Account, JournalLine.account_id == Account.id)
+        .where(
+            and_(
+                JournalEntry.company_id == company_id,
+                JournalEntry.tenant_id == tenant_id,
+                JournalEntry.status == EntryStatus.POSTED,
+                JournalEntry.archived_at.is_(None),
+                JournalEntry.entry_date < from_date,
+                Account.account_type == AccountType.ASSET,
+            )
+        )
+    )
+    opening_raw = (await session.execute(opening_stmt)).scalar()
 
     # --- Accumulate movements from period rows ---
     total_income = Decimal("0")
@@ -791,7 +800,7 @@ async def cashflow(
     period_cash_net = Decimal("0")  # net movement on cash/bank ASSET accounts
 
     for row in period_rows:
-        acc_id, acc_name, acc_code, acc_type, total_debit, total_credit = row
+        _, acc_name, acc_code, acc_type, total_debit, total_credit = row
         total_debit = Decimal(total_debit or "0")
         total_credit = Decimal(total_credit or "0")
 
@@ -943,8 +952,10 @@ def _next_month_depreciation(
 
 @router.get("/depreciation_schedule", response_model=DepreciationSchedule)
 async def depreciation_schedule(
+    request: Request,
     as_of_date: date | None = Query(default=None),
     method: str | None = Query(default=None),
+    session: AsyncSession = Depends(get_session),
 ) -> DepreciationSchedule:
     """Depreciation schedule for all active (non-disposed, non-archived) assets.
 
@@ -973,74 +984,73 @@ async def depreciation_schedule(
                 "Use STRAIGHT_LINE, DECLINING_BALANCE, linear, or diminishing_value.",
             )
 
-    async with AsyncSessionLocal() as session:
-        tenant_id = resolve_tenant_id()
-        company_id = await _first_company_id(session)
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
 
-        # Build query: non-archived, non-disposed assets for this tenant+company.
-        where_clauses = [
-            FixedAsset.company_id == company_id,
-            FixedAsset.tenant_id == tenant_id,
-            FixedAsset.archived_at.is_(None),
-            FixedAsset.status != "disposed",
-        ]
+    # Build query: non-archived, non-disposed assets for this tenant+company.
+    where_clauses = [
+        FixedAsset.company_id == company_id,
+        FixedAsset.tenant_id == tenant_id,
+        FixedAsset.archived_at.is_(None),
+        FixedAsset.status != "disposed",
+    ]
 
-        stmt = (
-            select(FixedAsset, DepreciationModel)
-            .join(
-                DepreciationModel,
-                FixedAsset.depreciation_model_id == DepreciationModel.id,
-            )
-            .where(*where_clauses)
-            .order_by(FixedAsset.code)
+    stmt = (
+        select(FixedAsset, DepreciationModel)
+        .join(
+            DepreciationModel,
+            FixedAsset.depreciation_model_id == DepreciationModel.id,
         )
-        if db_method is not None:
-            stmt = stmt.where(DepreciationModel.method == db_method)
+        .where(*where_clauses)
+        .order_by(FixedAsset.code)
+    )
+    if db_method is not None:
+        stmt = stmt.where(DepreciationModel.method == db_method)
 
-        rows = (await session.execute(stmt)).all()
+    rows = (await session.execute(stmt)).all()
 
-        asset_lines: list[DepreciationAssetLine] = []
-        total_cost = Decimal("0")
-        total_accumulated = Decimal("0")
-        total_book_value = Decimal("0")
+    asset_lines: list[DepreciationAssetLine] = []
+    total_cost = Decimal("0")
+    total_accumulated = Decimal("0")
+    total_book_value = Decimal("0")
 
-        for asset, dep_model in rows:
-            # Compute accumulated depreciation up to as_of.
-            accum = await assets_svc.cumulative_depreciation_through(
-                session, asset, as_of
+    for asset, dep_model in rows:
+        # Compute accumulated depreciation up to as_of.
+        accum = await assets_svc.cumulative_depreciation_through(
+            session, asset, as_of
+        )
+        book_val = (asset.cost - accum).quantize(Decimal("0.01"))
+        fully_dep = book_val <= asset.residual_value
+
+        next_month = (
+            Decimal("0")
+            if fully_dep
+            else _next_month_depreciation(
+                dep_model, book_val, asset.residual_value, asset.cost
             )
-            book_val = (asset.cost - accum).quantize(Decimal("0.01"))
-            fully_dep = book_val <= asset.residual_value
+        )
 
-            next_month = (
-                Decimal("0")
-                if fully_dep
-                else _next_month_depreciation(
-                    dep_model, book_val, asset.residual_value, asset.cost
-                )
+        life_months = _useful_life_months(dep_model)
+
+        asset_lines.append(
+            DepreciationAssetLine(
+                asset_id=asset.id,
+                asset_number=asset.code,
+                description=asset.description,
+                acquisition_date=asset.in_service_date,
+                cost=float(asset.cost),
+                residual_value=float(asset.residual_value),
+                useful_life_months=life_months,
+                depreciation_method=dep_model.method,
+                accumulated_depreciation=float(accum),
+                current_book_value=float(book_val),
+                next_month_depreciation=float(next_month),
+                fully_depreciated=fully_dep,
             )
-
-            life_months = _useful_life_months(dep_model)
-
-            asset_lines.append(
-                DepreciationAssetLine(
-                    asset_id=asset.id,
-                    asset_number=asset.code,
-                    description=asset.description,
-                    acquisition_date=asset.in_service_date,
-                    cost=float(asset.cost),
-                    residual_value=float(asset.residual_value),
-                    useful_life_months=life_months,
-                    depreciation_method=dep_model.method,
-                    accumulated_depreciation=float(accum),
-                    current_book_value=float(book_val),
-                    next_month_depreciation=float(next_month),
-                    fully_depreciated=fully_dep,
-                )
-            )
-            total_cost += asset.cost
-            total_accumulated += accum
-            total_book_value += book_val
+        )
+        total_cost += asset.cost
+        total_accumulated += accum
+        total_book_value += book_val
 
     return DepreciationSchedule(
         as_of_date=as_of,
@@ -1061,8 +1071,10 @@ _FX_REPORT_NOTE = "Live FX rates not configured. Amounts shown in original curre
 
 @router.get("/fx_revaluation", response_model=FXRevaluationReport)
 async def fx_revaluation(
+    request: Request,
     as_of_date: date = Query(...),
     base_currency: str = Query(default="AUD"),
+    session: AsyncSession = Depends(get_session),
 ) -> FXRevaluationReport:
     """FX revaluation report as at ``as_of_date``.
 
@@ -1076,45 +1088,44 @@ async def fx_revaluation(
     Documents with zero outstanding balance (fully paid) are included so
     the operator can confirm no residual exposure.
     """
-    async with AsyncSessionLocal() as session:
-        tenant_id = resolve_tenant_id()
-        company_id = await _first_company_id(session)
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
 
-        # --- POSTED invoices with non-base currency ---
-        inv_stmt = (
-            select(Invoice, Contact.name)
-            .join(Contact, Invoice.contact_id == Contact.id)
-            .where(
-                and_(
-                    Invoice.company_id == company_id,
-                    Invoice.tenant_id == tenant_id,
-                    Invoice.status == InvoiceStatus.POSTED,
-                    Invoice.archived_at.is_(None),
-                    Invoice.currency != base_currency,
-                    Invoice.issue_date <= as_of_date,
-                )
+    # --- POSTED invoices with non-base currency ---
+    inv_stmt = (
+        select(Invoice, Contact.name)
+        .join(Contact, Invoice.contact_id == Contact.id)
+        .where(
+            and_(
+                Invoice.company_id == company_id,
+                Invoice.tenant_id == tenant_id,
+                Invoice.status == InvoiceStatus.POSTED,
+                Invoice.archived_at.is_(None),
+                Invoice.currency != base_currency,
+                Invoice.issue_date <= as_of_date,
             )
-            .order_by(Invoice.issue_date, Invoice.number)
         )
-        inv_rows = (await session.execute(inv_stmt)).all()
+        .order_by(Invoice.issue_date, Invoice.number)
+    )
+    inv_rows = (await session.execute(inv_stmt)).all()
 
-        # --- POSTED bills with non-base currency ---
-        bill_stmt = (
-            select(Bill, Contact.name)
-            .join(Contact, Bill.contact_id == Contact.id)
-            .where(
-                and_(
-                    Bill.company_id == company_id,
-                    Bill.tenant_id == tenant_id,
-                    Bill.status == BillStatus.POSTED,
-                    Bill.archived_at.is_(None),
-                    Bill.currency != base_currency,
-                    Bill.issue_date <= as_of_date,
-                )
+    # --- POSTED bills with non-base currency ---
+    bill_stmt = (
+        select(Bill, Contact.name)
+        .join(Contact, Bill.contact_id == Contact.id)
+        .where(
+            and_(
+                Bill.company_id == company_id,
+                Bill.tenant_id == tenant_id,
+                Bill.status == BillStatus.POSTED,
+                Bill.archived_at.is_(None),
+                Bill.currency != base_currency,
+                Bill.issue_date <= as_of_date,
             )
-            .order_by(Bill.issue_date, Bill.number)
         )
-        bill_rows = (await session.execute(bill_stmt)).all()
+        .order_by(Bill.issue_date, Bill.number)
+    )
+    bill_rows = (await session.execute(bill_stmt)).all()
 
     items: list[FXRevaluationItem] = []
 
@@ -1172,8 +1183,10 @@ async def fx_revaluation(
 
 @router.get("/trial_balance", response_model=TrialBalanceReport)
 async def trial_balance(
+    request: Request,
     as_of_date: date | None = Query(default=None),
     include_zero_balance: bool = Query(default=False),
+    session: AsyncSession = Depends(get_session),
 ) -> TrialBalanceReport:
     """Trial balance as at ``as_of_date`` (default today).
 
@@ -1185,34 +1198,33 @@ async def trial_balance(
     """
     as_of = as_of_date or date.today()
 
-    async with AsyncSessionLocal() as session:
-        tenant_id = resolve_tenant_id()
-        company_id = await _first_company_id(session)
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
 
-        stmt = (
-            select(
-                Account.id,
-                Account.code,
-                Account.name,
-                Account.account_type,
-                func.sum(JournalLine.debit).label("total_debit"),
-                func.sum(JournalLine.credit).label("total_credit"),
-            )
-            .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
-            .join(Account, JournalLine.account_id == Account.id)
-            .where(
-                and_(
-                    JournalEntry.company_id == company_id,
-                    JournalEntry.tenant_id == tenant_id,
-                    JournalEntry.status == EntryStatus.POSTED,
-                    JournalEntry.archived_at.is_(None),
-                    JournalEntry.entry_date <= as_of,
-                )
-            )
-            .group_by(Account.id, Account.code, Account.name, Account.account_type)
-            .order_by(Account.code)
+    stmt = (
+        select(
+            Account.id,
+            Account.code,
+            Account.name,
+            Account.account_type,
+            func.sum(JournalLine.debit).label("total_debit"),
+            func.sum(JournalLine.credit).label("total_credit"),
         )
-        rows = (await session.execute(stmt)).all()
+        .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+        .join(Account, JournalLine.account_id == Account.id)
+        .where(
+            and_(
+                JournalEntry.company_id == company_id,
+                JournalEntry.tenant_id == tenant_id,
+                JournalEntry.status == EntryStatus.POSTED,
+                JournalEntry.archived_at.is_(None),
+                JournalEntry.entry_date <= as_of,
+            )
+        )
+        .group_by(Account.id, Account.code, Account.name, Account.account_type)
+        .order_by(Account.code)
+    )
+    rows = (await session.execute(stmt)).all()
 
     lines: list[TrialBalanceLine] = []
     total_debits = Decimal("0")
@@ -1256,8 +1268,10 @@ async def trial_balance(
 
 @router.get("/budget_vs_actual", response_model=BudgetVsActualReport)
 async def budget_vs_actual(
+    request: Request,
     year: int = Query(...),
     month: int | None = Query(default=None),
+    session: AsyncSession = Depends(get_session),
 ) -> BudgetVsActualReport:
     """Budget vs actual for a year (or a single month within that year).
 
@@ -1272,73 +1286,72 @@ async def budget_vs_actual(
     if month is not None and not 1 <= month <= 12:
         raise HTTPException(422, "month must be between 1 and 12")
 
-    async with AsyncSessionLocal() as session:
-        tenant_id = resolve_tenant_id()
-        company_id = await _first_company_id(session)
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
 
-        # --- Actuals ---
-        actual_conditions: list[Any] = [
-            JournalEntry.company_id == company_id,
-            JournalEntry.tenant_id == tenant_id,
-            JournalEntry.status == EntryStatus.POSTED,
-            JournalEntry.archived_at.is_(None),
-            func.extract("year", JournalEntry.entry_date) == year,
-        ]
-        if month is not None:
-            actual_conditions.append(
-                func.extract("month", JournalEntry.entry_date) == month
-            )
-
-        actual_stmt = (
-            select(
-                Account.id,
-                Account.code,
-                Account.name,
-                Account.account_type,
-                func.sum(JournalLine.debit).label("total_debit"),
-                func.sum(JournalLine.credit).label("total_credit"),
-            )
-            .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
-            .join(Account, JournalLine.account_id == Account.id)
-            .where(and_(*actual_conditions))
-            .group_by(Account.id, Account.code, Account.name, Account.account_type)
-            .order_by(Account.code)
+    # --- Actuals ---
+    actual_conditions: list[Any] = [
+        JournalEntry.company_id == company_id,
+        JournalEntry.tenant_id == tenant_id,
+        JournalEntry.status == EntryStatus.POSTED,
+        JournalEntry.archived_at.is_(None),
+        func.extract("year", JournalEntry.entry_date) == year,
+    ]
+    if month is not None:
+        actual_conditions.append(
+            func.extract("month", JournalEntry.entry_date) == month
         )
-        actual_rows = (await session.execute(actual_stmt)).all()
 
-        # --- Budgets ---
-        budget_conditions: list[Any] = [
-            Budget.company_id == company_id,
-            Budget.year == year,
-            Budget.archived_at.is_(None),
-        ]
-        if month is not None:
-            budget_conditions.append(Budget.month == month)
-
-        budget_stmt = (
-            select(
-                Budget.account_id,
-                func.sum(Budget.amount).label("total_budget"),
-            )
-            .where(and_(*budget_conditions))
-            .group_by(Budget.account_id)
+    actual_stmt = (
+        select(
+            Account.id,
+            Account.code,
+            Account.name,
+            Account.account_type,
+            func.sum(JournalLine.debit).label("total_debit"),
+            func.sum(JournalLine.credit).label("total_credit"),
         )
-        budget_rows = (await session.execute(budget_stmt)).all()
+        .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+        .join(Account, JournalLine.account_id == Account.id)
+        .where(and_(*actual_conditions))
+        .group_by(Account.id, Account.code, Account.name, Account.account_type)
+        .order_by(Account.code)
+    )
+    actual_rows = (await session.execute(actual_stmt)).all()
 
-        # Resolve account metadata for budget-only accounts
-        actual_account_ids = {r[0] for r in actual_rows}
-        budget_account_ids = {r[0] for r in budget_rows}
-        missing_ids = budget_account_ids - actual_account_ids
+    # --- Budgets ---
+    budget_conditions: list[Any] = [
+        Budget.company_id == company_id,
+        Budget.year == year,
+        Budget.archived_at.is_(None),
+    ]
+    if month is not None:
+        budget_conditions.append(Budget.month == month)
 
-        meta: dict[Any, tuple[str, str, Any]] = {
-            r[0]: (r[1], r[2], r[3]) for r in actual_rows
-        }
-        if missing_ids:
-            meta_stmt = select(
-                Account.id, Account.code, Account.name, Account.account_type
-            ).where(Account.id.in_(missing_ids))
-            for aid, code, name, atype in (await session.execute(meta_stmt)).all():
-                meta[aid] = (code, name, atype)
+    budget_stmt = (
+        select(
+            Budget.account_id,
+            func.sum(Budget.amount).label("total_budget"),
+        )
+        .where(and_(*budget_conditions))
+        .group_by(Budget.account_id)
+    )
+    budget_rows = (await session.execute(budget_stmt)).all()
+
+    # Resolve account metadata for budget-only accounts
+    actual_account_ids = {r[0] for r in actual_rows}
+    budget_account_ids = {r[0] for r in budget_rows}
+    missing_ids = budget_account_ids - actual_account_ids
+
+    meta: dict[Any, tuple[str, str, Any]] = {
+        r[0]: (r[1], r[2], r[3]) for r in actual_rows
+    }
+    if missing_ids:
+        meta_stmt = select(
+            Account.id, Account.code, Account.name, Account.account_type
+        ).where(Account.id.in_(missing_ids))
+        for aid, code, name, atype in (await session.execute(meta_stmt)).all():
+            meta[aid] = (code, name, atype)
 
     # Build lookup maps
     actuals_by_account: dict[Any, tuple[Decimal, Decimal]] = {
@@ -1365,10 +1378,7 @@ async def budget_vs_actual(
 
         raw_debit, raw_credit = actuals_by_account.get(aid, (Decimal("0"), Decimal("0")))
         # Natural-sign: income = credit-debit, expenses/assets = debit-credit
-        if acc_type in _INCOME_TYPES:
-            actual_val = raw_credit - raw_debit
-        else:
-            actual_val = raw_debit - raw_credit
+        actual_val = raw_credit - raw_debit if acc_type in _INCOME_TYPES else raw_debit - raw_credit
 
         budget_val = budgets_by_account.get(aid, Decimal("0"))
         variance = actual_val - budget_val
@@ -1409,9 +1419,11 @@ async def budget_vs_actual(
 
 @router.get("/pl_by_segment", response_model=PLBySegmentReport)
 async def pl_by_segment(
+    request: Request,
     from_date: date = Query(...),
     to_date: date = Query(...),
     segment_type: str = Query(default="project"),
+    session: AsyncSession = Depends(get_session),
 ) -> PLBySegmentReport:
     """P&L by segment (project) for a date range.
 
@@ -1433,17 +1445,16 @@ async def pl_by_segment(
             },
         )
 
-    async with AsyncSessionLocal() as session:
-        tenant_id = resolve_tenant_id()
-        company_id = await _first_company_id(session)
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
 
-        segment_rows = await reports_svc.pl_by_segment(
-            session,
-            company_id,
-            from_date=from_date,
-            to_date=to_date,
-            segment="project",
-        )
+    segment_rows = await reports_svc.pl_by_segment(
+        session,
+        company_id,
+        from_date=from_date,
+        to_date=to_date,
+        segment="project",
+    )
 
     # Convert service dataclasses to API schema
     output_segments: list[PLSegmentRow] = []

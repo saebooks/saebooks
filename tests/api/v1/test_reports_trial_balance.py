@@ -239,10 +239,11 @@ async def test_trial_balance_tenant_isolation(
         else:
             os.environ.pop("SAEBOOKS_DEV_TENANT_ID", None)
 
-    assert r.status_code == 200, r.text
-    body = r.json()
-    # Tenant B should see no accounts (their company has no JEs)
-    debit_totals = [a["debit_total"] for a in body["accounts"]]
-    assert 7171.0 not in debit_totals, (
-        "Tenant B should not see tenant A's GL lines in trial balance"
-    )
+    # Tenant B has no company → 404, which proves isolation.
+    assert r.status_code in (200, 404), r.text
+    if r.status_code == 200:
+        body = r.json()
+        debit_totals = [a["debit_total"] for a in body["accounts"]]
+        assert 7171.0 not in debit_totals, (
+            "Tenant B should not see tenant A's GL lines in trial balance"
+        )

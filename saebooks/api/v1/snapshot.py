@@ -28,14 +28,16 @@ from __future__ import annotations
 
 import json
 import os
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from saebooks.api.v1.auth import require_bearer
+from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
+from saebooks.api.v1.deps import get_session
 from saebooks.api.v1.schemas import (
     AccountOut,
     BankAccountOut,
@@ -60,7 +62,6 @@ from saebooks.models.budget import Budget
 from saebooks.models.change_log import ChangeLog
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact
-from saebooks.models.depreciation_model import DepreciationModel
 from saebooks.models.fixed_asset import FixedAsset
 from saebooks.models.invoice import Invoice
 from saebooks.models.item import Item
@@ -332,42 +333,53 @@ async def _generate(company_id, max_id: int, limit: int) -> AsyncGenerator[str, 
 
 
 @router.get("")
-async def snapshot() -> StreamingResponse:
+async def snapshot(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> StreamingResponse:
     limit = _entity_limit()
-    async with AsyncSessionLocal() as session:
-        # Read the change_log head first — cursor must be <= last visible change.
-        max_id = (
-            await session.execute(select(func.coalesce(func.max(ChangeLog.id), 0)))
-        ).scalar_one()
+    tenant_id = resolve_tenant_id(request)
 
-        # Resolve the single active company (Phase 1 single-company assumption).
-        company = (
-            await session.execute(
-                select(Company)
-                .where(Company.archived_at.is_(None))
-                .order_by(Company.created_at)
+    # Read the change_log head first — cursor must be <= last visible change.
+    max_id = (
+        await session.execute(select(func.coalesce(func.max(ChangeLog.id), 0)))
+    ).scalar_one()
+
+    # Resolve the first active company for this tenant.
+    company = (
+        await session.execute(
+            select(Company)
+            .where(
+                Company.tenant_id == tenant_id,
+                Company.archived_at.is_(None),
             )
-        ).scalars().first()
+            .order_by(Company.created_at)
+        )
+    ).scalars().first()
 
-        if company is None:
-            # No company yet — stream empty entity markers + cursor.
-            async def _empty() -> AsyncGenerator[str, None]:
-                for name in (
-                    "companies", "tax_codes", "accounts", "contacts", "items",
-                    "projects", "invoices", "bills", "payments", "journal_entries",
-                    "bank_accounts", "bank_statement_lines", "fixed_assets", "budgets",
-                ):
-                    yield json.dumps({"_entity": name, "_count": 0}) + "\n"
-                yield json.dumps({"_cursor": max_id}) + "\n"
+    if company is None:
+        # No company yet — stream empty entity markers + cursor.
+        async def _empty() -> AsyncGenerator[str, None]:
+            for name in (
+                "companies", "tax_codes", "accounts", "contacts", "items",
+                "projects", "invoices", "bills", "payments", "journal_entries",
+                "bank_accounts", "bank_statement_lines", "fixed_assets", "budgets",
+            ):
+                yield json.dumps({"_entity": name, "_count": 0}) + "\n"
+            yield json.dumps({"_cursor": max_id}) + "\n"
 
-            return StreamingResponse(
-                _empty(),
-                media_type="application/x-ndjson",
-                headers={"X-Cursor-Next": str(max_id)},
-            )
+        return StreamingResponse(
+            _empty(),
+            media_type="application/x-ndjson",
+            headers={"X-Cursor-Next": str(max_id)},
+        )
 
-        company_id = company.id
+    company_id = company.id
 
+    # _generate opens its own AsyncSessionLocal — async generators cannot
+    # share the request-scoped session after it closes at response end.
+    # company_id was resolved above from a tenant-scoped query (three-layer
+    # defence: GUC + explicit tenant filter + RLS).
     return StreamingResponse(
         _generate(company_id, max_id, limit),
         media_type="application/x-ndjson",

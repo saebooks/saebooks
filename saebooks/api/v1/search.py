@@ -9,12 +9,13 @@ Global read-only search across contacts, invoices, bills and accounts.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from saebooks.api.v1.auth import require_bearer
+from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
+from saebooks.api.v1.deps import get_session
 from saebooks.api.v1.schemas import SearchHitOut, SearchResponse
-from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 from saebooks.services import search as search_svc
 
@@ -25,22 +26,27 @@ router = APIRouter(
 )
 
 
-async def _first_company_id(session) -> str:
-    """Return the first active company's UUID — Phase 1 single-company assumption."""
+async def _first_company_id(session: AsyncSession, tenant_id) -> str:
+    """Return the first active company's UUID for this tenant."""
     result = await session.execute(
-        select(Company).where(Company.archived_at.is_(None)).order_by(Company.created_at)
+        select(Company)
+        .where(
+            Company.tenant_id == tenant_id,
+            Company.archived_at.is_(None),
+        )
+        .order_by(Company.created_at)
     )
-    from fastapi import HTTPException
-
     company = result.scalars().first()
     if company is None:
-        raise HTTPException(500, "No active company")
+        raise HTTPException(404, "No active company for tenant")
     return company.id
 
 
 @router.get("", response_model=SearchResponse)
 async def search(
+    request: Request,
     q: str = Query(default="", description="Search query string"),
+    session: AsyncSession = Depends(get_session),
 ) -> SearchResponse:
     """Search across contacts, invoices, bills and accounts.
 
@@ -49,9 +55,9 @@ async def search(
     """
     query = (q or "").strip()
 
-    async with AsyncSessionLocal() as session:
-        company_id = await _first_company_id(session)
-        hits = await search_svc.search_all(session, company_id, query=query)
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
+    hits = await search_svc.search_all(session, company_id, query=query)
 
     out_hits = [
         SearchHitOut(
