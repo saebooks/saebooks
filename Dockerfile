@@ -64,7 +64,9 @@ RUN mkdir -p saebooks/grpc_gen \
         -I saebooks/proto \
         --python_out=saebooks/grpc_gen \
         --grpc_python_out=saebooks/grpc_gen \
-        saebooks/proto/saebooks.proto
+        saebooks/proto/saebooks.proto \
+    && sed -i 's/^import saebooks_pb2/from saebooks.grpc_gen import saebooks_pb2/' \
+        saebooks/grpc_gen/saebooks_pb2_grpc.py
 
 # Re-install in editable-equivalent mode so package metadata is registered.
 # We copy the egg-info directory to the venv so importlib.metadata can find
