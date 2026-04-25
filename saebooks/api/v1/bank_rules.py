@@ -21,12 +21,13 @@ import json
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from saebooks.api.v1.auth import require_bearer
+from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
+from saebooks.api.v1.deps import get_session
 from saebooks.api.v1.schemas import (
     BankRuleApplyOut,
     BankRuleCreate,
@@ -34,7 +35,6 @@ from saebooks.api.v1.schemas import (
     BankRuleOut,
     BankRuleUpdate,
 )
-from saebooks.db import AsyncSessionLocal
 from saebooks.models.bank_rule import BankRule, MatchType
 from saebooks.models.company import Company
 from saebooks.services import bank_rules as svc
@@ -51,14 +51,19 @@ router = APIRouter(
 # ---------------------------------------------------------------------------
 
 
-async def _first_company_id(session: AsyncSession) -> UUID:
-    """Return the first active company — Phase 1 single-company assumption."""
+async def _first_company_id(session: AsyncSession, tenant_id: UUID) -> UUID:
+    """Return the first active company for the request tenant."""
     result = await session.execute(
-        select(Company).where(Company.archived_at.is_(None)).order_by(Company.created_at)
+        select(Company)
+        .where(
+            Company.tenant_id == tenant_id,
+            Company.archived_at.is_(None),
+        )
+        .order_by(Company.created_at)
     )
     company = result.scalars().first()
     if company is None:
-        raise HTTPException(500, "No active company")
+        raise HTTPException(404, "No active company for tenant")
     return company.id
 
 
@@ -73,32 +78,34 @@ def _dump(rule: BankRule) -> dict[str, Any]:
 
 @router.get("", response_model=BankRuleListOut)
 async def list_bank_rules(
+    request: Request,
     active_only: bool = Query(default=False),
     limit: int = Query(default=200, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_session),
 ) -> BankRuleListOut:
-    async with AsyncSessionLocal() as session:
-        company_id = await _first_company_id(session)
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
 
-        count_stmt = (
-            select(func.count())
-            .select_from(BankRule)
-            .where(BankRule.company_id == company_id)
-        )
-        if active_only:
-            count_stmt = count_stmt.where(BankRule.is_active.is_(True))
-        total = (await session.execute(count_stmt)).scalar_one()
+    count_stmt = (
+        select(func.count())
+        .select_from(BankRule)
+        .where(BankRule.company_id == company_id)
+    )
+    if active_only:
+        count_stmt = count_stmt.where(BankRule.is_active.is_(True))
+    total = (await session.execute(count_stmt)).scalar_one()
 
-        stmt = (
-            select(BankRule)
-            .where(BankRule.company_id == company_id)
-            .order_by(BankRule.priority.desc(), BankRule.name)
-            .offset(offset)
-            .limit(limit)
-        )
-        if active_only:
-            stmt = stmt.where(BankRule.is_active.is_(True))
-        rules = list((await session.execute(stmt)).scalars().all())
+    stmt = (
+        select(BankRule)
+        .where(BankRule.company_id == company_id)
+        .order_by(BankRule.priority.desc(), BankRule.name)
+        .offset(offset)
+        .limit(limit)
+    )
+    if active_only:
+        stmt = stmt.where(BankRule.is_active.is_(True))
+    rules = list((await session.execute(stmt)).scalars().all())
 
     return BankRuleListOut(
         items=[BankRuleOut.model_validate(r) for r in rules],
@@ -114,15 +121,17 @@ async def list_bank_rules(
 
 
 @router.get("/{rule_id}", response_model=BankRuleOut)
-async def get_bank_rule(rule_id: UUID) -> BankRuleOut:
-    async with AsyncSessionLocal() as session:
-        rule = await svc.get(session, rule_id)
-        if rule is None:
-            raise HTTPException(404, "Bank rule not found")
-        company_id = await _first_company_id(session)
-        if rule.company_id != company_id:
-            raise HTTPException(404, "Bank rule not found")
-        return BankRuleOut.model_validate(rule)
+async def get_bank_rule(
+    request: Request,
+    rule_id: UUID,
+    session: AsyncSession = Depends(get_session),
+) -> BankRuleOut:
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
+    rule = await svc.get(session, rule_id)
+    if rule is None or rule.company_id != company_id:
+        raise HTTPException(404, "Bank rule not found")
+    return BankRuleOut.model_validate(rule)
 
 
 # ---------------------------------------------------------------------------
@@ -132,35 +141,37 @@ async def get_bank_rule(rule_id: UUID) -> BankRuleOut:
 
 @router.post("", response_model=BankRuleOut, status_code=201)
 async def create_bank_rule(
+    request: Request,
     payload: BankRuleCreate,
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
-    async with AsyncSessionLocal() as session:
-        company_id = await _first_company_id(session)
-        try:
-            match_type = MatchType(payload.match_type.upper())
-        except ValueError:
-            valid = ", ".join(m.value for m in MatchType)
-            raise HTTPException(422, f"Invalid match_type '{payload.match_type}'. Valid values: {valid}")
-        try:
-            rule = await svc.create(
-                session,
-                company_id,
-                name=payload.name,
-                match_pattern=payload.match_pattern,
-                match_type=match_type,
-                account_id=payload.account_id,
-                tax_code=payload.tax_code,
-                contact_id=payload.contact_id,
-                description_template=payload.description_template,
-                auto_create=payload.auto_create,
-                priority=payload.priority,
-                is_active=payload.is_active,
-            )
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
+    try:
+        match_type = MatchType(payload.match_type.upper())
+    except ValueError:
+        valid = ", ".join(m.value for m in MatchType)
+        raise HTTPException(422, f"Invalid match_type '{payload.match_type}'. Valid values: {valid}") from None
+    try:
+        rule = await svc.create(
+            session,
+            company_id,
+            name=payload.name,
+            match_pattern=payload.match_pattern,
+            match_type=match_type,
+            account_id=payload.account_id,
+            tax_code=payload.tax_code,
+            contact_id=payload.contact_id,
+            description_template=payload.description_template,
+            auto_create=payload.auto_create,
+            priority=payload.priority,
+            is_active=payload.is_active,
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
-        body = _dump(rule)
+    body = _dump(rule)
     return JSONResponse(body, status_code=201)
 
 
@@ -171,38 +182,40 @@ async def create_bank_rule(
 
 @router.patch("/{rule_id}", response_model=BankRuleOut)
 async def update_bank_rule(
+    request: Request,
     rule_id: UUID,
     payload: BankRuleUpdate,
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
-    async with AsyncSessionLocal() as session:
-        company_id = await _first_company_id(session)
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
 
-        rule = await svc.get(session, rule_id)
-        if rule is None or rule.company_id != company_id:
-            raise HTTPException(404, "Bank rule not found")
+    rule = await svc.get(session, rule_id)
+    if rule is None or rule.company_id != company_id:
+        raise HTTPException(404, "Bank rule not found")
 
-        kwargs = payload.model_dump(exclude_unset=True)
+    kwargs = payload.model_dump(exclude_unset=True)
 
-        # Convert match_type string to enum if present
-        if "match_type" in kwargs and kwargs["match_type"] is not None:
-            try:
-                kwargs["match_type"] = MatchType(kwargs["match_type"].upper())
-            except ValueError:
-                valid = ", ".join(m.value for m in MatchType)
-                raise HTTPException(422, f"Invalid match_type. Valid values: {valid}")
-
+    # Convert match_type string to enum if present
+    if "match_type" in kwargs and kwargs["match_type"] is not None:
         try:
-            updated = await svc.update(
-                session,
-                rule_id,
-                performed_by=f"api:{bearer[:8]}…",
-                **kwargs,
-            )
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
+            kwargs["match_type"] = MatchType(kwargs["match_type"].upper())
+        except ValueError:
+            valid = ", ".join(m.value for m in MatchType)
+            raise HTTPException(422, f"Invalid match_type. Valid values: {valid}") from None
 
-        body = _dump(updated)
+    try:
+        updated = await svc.update(
+            session,
+            rule_id,
+            performed_by=f"api:{bearer[:8]}…",
+            **kwargs,
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+    body = _dump(updated)
     return JSONResponse(body, status_code=200)
 
 
@@ -213,21 +226,23 @@ async def update_bank_rule(
 
 @router.delete("/{rule_id}", responses={204: {"description": "Deleted"}})
 async def delete_bank_rule(
+    request: Request,
     rule_id: UUID,
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
-    async with AsyncSessionLocal() as session:
-        company_id = await _first_company_id(session)
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
 
-        rule = await svc.get(session, rule_id)
-        if rule is None or rule.company_id != company_id:
-            raise HTTPException(404, "Bank rule not found")
+    rule = await svc.get(session, rule_id)
+    if rule is None or rule.company_id != company_id:
+        raise HTTPException(404, "Bank rule not found")
 
-        await svc.delete(
-            session,
-            rule_id,
-            performed_by=f"api:{bearer[:8]}…",
-        )
+    await svc.delete(
+        session,
+        rule_id,
+        performed_by=f"api:{bearer[:8]}…",
+    )
     return Response(status_code=204)
 
 
@@ -239,16 +254,18 @@ async def delete_bank_rule(
 
 @router.post("/apply", response_model=BankRuleApplyOut)
 async def apply_all_bank_rules(
+    request: Request,
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     """Apply all active auto_create rules to unmatched bank statement lines.
 
     Returns ``{"applied": N}`` where N is the number of lines matched
     and journal entries created.
     """
-    async with AsyncSessionLocal() as session:
-        company_id = await _first_company_id(session)
-        counts = await svc.auto_apply_rules(session, company_id)
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
+    counts = await svc.auto_apply_rules(session, company_id)
     return BankRuleApplyOut(applied=counts.get("matched", 0))
 
 
@@ -259,38 +276,40 @@ async def apply_all_bank_rules(
 
 @router.post("/{rule_id}/apply", response_model=BankRuleApplyOut)
 async def apply_single_bank_rule(
+    request: Request,
     rule_id: UUID,
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     """Apply one rule to all matching unmatched bank statement lines.
 
     Returns ``{"applied": N}`` where N is the number of lines matched
     and journal entries created.
     """
-    async with AsyncSessionLocal() as session:
-        company_id = await _first_company_id(session)
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
 
-        rule = await svc.get(session, rule_id)
-        if rule is None or rule.company_id != company_id:
-            raise HTTPException(404, "Bank rule not found")
+    rule = await svc.get(session, rule_id)
+    if rule is None or rule.company_id != company_id:
+        raise HTTPException(404, "Bank rule not found")
 
-        # Find all unmatched lines that match this rule
-        matching_lines = await svc.preview_matches(
-            session, company_id, rule, limit=10000
-        )
+    # Find all unmatched lines that match this rule
+    matching_lines = await svc.preview_matches(
+        session, company_id, rule, limit=10000
+    )
 
-        applied = 0
-        for line in matching_lines:
-            try:
-                await svc.apply_rule_to_line(
-                    session,
-                    line.id,
-                    rule_id,
-                    posted_by=f"api:{bearer[:8]}…",
-                )
-                applied += 1
-            except Exception:
-                # Line may have been matched by a concurrent request; skip it
-                pass
+    applied = 0
+    for line in matching_lines:
+        try:
+            await svc.apply_rule_to_line(
+                session,
+                line.id,
+                rule_id,
+                posted_by=f"api:{bearer[:8]}…",
+            )
+            applied += 1
+        except Exception:
+            # Line may have been matched by a concurrent request; skip it
+            pass
 
     return BankRuleApplyOut(applied=applied)
