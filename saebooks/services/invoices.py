@@ -646,10 +646,36 @@ async def list_active(
 
 
 async def api_get(
-    session: AsyncSession, invoice_id: uuid.UUID
+    session: AsyncSession,
+    invoice_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
 ) -> Invoice | None:
-    """Fetch a single invoice with its lines. Returns None if not found."""
-    return await _get_with_lines(session, invoice_id)
+    """Fetch a single invoice with its lines. Returns None if not found.
+
+    When ``tenant_id`` is supplied, the lookup is filtered by tenant:
+    a foreign-tenant id returns ``None`` even if the row exists. The
+    parameter is keyword-only and optional so existing callers (the
+    legacy posting pipeline, services that already filtered by company)
+    keep working unchanged; the API layer always supplies it.
+
+    P0 cross-tenant leak fix: the bare ``select(Invoice).where(id == id)``
+    of the original implementation was an unscoped PK lookup — anyone
+    who learned a foreign-tenant UUID via the leaky list endpoint could
+    fetch the detail. With ``tenant_id`` supplied we now reject those
+    lookups defensively, on top of the FORCE-RLS gate at the DB layer.
+    """
+    if tenant_id is None:
+        return await _get_with_lines(session, invoice_id)
+    result = await session.execute(
+        select(Invoice)
+        .options(selectinload(Invoice.lines))
+        .where(
+            Invoice.id == invoice_id,
+            Invoice.tenant_id == tenant_id,
+        )
+    )
+    return result.scalar_one_or_none()
 
 
 # ---------------------------------------------------------------------------
