@@ -637,6 +637,7 @@ class InvoiceOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     archived_at: datetime | None = None
+    stripe_payment_link: str | None = None
     lines: list[InvoiceLineOut] = Field(default_factory=list)
 
 

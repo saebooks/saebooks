@@ -182,6 +182,14 @@ class Settings(BaseSettings):
     stripe_default_bank_account_id: str = Field(
         default="", alias="STRIPE_DEFAULT_BANK_ACCOUNT_ID"
     )
+    # Stripe API keys (B/48 — outbound Checkout Session creation).
+    # When stripe_secret_key is empty, create_payment_link raises
+    # StripeNotConfiguredError so an unconfigured install can't silently
+    # produce broken links. The publishable key is returned to the
+    # frontend for client-side Stripe.js use (optional but surfaced in
+    # the integrations status page).
+    stripe_secret_key: str = Field(default="", alias="STRIPE_SECRET_KEY")
+    stripe_publishable_key: str = Field(default="", alias="STRIPE_PUBLISHABLE_KEY")
 
     # ---------------------------------------------------------------- #
     # AI document extraction (B/46)                                    #

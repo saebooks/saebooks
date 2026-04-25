@@ -52,6 +52,7 @@ from saebooks.services.integrations.stripe import (
     handle_payment_intent_succeeded,
     verify_signature,
 )
+from saebooks.services.integrations.stripe_links import create_payment_link
 
 __all__ = [
     "AtoPrefillError",
@@ -74,6 +75,7 @@ __all__ = [
     "apply_to_contact",
     "attach_to_journal",
     "build_browser_url",
+    "create_payment_link",
     "handle_payment_intent_succeeded",
     "lookup_company",
     "lookup_lei",

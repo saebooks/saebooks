@@ -7,6 +7,8 @@ Phase 1 tier-3 accounts-receivable endpoint.
 * Every write appends a row to ``change_log``.
 * ``DELETE`` is a soft-void (archived_at + VOIDED) returning 204.
 * Lines are nested in the response.
+* B/48: ``POST /{id}/stripe-payment-link`` generates a Stripe Checkout
+  Session URL (gated on ``FLAG_STRIPE_INTEGRATION``).
 """
 from __future__ import annotations
 
@@ -15,7 +17,7 @@ from datetime import date
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,10 +30,14 @@ from saebooks.api.v1.schemas import (
     InvoiceOut,
     InvoiceUpdate,
 )
+from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 from saebooks.models.invoice import InvoiceStatus
 from saebooks.services import invoices as svc
+from saebooks.services.features import FLAG_STRIPE_INTEGRATION, require_feature
+from saebooks.services.integrations import StripeError, StripeNotConfiguredError
+from saebooks.services.integrations.stripe_links import create_payment_link
 
 router = APIRouter(
     prefix="/invoices",
@@ -357,3 +363,82 @@ async def void_invoice_transition(
 
         body = _dump(inv)
     return JSONResponse(body, status_code=200)
+
+
+# ---------------------------------------------------------------------------
+# Stripe payment link (B/48 — POST /{id}/stripe-payment-link)
+# Gated on FLAG_STRIPE_INTEGRATION (Business+).
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/{invoice_id}/stripe-payment-link",
+    dependencies=[Depends(require_feature(FLAG_STRIPE_INTEGRATION))],
+)
+async def create_stripe_payment_link(
+    invoice_id: UUID,
+) -> JSONResponse:
+    """Generate a Stripe Checkout Session URL for a posted invoice.
+
+    Requires:
+    * Edition >= Business (FLAG_STRIPE_INTEGRATION) — returns 404 otherwise.
+    * ``STRIPE_SECRET_KEY`` configured — returns 503 otherwise.
+    * Invoice must be in POSTED status with a positive balance due — 422 otherwise.
+
+    On success stores the URL in ``invoices.stripe_payment_link`` and returns
+    ``{"payment_link": "https://checkout.stripe.com/…"}``.
+    """
+    async with AsyncSessionLocal() as session:
+        inv = await svc.api_get(session, invoice_id)
+        if inv is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Invoice not found")
+
+        if inv.status != InvoiceStatus.POSTED:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"Invoice must be POSTED to generate a payment link "
+                f"(current status: {inv.status.value})",
+            )
+
+        balance_due = inv.total - inv.amount_paid
+        if balance_due <= 0:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "Invoice has no outstanding balance; payment link not generated",
+            )
+
+        # Build an invoice dict compatible with create_payment_link.
+        # We derive lines from the ORM objects rather than going through the
+        # schema layer to avoid a double-serialise round-trip.
+        invoice_dict: dict[str, Any] = {
+            "id": str(inv.id),
+            "number": inv.number,
+            "currency": inv.currency,
+            "total": inv.total,
+            "lines": [
+                {
+                    "description": line.description,
+                    "line_total": line.line_total,
+                }
+                for line in inv.lines
+            ],
+        }
+
+        try:
+            url = await create_payment_link(invoice_dict, settings=settings)
+        except StripeNotConfiguredError as exc:
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                f"Stripe is not configured: {exc}",
+            ) from exc
+        except StripeError as exc:
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY,
+                f"Stripe API error: {exc}",
+            ) from exc
+
+        # Persist the URL on the invoice row.
+        inv.stripe_payment_link = url
+        await session.commit()
+
+    return JSONResponse({"payment_link": url})

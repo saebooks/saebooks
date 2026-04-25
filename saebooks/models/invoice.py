@@ -146,6 +146,12 @@ class Invoice(CompanyScoped, Base):
         nullable=False,
     )
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # --- Stripe payment link (B/48) ----------------------------------------
+    # URL of the Stripe Checkout Session generated for this invoice.  Null
+    # until a payment link is created via POST /api/v1/invoices/{id}/stripe-payment-link.
+    # Gated by FLAG_STRIPE_INTEGRATION at the router level; stored here so
+    # the URL survives across requests and can be included in email templates.
+    stripe_payment_link: Mapped[str | None] = mapped_column(Text)
 
     lines: Mapped[list[InvoiceLine]] = relationship(
         back_populates="invoice",
