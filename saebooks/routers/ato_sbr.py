@@ -30,15 +30,20 @@ from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.ato_sbr import AtoSbrConfig
 from saebooks.models.company import Company
+from saebooks.models.user import UserRole
 from saebooks.services import crypto as crypto_svc
 from saebooks.services.ato_sbr import onboarding as sbr
 from saebooks.services.ato_sbr.keystore import KeystoreError
+from saebooks.services.authz import require_role
 from saebooks.services.features import FLAG_ATO_SBR, require_feature
 from saebooks.web import templates
 
 router = APIRouter(
     prefix="/admin/ato-sbr",
-    dependencies=[Depends(require_feature(FLAG_ATO_SBR))],
+    dependencies=[
+        Depends(require_feature(FLAG_ATO_SBR)),
+        Depends(require_role(UserRole.ADMIN)),
+    ],
 )
 
 

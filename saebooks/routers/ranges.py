@@ -1,7 +1,7 @@
 """Account ranges admin routes."""
 from uuid import UUID
 
-from fastapi import APIRouter, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 
@@ -9,10 +9,15 @@ from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import AccountType
 from saebooks.models.company import Company
+from saebooks.models.user import UserRole
 from saebooks.services import accounts as svc
+from saebooks.services.authz import require_role
 from saebooks.web import templates
 
-router = APIRouter(prefix="/admin/ranges")
+router = APIRouter(
+    prefix="/admin/ranges",
+    dependencies=[Depends(require_role(UserRole.ADMIN))],
+)
 
 
 ACCOUNT_TYPE_CHOICES = [(t.value, t.value.replace("_", " ").title()) for t in AccountType]

@@ -137,7 +137,11 @@ SETTINGS_SCHEMA: list[dict[str, object]] = [
 ]
 
 
-@router.get("/settings", response_class=HTMLResponse)
+@router.get(
+    "/settings",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_role(UserRole.ADMIN))],  # noqa: B008
+)
 async def settings_admin(request: Request) -> HTMLResponse:
     async with AsyncSessionLocal() as session:
         current = await svc.all(session)
@@ -153,7 +157,11 @@ async def settings_admin(request: Request) -> HTMLResponse:
     )
 
 
-@router.get("/audit", response_class=HTMLResponse)
+@router.get(
+    "/audit",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_staff())],  # noqa: B008
+)
 async def audit_list(
     request: Request,
     table_name: str | None = Query(None),
@@ -226,7 +234,7 @@ async def audit_export_csv(
     to_date: str | None = Query(None),
     table_name: str | None = Query(None),
     performed_by: str | None = Query(None),
-    _admin: User = Depends(require_role(UserRole.ACCOUNTANT)),  # noqa: B008
+    _staff: User = Depends(require_staff()),  # noqa: B008
 ) -> PlainTextResponse:
     """Download the audit trail as CSV.
 
@@ -252,7 +260,11 @@ async def audit_export_csv(
     )
 
 
-@router.get("/audit/{snapshot_id}", response_class=HTMLResponse)
+@router.get(
+    "/audit/{snapshot_id}",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_staff())],  # noqa: B008
+)
 async def audit_detail(
     request: Request,
     snapshot_id: uuid.UUID,
@@ -291,7 +303,10 @@ async def audit_detail(
     )
 
 
-@router.post("/audit/{snapshot_id}/revert")
+@router.post(
+    "/audit/{snapshot_id}/revert",
+    dependencies=[Depends(require_staff())],  # noqa: B008
+)
 async def audit_revert(
     request: Request,
     snapshot_id: uuid.UUID,
@@ -426,7 +441,11 @@ async def sql_export(
     )
 
 
-@router.get("/license", response_class=HTMLResponse)
+@router.get(
+    "/license",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_role(UserRole.ADMIN))],  # noqa: B008
+)
 async def license_admin(request: Request) -> HTMLResponse:
     """Show the active edition and the per-feature flag matrix.
 
@@ -509,7 +528,11 @@ async def theme_admin_save(
     return RedirectResponse("/admin/theme?saved=1", status_code=303)
 
 
-@router.get("/backups", response_class=HTMLResponse)
+@router.get(
+    "/backups",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_role(UserRole.ADMIN))],  # noqa: B008
+)
 async def backups_admin(request: Request) -> HTMLResponse:
     """List pg_dump backups and recent backup/restore-test runs."""
     return templates.TemplateResponse(
@@ -818,7 +841,10 @@ async def company_export_zip(
     )
 
 
-@router.post("/settings")
+@router.post(
+    "/settings",
+    dependencies=[Depends(require_role(UserRole.ADMIN))],  # noqa: B008
+)
 async def settings_save(request: Request) -> HTMLResponse:
     form = dict(await request.form())
     async with AsyncSessionLocal() as session:

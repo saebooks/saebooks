@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from sqlalchemy import select
 
@@ -43,9 +43,14 @@ from saebooks.services.imports import (
 from saebooks.services.imports import (
     qbo as qbo_svc,
 )
+from saebooks.services.authz import require_role
+from saebooks.models.user import UserRole
 from saebooks.web import templates
 
-router = APIRouter(prefix="/admin/imports")
+router = APIRouter(
+    prefix="/admin/imports",
+    dependencies=[Depends(require_role(UserRole.ADMIN))],
+)
 
 
 async def _first_company() -> Company:

@@ -37,6 +37,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
 from saebooks.services import contacts as contacts_svc
+from saebooks.services.authz import require_staff
 from saebooks.services.features import (
     FLAG_COMPANIES_HOUSE,
     FLAG_LEI_LOOKUP,
@@ -333,8 +334,16 @@ async def stripe_webhook(request: Request) -> JSONResponse:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/admin/integrations", response_class=HTMLResponse)
-@router.get("/admin/integrations/", response_class=HTMLResponse)
+@router.get(
+    "/admin/integrations",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_staff())],  # noqa: B008
+)
+@router.get(
+    "/admin/integrations/",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_staff())],  # noqa: B008
+)
 async def integrations_index(request: Request) -> HTMLResponse:
     """Landing page with a status matrix for each integration."""
     statuses = {
@@ -361,7 +370,10 @@ async def integrations_index(request: Request) -> HTMLResponse:
     )
 
 
-@router.post("/admin/integrations/paperless/attach")
+@router.post(
+    "/admin/integrations/paperless/attach",
+    dependencies=[Depends(require_staff())],  # noqa: B008
+)
 async def paperless_attach(
     request: Request,
     journal_id: UUID = Form(...),  # noqa: B008
@@ -399,7 +411,10 @@ async def paperless_attach(
     )
 
 
-@router.post("/admin/integrations/ato-prefill")
+@router.post(
+    "/admin/integrations/ato-prefill",
+    dependencies=[Depends(require_staff())],  # noqa: B008
+)
 async def ato_prefill_stub() -> JSONResponse:
     """Stub — returns 501 until Batch KK lands."""
     return JSONResponse(
@@ -420,7 +435,11 @@ async def ato_prefill_stub() -> JSONResponse:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/admin/integrations/healthz", response_class=PlainTextResponse)
+@router.get(
+    "/admin/integrations/healthz",
+    response_class=PlainTextResponse,
+    dependencies=[Depends(require_staff())],  # noqa: B008
+)
 async def integrations_healthz() -> PlainTextResponse:
     """Plain-text dump of which integrations are configured.
 
