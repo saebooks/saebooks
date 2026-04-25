@@ -2,11 +2,21 @@
 
 Phase 1 tier-3 accounts-payable endpoint.
 
-* Bearer-token auth via ``SAEBOOKS_DEV_API_TOKEN``.
+* Bearer-token auth via ``SAEBOOKS_DEV_API_TOKEN`` or JWT.
 * Optimistic locking via ``If-Match: <version>`` on update/delete.
 * Every write appends a row to ``change_log``.
 * ``DELETE`` is a soft-void (archived_at + VOIDED) returning 204.
 * Lines are nested in the response.
+
+P0 cross-tenant leak fix
+------------------------
+All handlers now share a single ``Depends(get_session)`` session per
+request. ``app.current_tenant`` is bound at the connection level by
+``get_session``; all queries within the request are gated by the
+``tenant_isolation`` RLS policy from migration 0055.
+``_first_company_id`` is scoped by the request tenant. Existence
+checks pass ``tenant_id`` to ``svc.api_get`` so a foreign-tenant UUID
+returns 404 even if the caller knows the id.
 """
 from __future__ import annotations
 
@@ -15,12 +25,13 @@ from datetime import date
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
+from saebooks.api.v1.deps import get_session
 from saebooks.api.v1.schemas import (
     BillConflictBody,
     BillCreate,
@@ -28,7 +39,6 @@ from saebooks.api.v1.schemas import (
     BillOut,
     BillUpdate,
 )
-from saebooks.db import AsyncSessionLocal
 from saebooks.models.bill import BillStatus
 from saebooks.models.company import Company
 from saebooks.services import bills as svc
@@ -45,14 +55,19 @@ router = APIRouter(
 # ---------------------------------------------------------------------------
 
 
-async def _first_company_id(session: AsyncSession) -> UUID:
-    """Return the first active company — Phase 1 single-company assumption."""
+async def _first_company_id(session: AsyncSession, tenant_id: UUID) -> UUID:
+    """Return the first active company for the request tenant."""
     result = await session.execute(
-        select(Company).where(Company.archived_at.is_(None)).order_by(Company.created_at)
+        select(Company)
+        .where(
+            Company.tenant_id == tenant_id,
+            Company.archived_at.is_(None),
+        )
+        .order_by(Company.created_at)
     )
     company = result.scalars().first()
     if company is None:
-        raise HTTPException(500, "No active company")
+        raise HTTPException(404, "No active company for tenant")
     return company.id
 
 
@@ -77,12 +92,14 @@ def _dump(bill: Any) -> dict[str, Any]:
 
 @router.get("", response_model=BillListOut)
 async def list_bills(
+    request: Request,
     contact_id: UUID | None = Query(default=None),
     status: str | None = Query(default=None),
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
+    session: AsyncSession = Depends(get_session),
 ) -> BillListOut:
     offset = (page - 1) * page_size
     status_enum: BillStatus | None = None
@@ -92,26 +109,25 @@ async def list_bills(
         except ValueError as exc:
             raise HTTPException(400, f"Invalid status '{status}'") from exc
 
-    async with AsyncSessionLocal() as session:
-        company_id = await _first_company_id(session)
-        tenant_id = resolve_tenant_id()
-        bills, total = await svc.list_active(
-            session,
-            company_id,
-            tenant_id,
-            contact_id=contact_id,
-            status=status_enum,
-            date_from=date_from,
-            date_to=date_to,
-            limit=page_size,
-            offset=offset,
-        )
-        return BillListOut(
-            items=[BillOut.model_validate(b) for b in bills],
-            total=total,
-            limit=page_size,
-            offset=offset,
-        )
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
+    bills, total = await svc.list_active(
+        session,
+        company_id,
+        tenant_id,
+        contact_id=contact_id,
+        status=status_enum,
+        date_from=date_from,
+        date_to=date_to,
+        limit=page_size,
+        offset=offset,
+    )
+    return BillListOut(
+        items=[BillOut.model_validate(b) for b in bills],
+        total=total,
+        limit=page_size,
+        offset=offset,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -120,12 +136,16 @@ async def list_bills(
 
 
 @router.get("/{bill_id}", response_model=BillOut)
-async def get_bill(bill_id: UUID) -> BillOut:
-    async with AsyncSessionLocal() as session:
-        bill = await svc.api_get(session, bill_id)
-        if bill is None:
-            raise HTTPException(404, "Bill not found")
-        return BillOut.model_validate(bill)
+async def get_bill(
+    bill_id: UUID,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> BillOut:
+    tenant_id = resolve_tenant_id(request)
+    bill = await svc.api_get(session, bill_id, tenant_id=tenant_id)
+    if bill is None:
+        raise HTTPException(404, "Bill not found")
+    return BillOut.model_validate(bill)
 
 
 # ---------------------------------------------------------------------------
@@ -136,29 +156,30 @@ async def get_bill(bill_id: UUID) -> BillOut:
 @router.post("", response_model=BillOut, status_code=201)
 async def create_bill(
     payload: BillCreate,
+    request: Request,
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
-    async with AsyncSessionLocal() as session:
-        company_id = await _first_company_id(session)
-        tenant_id = resolve_tenant_id()
-        try:
-            bill = await svc.api_create(
-                session,
-                company_id,
-                tenant_id,
-                actor=f"api:{bearer[:8]}…",
-                contact_id=payload.contact_id,
-                issue_date=payload.issue_date,
-                due_date=payload.due_date,
-                lines=[line.model_dump() for line in payload.lines],
-                reference=payload.supplier_reference,
-                notes=payload.notes,
-                currency=payload.currency,
-            )
-        except (ValueError, svc.BillError) as exc:
-            raise HTTPException(422, str(exc)) from exc
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
+    try:
+        bill = await svc.api_create(
+            session,
+            company_id,
+            tenant_id,
+            actor=f"api:{bearer[:8]}…",
+            contact_id=payload.contact_id,
+            issue_date=payload.issue_date,
+            due_date=payload.due_date,
+            lines=[line.model_dump() for line in payload.lines],
+            reference=payload.supplier_reference,
+            notes=payload.notes,
+            currency=payload.currency,
+        )
+    except (ValueError, svc.BillError) as exc:
+        raise HTTPException(422, str(exc)) from exc
 
-        body = _dump(bill)
+    body = _dump(bill)
     return JSONResponse(body, status_code=201)
 
 
@@ -177,45 +198,50 @@ async def create_bill(
 async def update_bill(
     bill_id: UUID,
     payload: BillUpdate,
+    request: Request,
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with bill version is required")
 
-    async with AsyncSessionLocal() as session:
-        try:
-            lines_data = (
-                [line.model_dump() for line in payload.lines]
-                if payload.lines is not None
-                else None
-            )
-            bill = await svc.api_update(
-                session,
-                bill_id,
-                actor=f"api:{bearer[:8]}…",
-                expected_version=expected,
-                contact_id=payload.contact_id,
-                issue_date=payload.issue_date,
-                due_date=payload.due_date,
-                notes=payload.notes,
-                reference=payload.supplier_reference,
-                lines=lines_data,
-            )
-        except svc.VersionConflict as exc:
-            body = BillConflictBody(
-                detail="version mismatch",
-                current=BillOut.model_validate(exc.current),
-            ).model_dump(mode="json")
-            return JSONResponse(body, status_code=409)
-        except (ValueError, svc.BillError) as exc:
-            msg = str(exc)
-            if "not found" in msg.lower():
-                raise HTTPException(404, msg) from exc
-            raise HTTPException(422, msg) from exc
+    tenant_id = resolve_tenant_id(request)
+    if await svc.api_get(session, bill_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Bill not found")
 
-        body = _dump(bill)
+    try:
+        lines_data = (
+            [line.model_dump() for line in payload.lines]
+            if payload.lines is not None
+            else None
+        )
+        bill = await svc.api_update(
+            session,
+            bill_id,
+            actor=f"api:{bearer[:8]}…",
+            expected_version=expected,
+            contact_id=payload.contact_id,
+            issue_date=payload.issue_date,
+            due_date=payload.due_date,
+            notes=payload.notes,
+            reference=payload.supplier_reference,
+            lines=lines_data,
+        )
+    except svc.VersionConflict as exc:
+        body = BillConflictBody(
+            detail="version mismatch",
+            current=BillOut.model_validate(exc.current),
+        ).model_dump(mode="json")
+        return JSONResponse(body, status_code=409)
+    except (ValueError, svc.BillError) as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
+
+    body = _dump(bill)
     return JSONResponse(body, status_code=200)
 
 
@@ -233,32 +259,37 @@ async def update_bill(
 )
 async def void_bill(
     bill_id: UUID,
+    request: Request,
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with bill version is required")
 
-    async with AsyncSessionLocal() as session:
-        try:
-            await svc.api_void(
-                session,
-                bill_id,
-                actor=f"api:{bearer[:8]}…",
-                expected_version=expected,
-            )
-        except svc.VersionConflict as exc:
-            body = BillConflictBody(
-                detail="version mismatch",
-                current=BillOut.model_validate(exc.current),
-            ).model_dump(mode="json")
-            return JSONResponse(body, status_code=409)
-        except (ValueError, svc.BillError) as exc:
-            msg = str(exc)
-            if "not found" in msg.lower():
-                raise HTTPException(404, msg) from exc
-            raise HTTPException(422, msg) from exc
+    tenant_id = resolve_tenant_id(request)
+    if await svc.api_get(session, bill_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Bill not found")
+
+    try:
+        await svc.api_void(
+            session,
+            bill_id,
+            actor=f"api:{bearer[:8]}…",
+            expected_version=expected,
+        )
+    except svc.VersionConflict as exc:
+        body = BillConflictBody(
+            detail="version mismatch",
+            current=BillOut.model_validate(exc.current),
+        ).model_dump(mode="json")
+        return JSONResponse(body, status_code=409)
+    except (ValueError, svc.BillError) as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
 
     return Response(status_code=204)
 
@@ -277,37 +308,41 @@ async def void_bill(
 )
 async def post_bill(
     bill_id: UUID,
+    request: Request,
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     """Transition bill DRAFT → POSTED, generating journal entry lines."""
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with bill version is required")
 
-    async with AsyncSessionLocal() as session:
-        tenant_id = resolve_tenant_id()
-        try:
-            bill = await svc.api_post_bill(
-                session,
-                bill_id,
-                actor=f"api:{bearer[:8]}…",
-                expected_version=expected,
-                tenant_id=tenant_id,
-            )
-        except svc.VersionConflict as exc:
-            body = BillConflictBody(
-                detail="version mismatch",
-                current=BillOut.model_validate(exc.current),
-            ).model_dump(mode="json")
-            return JSONResponse(body, status_code=409)
-        except (ValueError, svc.BillError) as exc:
-            msg = str(exc)
-            if "not found" in msg.lower():
-                raise HTTPException(404, msg) from exc
-            raise HTTPException(422, msg) from exc
+    tenant_id = resolve_tenant_id(request)
+    if await svc.api_get(session, bill_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Bill not found")
 
-        body = _dump(bill)
+    try:
+        bill = await svc.api_post_bill(
+            session,
+            bill_id,
+            actor=f"api:{bearer[:8]}…",
+            expected_version=expected,
+            tenant_id=tenant_id,
+        )
+    except svc.VersionConflict as exc:
+        body = BillConflictBody(
+            detail="version mismatch",
+            current=BillOut.model_validate(exc.current),
+        ).model_dump(mode="json")
+        return JSONResponse(body, status_code=409)
+    except (ValueError, svc.BillError) as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
+
+    body = _dump(bill)
     return JSONResponse(body, status_code=200)
 
 
@@ -325,35 +360,39 @@ async def post_bill(
 )
 async def void_bill_transition(
     bill_id: UUID,
+    request: Request,
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     """Transition any non-VOIDED bill → VOIDED, reversing JE if POSTED."""
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with bill version is required")
 
-    async with AsyncSessionLocal() as session:
-        tenant_id = resolve_tenant_id()
-        try:
-            bill = await svc.api_void_bill(
-                session,
-                bill_id,
-                actor=f"api:{bearer[:8]}…",
-                expected_version=expected,
-                tenant_id=tenant_id,
-            )
-        except svc.VersionConflict as exc:
-            body = BillConflictBody(
-                detail="version mismatch",
-                current=BillOut.model_validate(exc.current),
-            ).model_dump(mode="json")
-            return JSONResponse(body, status_code=409)
-        except (ValueError, svc.BillError) as exc:
-            msg = str(exc)
-            if "not found" in msg.lower():
-                raise HTTPException(404, msg) from exc
-            raise HTTPException(422, msg) from exc
+    tenant_id = resolve_tenant_id(request)
+    if await svc.api_get(session, bill_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Bill not found")
 
-        body = _dump(bill)
+    try:
+        bill = await svc.api_void_bill(
+            session,
+            bill_id,
+            actor=f"api:{bearer[:8]}…",
+            expected_version=expected,
+            tenant_id=tenant_id,
+        )
+    except svc.VersionConflict as exc:
+        body = BillConflictBody(
+            detail="version mismatch",
+            current=BillOut.model_validate(exc.current),
+        ).model_dump(mode="json")
+        return JSONResponse(body, status_code=409)
+    except (ValueError, svc.BillError) as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
+
+    body = _dump(bill)
     return JSONResponse(body, status_code=200)

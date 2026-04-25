@@ -752,10 +752,30 @@ async def list_active(
 
 
 async def api_get(
-    session: AsyncSession, payment_id: uuid.UUID
+    session: AsyncSession,
+    payment_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
 ) -> Payment | None:
-    """Fetch a single payment with its allocations. Returns None if not found."""
-    return await _get_with_allocations(session, payment_id)
+    """Fetch a single payment with its allocations. Returns None if not found.
+
+    P0 cross-tenant leak fix: when ``tenant_id`` is supplied, the
+    lookup is filtered by tenant — a foreign-tenant id returns
+    ``None`` even if the row exists. The parameter is keyword-only
+    and optional so existing callers keep working unchanged; the
+    API layer always supplies it.
+    """
+    if tenant_id is None:
+        return await _get_with_allocations(session, payment_id)
+    result = await session.execute(
+        select(Payment)
+        .options(selectinload(Payment.allocations))
+        .where(
+            Payment.id == payment_id,
+            Payment.tenant_id == tenant_id,
+        )
+    )
+    return result.scalar_one_or_none()
 
 
 # ---------------------------------------------------------------------------

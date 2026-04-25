@@ -472,8 +472,30 @@ async def list_active(
     return list(result.scalars().all())
 
 
-async def get(session: AsyncSession, account_id: uuid.UUID) -> Account | None:
-    return await session.get(Account, account_id)
+async def get(
+    session: AsyncSession,
+    account_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
+) -> Account | None:
+    """Fetch an account by id.
+
+    P0 cross-tenant leak fix: when ``tenant_id`` is supplied, the
+    lookup is filtered by tenant — a foreign-tenant id returns
+    ``None`` even if the row exists. The parameter is keyword-only
+    and optional so existing internal callers (legacy Jinja routes,
+    services that already filtered by company) keep working unchanged;
+    the API layer always supplies it.
+    """
+    if tenant_id is None:
+        return await session.get(Account, account_id)
+    result = await session.execute(
+        select(Account).where(
+            Account.id == account_id,
+            Account.tenant_id == tenant_id,
+        )
+    )
+    return result.scalars().first()
 
 
 _DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")

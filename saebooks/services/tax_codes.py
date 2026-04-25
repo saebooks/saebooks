@@ -130,8 +130,29 @@ async def list_active(session: AsyncSession, company_id: uuid.UUID) -> list[TaxC
     return list(result.scalars().all())
 
 
-async def get(session: AsyncSession, tax_code_id: uuid.UUID) -> TaxCode | None:
-    return await session.get(TaxCode, tax_code_id)
+async def get(
+    session: AsyncSession,
+    tax_code_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
+) -> TaxCode | None:
+    """Fetch a tax code by id.
+
+    P0 cross-tenant leak fix: when ``tenant_id`` is supplied, the
+    lookup is filtered by tenant — a foreign-tenant id returns
+    ``None`` even if the row exists. The parameter is keyword-only
+    and optional so existing internal callers keep working unchanged;
+    the API layer always supplies it.
+    """
+    if tenant_id is None:
+        return await session.get(TaxCode, tax_code_id)
+    result = await session.execute(
+        select(TaxCode).where(
+            TaxCode.id == tax_code_id,
+            TaxCode.tenant_id == tenant_id,
+        )
+    )
+    return result.scalars().first()
 
 
 async def create(

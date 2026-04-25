@@ -617,10 +617,30 @@ async def list_active(
 
 
 async def api_get(
-    session: AsyncSession, bill_id: uuid.UUID
+    session: AsyncSession,
+    bill_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
 ) -> Bill | None:
-    """Fetch a single bill with its lines. Returns None if not found."""
-    return await _get_with_lines(session, bill_id)
+    """Fetch a single bill with its lines. Returns None if not found.
+
+    P0 cross-tenant leak fix: when ``tenant_id`` is supplied, the
+    lookup is filtered by tenant — a foreign-tenant id returns
+    ``None`` even if the row exists. The parameter is keyword-only
+    and optional so existing callers (the legacy posting pipeline)
+    keep working unchanged; the API layer always supplies it.
+    """
+    if tenant_id is None:
+        return await _get_with_lines(session, bill_id)
+    result = await session.execute(
+        select(Bill)
+        .options(selectinload(Bill.lines))
+        .where(
+            Bill.id == bill_id,
+            Bill.tenant_id == tenant_id,
+        )
+    )
+    return result.scalar_one_or_none()
 
 
 # ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@
 
 Phase 1 tier-3 general ledger endpoint.
 
-* Bearer-token auth via ``SAEBOOKS_DEV_API_TOKEN``.
+* Bearer-token auth via ``SAEBOOKS_DEV_API_TOKEN`` or JWT.
 * Optimistic locking via ``If-Match: <version>`` on update/delete.
 * Every write appends a row to ``change_log``.
 * ``DELETE`` is a soft-void (archived_at) returning 204.
@@ -11,6 +11,15 @@ Phase 1 tier-3 general ledger endpoint.
     POST /{id}/post    — DRAFT → POSTED
     POST /{id}/reverse — POSTED → REVERSED (creates mirror reversal entry)
 * Retry-safe writes via ``X-Idempotency-Key: <uuid>`` on transition endpoints.
+
+P0 cross-tenant leak fix
+------------------------
+All handlers now share a single ``Depends(get_session)`` session per
+request. ``app.current_tenant`` is bound at the connection level by
+``get_session``; every query is gated by the ``tenant_isolation`` RLS
+policy from migration 0055. Existence checks pass ``tenant_id`` to
+``svc.get`` so a foreign-tenant UUID returns 404 even if the caller
+knows the id.
 """
 from __future__ import annotations
 
@@ -19,12 +28,13 @@ from datetime import date
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
+from saebooks.api.v1.deps import get_session
 from saebooks.api.v1.schemas import (
     JournalEntryConflictBody,
     JournalEntryCreate,
@@ -32,7 +42,6 @@ from saebooks.api.v1.schemas import (
     JournalEntryOut,
     JournalEntryUpdate,
 )
-from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 from saebooks.models.idempotency_key import IdempotencyKey
 from saebooks.models.journal import EntryStatus
@@ -50,14 +59,19 @@ router = APIRouter(
 # ---------------------------------------------------------------------------
 
 
-async def _first_company_id(session: AsyncSession) -> UUID:
-    """Return the first active company — Phase 1 single-company assumption."""
+async def _first_company_id(session: AsyncSession, tenant_id: UUID) -> UUID:
+    """Return the first active company for the request tenant."""
     result = await session.execute(
-        select(Company).where(Company.archived_at.is_(None)).order_by(Company.created_at)
+        select(Company)
+        .where(
+            Company.tenant_id == tenant_id,
+            Company.archived_at.is_(None),
+        )
+        .order_by(Company.created_at)
     )
     company = result.scalars().first()
     if company is None:
-        raise HTTPException(500, "No active company")
+        raise HTTPException(404, "No active company for tenant")
     return company.id
 
 
@@ -106,11 +120,13 @@ def _dump(entry: Any) -> dict[str, Any]:
 
 @router.get("", response_model=JournalEntryListOut)
 async def list_journal_entries(
+    request: Request,
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
     status: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
+    session: AsyncSession = Depends(get_session),
 ) -> JournalEntryListOut:
     offset = (page - 1) * page_size
     status_enum: EntryStatus | None = None
@@ -120,25 +136,24 @@ async def list_journal_entries(
         except ValueError as exc:
             raise HTTPException(400, f"Invalid status '{status}'") from exc
 
-    async with AsyncSessionLocal() as session:
-        company_id = await _first_company_id(session)
-        tenant_id = resolve_tenant_id()
-        entries, total = await svc.list_active(
-            session,
-            company_id,
-            tenant_id,
-            date_from=date_from,
-            date_to=date_to,
-            status=status_enum,
-            limit=page_size,
-            offset=offset,
-        )
-        return JournalEntryListOut(
-            items=[JournalEntryOut.model_validate(e) for e in entries],
-            total=total,
-            limit=page_size,
-            offset=offset,
-        )
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
+    entries, total = await svc.list_active(
+        session,
+        company_id,
+        tenant_id,
+        date_from=date_from,
+        date_to=date_to,
+        status=status_enum,
+        limit=page_size,
+        offset=offset,
+    )
+    return JournalEntryListOut(
+        items=[JournalEntryOut.model_validate(e) for e in entries],
+        total=total,
+        limit=page_size,
+        offset=offset,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -147,12 +162,16 @@ async def list_journal_entries(
 
 
 @router.get("/{entry_id}", response_model=JournalEntryOut)
-async def get_journal_entry(entry_id: UUID) -> JournalEntryOut:
-    async with AsyncSessionLocal() as session:
-        entry = await svc.get(session, entry_id)
-        if entry is None:
-            raise HTTPException(404, "Journal entry not found")
-        return JournalEntryOut.model_validate(entry)
+async def get_journal_entry(
+    entry_id: UUID,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> JournalEntryOut:
+    tenant_id = resolve_tenant_id(request)
+    entry = await svc.get(session, entry_id, tenant_id=tenant_id)
+    if entry is None:
+        raise HTTPException(404, "Journal entry not found")
+    return JournalEntryOut.model_validate(entry)
 
 
 # ---------------------------------------------------------------------------
@@ -163,26 +182,27 @@ async def get_journal_entry(entry_id: UUID) -> JournalEntryOut:
 @router.post("", response_model=JournalEntryOut, status_code=201)
 async def create_journal_entry(
     payload: JournalEntryCreate,
+    request: Request,
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
-    async with AsyncSessionLocal() as session:
-        company_id = await _first_company_id(session)
-        tenant_id = resolve_tenant_id()
-        try:
-            entry = await svc.create(
-                session,
-                company_id,
-                tenant_id,
-                actor=f"api:{bearer[:8]}…",
-                entry_date=payload.entry_date,
-                narration=payload.narration,
-                reference=payload.reference,
-                lines=[line.model_dump() for line in payload.lines],
-            )
-        except (ValueError, svc.JournalEntryError) as exc:
-            raise HTTPException(422, str(exc)) from exc
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
+    try:
+        entry = await svc.create(
+            session,
+            company_id,
+            tenant_id,
+            actor=f"api:{bearer[:8]}…",
+            entry_date=payload.entry_date,
+            narration=payload.narration,
+            reference=payload.reference,
+            lines=[line.model_dump() for line in payload.lines],
+        )
+    except (ValueError, svc.JournalEntryError) as exc:
+        raise HTTPException(422, str(exc)) from exc
 
-        body = _dump(entry)
+    body = _dump(entry)
     return JSONResponse(body, status_code=201)
 
 
@@ -201,44 +221,49 @@ async def create_journal_entry(
 async def update_journal_entry(
     entry_id: UUID,
     payload: JournalEntryUpdate,
+    request: Request,
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with entry version is required")
 
-    async with AsyncSessionLocal() as session:
-        try:
-            lines_data = (
-                [line.model_dump() for line in payload.lines]
-                if payload.lines is not None
-                else None
-            )
-            entry = await svc.update(
-                session,
-                entry_id,
-                actor=f"api:{bearer[:8]}…",
-                expected_version=expected,
-                entry_date=payload.entry_date,
-                narration=payload.narration,
-                reference=payload.reference,
-                status=payload.status,
-                lines=lines_data,
-            )
-        except svc.VersionConflict as exc:
-            body = JournalEntryConflictBody(
-                detail="version mismatch",
-                current=JournalEntryOut.model_validate(exc.current),
-            ).model_dump(mode="json")
-            return JSONResponse(body, status_code=409)
-        except (ValueError, svc.JournalEntryError) as exc:
-            msg = str(exc)
-            if "not found" in msg.lower():
-                raise HTTPException(404, msg) from exc
-            raise HTTPException(422, msg) from exc
+    tenant_id = resolve_tenant_id(request)
+    if await svc.get(session, entry_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Journal entry not found")
 
-        body = _dump(entry)
+    try:
+        lines_data = (
+            [line.model_dump() for line in payload.lines]
+            if payload.lines is not None
+            else None
+        )
+        entry = await svc.update(
+            session,
+            entry_id,
+            actor=f"api:{bearer[:8]}…",
+            expected_version=expected,
+            entry_date=payload.entry_date,
+            narration=payload.narration,
+            reference=payload.reference,
+            status=payload.status,
+            lines=lines_data,
+        )
+    except svc.VersionConflict as exc:
+        body = JournalEntryConflictBody(
+            detail="version mismatch",
+            current=JournalEntryOut.model_validate(exc.current),
+        ).model_dump(mode="json")
+        return JSONResponse(body, status_code=409)
+    except (ValueError, svc.JournalEntryError) as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
+
+    body = _dump(entry)
     return JSONResponse(body, status_code=200)
 
 
@@ -256,32 +281,37 @@ async def update_journal_entry(
 )
 async def void_journal_entry(
     entry_id: UUID,
+    request: Request,
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with entry version is required")
 
-    async with AsyncSessionLocal() as session:
-        try:
-            await svc.void(
-                session,
-                entry_id,
-                actor=f"api:{bearer[:8]}…",
-                expected_version=expected,
-            )
-        except svc.VersionConflict as exc:
-            body = JournalEntryConflictBody(
-                detail="version mismatch",
-                current=JournalEntryOut.model_validate(exc.current),
-            ).model_dump(mode="json")
-            return JSONResponse(body, status_code=409)
-        except (ValueError, svc.JournalEntryError) as exc:
-            msg = str(exc)
-            if "not found" in msg.lower():
-                raise HTTPException(404, msg) from exc
-            raise HTTPException(422, msg) from exc
+    tenant_id = resolve_tenant_id(request)
+    if await svc.get(session, entry_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Journal entry not found")
+
+    try:
+        await svc.void(
+            session,
+            entry_id,
+            actor=f"api:{bearer[:8]}…",
+            expected_version=expected,
+        )
+    except svc.VersionConflict as exc:
+        body = JournalEntryConflictBody(
+            detail="version mismatch",
+            current=JournalEntryOut.model_validate(exc.current),
+        ).model_dump(mode="json")
+        return JSONResponse(body, status_code=409)
+    except (ValueError, svc.JournalEntryError) as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
 
     return Response(status_code=204)
 
@@ -300,9 +330,11 @@ async def void_journal_entry(
 )
 async def post_journal_entry(
     entry_id: UUID,
+    request: Request,
     if_match: str | None = Header(default=None, alias="If-Match"),
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     """Transition journal entry DRAFT → POSTED.
 
@@ -314,36 +346,39 @@ async def post_journal_entry(
         raise HTTPException(428, "If-Match header with entry version is required")
 
     idem_key = _parse_idempotency_key(idempotency_key)
+    tenant_id = resolve_tenant_id(request)
 
-    async with AsyncSessionLocal() as session:
-        if idem_key is not None:
-            cached = await _idempotent_replay(session, idem_key)
-            if cached is not None:
-                return cached
+    if idem_key is not None:
+        cached = await _idempotent_replay(session, idem_key)
+        if cached is not None:
+            return cached
 
-        try:
-            entry = await svc.api_post(
-                session,
-                entry_id,
-                actor=f"api:{bearer[:8]}…",
-                expected_version=expected,
-            )
-        except svc.VersionConflict as exc:
-            body = JournalEntryConflictBody(
-                detail="version mismatch",
-                current=JournalEntryOut.model_validate(exc.current),
-            ).model_dump(mode="json")
-            return JSONResponse(body, status_code=409)
-        except (ValueError, svc.JournalEntryError) as exc:
-            msg = str(exc)
-            if "not found" in msg.lower():
-                raise HTTPException(404, msg) from exc
-            raise HTTPException(422, msg) from exc
+    if await svc.get(session, entry_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Journal entry not found")
 
-        body = _dump(entry)
-        if idem_key is not None:
-            await _remember_idempotent(session, idem_key, body, 200)
-            await session.commit()
+    try:
+        entry = await svc.api_post(
+            session,
+            entry_id,
+            actor=f"api:{bearer[:8]}…",
+            expected_version=expected,
+        )
+    except svc.VersionConflict as exc:
+        body = JournalEntryConflictBody(
+            detail="version mismatch",
+            current=JournalEntryOut.model_validate(exc.current),
+        ).model_dump(mode="json")
+        return JSONResponse(body, status_code=409)
+    except (ValueError, svc.JournalEntryError) as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
+
+    body = _dump(entry)
+    if idem_key is not None:
+        await _remember_idempotent(session, idem_key, body, 200)
+        await session.commit()
     return JSONResponse(body, status_code=200)
 
 
@@ -362,9 +397,11 @@ async def post_journal_entry(
 )
 async def reverse_journal_entry(
     entry_id: UUID,
+    request: Request,
     if_match: str | None = Header(default=None, alias="If-Match"),
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     """Create a reversal of a POSTED journal entry (POSTED → REVERSED).
 
@@ -378,34 +415,37 @@ async def reverse_journal_entry(
         raise HTTPException(428, "If-Match header with entry version is required")
 
     idem_key = _parse_idempotency_key(idempotency_key)
+    tenant_id = resolve_tenant_id(request)
 
-    async with AsyncSessionLocal() as session:
-        if idem_key is not None:
-            cached = await _idempotent_replay(session, idem_key)
-            if cached is not None:
-                return cached
+    if idem_key is not None:
+        cached = await _idempotent_replay(session, idem_key)
+        if cached is not None:
+            return cached
 
-        try:
-            reversal = await svc.api_reverse(
-                session,
-                entry_id,
-                actor=f"api:{bearer[:8]}…",
-                expected_version=expected,
-            )
-        except svc.VersionConflict as exc:
-            body = JournalEntryConflictBody(
-                detail="version mismatch",
-                current=JournalEntryOut.model_validate(exc.current),
-            ).model_dump(mode="json")
-            return JSONResponse(body, status_code=409)
-        except (ValueError, svc.JournalEntryError) as exc:
-            msg = str(exc)
-            if "not found" in msg.lower():
-                raise HTTPException(404, msg) from exc
-            raise HTTPException(422, msg) from exc
+    if await svc.get(session, entry_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Journal entry not found")
 
-        body = _dump(reversal)
-        if idem_key is not None:
-            await _remember_idempotent(session, idem_key, body, 201)
-            await session.commit()
+    try:
+        reversal = await svc.api_reverse(
+            session,
+            entry_id,
+            actor=f"api:{bearer[:8]}…",
+            expected_version=expected,
+        )
+    except svc.VersionConflict as exc:
+        body = JournalEntryConflictBody(
+            detail="version mismatch",
+            current=JournalEntryOut.model_validate(exc.current),
+        ).model_dump(mode="json")
+        return JSONResponse(body, status_code=409)
+    except (ValueError, svc.JournalEntryError) as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
+
+    body = _dump(reversal)
+    if idem_key is not None:
+        await _remember_idempotent(session, idem_key, body, 201)
+        await session.commit()
     return JSONResponse(body, status_code=201)

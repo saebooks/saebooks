@@ -167,9 +167,31 @@ async def list_active(
     return entries, total
 
 
-async def get(session: AsyncSession, entry_id: uuid.UUID) -> JournalEntry | None:
-    """Fetch a single journal entry with its lines. Returns None if not found."""
-    return await _get_with_lines(session, entry_id)
+async def get(
+    session: AsyncSession,
+    entry_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
+) -> JournalEntry | None:
+    """Fetch a single journal entry with its lines. Returns None if not found.
+
+    P0 cross-tenant leak fix: when ``tenant_id`` is supplied, the
+    lookup is filtered by tenant — a foreign-tenant id returns
+    ``None`` even if the row exists. The parameter is keyword-only
+    and optional so existing internal callers keep working unchanged;
+    the API layer always supplies it.
+    """
+    if tenant_id is None:
+        return await _get_with_lines(session, entry_id)
+    result = await session.execute(
+        select(JournalEntry)
+        .options(selectinload(JournalEntry.lines))
+        .where(
+            JournalEntry.id == entry_id,
+            JournalEntry.tenant_id == tenant_id,
+        )
+    )
+    return result.scalar_one_or_none()
 
 
 # ---------------------------------------------------------------------------
