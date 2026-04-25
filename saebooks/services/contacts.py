@@ -121,8 +121,35 @@ async def list_active(
     return list(result.scalars().all())
 
 
-async def get(session: AsyncSession, contact_id: uuid.UUID) -> Contact | None:
-    return await session.get(Contact, contact_id)
+async def get(
+    session: AsyncSession,
+    contact_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
+) -> Contact | None:
+    """Fetch a contact by id.
+
+    When ``tenant_id`` is supplied, the lookup is filtered by tenant —
+    a foreign-tenant id returns ``None`` even if the row exists. The
+    parameter is keyword-only and optional so existing callers
+    (legacy Jinja routes, services that already filtered by company)
+    keep working unchanged; the API layer always supplies it.
+
+    P0 cross-tenant leak fix: the bare ``session.get(Contact, id)`` of
+    the original implementation was an unscoped PK lookup — anyone who
+    learned a foreign-tenant UUID via the leaky list endpoint could
+    fetch the detail. With ``tenant_id`` supplied we now reject those
+    lookups defensively, on top of the FORCE-RLS gate at the DB layer.
+    """
+    if tenant_id is None:
+        return await session.get(Contact, contact_id)
+    result = await session.execute(
+        select(Contact).where(
+            Contact.id == contact_id,
+            Contact.tenant_id == tenant_id,
+        )
+    )
+    return result.scalars().first()
 
 
 _DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")

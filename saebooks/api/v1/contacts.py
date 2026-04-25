@@ -3,12 +3,27 @@
 Implements the Phase 0 scaffolding pattern that Phase 1 will apply to
 every other entity:
 
-* Bearer-token auth via ``SAEBOOKS_DEV_API_TOKEN`` (TODO: JWT in Phase 1).
+* Bearer-token auth via ``SAEBOOKS_DEV_API_TOKEN`` or JWT.
 * Optimistic locking via ``If-Match: <version>`` header on update/delete.
 * Retry-safe writes via ``X-Idempotency-Key: <uuid>`` header — replayed
   requests return the cached response body + status without re-executing.
 * Every write appends a row to ``change_log`` (handled by the service
   layer, not the router).
+
+P0 cross-tenant leak fix
+------------------------
+This router is the leak's epicentre and the first to migrate to the
+shared ``get_session`` dep — see ``saebooks.api.v1.deps``. Behaviour
+changes:
+
+* ``_first_company_id`` now scopes by the request tenant, not "the
+  oldest active company in the entire DB".
+* ``get_contact`` now passes the request tenant to ``svc.get`` so a
+  detail lookup for a foreign-tenant UUID returns 404 even if the
+  caller knows the UUID.
+* Every handler accepts a single ``Depends(get_session)`` session
+  with ``app.current_tenant`` set, so the FORCE-RLS policy gates
+  every query in the handler.
 """
 from __future__ import annotations
 
@@ -22,6 +37,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
+from saebooks.api.v1.deps import get_session
 from saebooks.api.v1.schemas import (
     ConflictBody,
     ContactCreate,
@@ -29,7 +45,6 @@ from saebooks.api.v1.schemas import (
     ContactOut,
     ContactUpdate,
 )
-from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
 from saebooks.models.idempotency_key import IdempotencyKey
@@ -47,25 +62,30 @@ router = APIRouter(
 # ---------------------------------------------------------------------------
 
 
-async def _first_company_id(session: AsyncSession) -> UUID:
-    """Community edition: all rows belong to the single company. Phase 0
-    doesn't wire tenant resolution through the bearer token yet — the
-    portal JWT in Phase 1 will carry ``company_id`` as a claim."""
+async def _first_company_id(session: AsyncSession, tenant_id: UUID) -> UUID:
+    """Resolve the active company for the request tenant.
+
+    Pre-fix this took no tenant input and returned the oldest active
+    company in the entire DB — leaking every authenticated request
+    into Default Company. Now scoped by ``tenant_id``: returns the
+    oldest active company that belongs to the caller's tenant.
+    """
     result = await session.execute(
-        select(Company).where(Company.archived_at.is_(None)).order_by(Company.created_at)
+        select(Company)
+        .where(
+            Company.tenant_id == tenant_id,
+            Company.archived_at.is_(None),
+        )
+        .order_by(Company.created_at)
     )
     company = result.scalars().first()
     if company is None:
-        raise HTTPException(500, "No active company")
+        raise HTTPException(404, "No active company for tenant")
     return company.id
 
 
 def _parse_if_match(header: str | None) -> int | None:
-    """Parse the ``If-Match`` header as a version integer.
-
-    Accepts ``"5"`` (RFC 7232 weak-etag style) or ``5``. Missing header
-    returns ``None`` (no precondition).
-    """
+    """Parse the ``If-Match`` header as a version integer."""
     if header is None:
         return None
     cleaned = header.strip().strip('"').strip("W/").strip('"')
@@ -114,8 +134,7 @@ async def _remember_idempotent(
 
 
 def _dump(contact: Contact) -> dict[str, Any]:
-    """Pydantic-serialise a Contact row. Uses ``mode='json'`` to get
-    stringified UUIDs/datetimes so the dict round-trips through JSONB."""
+    """Pydantic-serialise a Contact row."""
     return json.loads(ContactOut.model_validate(contact).model_dump_json())
 
 
@@ -126,41 +145,43 @@ def _dump(contact: Contact) -> dict[str, Any]:
 
 @router.get("", response_model=ContactListOut)
 async def list_contacts(
+    request: Request,
     contact_type: ContactType | None = Query(default=None, alias="type"),  # noqa: B008
     search: str | None = Query(default=None, alias="q"),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_session),
 ) -> ContactListOut:
-    async with AsyncSessionLocal() as session:
-        company_id = await _first_company_id(session)
-        # Count (matches filter minus limit/offset).
-        count_stmt = (
-            select(func.count())
-            .select_from(Contact)
-            .where(Contact.company_id == company_id, Contact.archived_at.is_(None))
+    tenant_id = resolve_tenant_id(request)
+    company_id = await _first_company_id(session, tenant_id)
+    # Count (matches filter minus limit/offset).
+    count_stmt = (
+        select(func.count())
+        .select_from(Contact)
+        .where(Contact.company_id == company_id, Contact.archived_at.is_(None))
+    )
+    if contact_type is not None:
+        count_stmt = count_stmt.where(Contact.contact_type == contact_type)
+    if search:
+        pattern = f"%{search}%"
+        count_stmt = count_stmt.where(
+            Contact.name.ilike(pattern) | Contact.email.ilike(pattern)
         )
-        if contact_type is not None:
-            count_stmt = count_stmt.where(Contact.contact_type == contact_type)
-        if search:
-            pattern = f"%{search}%"
-            count_stmt = count_stmt.where(
-                Contact.name.ilike(pattern) | Contact.email.ilike(pattern)
-            )
-        total = (await session.execute(count_stmt)).scalar_one()
-        items = await svc.list_active(
-            session,
-            company_id,
-            contact_type=contact_type,
-            search=search,
-            limit=limit,
-            offset=offset,
-        )
-        return ContactListOut(
-            items=[ContactOut.model_validate(c) for c in items],
-            total=total,
-            limit=limit,
-            offset=offset,
-        )
+    total = (await session.execute(count_stmt)).scalar_one()
+    items = await svc.list_active(
+        session,
+        company_id,
+        contact_type=contact_type,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+    return ContactListOut(
+        items=[ContactOut.model_validate(c) for c in items],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -169,12 +190,16 @@ async def list_contacts(
 
 
 @router.get("/{contact_id}", response_model=ContactOut)
-async def get_contact(contact_id: UUID) -> ContactOut:
-    async with AsyncSessionLocal() as session:
-        contact = await svc.get(session, contact_id)
-        if contact is None:
-            raise HTTPException(404, "Contact not found")
-        return ContactOut.model_validate(contact)
+async def get_contact(
+    contact_id: UUID,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> ContactOut:
+    tenant_id = resolve_tenant_id(request)
+    contact = await svc.get(session, contact_id, tenant_id=tenant_id)
+    if contact is None:
+        raise HTTPException(404, "Contact not found")
+    return ContactOut.model_validate(contact)
 
 
 # ---------------------------------------------------------------------------
@@ -192,34 +217,34 @@ async def create_contact(
     request: Request,
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
+    tenant_id = resolve_tenant_id(request)
     key = _parse_idempotency_key(idempotency_key)
-    async with AsyncSessionLocal() as session:
-        if key is not None:
-            replay = await _idempotent_replay(session, key)
-            if replay is not None:
-                return replay
+    if key is not None:
+        replay = await _idempotent_replay(session, key)
+        if replay is not None:
+            return replay
 
-        company_id = await _first_company_id(session)
-        tenant_id = resolve_tenant_id()
-        try:
-            contact = await svc.create(
-                session,
-                company_id,
-                actor=f"api:{bearer[:8]}…",
-                tenant_id=tenant_id,
-                **payload.model_dump(exclude_unset=False, exclude={"bank_bsb", "bank_account_number", "bank_account_title"}),
-            )
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
+    company_id = await _first_company_id(session, tenant_id)
+    try:
+        contact = await svc.create(
+            session,
+            company_id,
+            actor=f"api:{bearer[:8]}…",
+            tenant_id=tenant_id,
+            **payload.model_dump(exclude_unset=False, exclude={"bank_bsb", "bank_account_number", "bank_account_title"}),
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
-        # svc.create already committed; refresh inside the session before
-        # we dump to dodge a MissingGreenlet when pydantic walks the row.
-        await session.refresh(contact)
-        body = _dump(contact)
-        if key is not None:
-            await _remember_idempotent(session, key, body, 201)
-            await session.commit()
+    # svc.create already committed; refresh inside the session before
+    # we dump to dodge a MissingGreenlet when pydantic walks the row.
+    await session.refresh(contact)
+    body = _dump(contact)
+    if key is not None:
+        await _remember_idempotent(session, key, body, 201)
+        await session.commit()
     return JSONResponse(body, status_code=201)
 
 
@@ -238,51 +263,59 @@ async def create_contact(
 async def update_contact(
     contact_id: UUID,
     payload: ContactUpdate,
+    request: Request,
     if_match: str | None = Header(default=None, alias="If-Match"),
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with contact version is required")
     key = _parse_idempotency_key(idempotency_key)
+    tenant_id = resolve_tenant_id(request)
 
-    async with AsyncSessionLocal() as session:
+    if key is not None:
+        replay = await _idempotent_replay(session, key)
+        if replay is not None:
+            return replay
+
+    # Belt-and-braces: check the contact exists and is owned by this
+    # tenant before we attempt the update. RLS already enforces this,
+    # but the service-layer ValueError message is friendlier than a
+    # silent zero-rows update.
+    if await svc.get(session, contact_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Contact not found")
+
+    try:
+        contact = await svc.update(
+            session,
+            contact_id,
+            actor=f"api:{bearer[:8]}…",
+            expected_version=expected,
+            **payload.model_dump(exclude_unset=True),
+        )
+    except svc.VersionConflict as exc:
+        await session.refresh(exc.current)
+        body = ConflictBody(
+            detail="version mismatch",
+            current=ContactOut.model_validate(exc.current),
+        ).model_dump(mode="json")
         if key is not None:
-            replay = await _idempotent_replay(session, key)
-            if replay is not None:
-                return replay
-
-        try:
-            contact = await svc.update(
-                session,
-                contact_id,
-                actor=f"api:{bearer[:8]}…",
-                expected_version=expected,
-                **payload.model_dump(exclude_unset=True),
-            )
-        except svc.VersionConflict as exc:
-            await session.refresh(exc.current)
-            body = ConflictBody(
-                detail="version mismatch",
-                current=ContactOut.model_validate(exc.current),
-            ).model_dump(mode="json")
-            if key is not None:
-                await _remember_idempotent(session, key, body, 409)
-                await session.commit()
-            return JSONResponse(body, status_code=409)
-        except ValueError as exc:
-            # Not-found or bad field — service raises ValueError.
-            msg = str(exc)
-            if "not found" in msg.lower():
-                raise HTTPException(404, msg) from exc
-            raise HTTPException(422, msg) from exc
-
-        await session.refresh(contact)
-        body = _dump(contact)
-        if key is not None:
-            await _remember_idempotent(session, key, body, 200)
+            await _remember_idempotent(session, key, body, 409)
             await session.commit()
+        return JSONResponse(body, status_code=409)
+    except ValueError as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
+
+    await session.refresh(contact)
+    body = _dump(contact)
+    if key is not None:
+        await _remember_idempotent(session, key, body, 200)
+        await session.commit()
     return JSONResponse(body, status_code=200)
 
 
@@ -300,41 +333,46 @@ async def update_contact(
 )
 async def archive_contact(
     contact_id: UUID,
+    request: Request,
     if_match: str | None = Header(default=None, alias="If-Match"),
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with contact version is required")
     key = _parse_idempotency_key(idempotency_key)
+    tenant_id = resolve_tenant_id(request)
 
-    async with AsyncSessionLocal() as session:
+    if key is not None:
+        replay = await _idempotent_replay(session, key)
+        if replay is not None:
+            return replay
+
+    if await svc.get(session, contact_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Contact not found")
+
+    try:
+        contact = await svc.archive(
+            session,
+            contact_id,
+            actor=f"api:{bearer[:8]}…",
+            expected_version=expected,
+        )
+    except svc.VersionConflict as exc:
+        await session.refresh(exc.current)
+        body = ConflictBody(
+            detail="version mismatch",
+            current=ContactOut.model_validate(exc.current),
+        ).model_dump(mode="json")
         if key is not None:
-            replay = await _idempotent_replay(session, key)
-            if replay is not None:
-                return replay
-        try:
-            contact = await svc.archive(
-                session,
-                contact_id,
-                actor=f"api:{bearer[:8]}…",
-                expected_version=expected,
-            )
-        except svc.VersionConflict as exc:
-            await session.refresh(exc.current)
-            body = ConflictBody(
-                detail="version mismatch",
-                current=ContactOut.model_validate(exc.current),
-            ).model_dump(mode="json")
-            if key is not None:
-                await _remember_idempotent(session, key, body, 409)
-                await session.commit()
-            return JSONResponse(body, status_code=409)
-        if contact is None:
-            raise HTTPException(404, "Contact not found")
-        if key is not None:
-            # 204 has no body, but we still record the fact for replay.
-            await _remember_idempotent(session, key, {"archived": str(contact.id)}, 204)
+            await _remember_idempotent(session, key, body, 409)
             await session.commit()
+        return JSONResponse(body, status_code=409)
+    if contact is None:
+        raise HTTPException(404, "Contact not found")
+    if key is not None:
+        await _remember_idempotent(session, key, {"archived": str(contact.id)}, 204)
+        await session.commit()
     return Response(status_code=204)
