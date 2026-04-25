@@ -59,6 +59,16 @@ class Settings(BaseSettings):
     )
     siss_sandbox: bool = Field(default=False, alias="SISS_SANDBOX")
 
+    # Sandbox-specific overrides. When SISS_SANDBOX=true, siss_client()
+    # uses siss_sandbox_key (APIM primary key from the sandbox portal) and
+    # siss_base_url (the sandbox API host) instead of the production pair.
+    # Leave both empty in production deployments.
+    siss_sandbox_key: str = Field(default="", alias="SISS_SANDBOX_PRIMARY_KEY")
+    siss_base_url: str = Field(
+        default="https://sandboxapi.sissdata.com.au/cdr-au/v1/",
+        alias="SISS_BASE_URL",
+    )
+
     # ---------------------------------------------------------------- #
     # Field-level encryption (Batch II)                                #
     # ---------------------------------------------------------------- #
@@ -172,6 +182,15 @@ class Settings(BaseSettings):
     stripe_default_bank_account_id: str = Field(
         default="", alias="STRIPE_DEFAULT_BANK_ACCOUNT_ID"
     )
+
+    # ---------------------------------------------------------------- #
+    # AI document extraction (B/46)                                    #
+    # ---------------------------------------------------------------- #
+    # Anthropic API key for Claude Haiku vision extraction. When empty
+    # the ai_extraction service raises AiExtractionNotConfiguredError
+    # on use so a misconfigured install can't silently fail. Only
+    # reached on Business+ editions (FLAG_AI_EXTRACTION gate).
+    anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
 
     # ---------------------------------------------------------------- #
     # ATO SBR (Batch II.5)                                             #

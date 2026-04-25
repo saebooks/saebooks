@@ -168,6 +168,11 @@ def _client_from_creds(creds: ResolvedSissCreds) -> SissClient:
 async def siss_client(settings: Settings | None = None) -> AsyncIterator[SissClient]:
     """Build a configured ``SissClient`` from ``Settings`` and clean it up.
 
+    When ``SISS_SANDBOX=true`` and ``SISS_SANDBOX_PRIMARY_KEY`` is set, the
+    sandbox APIM key and sandbox base URL are used in preference to the
+    production equivalents. This lets a developer set only the sandbox key
+    without also having production credentials.
+
     Raises ``SissNotConfiguredError`` if the three env creds aren't all
     set — callers should catch this and surface "not configured" in the
     UI rather than letting it bubble as a 500.
@@ -178,14 +183,21 @@ async def siss_client(settings: Settings | None = None) -> AsyncIterator[SissCli
             "SISS not configured — set SISS_CLIENT_ID, SISS_CLIENT_SECRET "
             "and SISS_SUBSCRIPTION_KEY via env or .env."
         )
+    # Sandbox path: prefer the dedicated sandbox APIM key + base URL.
+    if s.siss_sandbox and s.siss_sandbox_key:
+        effective_subscription_key = s.siss_sandbox_key
+        effective_api_base = s.siss_base_url or s.siss_api_base
+    else:
+        effective_subscription_key = s.siss_subscription_key
+        effective_api_base = s.siss_api_base
     cache = TokenCache(
         client_id=s.siss_client_id,
         client_secret=s.siss_client_secret,
         token_url=s.siss_token_url,
     )
     client = SissClient(
-        api_base=s.siss_api_base,
-        subscription_key=s.siss_subscription_key,
+        api_base=effective_api_base,
+        subscription_key=effective_subscription_key,
         token_cache=cache,
     )
     async with client:
