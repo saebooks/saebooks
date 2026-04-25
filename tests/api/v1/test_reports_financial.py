@@ -458,3 +458,103 @@ async def test_balance_sheet_tenant_isolation(
     assert 6666.0 not in asset_balances, (
         "Tenant B should not see tenant A's assets in balance sheet"
     )
+
+
+# ---------------------------------------------------------------------------
+# Bug 2 regression: Balance sheet must include Current Year Earnings
+# ---------------------------------------------------------------------------
+
+
+async def test_balance_sheet_includes_cye_line(api_client: AsyncClient) -> None:
+    """Balance sheet equity section must always contain a 'Current Year Earnings' line.
+
+    The CYE line synthesises unposted P&L into the equity section so that
+    Assets = Liabilities + Equity for any balanced ledger.
+    """
+    r = await api_client.get(
+        "/api/v1/reports/balance_sheet",
+        params={"as_of_date": "1998-12-31"},  # no data → CYE should be 0
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    equity_lines = body["equity"]["EQUITY"]
+    cye_lines = [ln for ln in equity_lines if ln.get("code") == "CYE"]
+    assert cye_lines, (
+        "Expected a 'Current Year Earnings' line (code=CYE) in the equity section"
+    )
+
+
+async def test_balance_sheet_balances_with_income_only(
+    api_client: AsyncClient, gl_accounts: dict[str, str]
+) -> None:
+    """With INCOME and ASSETS posted, the balance sheet must balance.
+
+    Scenario (uses year 2091 to avoid pollution):
+      ASSET  +95,425  (debit)
+      INCOME -86,750  (credit-normal)
+      LIAB    -8,675  (credit)
+
+    Expected: Assets 95,425 = Liabilities 8,675 + Equity (CYE) 86,750
+    balanced must be True, difference must be < 0.01.
+    """
+    asset_id = gl_accounts[AccountType.ASSET.value]
+    income_id = gl_accounts[AccountType.INCOME.value]
+    liability_id = gl_accounts[AccountType.LIABILITY.value]
+
+    # Post: debit ASSET 86,750, credit INCOME 86,750
+    await _create_and_post_je(
+        api_client,
+        "2091-03-01",
+        lines=_balanced_lines(asset_id, income_id, "86750.00"),
+    )
+
+    # Post: debit ASSET 8,675, credit LIABILITY 8,675
+    await _create_and_post_je(
+        api_client,
+        "2091-03-02",
+        lines=[
+            {"account_id": asset_id, "debit": "8675.00", "credit": "0"},
+            {"account_id": liability_id, "debit": "0", "credit": "8675.00"},
+        ],
+    )
+
+    r = await api_client.get(
+        "/api/v1/reports/balance_sheet",
+        params={"as_of_date": "2091-03-31"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    # The BS must balance (Assets = Liabilities + Equity with CYE).
+    assert body["balanced"] is True, (
+        f"Balance sheet is not balanced: difference={body['difference']}, body={body}"
+    )
+    assert body["difference"] < 0.01, (
+        f"Expected difference < 0.01, got {body['difference']}"
+    )
+
+    # CYE line must exist and carry the income value.
+    equity_lines = body["equity"]["EQUITY"]
+    cye_lines = [ln for ln in equity_lines if ln.get("code") == "CYE"]
+    assert cye_lines, "CYE line missing from equity section"
+    assert cye_lines[0]["balance"] >= 86750.0 - 0.01, (
+        f"CYE balance should include 86,750 income, got {cye_lines[0]['balance']}"
+    )
+
+
+async def test_balance_sheet_cye_zero_for_empty_period(api_client: AsyncClient) -> None:
+    """An empty ledger period produces CYE = 0 and balanced = True."""
+    r = await api_client.get(
+        "/api/v1/reports/balance_sheet",
+        params={"as_of_date": "1995-12-31"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    equity_lines = body["equity"]["EQUITY"]
+    cye_lines = [ln for ln in equity_lines if ln.get("code") == "CYE"]
+    assert cye_lines, "CYE line must be present even when zero"
+    assert cye_lines[0]["balance"] == 0.0, (
+        f"Empty period CYE should be 0.0, got {cye_lines[0]['balance']}"
+    )
+    assert body["balanced"] is True

@@ -124,9 +124,16 @@ async def balance_sheet(
     company_id: uuid.UUID,
     *,
     as_of: date | None = None,
+    tenant_id: uuid.UUID | None = None,
 ) -> tuple[list[ReportSection], Decimal]:
-    """Balance sheet: assets, liabilities, equity. Returns (sections, net_assets)."""
-    balances = await _account_balances(session, company_id, as_of=as_of)
+    """Balance sheet: assets, liabilities, equity. Returns (sections, net_assets).
+
+    Synthesises a "Current Year Earnings" line under Equity for any
+    un-closed P&L balances, matching Xero/MYOB/QBO behaviour for open
+    periods.  The synthetic line is never zero-suppressed — it is always
+    present so accountants know the period has not been formally closed.
+    """
+    balances = await _account_balances(session, company_id, as_of=as_of, tenant_id=tenant_id)
     bs = [b for b in balances if b.account_type in BALANCE_SHEET_TYPES]
     sections = _group_balances(bs)
 
@@ -142,6 +149,54 @@ async def balance_sheet(
         (s.total_balance for s in sections if s.account_type == AccountType.EQUITY),
         Decimal("0"),
     )
+
+    # --- Current Year Earnings (synthetic) -----------------------------------
+    # Sum all INCOME/OTHER_INCOME and EXPENSE/COST_OF_SALES/OTHER_EXPENSE
+    # balances up to as_of.  Income accounts are credit-normal (negative
+    # balance in our debit-minus-credit model); expenses are debit-normal
+    # (positive).  Net = -income_balance - expense_balance → positive when
+    # income exceeds expenses.
+    pnl_balances = [b for b in balances if b.account_type in PNL_TYPES]
+    income_sum = sum(
+        b.balance for b in pnl_balances
+        if b.account_type in {AccountType.INCOME, AccountType.OTHER_INCOME}
+    )
+    expense_sum = sum(
+        b.balance for b in pnl_balances
+        if b.account_type in {
+            AccountType.EXPENSE, AccountType.COST_OF_SALES, AccountType.OTHER_EXPENSE
+        }
+    )
+    # net_income > 0 means profitable; in equity terms it is credit-normal so
+    # it REDUCES the debit-minus-credit result (balance is negative on the BS).
+    net_income = -income_sum - expense_sum
+
+    # Inject a synthetic AccountBalance into (or append to) the EQUITY section.
+    cye_row = AccountBalance(
+        account_id=uuid.UUID("00000000-0000-0000-0000-000000000000"),
+        code="CYE",
+        name="Current Year Earnings",
+        account_type=AccountType.EQUITY,
+        debit=Decimal("0") if net_income >= 0 else -net_income,
+        credit=net_income if net_income >= 0 else Decimal("0"),
+    )
+    # Find or create the EQUITY section and append the synthetic row.
+    equity_section = next(
+        (s for s in sections if s.account_type == AccountType.EQUITY), None
+    )
+    if equity_section is None:
+        equity_section = ReportSection(
+            label="Equity", account_type=AccountType.EQUITY, rows=[]
+        )
+        sections.append(equity_section)
+    equity_section.rows.append(cye_row)
+
+    # Recompute totals including CYE.
+    equity = sum(
+        (s.total_balance for s in sections if s.account_type == AccountType.EQUITY),
+        Decimal("0"),
+    )
+
     net_assets = assets + liabilities + equity  # liabilities are credit-normal (negative)
     return sections, net_assets
 
@@ -153,13 +208,22 @@ async def _account_balances(
     from_date: date | None = None,
     to_date: date | None = None,
     as_of: date | None = None,
+    tenant_id: uuid.UUID | None = None,
 ) -> list[AccountBalance]:
-    """Aggregate posted journal lines into per-account debit/credit totals."""
+    """Aggregate posted journal lines into per-account debit/credit totals.
+
+    ``tenant_id`` scopes to a single tenant when provided.  Without it
+    the query spans all tenants (appropriate for single-tenant dev; the
+    HTML balance-sheet route does not yet have a tenant in its request
+    context, but the JSON API route always passes one).
+    """
     # Build filters
     conditions = [
         JournalEntry.company_id == company_id,
         JournalEntry.status == EntryStatus.POSTED,
     ]
+    if tenant_id is not None:
+        conditions.append(JournalEntry.tenant_id == tenant_id)
     if from_date:
         conditions.append(JournalEntry.entry_date >= from_date)
     if to_date or as_of:

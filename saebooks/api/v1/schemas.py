@@ -9,7 +9,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from saebooks.models.contact import ContactType
 from saebooks.models.account import AccountType
@@ -461,6 +461,20 @@ class JournalEntryCreate(JournalEntryBase):
 
     lines: list[JournalLineCreate] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def _lines_must_balance(self) -> "JournalEntryCreate":
+        """Reject unbalanced journal entries at the schema level (fast 422)."""
+        if not self.lines:
+            return self
+        total_debit = sum(ln.debit for ln in self.lines)
+        total_credit = sum(ln.credit for ln in self.lines)
+        if total_debit != total_credit:
+            raise ValueError(
+                f"Journal entry lines are unbalanced: "
+                f"debits={total_debit}, credits={total_credit}"
+            )
+        return self
+
 
 class JournalEntryUpdate(BaseModel):
     """PATCH body — every field optional."""
@@ -472,6 +486,20 @@ class JournalEntryUpdate(BaseModel):
     reference: str | None = None
     status: str | None = None
     lines: list[JournalLineCreate] | None = None
+
+    @model_validator(mode="after")
+    def _lines_must_balance(self) -> "JournalEntryUpdate":
+        """Reject unbalanced line replacements at the schema level (fast 422)."""
+        if self.lines is None or len(self.lines) == 0:
+            return self
+        total_debit = sum(ln.debit for ln in self.lines)
+        total_credit = sum(ln.credit for ln in self.lines)
+        if total_debit != total_credit:
+            raise ValueError(
+                f"Journal entry lines are unbalanced: "
+                f"debits={total_debit}, credits={total_credit}"
+            )
+        return self
 
 
 class JournalEntryOut(BaseModel):

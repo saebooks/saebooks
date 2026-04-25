@@ -590,3 +590,83 @@ async def test_je_reverse_only_works_on_posted_422(
         headers={"If-Match": str(version)},
     )
     assert r2.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Bug 1 regression: POST with unbalanced lines must return 422
+# ---------------------------------------------------------------------------
+
+
+async def test_create_unbalanced_je_returns_422(
+    api_client: AsyncClient, account_ids: dict[str, str]
+) -> None:
+    """POST /api/v1/journal_entries with debit=100, credit=99 must return 422.
+
+    Regression test for the validator gap diagnosed in audit-trail/03.
+    Before this fix, the API accepted unbalanced lines silently.
+    The Pydantic model_validator on JournalEntryCreate catches this at
+    the schema layer before the service is even called.
+    """
+    payload = {
+        "entry_date": "2026-04-01",
+        "narration": "Unbalanced entry — should be rejected",
+        "lines": [
+            {
+                "account_id": account_ids["asset_id"],
+                "debit": "100.00",
+                "credit": "0.00",
+                "description": "Debit side",
+            },
+            {
+                "account_id": account_ids["expense_id"],
+                "debit": "0.00",
+                "credit": "99.00",  # off by $1 — deliberately unbalanced
+                "description": "Credit side (wrong amount)",
+            },
+        ],
+    }
+    r = await api_client.post("/api/v1/journal_entries", json=payload)
+    assert r.status_code == 422, (
+        f"Expected 422 for unbalanced JE, got {r.status_code}: {r.text}"
+    )
+    body = r.json()
+    # FastAPI wraps Pydantic validation errors as a list under "detail"
+    detail = body.get("detail", "")
+    detail_str = str(detail).lower()
+    assert "unbalanced" in detail_str or "debit" in detail_str or "credit" in detail_str, (
+        f"Expected error message to mention balance, got: {detail}"
+    )
+
+
+async def test_update_unbalanced_lines_returns_422(
+    api_client: AsyncClient, account_ids: dict[str, str]
+) -> None:
+    """PATCH /api/v1/journal_entries/{id} with unbalanced line replacement → 422."""
+    # Create a balanced entry first
+    r = await api_client.post("/api/v1/journal_entries", json=_entry_payload(account_ids))
+    assert r.status_code == 201, r.text
+    entry_id = r.json()["id"]
+    version = r.json()["version"]
+
+    # Now try to replace lines with unbalanced ones
+    r2 = await api_client.patch(
+        f"/api/v1/journal_entries/{entry_id}",
+        json={
+            "lines": [
+                {
+                    "account_id": account_ids["asset_id"],
+                    "debit": "200.00",
+                    "credit": "0.00",
+                },
+                {
+                    "account_id": account_ids["expense_id"],
+                    "debit": "0.00",
+                    "credit": "150.00",  # off by $50
+                },
+            ]
+        },
+        headers={"If-Match": str(version)},
+    )
+    assert r2.status_code == 422, (
+        f"Expected 422 for unbalanced line update, got {r2.status_code}: {r2.text}"
+    )

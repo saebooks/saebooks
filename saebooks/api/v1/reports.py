@@ -470,6 +470,12 @@ async def balance_sheet(
     Liability + equity accounts: balance = credit - debit.
     Accounts with a zero net balance are omitted from the response.
 
+    A synthetic "Current Year Earnings" line is always appended to the
+    equity section.  It represents the period net income (income credits
+    minus expense debits) for all POSTED entries up to ``as_of_date``.
+    This matches Xero/MYOB/QBO behaviour for periods that have not been
+    formally closed to a retained-earnings equity account.
+
     ``balanced`` is True when
     ``abs(total_assets - total_liabilities - total_equity) < 0.01``.
     """
@@ -505,6 +511,12 @@ async def balance_sheet(
     assets: list[dict[str, Any]] = []
     liabilities: list[dict[str, Any]] = []
     equity: list[dict[str, Any]] = []
+
+    # Accumulators for Current Year Earnings (CYE) synthesis.
+    # Income is credit-normal: net_income_credit accumulates (credit - debit).
+    # Expense is debit-normal: net_expense_debit accumulates (debit - credit).
+    cye_income_credit = Decimal("0")   # credit-normal income contribution
+    cye_expense_debit = Decimal("0")   # debit-normal expense contribution
 
     for row in rows:
         acc_id, acc_name, acc_code, acc_type, total_debit, total_credit = row
@@ -544,6 +556,25 @@ async def balance_sheet(
                         "balance": bal,
                     }
                 )
+        elif acc_type in _INCOME_TYPES:
+            # Credit-normal: income increases with credits.
+            cye_income_credit += total_credit - total_debit
+        elif acc_type in _EXPENSE_TYPES:
+            # Debit-normal: expenses increase with debits.
+            cye_expense_debit += total_debit - total_credit
+
+    # Synthesise Current Year Earnings.
+    # A profitable period (income > expenses) adds credit-normal equity,
+    # so the CYE balance in equity terms = income_credit - expense_debit.
+    cye_balance = float(cye_income_credit - cye_expense_debit)
+    equity.append(
+        {
+            "account_id": "00000000-0000-0000-0000-000000000000",
+            "account_name": "Current Year Earnings",
+            "code": "CYE",
+            "balance": cye_balance,
+        }
+    )
 
     total_assets = sum(line["balance"] for line in assets)
     total_liabilities = sum(line["balance"] for line in liabilities)

@@ -180,6 +180,26 @@ async def get(session: AsyncSession, entry_id: uuid.UUID) -> JournalEntry | None
 _DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
+def _assert_lines_balanced(lines: list[dict[str, Any]], ref: str = "entry") -> None:
+    """Raise JournalEntryError if the lines list is not debit-credit balanced.
+
+    This is the service-layer defence-in-depth guard.  The Pydantic schema
+    validator in ``JournalEntryCreate`` / ``JournalEntryUpdate`` is the first
+    layer and returns 422 before we ever reach the service.  This guard
+    protects callers who bypass the schema (e.g. internal tooling, migrations,
+    future gRPC endpoints).
+    """
+    if not lines:
+        return
+    total_debit = sum(Decimal(str(ln.get("debit", 0))) for ln in lines)
+    total_credit = sum(Decimal(str(ln.get("credit", 0))) for ln in lines)
+    if total_debit != total_credit:
+        raise JournalEntryError(
+            f"Journal entry {ref} lines are unbalanced: "
+            f"debits={total_debit}, credits={total_credit}"
+        )
+
+
 async def create(
     session: AsyncSession,
     company_id: uuid.UUID,
@@ -193,6 +213,9 @@ async def create(
 ) -> JournalEntry:
     """Create a journal entry (draft) with change_log row. version=1."""
     from saebooks.services.journal import next_ref  # avoid circular at module level
+
+    if lines:
+        _assert_lines_balanced(lines, reference or "(pending-ref)")
 
     ref = reference or await next_ref(session)
 
@@ -260,6 +283,7 @@ async def update(
         entry.status = EntryStatus(status)
 
     if lines is not None:
+        _assert_lines_balanced(lines, entry.ref)
         # Replace all lines
         for old_line in list(entry.lines):
             await session.delete(old_line)
