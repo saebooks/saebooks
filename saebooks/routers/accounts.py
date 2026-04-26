@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from saebooks.api.v1.auth import resolve_tenant_id
 from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
@@ -284,8 +285,9 @@ async def accounts_detail(
     parsed_from = _parse_date(from_date)
     parsed_to = _parse_date(to_date)
 
+    tenant_id = resolve_tenant_id(request)
     async with AsyncSessionLocal() as session:
-        account = await svc.get(session, account_id)
+        account = await svc.get(session, account_id, tenant_id=tenant_id)
         if account is None:
             raise HTTPException(404, "Account not found")
         company = await session.get(Company, account.company_id)
@@ -376,8 +378,9 @@ async def accounts_detail(
 
 @router.get("/accounts/{account_id}/edit", response_class=HTMLResponse)
 async def accounts_edit(request: Request, account_id: UUID) -> HTMLResponse:
+    tenant_id = resolve_tenant_id(request)
     async with AsyncSessionLocal() as session:
-        account = await svc.get(session, account_id)
+        account = await svc.get(session, account_id, tenant_id=tenant_id)
         if account is None:
             raise HTTPException(404, "Account not found")
         company = await session.get(Company, account.company_id)
@@ -408,11 +411,13 @@ async def accounts_update(
     is_header: bool = Form(False),
     tax_code_default: str = Form(""),
 ) -> RedirectResponse | HTMLResponse:
+    tenant_id = resolve_tenant_id(request)
     try:
         async with AsyncSessionLocal() as session:
             await svc.update(
                 session,
                 account_id,
+                tenant_id=tenant_id,
                 code=code,
                 name=name,
                 account_type=AccountType(account_type),
@@ -423,7 +428,7 @@ async def accounts_update(
             )
     except ValueError as exc:
         async with AsyncSessionLocal() as session:
-            account = await svc.get(session, account_id)
+            account = await svc.get(session, account_id, tenant_id=tenant_id)
             if account is None:
                 raise HTTPException(404, "Account not found") from exc
             company = await session.get(Company, account.company_id)
@@ -445,9 +450,10 @@ async def accounts_update(
 
 
 @router.post("/accounts/{account_id}/archive")
-async def accounts_archive(account_id: UUID) -> RedirectResponse:
+async def accounts_archive(request: Request, account_id: UUID) -> RedirectResponse:
+    tenant_id = resolve_tenant_id(request)
     async with AsyncSessionLocal() as session:
-        await svc.archive(session, account_id)
+        await svc.archive(session, account_id, tenant_id=tenant_id)
     return RedirectResponse("/accounts", status_code=303)
 
 
@@ -523,16 +529,18 @@ async def accounts_set_tax_code(
     request: Request, account_id: UUID
 ) -> HTMLResponse:
     """HTMX inline: set the default tax code for an account."""
+    tenant_id = resolve_tenant_id(request)
     form = await request.form()
     new_code = str(form.get("tax_code_default", "")).strip()
     async with AsyncSessionLocal() as session:
         await svc.update(
             session, account_id,
+            tenant_id=tenant_id,
             tax_code_default=new_code or None,
             skip_validation=True,
             performed_by="web",
         )
-        account = await svc.get(session, account_id)
+        account = await svc.get(session, account_id, tenant_id=tenant_id)
     if account is None:
         raise HTTPException(404)
     # Return just the cell content for HTMX swap
@@ -549,10 +557,11 @@ async def accounts_edit_tax_code_inline(
     request: Request, account_id: UUID
 ) -> HTMLResponse:
     """HTMX inline: render the tax code dropdown for an account."""
+    tenant_id = resolve_tenant_id(request)
     company = await _first_company()
     tax_codes = await _tax_codes(company.id)
     async with AsyncSessionLocal() as session:
-        account = await svc.get(session, account_id)
+        account = await svc.get(session, account_id, tenant_id=tenant_id)
     if account is None:
         raise HTTPException(404)
     current = account.tax_code_default or ""
@@ -577,6 +586,7 @@ async def accounts_edit_tax_code_inline(
 @router.post("/accounts/bulk", response_model=None)
 async def accounts_bulk_update(request: Request) -> RedirectResponse:
     """Apply a bulk action to selected accounts."""
+    tenant_id = resolve_tenant_id(request)
     form = dict(await request.form())
 
     # Collect selected IDs
@@ -596,6 +606,7 @@ async def accounts_bulk_update(request: Request) -> RedirectResponse:
             for aid in selected:
                 await svc.update(
                     session, aid,
+                    tenant_id=tenant_id,
                     tax_code_default=bulk_val or None,
                     skip_validation=True,
                     performed_by="web-bulk",
@@ -604,6 +615,7 @@ async def accounts_bulk_update(request: Request) -> RedirectResponse:
             for aid in selected:
                 await svc.update(
                     session, aid,
+                    tenant_id=tenant_id,
                     reconcile=bulk_val == "true",
                     skip_validation=True,
                     performed_by="web-bulk",

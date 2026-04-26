@@ -27,6 +27,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from saebooks.api.v1.auth import resolve_tenant_id
 from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
@@ -314,8 +315,12 @@ async def invoices_pdf(invoice_id: UUID) -> Response:
 
 @router.get("/{invoice_id}", response_class=HTMLResponse)
 async def invoices_detail(request: Request, invoice_id: UUID) -> HTMLResponse:
+    tenant_id = resolve_tenant_id(request)
     async with AsyncSessionLocal() as session:
-        inv = await svc.get(session, invoice_id)
+        try:
+            inv = await svc.get(session, invoice_id, tenant_id=tenant_id)
+        except svc.InvoiceError as exc:
+            raise HTTPException(404, "Invoice not found") from exc
         company = await session.get(Company, inv.company_id)
         contact = await session.get(Contact, inv.contact_id)
         # Resolve account + tax-code names for the line display
@@ -354,8 +359,12 @@ async def invoices_detail(request: Request, invoice_id: UUID) -> HTMLResponse:
 
 @router.get("/{invoice_id}/edit", response_class=HTMLResponse)
 async def invoices_edit(request: Request, invoice_id: UUID) -> HTMLResponse:
+    tenant_id = resolve_tenant_id(request)
     async with AsyncSessionLocal() as session:
-        inv = await svc.get(session, invoice_id)
+        try:
+            inv = await svc.get(session, invoice_id, tenant_id=tenant_id)
+        except svc.InvoiceError as exc:
+            raise HTTPException(404, "Invoice not found") from exc
         company = await session.get(Company, inv.company_id)
         dropdowns = await _form_dropdowns(session, inv.company_id)
     if inv.status != InvoiceStatus.DRAFT:
@@ -380,12 +389,14 @@ async def invoices_edit(request: Request, invoice_id: UUID) -> HTMLResponse:
 async def invoices_update(
     request: Request, invoice_id: UUID
 ) -> RedirectResponse | HTMLResponse:
+    tenant_id = resolve_tenant_id(request)
     form = dict(await request.form())
     try:
         async with AsyncSessionLocal() as session:
             await svc.update_draft(
                 session,
                 invoice_id,
+                tenant_id=tenant_id,
                 contact_id=uuid.UUID(str(form["contact_id"])),
                 issue_date=_parse_date(str(form["issue_date"]), "issue_date"),
                 due_date=_parse_date(str(form["due_date"]), "due_date"),
@@ -395,7 +406,10 @@ async def invoices_update(
             )
     except (ValueError, svc.InvoiceError) as exc:
         async with AsyncSessionLocal() as session:
-            inv = await svc.get(session, invoice_id)
+            try:
+                inv = await svc.get(session, invoice_id, tenant_id=tenant_id)
+            except svc.InvoiceError:
+                raise HTTPException(404, "Invoice not found") from exc
             company = await session.get(Company, inv.company_id)
             dropdowns = await _form_dropdowns(session, inv.company_id)
         return templates.TemplateResponse(
@@ -443,9 +457,17 @@ async def invoices_sent(invoice_id: UUID) -> RedirectResponse:
 
 
 @router.post("/{invoice_id}/archive")
-async def invoices_archive(invoice_id: UUID) -> RedirectResponse:
+async def invoices_archive(
+    request: Request, invoice_id: UUID
+) -> RedirectResponse:
+    tenant_id = resolve_tenant_id(request)
     async with AsyncSessionLocal() as session:
-        await svc.archive(session, invoice_id)
+        try:
+            await svc.archive(session, invoice_id, tenant_id=tenant_id)
+        except svc.InvoiceError:
+            # Cross-tenant archive — silently no-op (303 to list per
+            # forum#2 acceptance criteria; row stays untouched).
+            pass
     return RedirectResponse("/invoices", status_code=303)
 
 

@@ -200,12 +200,17 @@ async def _upsert_user(
         return None
 
 
-async def _user_from_jwt_bearer(authorization: str) -> User | None:
-    """Resolve a User row from an ``Authorization: Bearer <jwt>`` header.
+async def _user_from_jwt_bearer(
+    authorization: str,
+) -> tuple[User | None, dict[str, object] | None]:
+    """Resolve (User, claims) from an ``Authorization: Bearer <jwt>`` header.
 
-    Returns ``None`` for any malformed / expired / unverifiable token, or
-    when the JWT's ``sub`` claim points at a missing user. Lets the caller
-    fall through to the Authentik forward-auth path without 401-ing.
+    Returns ``(None, None)`` for any malformed / expired / unverifiable
+    token. Returns ``(None, claims)`` when the token decodes but the
+    ``sub`` claim points at a missing user — callers may still want to
+    use the claims (notably ``tenant_id``) even if the user lookup
+    failed (the JSON-API tests, for instance, mint JWTs with random
+    sub UUIDs).
 
     Used by ForwardAuthMiddleware so internal calls from saebooks-web
     (which carries a JWT, never Authentik headers) can reach the
@@ -216,7 +221,7 @@ async def _user_from_jwt_bearer(authorization: str) -> User | None:
     """
     parts = authorization.split(None, 1)
     if len(parts) != 2 or parts[0].lower() != "bearer":
-        return None
+        return None, None
     token = parts[1].strip()
 
     # Local imports to avoid a circular at module load time.
@@ -225,23 +230,23 @@ async def _user_from_jwt_bearer(authorization: str) -> User | None:
     try:
         claims = decode_access_token(token)
     except JWTError:
-        return None
+        return None, None
 
     sub = claims.get("sub")
     if not sub:
-        return None
+        return None, claims
     try:
         user_id = uuid.UUID(str(sub))
     except (ValueError, TypeError):
-        return None
+        return None, claims
 
     try:
         async with AsyncSessionLocal() as session:
             user = await session.get(User, user_id)
     except Exception as exc:  # defensive — DB hiccup shouldn't 500
         logger.warning("JWT user lookup failed for sub=%s: %s", sub, exc)
-        return None
-    return user
+        return None, claims
+    return user, claims
 
 
 class ForwardAuthMiddleware(BaseHTTPMiddleware):
@@ -257,6 +262,12 @@ class ForwardAuthMiddleware(BaseHTTPMiddleware):
         request.state.user = None
         request.state.role = None
         request.state.username = None
+        # Default: no JWT claims either. The HTML routers and the
+        # belt-and-braces tenant filtering rely on this being either
+        # populated or missing (resolve_tenant_id treats missing as
+        # "fall back to env / dev default / 401 in prod").
+        if not hasattr(request.state, "jwt_claims"):
+            request.state.jwt_claims = None
 
         if _is_open_path(request.url.path):
             return await call_next(request)
@@ -292,6 +303,10 @@ class ForwardAuthMiddleware(BaseHTTPMiddleware):
                 request.state.user = user
                 request.state.role = user.role
                 request.state.username = user.username
+                # Stamp the user's tenant onto request.state.jwt_claims
+                # so HTML routers can apply belt-and-braces tenant
+                # filtering via ``resolve_tenant_id`` (forum#2).
+                request.state.jwt_claims = {"tenant_id": str(user.tenant_id)}
             elif user is not None and user.archived_at is not None:
                 # Archived users stay authenticated-but-powerless —
                 # username logged, but role is None so every gate
@@ -305,8 +320,16 @@ class ForwardAuthMiddleware(BaseHTTPMiddleware):
             # by OPEN_PATH_PREFIXES above and never reach this branch.)
             authz = request.headers.get("authorization")
             jwt_user: User | None = None
+            jwt_claims: dict[str, object] | None = None
             if authz:
-                jwt_user = await _user_from_jwt_bearer(authz)
+                jwt_user, jwt_claims = await _user_from_jwt_bearer(authz)
+
+            # Stamp claims on request.state regardless of user-lookup
+            # outcome — the JWT's tenant_id is still authoritative even
+            # if ``sub`` doesn't resolve to a User row (e.g. tests that
+            # mint synthetic JWTs with random sub UUIDs).
+            if jwt_claims is not None:
+                request.state.jwt_claims = jwt_claims
 
             if jwt_user is not None and jwt_user.archived_at is None:
                 request.state.user = jwt_user

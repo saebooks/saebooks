@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 
+from saebooks.api.v1.auth import resolve_tenant_id
 from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account
@@ -328,8 +329,9 @@ async def contacts_abr_apply(
 
 @router.get("/{contact_id}", response_class=HTMLResponse)
 async def contacts_detail(request: Request, contact_id: UUID) -> HTMLResponse:
+    tenant_id = resolve_tenant_id(request)
     async with AsyncSessionLocal() as session:
-        contact = await svc.get(session, contact_id)
+        contact = await svc.get(session, contact_id, tenant_id=tenant_id)
         if contact is None:
             raise HTTPException(404, "Contact not found")
         company = await session.get(Company, contact.company_id)
@@ -358,8 +360,9 @@ async def contacts_detail(request: Request, contact_id: UUID) -> HTMLResponse:
 
 @router.get("/{contact_id}/edit", response_class=HTMLResponse)
 async def contacts_edit(request: Request, contact_id: UUID) -> HTMLResponse:
+    tenant_id = resolve_tenant_id(request)
     async with AsyncSessionLocal() as session:
-        contact = await svc.get(session, contact_id)
+        contact = await svc.get(session, contact_id, tenant_id=tenant_id)
         if contact is None:
             raise HTTPException(404, "Contact not found")
         company = await session.get(Company, contact.company_id)
@@ -398,6 +401,7 @@ async def contacts_update(
     default_account_id: str = Form(""),
     default_tax_code: str = Form(""),
 ) -> RedirectResponse | HTMLResponse:
+    tenant_id = resolve_tenant_id(request)
     kwargs = _parse_form_fields(
         name, contact_type, email, phone, abn,
         address_line1, address_line2, city, state, postcode,
@@ -405,10 +409,13 @@ async def contacts_update(
     )
     try:
         async with AsyncSessionLocal() as session:
-            await svc.update(session, contact_id, performed_by="web", **kwargs)
+            await svc.update(
+                session, contact_id, performed_by="web",
+                tenant_id=tenant_id, **kwargs,
+            )
     except ValueError as exc:
         async with AsyncSessionLocal() as session:
-            contact = await svc.get(session, contact_id)
+            contact = await svc.get(session, contact_id, tenant_id=tenant_id)
             if contact is None:
                 raise HTTPException(404, "Contact not found") from exc
             company = await session.get(Company, contact.company_id)
@@ -436,7 +443,12 @@ async def contacts_update(
 
 
 @router.post("/{contact_id}/archive")
-async def contacts_archive(contact_id: UUID) -> RedirectResponse:
+async def contacts_archive(
+    request: Request, contact_id: UUID
+) -> RedirectResponse:
+    tenant_id = resolve_tenant_id(request)
     async with AsyncSessionLocal() as session:
-        await svc.archive(session, contact_id, performed_by="web")
+        await svc.archive(
+            session, contact_id, performed_by="web", tenant_id=tenant_id
+        )
     return RedirectResponse("/contacts", status_code=303)

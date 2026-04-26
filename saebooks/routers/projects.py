@@ -13,6 +13,7 @@ from fastapi import APIRouter, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 
+from saebooks.api.v1.auth import resolve_tenant_id
 from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
@@ -163,8 +164,9 @@ async def projects_create(
 
 @router.get("/{project_id}", response_class=HTMLResponse)
 async def projects_detail(request: Request, project_id: UUID) -> HTMLResponse:
+    tenant_id = resolve_tenant_id(request)
     async with AsyncSessionLocal() as session:
-        project = await svc.get(session, project_id)
+        project = await svc.get(session, project_id, tenant_id=tenant_id)
         if project is None:
             raise HTTPException(404, "Project not found")
         company = await session.get(Company, project.company_id)
@@ -181,8 +183,9 @@ async def projects_detail(request: Request, project_id: UUID) -> HTMLResponse:
 
 @router.get("/{project_id}/edit", response_class=HTMLResponse)
 async def projects_edit(request: Request, project_id: UUID) -> HTMLResponse:
+    tenant_id = resolve_tenant_id(request)
     async with AsyncSessionLocal() as session:
-        project = await svc.get(session, project_id)
+        project = await svc.get(session, project_id, tenant_id=tenant_id)
         if project is None:
             raise HTTPException(404, "Project not found")
         company = await session.get(Company, project.company_id)
@@ -214,11 +217,13 @@ async def projects_update(
         status_enum = ProjectStatus(status)
     except ValueError as exc:
         raise HTTPException(400, f"Invalid status: {status}") from exc
+    tenant_id = resolve_tenant_id(request)
     try:
         async with AsyncSessionLocal() as session:
             await svc.update(
                 session,
                 project_id,
+                tenant_id=tenant_id,
                 performed_by="web",
                 code=code,
                 name=name,
@@ -229,7 +234,7 @@ async def projects_update(
             )
     except ValueError as exc:
         async with AsyncSessionLocal() as session:
-            project = await svc.get(session, project_id)
+            project = await svc.get(session, project_id, tenant_id=tenant_id)
             if project is None:
                 raise HTTPException(404, "Project not found") from exc
             company = await session.get(Company, project.company_id)
@@ -254,7 +259,8 @@ async def projects_update(
 
 
 @router.post("/{project_id}/archive")
-async def projects_archive(project_id: UUID) -> RedirectResponse:
+async def projects_archive(request: Request, project_id: UUID) -> RedirectResponse:
+    tenant_id = resolve_tenant_id(request)
     async with AsyncSessionLocal() as session:
-        await svc.archive(session, project_id, performed_by="web")
+        await svc.archive(session, project_id, tenant_id=tenant_id, performed_by="web")
     return RedirectResponse("/projects", status_code=303)

@@ -224,6 +224,7 @@ async def update(
     performed_by: str | None = None,
     actor: str | None = None,
     expected_version: int | None = None,
+    tenant_id: uuid.UUID | None = None,
     **kwargs,
 ) -> Contact:
     """Update contact fields. Only update fields that are explicitly passed.
@@ -231,8 +232,11 @@ async def update(
     If ``expected_version`` is supplied and does not match the stored
     ``Contact.version``, raises ``VersionConflict``. Otherwise bumps
     the version, appends a change_log row, and commits.
+
+    When ``tenant_id`` is supplied, a foreign-tenant id raises
+    ``ValueError`` (treated as not found) — cross-tenant probes 404.
     """
-    contact = await session.get(Contact, contact_id)
+    contact = await get(session, contact_id, tenant_id=tenant_id)
     if contact is None:
         raise ValueError(f"Contact {contact_id} not found")
 
@@ -288,9 +292,14 @@ async def archive(
     performed_by: str | None = None,
     actor: str | None = None,
     expected_version: int | None = None,
+    tenant_id: uuid.UUID | None = None,
 ) -> Contact | None:
-    """Soft-delete."""
-    contact = await session.get(Contact, contact_id)
+    """Soft-delete.
+
+    When ``tenant_id`` is supplied, a foreign-tenant id returns ``None``
+    silently — cross-tenant archive is a no-op.
+    """
+    contact = await get(session, contact_id, tenant_id=tenant_id)
     if contact is None:
         return None
     if expected_version is not None and contact.version != expected_version:

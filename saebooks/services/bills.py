@@ -234,12 +234,27 @@ async def _recalc(session: AsyncSession, bill: Bill) -> None:
     bill.base_amount_paid = _q2(Decimal(bill.amount_paid) * rate)
 
 
-async def get(session: AsyncSession, bill_id: uuid.UUID) -> Bill:
-    result = await session.execute(
+async def get(
+    session: AsyncSession,
+    bill_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
+) -> Bill:
+    """Fetch a bill by id.
+
+    When ``tenant_id`` is supplied, the lookup is filtered by tenant —
+    a foreign-tenant id raises ``BillError`` (treated as not found),
+    so cross-tenant probes 404 even if the underlying row exists.
+    Belt-and-braces complement to FORCE RLS at the DB layer.
+    """
+    stmt = (
         select(Bill)
         .options(selectinload(Bill.lines))
         .where(Bill.id == bill_id)
     )
+    if tenant_id is not None:
+        stmt = stmt.where(Bill.tenant_id == tenant_id)
+    result = await session.execute(stmt)
     bill = result.scalar_one_or_none()
     if bill is None:
         raise BillError(f"Bill {bill_id} not found")
@@ -285,8 +300,9 @@ async def update_draft(
     notes: str | None = None,
     currency: str | None = None,
     fx_rate: Decimal | None = None,
+    tenant_id: uuid.UUID | None = None,
 ) -> Bill:
-    bill = await get(session, bill_id)
+    bill = await get(session, bill_id, tenant_id=tenant_id)
     if bill.status != BillStatus.DRAFT:
         raise BillError(
             f"Cannot edit bill {bill.id} in state {bill.status.value}; "
@@ -471,9 +487,12 @@ async def void_bill(
 
 
 async def archive(
-    session: AsyncSession, bill_id: uuid.UUID
+    session: AsyncSession,
+    bill_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
 ) -> Bill:
-    bill = await get(session, bill_id)
+    bill = await get(session, bill_id, tenant_id=tenant_id)
     bill.archived_at = datetime.now(UTC)
     await session.commit()
     return bill

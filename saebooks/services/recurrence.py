@@ -179,13 +179,26 @@ async def create(
 
 
 async def get(
-    session: AsyncSession, template_id: uuid.UUID
+    session: AsyncSession,
+    template_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
 ) -> RecurringInvoice:
-    result = await session.execute(
+    """Fetch a recurring invoice template by id.
+
+    When ``tenant_id`` is supplied, the lookup is filtered by tenant —
+    a foreign-tenant id raises ``RecurrenceError`` (treated as not found),
+    so cross-tenant probes 404 even if the underlying row exists.
+    Belt-and-braces complement to FORCE RLS at the DB layer.
+    """
+    stmt = (
         select(RecurringInvoice)
         .options(selectinload(RecurringInvoice.lines))
         .where(RecurringInvoice.id == template_id)
     )
+    if tenant_id is not None:
+        stmt = stmt.where(RecurringInvoice.tenant_id == tenant_id)
+    result = await session.execute(stmt)
     tpl = result.scalar_one_or_none()
     if tpl is None:
         raise RecurrenceError(f"Recurring invoice {template_id} not found")
@@ -220,6 +233,7 @@ async def update(
     session: AsyncSession,
     template_id: uuid.UUID,
     *,
+    tenant_id: uuid.UUID | None = None,
     contact_id: uuid.UUID | None = None,
     name: str | None = None,
     frequency: RecurrenceFrequency | None = None,
@@ -232,7 +246,7 @@ async def update(
     auto_post: bool | None = None,
     lines: list[dict[str, object]] | None = None,
 ) -> RecurringInvoice:
-    tpl = await get(session, template_id)
+    tpl = await get(session, template_id, tenant_id=tenant_id)
     if contact_id is not None:
         tpl.contact_id = contact_id
     if name is not None:
@@ -273,7 +287,7 @@ async def update(
             session.add(new_line)
         await session.flush()
     await session.commit()
-    return await get(session, tpl.id)
+    return await get(session, tpl.id, tenant_id=tenant_id)
 
 
 # ---------------------------------------------------------------------- #
@@ -282,9 +296,12 @@ async def update(
 
 
 async def pause(
-    session: AsyncSession, template_id: uuid.UUID
+    session: AsyncSession,
+    template_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
 ) -> RecurringInvoice:
-    tpl = await get(session, template_id)
+    tpl = await get(session, template_id, tenant_id=tenant_id)
     if tpl.status == RecurrenceStatus.ENDED:
         raise RecurrenceError("Cannot pause an ENDED template")
     tpl.status = RecurrenceStatus.PAUSED
@@ -293,9 +310,12 @@ async def pause(
 
 
 async def resume(
-    session: AsyncSession, template_id: uuid.UUID
+    session: AsyncSession,
+    template_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
 ) -> RecurringInvoice:
-    tpl = await get(session, template_id)
+    tpl = await get(session, template_id, tenant_id=tenant_id)
     if tpl.status == RecurrenceStatus.ENDED:
         raise RecurrenceError("Cannot resume an ENDED template")
     tpl.status = RecurrenceStatus.ACTIVE
@@ -304,18 +324,24 @@ async def resume(
 
 
 async def end(
-    session: AsyncSession, template_id: uuid.UUID
+    session: AsyncSession,
+    template_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
 ) -> RecurringInvoice:
-    tpl = await get(session, template_id)
+    tpl = await get(session, template_id, tenant_id=tenant_id)
     tpl.status = RecurrenceStatus.ENDED
     await session.commit()
     return tpl
 
 
 async def archive(
-    session: AsyncSession, template_id: uuid.UUID
+    session: AsyncSession,
+    template_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
 ) -> RecurringInvoice:
-    tpl = await get(session, template_id)
+    tpl = await get(session, template_id, tenant_id=tenant_id)
     tpl.archived_at = datetime.now(UTC)
     await session.commit()
     return tpl

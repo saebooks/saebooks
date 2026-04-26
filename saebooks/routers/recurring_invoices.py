@@ -26,6 +26,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from saebooks.api.v1.auth import resolve_tenant_id
 from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
@@ -308,8 +309,12 @@ async def recurring_create(
 async def recurring_detail(
     request: Request, template_id: UUID
 ) -> HTMLResponse:
+    tenant_id = resolve_tenant_id(request)
     async with AsyncSessionLocal() as session:
-        tpl = await svc.get(session, template_id)
+        try:
+            tpl = await svc.get(session, template_id, tenant_id=tenant_id)
+        except svc.RecurrenceError as exc:
+            raise HTTPException(404, "Template not found") from exc
         company = await session.get(Company, tpl.company_id)
         contact = await session.get(Contact, tpl.contact_id)
         account_ids = {ln.account_id for ln in tpl.lines}
@@ -363,8 +368,12 @@ async def recurring_detail(
 async def recurring_edit(
     request: Request, template_id: UUID
 ) -> HTMLResponse:
+    tenant_id = resolve_tenant_id(request)
     async with AsyncSessionLocal() as session:
-        tpl = await svc.get(session, template_id)
+        try:
+            tpl = await svc.get(session, template_id, tenant_id=tenant_id)
+        except svc.RecurrenceError as exc:
+            raise HTTPException(404, "Template not found") from exc
         company = await session.get(Company, tpl.company_id)
         dropdowns = await _form_dropdowns(session, tpl.company_id)
     if tpl.status == RecurrenceStatus.ENDED:
@@ -390,6 +399,7 @@ async def recurring_edit(
 async def recurring_update(
     request: Request, template_id: UUID
 ) -> RedirectResponse | HTMLResponse:
+    tenant_id = resolve_tenant_id(request)
     form = dict(await request.form())
     try:
         freq_raw = str(form.get("frequency") or "").strip().upper()
@@ -402,6 +412,7 @@ async def recurring_update(
             await svc.update(
                 session,
                 template_id,
+                tenant_id=tenant_id,
                 contact_id=uuid.UUID(str(form["contact_id"])),
                 name=str(form.get("name") or "").strip() or None,
                 frequency=RecurrenceFrequency(freq_raw),
@@ -419,7 +430,10 @@ async def recurring_update(
             )
     except (ValueError, svc.RecurrenceError) as exc:
         async with AsyncSessionLocal() as session:
-            tpl = await svc.get(session, template_id)
+            try:
+                tpl = await svc.get(session, template_id, tenant_id=tenant_id)
+            except svc.RecurrenceError as gexc:
+                raise HTTPException(404, "Template not found") from gexc
             company = await session.get(Company, tpl.company_id)
             dropdowns = await _form_dropdowns(session, tpl.company_id)
         return templates.TemplateResponse(
@@ -447,42 +461,62 @@ async def recurring_update(
 
 
 @router.post("/{template_id}/pause")
-async def recurring_pause(template_id: UUID) -> RedirectResponse:
+async def recurring_pause(request: Request, template_id: UUID) -> RedirectResponse:
+    tenant_id = resolve_tenant_id(request)
     async with AsyncSessionLocal() as session:
-        await svc.pause(session, template_id)
+        try:
+            await svc.pause(session, template_id, tenant_id=tenant_id)
+        except svc.RecurrenceError:
+            pass
     return RedirectResponse(
         f"/invoices/recurring/{template_id}", status_code=303
     )
 
 
 @router.post("/{template_id}/resume")
-async def recurring_resume(template_id: UUID) -> RedirectResponse:
+async def recurring_resume(request: Request, template_id: UUID) -> RedirectResponse:
+    tenant_id = resolve_tenant_id(request)
     async with AsyncSessionLocal() as session:
-        await svc.resume(session, template_id)
+        try:
+            await svc.resume(session, template_id, tenant_id=tenant_id)
+        except svc.RecurrenceError:
+            pass
     return RedirectResponse(
         f"/invoices/recurring/{template_id}", status_code=303
     )
 
 
 @router.post("/{template_id}/end")
-async def recurring_end(template_id: UUID) -> RedirectResponse:
+async def recurring_end(request: Request, template_id: UUID) -> RedirectResponse:
+    tenant_id = resolve_tenant_id(request)
     async with AsyncSessionLocal() as session:
-        await svc.end(session, template_id)
+        try:
+            await svc.end(session, template_id, tenant_id=tenant_id)
+        except svc.RecurrenceError:
+            pass
     return RedirectResponse(
         f"/invoices/recurring/{template_id}", status_code=303
     )
 
 
 @router.post("/{template_id}/archive")
-async def recurring_archive(template_id: UUID) -> RedirectResponse:
+async def recurring_archive(request: Request, template_id: UUID) -> RedirectResponse:
+    tenant_id = resolve_tenant_id(request)
     async with AsyncSessionLocal() as session:
-        await svc.archive(session, template_id)
+        try:
+            await svc.archive(session, template_id, tenant_id=tenant_id)
+        except svc.RecurrenceError:
+            pass
     return RedirectResponse("/invoices/recurring", status_code=303)
 
 
 @router.post("/{template_id}/run")
-async def recurring_run(template_id: UUID) -> RedirectResponse:
+async def recurring_run(request: Request, template_id: UUID) -> RedirectResponse:
+    tenant_id = resolve_tenant_id(request)
     async with AsyncSessionLocal() as session:
-        tpl = await svc.get(session, template_id)
+        try:
+            tpl = await svc.get(session, template_id, tenant_id=tenant_id)
+        except svc.RecurrenceError as exc:
+            raise HTTPException(404, "Template not found") from exc
         inv = await svc.materialise_one(session, tpl)
     return RedirectResponse(f"/invoices/{inv.id}", status_code=303)

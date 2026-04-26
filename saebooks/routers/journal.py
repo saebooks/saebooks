@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import func, select
 
+from saebooks.api.v1.auth import resolve_tenant_id
 from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account
@@ -114,10 +115,14 @@ async def journal_new(request: Request) -> HTMLResponse:
 
 @router.get("/{entry_id}", response_class=HTMLResponse)
 async def journal_detail(request: Request, entry_id: uuid.UUID) -> HTMLResponse:
+    tenant_id = resolve_tenant_id(request)
     company = await _first_company()
     accounts, tax_codes, projects = await _accounts_and_tax_codes(company.id)
     async with AsyncSessionLocal() as session:
-        entry = await svc.get(session, entry_id)
+        try:
+            entry = await svc.get(session, entry_id, tenant_id=tenant_id)
+        except ValueError as exc:
+            raise HTTPException(404, "Journal entry not found") from exc
     return templates.TemplateResponse(
         request,
         "journal/form.html",
@@ -179,6 +184,7 @@ def _parse_lines(form: dict[str, object]) -> list[dict[str, object]]:
 
 @router.post("/save", response_model=None)
 async def journal_save(request: Request) -> RedirectResponse | HTMLResponse:
+    tenant_id = resolve_tenant_id(request)
     form: dict[str, object] = dict(await request.form())
     company = await _first_company()
 
@@ -202,6 +208,7 @@ async def journal_save(request: Request) -> RedirectResponse | HTMLResponse:
                 entry = await svc.update_draft(
                     session,
                     uuid.UUID(str(entry_id)),
+                    tenant_id=tenant_id,
                     entry_date=entry_date,
                     description=description or None,
                     ref=ref or None,
@@ -221,7 +228,11 @@ async def journal_save(request: Request) -> RedirectResponse | HTMLResponse:
             if action == "post":
                 override = str(form.get("override_reason", "")).strip() or None
                 entry = await svc.post(
-                    session, entry.id, posted_by="web", override_reason=override
+                    session,
+                    entry.id,
+                    posted_by="web",
+                    override_reason=override,
+                    tenant_id=tenant_id,
                 )
 
         except PostingError as exc:
@@ -247,17 +258,30 @@ async def journal_save(request: Request) -> RedirectResponse | HTMLResponse:
 
 
 @router.post("/{entry_id}/reverse")
-async def journal_reverse(entry_id: uuid.UUID) -> RedirectResponse:
+async def journal_reverse(request: Request, entry_id: uuid.UUID) -> RedirectResponse:
+    tenant_id = resolve_tenant_id(request)
     async with AsyncSessionLocal() as session:
         try:
-            reversal = await svc.reverse(session, entry_id, posted_by="web")
+            reversal = await svc.reverse(
+                session, entry_id, posted_by="web", tenant_id=tenant_id
+            )
         except PostingError as exc:
             raise HTTPException(400, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(404, "Journal entry not found") from exc
     return RedirectResponse(f"/journal/{reversal.id}", status_code=303)
 
 
 @router.post("/{entry_id}/delete")
-async def journal_delete(entry_id: uuid.UUID) -> RedirectResponse:
+async def journal_delete(request: Request, entry_id: uuid.UUID) -> RedirectResponse:
+    tenant_id = resolve_tenant_id(request)
     async with AsyncSessionLocal() as session:
-        await svc.delete(session, entry_id, performed_by="web")
+        try:
+            await svc.delete(
+                session, entry_id, performed_by="web", tenant_id=tenant_id
+            )
+        except ValueError:
+            # Cross-tenant or non-existent: silently no-op so users
+            # never learn whether the entry exists in another tenant.
+            pass
     return RedirectResponse("/journal", status_code=303)
