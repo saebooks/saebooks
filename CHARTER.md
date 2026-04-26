@@ -25,8 +25,15 @@ businesses who want their financial data on their own infrastructure.
   purchases (expenses), contacts, banking, reconcile, GST/BAS reporting,
   standard reports.
 - **Out of scope for v1:** payroll / STP / super (no ATO DSP certification
-  pit), multi-currency stays configurable but is a v1.1 priority, live
-  bank feeds are v1.1, inventory belongs in a sibling project.
+  pit), live bank feeds are v1.1, inventory belongs in a sibling
+  project.
+- **In scope for v1, schema-only:** **multi-market readiness.** The
+  v1 schema and API surface are designed so that adding non-AU
+  jurisdictions (UK, US, EU member states) is a localisation-pack
+  exercise (§6.15) rather than a refactor. Multi-currency, address
+  polymorphism, bank-account polymorphism, and a pluggable tax-engine
+  registry are present from the start. UI, BAS-equivalent reports, and
+  certified e-lodgement engines for non-AU jurisdictions ship later.
 - **Data model inspiration:** MYOB AccountRight Classic v19 (reverse-
   engineered from its ODBC schema).
 - **UX inspiration:** the same — MYOB v19 Command Centre, keyboard-
@@ -79,14 +86,38 @@ it wrong.
 
 ## 5. Licence and IP
 
-- **Core code:** AGPLv3. Copyleft strong enough that commercial forks
-  can't re-host as a proprietary SaaS without contributing back or
-  buying a commercial exemption from us.
+- **Core code:** AGPLv3 + commercial dual licence. AGPLv3's
+  network-copyleft is strong enough that commercial forks can't run a
+  modified SAE Books as a proprietary SaaS without publishing their
+  modifications. Customers who want to use SAE Books outside AGPL's
+  terms (typical: integrators bundling SAE Books in a proprietary
+  product, or paying subscribers on Business / Pro / Enterprise tiers)
+  buy a commercial licence. Top-level summary in `LICENSING.md`;
+  customer-facing detail in `SPEC-LICENSING.md`; legal text in
+  `LICENSE`.
+- **Repos covered:** `saebooks` (engine) and `saebooks-web` (server-
+  rendered frontend) are both under AGPLv3 + commercial dual licence.
+  The frontend is open because community traction depends on the
+  community being able to read, audit, and modify the screens they
+  use every day. Hosted SaaS infrastructure (billing portal,
+  onboarding, ops tooling) and certified e-lodgement engines (ATO
+  SBR, HMRC MTD, IRS e-file, etc.) are proprietary, never published.
+- **Localisation packs:** see §6.15. Country charts of accounts, tax
+  codes, and report templates are AGPL and community-maintainable;
+  certified e-lodgement engines per jurisdiction are paid commercial.
+- **Trademark:** "SAE Books," "saebooks," and the SAE Books logo are
+  trademarks of SAE Engineering. Forking the source under AGPL is
+  fine; calling the fork "SAE Books" is not. Full policy in
+  `TRADEMARK.md`. The trademark is the brand-protection lever AGPL
+  doesn't provide — necessary for the "users can trust the name"
+  promise once external forks exist.
 - **CLA (Contributor License Agreement):** required from every external
-  contributor starting from the first pull request. Gives Richard Sauer
-  (or assignee) the right to re-license contributions under a commercial
-  licence in addition to AGPL. Standard wording — modelled on the Apache
-  ICLA. Automated via a GitHub CLA bot once the repo is public.
+  contributor starting from the first pull request, covering all SAE
+  Books repositories under one signature. Gives SAE Engineering the
+  right to re-license contributions under a commercial licence in
+  addition to AGPL. Modelled on the Apache ICLA v2.2. Full text in
+  `CLA.md`. Automated via the CLA Assistant bot once the repo is
+  public.
 - **Copyright:** © 2026 Richard Sauer / SAE Engineering. Every source
   file gets a header.
 - **No contributions accepted without CLA.** Even from Claude. Any code
@@ -384,6 +415,76 @@ QBO subscription and owns his data outright. If it does earn revenue,
 it's from Offline perpetual licences, subscription Business / Pro /
 Enterprise gating, compliance plumbing, and the marketplace — not from
 holding the ledger hostage.
+
+### 6.15 Localisation packs — open or paid, by jurisdiction
+
+SAE Books is multi-market by design (§1, §7.x). Adding a new country
+is a localisation-pack exercise, not a fork. Localisation packs split
+into two layers, with different licensing on each layer:
+
+**Open layer (AGPL-3.0, community-maintainable):**
+
+- Country chart of accounts (e.g. Odoo `l10n_au` / `l10n_uk` /
+  `l10n_us` / `l10n_de` shape).
+- Tax codes and rate tables (GST 10%, VAT 20%, US state sales-tax
+  matrices, EU VAT rates, etc.).
+- Report templates that don't require government certification —
+  P&L, balance sheet, trial balance, ageing reports, custom layouts
+  per jurisdiction.
+- BAS-equivalent **report generation** (not lodgement) where the
+  output is a paper-equivalent document the user lodges manually.
+- Currency formatting, locale-aware date/number formatting, language
+  translations.
+- Bank-account format validators (BSB, IBAN, sort+account, ABA
+  routing).
+
+These ship as `saebooks-l10n-au`, `saebooks-l10n-uk`, etc. Each pack
+is an AGPL repository accepting community contributions under the
+SAE Books CLA. The community is free to maintain, extend, and
+correct them — that's the whole point.
+
+**Paid layer (commercial licence, SAE-maintained):**
+
+- Certified e-lodgement engines: ATO SBR (BAS, STP), HMRC MTD (VAT,
+  ITSA), IRS Modernized e-File, EU member-state e-invoicing schemes
+  (PEPPOL UBL, FatturaPA, etc.). These have ongoing certification
+  costs (DSP registration, security audits, API contract fees) that
+  must be funded.
+- Government-certified accounting engines where a jurisdiction
+  requires audited certification of the software itself (rare, but
+  exists in some EU jurisdictions and parts of LATAM).
+- Tax-engine plug-ins covering complex calculation rules where errors
+  carry direct customer liability (e.g. EU VAT MOSS, US sales-tax
+  nexus calculation across 50 states).
+
+Paid-layer packs are bundled into the Pro and Enterprise subscription
+tiers (§6.4, §6.5). Customers running Community or Offline editions
+can use the open layer fully, including report **generation**, and
+lodge those reports manually with the relevant tax authority — the
+paid layer is the *automation* of lodgement, not the ability to
+comply.
+
+**Why this split:**
+
+- The open layer is where the community contributes — bookkeepers and
+  accountants in every jurisdiction can fix errors in their country's
+  CoA or tax tables without waiting for SAE Engineering. Mirrors
+  Odoo's `l10n_*` model, which has produced 50+ community-maintained
+  country packs.
+- The paid layer is where the cost is. Government certifications
+  expire, APIs change, security audits recur. Funding those through
+  paid tiers keeps SAE Engineering able to maintain them; making them
+  free would either burn out the maintainer or cause certifications
+  to lapse.
+- The split runs along the same axis as the rest of the open-core
+  model: free where the marginal cost is zero, paid where it isn't.
+
+**Boundary rule.** Code that decides *what to lodge* belongs in the
+open layer. Code that *transmits the lodgement to a certified
+endpoint* belongs in the paid layer. This rule resolves most edge
+cases — a bookkeeper in any edition can produce a fully-correct BAS
+on screen and lodge it manually; only the click-to-submit pipeline
+costs money.
 
 ## 7. Architecture decisions
 
@@ -762,3 +863,4 @@ Every commit signed, every PR (once public) CLA-checked.
 
 *Charter v1.0 — 2026-04-15*
 *Charter v1.1 — 2026-04-22 — Amended §6 (five-edition model + Offline perpetual + USB-bound licensing + AUP + updates policy), §7.1 (company caps per edition), §12 (five-column feature matrix + seat matrix + company matrix). Companion docs: `SPEC-LICENSING.md` (public), `SPEC-PRICING.md` (private), `EULA.md` draft (private, pending lawyer review).*
+*Charter v1.2 — 2026-04-26 — Amended §1 (multi-market readiness in scope at schema/API layer; certified non-AU lodgement deferred), §5 (added saebooks-web AGPL coverage + trademark + concrete CLA file references), and added §6.15 (localisation pack open/paid split — open CoA + tax codes + report generation, paid certified e-lodgement). Companion docs: `LICENSING.md` (top-level summary), `TRADEMARK.md` (brand policy), `CLA.md` (Apache ICLA derivative). `saebooks-web` LICENSE file added (AGPL-3.0).*
