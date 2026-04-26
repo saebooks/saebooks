@@ -15,6 +15,7 @@ handles those paths via the service layer.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any
 from uuid import UUID
@@ -33,8 +34,8 @@ from saebooks.api.v1.schemas import (
     CompanyUpdate,
 )
 from saebooks.models.company import Company
-from saebooks.models.idempotency_key import IdempotencyKey
 from saebooks.services import companies as svc
+from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 
 router = APIRouter(
     prefix="/companies",
@@ -74,28 +75,11 @@ def _parse_if_match(header: str | None) -> int | None:
         raise HTTPException(400, f"If-Match must be an integer version, got '{header}'") from exc
 
 
-def _parse_idempotency_key(header: str | None) -> UUID | None:
+def _parse_idempotency_key(header: str | None) -> str | None:
+    """Return the raw idempotency key string, or None if absent."""
     if header is None or not header.strip():
         return None
-    try:
-        return UUID(header.strip())
-    except ValueError as exc:
-        raise HTTPException(400, "X-Idempotency-Key must be a UUID") from exc
-
-
-async def _idempotent_replay(session: Any, key: UUID) -> JSONResponse | None:
-    existing = await session.get(IdempotencyKey, key)
-    if existing is None:
-        return None
-    return JSONResponse(content=existing.response_body, status_code=existing.response_status)
-
-
-async def _remember_idempotent(
-    session: Any, key: UUID, body: dict[str, Any], status_code: int
-) -> None:
-    row = IdempotencyKey(key=key, response_body=body, response_status=status_code)
-    session.add(row)
-    await session.flush()
+    return header.strip()
 
 
 def _dump(company: Company) -> dict[str, Any]:
@@ -194,9 +178,19 @@ async def update_company(
         raise HTTPException(404, "Company not found")
 
     if key is not None:
-        replay = await _idempotent_replay(session, key)
-        if replay is not None:
-            return replay
+        raw_body = await request.body()
+        body_sha256 = hashlib.sha256(raw_body).hexdigest()
+        claim = await claim_or_fetch(session, key, tenant_id, body_sha256)
+        if claim.status == ClaimStatus.CONFLICT:
+            return JSONResponse(
+                {"code": "idempotency_key_conflict", "message": "X-Idempotency-Key reused with a different request body"},
+                status_code=422,
+            )
+        if claim.status == ClaimStatus.REPLAY:
+            return JSONResponse(
+                content=json.loads(claim.response_body) if claim.response_body else {},
+                status_code=claim.response_status or 200,
+            )
 
     try:
         company = await svc.update(
@@ -213,7 +207,7 @@ async def update_company(
             current=CompanyOut.model_validate(exc.current),
         ).model_dump(mode="json")
         if key is not None:
-            await _remember_idempotent(session, key, body, 409)
+            await store_response(session, key, 409, json.dumps(body).encode())
             await session.commit()
         return JSONResponse(body, status_code=409)
     except ValueError as exc:
@@ -225,6 +219,6 @@ async def update_company(
     await session.refresh(company)
     body = _dump(company)
     if key is not None:
-        await _remember_idempotent(session, key, body, 200)
+        await store_response(session, key, 200, json.dumps(body).encode())
         await session.commit()
     return JSONResponse(body, status_code=200)
