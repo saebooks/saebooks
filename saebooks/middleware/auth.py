@@ -200,6 +200,50 @@ async def _upsert_user(
         return None
 
 
+async def _user_from_jwt_bearer(authorization: str) -> User | None:
+    """Resolve a User row from an ``Authorization: Bearer <jwt>`` header.
+
+    Returns ``None`` for any malformed / expired / unverifiable token, or
+    when the JWT's ``sub`` claim points at a missing user. Lets the caller
+    fall through to the Authentik forward-auth path without 401-ing.
+
+    Used by ForwardAuthMiddleware so internal calls from saebooks-web
+    (which carries a JWT, never Authentik headers) can reach the
+    HTML admin pages on ``/admin/*``. Without this, every admin gate
+    that depends on ``request.state.user`` 401's because the JWT was
+    parsed only by the JSON-API ``require_bearer`` dep — never the
+    middleware.
+    """
+    parts = authorization.split(None, 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return None
+    token = parts[1].strip()
+
+    # Local imports to avoid a circular at module load time.
+    from saebooks.services.jwt_tokens import JWTError, decode_access_token
+
+    try:
+        claims = decode_access_token(token)
+    except JWTError:
+        return None
+
+    sub = claims.get("sub")
+    if not sub:
+        return None
+    try:
+        user_id = uuid.UUID(str(sub))
+    except (ValueError, TypeError):
+        return None
+
+    try:
+        async with AsyncSessionLocal() as session:
+            user = await session.get(User, user_id)
+    except Exception as exc:  # defensive — DB hiccup shouldn't 500
+        logger.warning("JWT user lookup failed for sub=%s: %s", sub, exc)
+        return None
+    return user
+
+
 class ForwardAuthMiddleware(BaseHTTPMiddleware):
     """Attach the Authentik-authenticated user to ``request.state``."""
 
@@ -255,18 +299,32 @@ class ForwardAuthMiddleware(BaseHTTPMiddleware):
                 # racing with an in-flight request.
                 request.state.username = user.username
         else:
-            # No identity headers at all — neither Remote-User nor
-            # X-authentik-username. Most of the time this is an
-            # anonymous healthcheck-ish request from inside the docker
-            # network. On /admin/* paths it means forward-auth isn't
-            # wired up right; log at INFO so the misconfig is visible
-            # without flipping the global level.
-            level = logging.INFO if request.url.path.startswith("/admin/") else logging.DEBUG
-            logger.log(
-                level,
-                "No user identity on %s; saw headers: %s",
-                request.url.path,
-                sorted(request.headers.keys()),
-            )
+            # No Authentik identity headers — try the JWT bearer fallback
+            # so saebooks-web can reach the HTML admin pages with the
+            # session JWT. (The JSON ``/api/`` paths are short-circuited
+            # by OPEN_PATH_PREFIXES above and never reach this branch.)
+            authz = request.headers.get("authorization")
+            jwt_user: User | None = None
+            if authz:
+                jwt_user = await _user_from_jwt_bearer(authz)
+
+            if jwt_user is not None and jwt_user.archived_at is None:
+                request.state.user = jwt_user
+                request.state.role = jwt_user.role
+                request.state.username = jwt_user.username
+            else:
+                # Genuinely anonymous — log on /admin/* so forward-auth
+                # misconfig is visible without flipping the global level.
+                level = (
+                    logging.INFO
+                    if request.url.path.startswith("/admin/")
+                    else logging.DEBUG
+                )
+                logger.log(
+                    level,
+                    "No user identity on %s; saw headers: %s",
+                    request.url.path,
+                    sorted(request.headers.keys()),
+                )
 
         return await call_next(request)
