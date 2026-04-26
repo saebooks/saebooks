@@ -223,6 +223,9 @@ async def test_me_with_valid_token_200(client: AsyncClient) -> None:
     assert body["email"] == "me_ok@test.com"
     assert body["role"] == "readonly"
     assert body["tenant_id"] == str(_DEFAULT_TENANT)
+    # P0 regression — must include username so saebooks-web can match the
+    # SAE_STAFF_USERNAMES allowlist (Taylor Riverside Round 1, Probe C).
+    assert body["username"] == user.username
 
 
 # ---------------------------------------------------------------------------

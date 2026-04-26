@@ -64,6 +64,7 @@ class RefreshRequest(BaseModel):
 
 class UserProfile(BaseModel):
     id: str
+    username: str
     email: str | None
     name: str | None
     role: str
@@ -130,7 +131,9 @@ async def login(body: LoginRequest) -> TokenResponse:
     Returns 401 (same message) for unknown email, wrong password.
     Returns 403 if the account is archived.
     """
-    from saebooks.services.jwt_tokens import verify_password  # noqa: PLC0415 (avoid top-level cycle)
+    from saebooks.services.jwt_tokens import (
+        verify_password,
+    )
 
     _INVALID = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -251,6 +254,7 @@ async def me(
 
     return UserProfile(
         id=str(user.id),
+        username=user.username,
         email=user.email,
         name=user.display_name,
         role=user.role,
@@ -278,7 +282,7 @@ async def change_password(
     Requires a valid JWT and the correct current password.
     Returns 204 on success, 401 on bad token or wrong current password.
     """
-    from saebooks.services.jwt_tokens import (  # noqa: PLC0415
+    from saebooks.services.jwt_tokens import (
         JWTError,
         decode_access_token,
         hash_password,
