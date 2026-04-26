@@ -17,6 +17,7 @@ policy from migration 0055.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import date
 from typing import Any
@@ -39,6 +40,7 @@ from saebooks.api.v1.schemas import (
 from saebooks.models.company import Company
 from saebooks.models.payment import PaymentDirection, PaymentMethod
 from saebooks.services import payments as svc
+from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 
 router = APIRouter(
     prefix="/payments",
@@ -76,6 +78,13 @@ def _parse_if_match(header: str | None) -> int | None:
         return int(cleaned)
     except ValueError as exc:
         raise HTTPException(400, f"If-Match must be an integer version, got '{header}'") from exc
+
+
+def _parse_idempotency_key(header: str | None) -> str | None:
+    """Return the raw idempotency key string, or None if absent."""
+    if header is None or not header.strip():
+        return None
+    return header.strip()
 
 
 def _dump(payment: Any) -> dict[str, Any]:
@@ -154,10 +163,28 @@ async def get_payment(
 async def create_payment(
     payload: PaymentCreate,
     request: Request,
+    idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
+    key = _parse_idempotency_key(idempotency_key)
+
+    if key is not None:
+        raw_body = await request.body()
+        body_sha256 = hashlib.sha256(raw_body).hexdigest()
+        claim = await claim_or_fetch(session, key, tenant_id, body_sha256)
+        if claim.status == ClaimStatus.CONFLICT:
+            return JSONResponse(
+                {"code": "idempotency_key_conflict", "message": "X-Idempotency-Key reused with a different request body"},
+                status_code=422,
+            )
+        if claim.status == ClaimStatus.REPLAY:
+            return JSONResponse(
+                content=json.loads(claim.response_body) if claim.response_body else {},
+                status_code=claim.response_status or 201,
+            )
+
     company_id = await _first_company_id(session, tenant_id)
     try:
         direction_enum = PaymentDirection(payload.direction.upper())
@@ -189,6 +216,9 @@ async def create_payment(
         raise HTTPException(422, str(exc)) from exc
 
     body = _dump(payment)
+    if key is not None:
+        await store_response(session, key, 201, json.dumps(body).encode())
+        await session.commit()
     return JSONResponse(body, status_code=201)
 
 
