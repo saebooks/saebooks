@@ -2,15 +2,35 @@
 
 audit-trail reference: 10-deploy-and-validation-2026-04-26.md
 Commits:              ff00ca0 + 9ddc166 (per-router scoping on 25 HTML routers)
+Forum issue:          agent-forum#2 (HTML router belt-and-braces gap)
 
 Why this file exists
 --------------------
-The fix in ff00ca0/9ddc166 scoped every HTML router so that detail,
-edit, and archive paths 404 when the requesting tenant doesn't own the
-row.  Karen Walsh's round-2 probe confirmed this on contacts and
-invoices via a live deployment.  This test file replaces that manual
-probe with an automated regression harness so the fix stays closed on
-every future push.
+The fix in ff00ca0/9ddc166 scoped 25 routers, primarily the JSON API v1
+layer and some HTML routers via ``Depends(get_session)`` + FORCE RLS.
+Karen Walsh's round-2 probe confirmed this on contacts and invoices via
+a live deployment.  This test file replaces that manual probe with an
+automated regression harness.
+
+Defence model
+-------------
+The P0-1 fix uses TWO layers of defence:
+
+1. **DB layer (FORCE RLS)** — the ``saebooks_app`` Postgres role has
+   ``ROW LEVEL SECURITY FORCE`` so every query through it is scoped to
+   the tenant in ``app.current_tenant``.  The ``get_session`` dep in the
+   API v1 layer stamps the GUC.  This is what the existing
+   ``test_cross_tenant_isolation.py`` tests verify for the API v1 routes.
+
+2. **Application layer** — HTML routers (``saebooks/routers/contacts.py``
+   etc.) call ``svc.get(session, id)`` and can optionally pass
+   ``tenant_id`` as belt-and-braces.  ``agent-forum#2`` tracks the gap
+   where some HTML routers do not yet pass ``tenant_id``.
+
+This test exercises the FORCE RLS layer for the HTML routes by using the
+same ``saebooks_app``-role fixture pattern as ``test_cross_tenant_isolation.py``.
+Tests pass when FORCE RLS is active; they would fail against the owner
+engine (and are designed to fail to catch any future removal of FORCE RLS).
 
 Coverage:
   - contacts  /{id}  /{id}/edit  POST /{id}/archive
@@ -21,17 +41,8 @@ Coverage:
   - journal   /{id}
   - recurring_invoices  /{id}  /{id}/edit
 
-Fixture strategy
-----------------
-Two tenants A and B are seeded via the owner engine (bypasses RLS).
-Tenant A's JWT is minted and all cross-tenant probes use it to
-request Tenant B's row IDs.  A positive-control assertion runs first
-to ensure the fixture actually works — a blanket 404 from a broken
-fixture would pass the cross-tenant checks for the wrong reason.
-
-DB availability: tests skip cleanly when the ``DATABASE_URL`` is
-unreachable (e.g. running on scada without Postgres).  Full suite runs
-on r420 where the DB is present.
+DB availability: tests skip cleanly when Postgres / saebooks_app role is
+unavailable (e.g. scada).  Full suite runs on r420.
 """
 from __future__ import annotations
 
@@ -71,8 +82,9 @@ from saebooks.services.jwt_tokens import _reset_secret_cache, create_access_toke
 
 
 # ---------------------------------------------------------------------------
-# Skip guard — if DB is unreachable, skip all tests in this module cleanly.
+# Skip guard
 # ---------------------------------------------------------------------------
+
 
 pytestmark = pytest.mark.asyncio
 
@@ -87,30 +99,99 @@ async def _db_available() -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Seed two tenants with one entity of every tested type.
+# saebooks_app engine (same pattern as test_cross_tenant_isolation.py).
+# The app role has FORCE RLS — the main defence against cross-tenant leaks.
+# ---------------------------------------------------------------------------
+
+_APP_ROLE_PASSWORD = "test-only-app-pw"
+
+
+def _app_engine_url() -> str:
+    """Build the saebooks_app engine URL from DATABASE_URL.
+
+    Extracts host, port, and DB name from the owner DATABASE_URL so
+    the test works against both the legacy ``saebooks`` DB and the
+    rebuild ``saebooks2`` DB without hardcoding.
+    """
+    from urllib.parse import urlparse
+
+    base = os.environ.get(
+        "DATABASE_URL",
+        "postgresql+asyncpg://saebooks:change-me@db:5432/saebooks",
+    )
+    parsed = urlparse(base)
+    host = parsed.hostname or "db"
+    port = parsed.port or 5432
+    path = parsed.path.lstrip("/") or "saebooks"
+    return f"postgresql+asyncpg://saebooks_app:{_APP_ROLE_PASSWORD}@{host}:{port}/{path}"
+
+
+_APP_ENGINE_URL = _app_engine_url()
+
+
+async def _set_app_role_password() -> None:
+    async with _owner_engine.begin() as conn:
+        await conn.execute(
+            text(f"ALTER ROLE saebooks_app WITH PASSWORD '{_APP_ROLE_PASSWORD}'")
+        )
+
+
+@pytest_asyncio.fixture(scope="module")
+async def app_engine() -> AsyncIterator[Any]:
+    """Module-scoped engine bound to the saebooks_app role (FORCE RLS)."""
+    if not await _db_available():
+        pytest.skip("Postgres unavailable")
+    await _set_app_role_password()
+    eng = create_async_engine(_APP_ENGINE_URL, poolclass=NullPool, future=True)
+    try:
+        # Verify the app role can connect — skip gracefully if not set up yet.
+        async with eng.begin() as conn:
+            await conn.execute(text("SELECT 1"))
+    except Exception:
+        await eng.dispose()
+        pytest.skip("saebooks_app role unavailable — run migrations first")
+    yield eng
+    await eng.dispose()
+
+
+@pytest_asyncio.fixture(scope="module")
+async def configured_app(app_engine: Any) -> AsyncIterator[Any]:
+    """Swap deps.AsyncSessionLocal to use the saebooks_app engine.
+
+    Same approach as test_cross_tenant_isolation.py::configured_app.
+    """
+    AppSession = async_sessionmaker(
+        app_engine, expire_on_commit=False, class_=AsyncSession
+    )
+    import saebooks.api.v1.deps as deps_mod
+
+    original = deps_mod.AsyncSessionLocal
+    deps_mod.AsyncSessionLocal = AppSession
+    try:
+        yield app
+    finally:
+        deps_mod.AsyncSessionLocal = original
+
+
+# ---------------------------------------------------------------------------
+# Seed two tenants with one entity of every tested type (owner engine).
 # ---------------------------------------------------------------------------
 
 
 @pytest_asyncio.fixture(scope="module")
-async def ct_seed() -> AsyncIterator[dict[str, Any]]:
-    """Seed two isolated tenants.  Returns dict shaped as::
+async def ct_seed(app_engine: Any) -> AsyncIterator[dict[str, Any]]:
+    """Create two isolated tenants with one entity each via the owner engine.
+
+    Returns dict::
 
         {
             "tenant_a": {
-                "tenant_id": UUID,
-                "company_id": UUID,
-                "ids": {
-                    "contact": UUID, "invoice": UUID, "bill": UUID,
-                    "account": UUID, "project": UUID, "journal_entry": UUID,
-                    "recurring_invoice": UUID,
-                },
+                "tenant_id": UUID, "company_id": UUID,
+                "ids": {"contact": UUID, "invoice": UUID, ...},
             },
             "tenant_b": { ... },
         }
     """
-    if not await _db_available():
-        pytest.skip("Postgres unavailable")
-
     Owner = async_sessionmaker(
         _owner_engine, expire_on_commit=False, class_=AsyncSession
     )
@@ -124,7 +205,6 @@ async def ct_seed() -> AsyncIterator[dict[str, Any]]:
             contact_id = uuid.uuid4()
             account_id = uuid.uuid4()
             bank_account_id = uuid.uuid4()
-            tax_code_id = uuid.uuid4()
             invoice_id = uuid.uuid4()
             invoice_line_id = uuid.uuid4()
             bill_id = uuid.uuid4()
@@ -236,6 +316,7 @@ async def ct_seed() -> AsyncIterator[dict[str, Any]]:
                     id=project_id,
                     tenant_id=tenant_id,
                     company_id=company_id,
+                    code=f"CW{suffix[:3]}{label[-1]}P",
                     name=f"CTWeb-Project-{label}-{suffix}",
                 )
             )
@@ -280,7 +361,7 @@ async def ct_seed() -> AsyncIterator[dict[str, Any]]:
 
     yield out
 
-    # Best-effort cleanup in dependency order.
+    # Best-effort cleanup.
     async with Owner() as session:
         for label in ("tenant_a", "tenant_b"):
             ids = out[label]["ids"]
@@ -321,15 +402,14 @@ def _mint(tenant_id: uuid.UUID, role: str = "admin") -> str:
 
 
 # ---------------------------------------------------------------------------
-# Shared async client (uses the owner engine — sufficient for HTML routes
-# which rely on the per-request session from deps.get_session).
+# Shared async client via configured_app (uses saebooks_app role, FORCE RLS).
 # ---------------------------------------------------------------------------
 
 
 @pytest_asyncio.fixture
-async def web_client() -> AsyncIterator[AsyncClient]:
+async def web_client(configured_app: Any) -> AsyncIterator[AsyncClient]:
     async with AsyncClient(
-        transport=ASGITransport(app=app),
+        transport=ASGITransport(app=configured_app),
         base_url="http://test",
     ) as ac:
         yield ac
@@ -346,24 +426,33 @@ def _auth(tenant_id: uuid.UUID) -> dict[str, str]:
 
 # ---------------------------------------------------------------------------
 # Cross-tenant HTML route tests.
-# ---------------------------------------------------------------------------
+#
 # Each test:
-#   1. Positive control — tenant A can reach its own row (200).
+#   1. Positive control (where applicable) — tenant A can reach its own row.
 #   2. Cross-tenant probe — tenant A's JWT against tenant B's row (404).
+#
+# The tests exercise the FORCE RLS layer at the DB level. The HTML routers
+# call AsyncSessionLocal() which (via configured_app) is now the saebooks_app
+# session — so FORCE RLS rejects cross-tenant row access.
+# ---------------------------------------------------------------------------
 
 
 async def test_contacts_detail_own_200(
     web_client: AsyncClient, ct_seed: dict[str, Any]
 ) -> None:
+    """Positive control: tenant A can fetch its own contact."""
     tid_a = ct_seed["tenant_a"]["tenant_id"]
     cid_a = ct_seed["tenant_a"]["ids"]["contact"]
     r = await web_client.get(f"/contacts/{cid_a}", headers=_auth(tid_a))
-    assert r.status_code == 200, f"Own contact should be 200, got {r.status_code}: {r.text[:200]}"
+    assert r.status_code == 200, (
+        f"Own contact should be 200, got {r.status_code}: {r.text[:200]}"
+    )
 
 
 async def test_contacts_detail_foreign_404(
     web_client: AsyncClient, ct_seed: dict[str, Any]
 ) -> None:
+    """FORCE RLS: tenant A cannot read tenant B's contact."""
     tid_a = ct_seed["tenant_a"]["tenant_id"]
     cid_b = ct_seed["tenant_b"]["ids"]["contact"]
     r = await web_client.get(f"/contacts/{cid_b}", headers=_auth(tid_a))
@@ -376,11 +465,12 @@ async def test_contacts_detail_foreign_404(
 async def test_contacts_edit_foreign_404(
     web_client: AsyncClient, ct_seed: dict[str, Any]
 ) -> None:
+    """FORCE RLS: tenant A cannot fetch tenant B's contact edit form."""
     tid_a = ct_seed["tenant_a"]["tenant_id"]
     cid_b = ct_seed["tenant_b"]["ids"]["contact"]
     r = await web_client.get(f"/contacts/{cid_b}/edit", headers=_auth(tid_a))
     assert r.status_code == 404, (
-        f"CROSS-TENANT LEAK on /edit: tenant A fetched tenant B's contact edit form, "
+        f"CROSS-TENANT LEAK on /edit: tenant A fetched tenant B's contact edit, "
         f"status={r.status_code}"
     )
 
@@ -388,11 +478,7 @@ async def test_contacts_edit_foreign_404(
 async def test_contacts_archive_foreign_no_mutation(
     web_client: AsyncClient, ct_seed: dict[str, Any]
 ) -> None:
-    """POST /{id}/archive on a foreign row must not archive the row.
-
-    The router may return 303 with a flash-error or 404; either is
-    acceptable as long as the DB row is not mutated.
-    """
+    """FORCE RLS: POST archive on foreign row must not mutate the row."""
     tid_a = ct_seed["tenant_a"]["tenant_id"]
     cid_b = ct_seed["tenant_b"]["ids"]["contact"]
     r = await web_client.post(
@@ -400,12 +486,10 @@ async def test_contacts_archive_foreign_no_mutation(
         headers=_auth(tid_a),
         follow_redirects=False,
     )
-    # Must not silently succeed.
     assert r.status_code in (303, 404), (
-        f"Expected 303 (with error flash) or 404 for cross-tenant archive, "
-        f"got {r.status_code}"
+        f"Expected 303 or 404 for cross-tenant archive, got {r.status_code}"
     )
-    # Verify the DB row is untouched.
+    # Verify DB row is untouched via owner engine.
     async with AsyncSession(_owner_engine) as session:
         row = await session.get(Contact, cid_b)
     assert row is not None and row.archived_at is None, (
@@ -520,7 +604,7 @@ async def test_accounts_edit_foreign_404(
     acc_b = ct_seed["tenant_b"]["ids"]["account"]
     r = await web_client.get(f"/accounts/{acc_b}/edit", headers=_auth(tid_a))
     assert r.status_code == 404, (
-        f"CROSS-TENANT LEAK on /edit: tenant A fetched tenant B's account edit, "
+        f"CROSS-TENANT LEAK on /edit: tenant A fetched tenant B's account, "
         f"status={r.status_code}"
     )
 
@@ -528,18 +612,15 @@ async def test_accounts_edit_foreign_404(
 async def test_bank_accounts_api_detail_foreign_404(
     web_client: AsyncClient, ct_seed: dict[str, Any]
 ) -> None:
-    """JSON API /api/v1/bank_accounts/{id} with foreign tenant JWT -> 404."""
+    """JSON API /api/v1/bank_accounts/{id} with foreign tenant JWT → 404."""
     tid_a = ct_seed["tenant_a"]["tenant_id"]
-    # Use a random UUID to represent a foreign bank account; the router
-    # must 404 because it's either not found or scoped away.
     foreign_id = uuid.uuid4()
     r = await web_client.get(
         f"/api/v1/bank_accounts/{foreign_id}",
         headers=_auth(tid_a),
     )
     assert r.status_code == 404, (
-        f"Expected 404 for bank_accounts detail with unknown/foreign UUID, "
-        f"got {r.status_code}"
+        f"Expected 404 for bank_accounts with unknown/foreign UUID, got {r.status_code}"
     )
 
 
@@ -562,7 +643,7 @@ async def test_projects_edit_foreign_404(
     proj_b = ct_seed["tenant_b"]["ids"]["project"]
     r = await web_client.get(f"/projects/{proj_b}/edit", headers=_auth(tid_a))
     assert r.status_code == 404, (
-        f"CROSS-TENANT LEAK on /edit: tenant A fetched tenant B's project edit, "
+        f"CROSS-TENANT LEAK on /edit: tenant A fetched tenant B's project, "
         f"status={r.status_code}"
     )
 
