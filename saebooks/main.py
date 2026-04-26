@@ -3,6 +3,7 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
@@ -141,6 +142,23 @@ def create_app() -> FastAPI:
     # from the Authentik forward-auth middleware above.
     app.include_router(api_v1_router)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+    # Override the OpenAPI schema generator to strip /admin/* paths from
+    # the published spec.  The routes still exist and are enforced by
+    # require_staff() / require_role() — they just don't advertise
+    # themselves as attack targets to unauthenticated spec readers.
+    _original_openapi = app.openapi
+
+    def _filtered_openapi() -> dict[str, Any]:
+        schema = _original_openapi()
+        schema["paths"] = {
+            path: item
+            for path, item in schema.get("paths", {}).items()
+            if not path.startswith("/admin/")
+        }
+        return schema
+
+    app.openapi = _filtered_openapi  # type: ignore[method-assign]
 
     # Prometheus /metrics + per-request latency histogram. Install last
     # so the middleware sits outside every router + mount, capturing
