@@ -23,6 +23,7 @@ knows the id.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import date
 from typing import Any
@@ -43,9 +44,9 @@ from saebooks.api.v1.schemas import (
     JournalEntryUpdate,
 )
 from saebooks.models.company import Company
-from saebooks.models.idempotency_key import IdempotencyKey
 from saebooks.models.journal import EntryStatus
 from saebooks.services import journal_entries as svc
+from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 
 router = APIRouter(
     prefix="/journal_entries",
@@ -85,28 +86,11 @@ def _parse_if_match(header: str | None) -> int | None:
         raise HTTPException(400, f"If-Match must be an integer version, got '{header}'") from exc
 
 
-def _parse_idempotency_key(header: str | None) -> UUID | None:
+def _parse_idempotency_key(header: str | None) -> str | None:
+    """Return the raw idempotency key string, or None if absent."""
     if header is None or not header.strip():
         return None
-    try:
-        return UUID(header.strip())
-    except ValueError as exc:
-        raise HTTPException(400, "X-Idempotency-Key must be a UUID") from exc
-
-
-async def _idempotent_replay(session: AsyncSession, key: UUID) -> JSONResponse | None:
-    existing = await session.get(IdempotencyKey, key)
-    if existing is None:
-        return None
-    return JSONResponse(content=existing.response_body, status_code=existing.response_status)
-
-
-async def _remember_idempotent(
-    session: AsyncSession, key: UUID, body: dict[str, Any], status_code: int
-) -> None:
-    row = IdempotencyKey(key=key, response_body=body, response_status=status_code)
-    session.add(row)
-    await session.flush()
+    return header.strip()
 
 
 def _dump(entry: Any) -> dict[str, Any]:
@@ -349,9 +333,19 @@ async def post_journal_entry(
     tenant_id = resolve_tenant_id(request)
 
     if idem_key is not None:
-        cached = await _idempotent_replay(session, idem_key)
-        if cached is not None:
-            return cached
+        raw_body = await request.body()
+        body_sha256 = hashlib.sha256(raw_body).hexdigest()
+        claim = await claim_or_fetch(session, idem_key, tenant_id, body_sha256)
+        if claim.status == ClaimStatus.CONFLICT:
+            return JSONResponse(
+                {"code": "idempotency_key_conflict", "message": "X-Idempotency-Key reused with a different request body"},
+                status_code=422,
+            )
+        if claim.status == ClaimStatus.REPLAY:
+            return JSONResponse(
+                content=json.loads(claim.response_body) if claim.response_body else {},
+                status_code=claim.response_status or 200,
+            )
 
     if await svc.get(session, entry_id, tenant_id=tenant_id) is None:
         raise HTTPException(404, "Journal entry not found")
@@ -377,7 +371,7 @@ async def post_journal_entry(
 
     body = _dump(entry)
     if idem_key is not None:
-        await _remember_idempotent(session, idem_key, body, 200)
+        await store_response(session, idem_key, 200, json.dumps(body).encode())
         await session.commit()
     return JSONResponse(body, status_code=200)
 
@@ -418,9 +412,19 @@ async def reverse_journal_entry(
     tenant_id = resolve_tenant_id(request)
 
     if idem_key is not None:
-        cached = await _idempotent_replay(session, idem_key)
-        if cached is not None:
-            return cached
+        raw_body = await request.body()
+        body_sha256 = hashlib.sha256(raw_body).hexdigest()
+        claim = await claim_or_fetch(session, idem_key, tenant_id, body_sha256)
+        if claim.status == ClaimStatus.CONFLICT:
+            return JSONResponse(
+                {"code": "idempotency_key_conflict", "message": "X-Idempotency-Key reused with a different request body"},
+                status_code=422,
+            )
+        if claim.status == ClaimStatus.REPLAY:
+            return JSONResponse(
+                content=json.loads(claim.response_body) if claim.response_body else {},
+                status_code=claim.response_status or 201,
+            )
 
     if await svc.get(session, entry_id, tenant_id=tenant_id) is None:
         raise HTTPException(404, "Journal entry not found")
@@ -446,6 +450,6 @@ async def reverse_journal_entry(
 
     body = _dump(reversal)
     if idem_key is not None:
-        await _remember_idempotent(session, idem_key, body, 201)
+        await store_response(session, idem_key, 201, json.dumps(body).encode())
         await session.commit()
     return JSONResponse(body, status_code=201)
