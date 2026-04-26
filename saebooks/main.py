@@ -13,6 +13,7 @@ from saebooks.api.v1 import router as api_v1_router
 from saebooks.config import settings
 from saebooks.grpc_server import serve as grpc_serve
 from saebooks.middleware.auth import ForwardAuthMiddleware
+from saebooks.middleware.request_id import RequestIdMiddleware
 from saebooks.routers import (
     accounts,
     admin,
@@ -84,6 +85,10 @@ def create_app() -> FastAPI:
         description="Self-hosted double-entry accounting",
         lifespan=lifespan,
     )
+    # RequestIdMiddleware generates / propagates X-Request-Id on every
+    # request. Register before ForwardAuthMiddleware so the id is available
+    # to all downstream middleware and handlers.
+    app.add_middleware(RequestIdMiddleware)
     # ForwardAuthMiddleware reads Authentik's Remote-User header (set by
     # Caddy forward-auth) and stamps request.state.user / .role. It's a
     # no-op on /healthz, /metrics, /static/, /webhooks/, /favicon.ico so
