@@ -24,9 +24,18 @@ changes:
 * Every handler accepts a single ``Depends(get_session)`` session
   with ``app.current_tenant`` set, so the FORCE-RLS policy gates
   every query in the handler.
+
+Idempotency migration (audit-trail #10)
+----------------------------------------
+Replaced the race-unsafe ``_idempotent_replay`` / ``_remember_idempotent``
+helpers (against legacy ``idempotency_keys`` table) with the race-safe
+``claim_or_fetch`` / ``store_response`` service (``idempotency_records``
+table).  SHA-256 of the raw request body is passed so conflicting bodies
+on the same key return HTTP 422 per RFC 8417 §2.1.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any
 from uuid import UUID
@@ -47,8 +56,8 @@ from saebooks.api.v1.schemas import (
 )
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
-from saebooks.models.idempotency_key import IdempotencyKey
 from saebooks.services import contacts as svc
+from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 
 router = APIRouter(
     prefix="/contacts",
@@ -95,42 +104,11 @@ def _parse_if_match(header: str | None) -> int | None:
         raise HTTPException(400, f"If-Match must be an integer version, got '{header}'") from exc
 
 
-def _parse_idempotency_key(header: str | None) -> UUID | None:
+def _parse_idempotency_key(header: str | None) -> str | None:
+    """Return the raw idempotency key string, or None if absent."""
     if header is None or not header.strip():
         return None
-    try:
-        return UUID(header.strip())
-    except ValueError as exc:
-        raise HTTPException(400, "X-Idempotency-Key must be a UUID") from exc
-
-
-async def _idempotent_replay(
-    session: AsyncSession, key: UUID
-) -> JSONResponse | None:
-    """Return the cached response if the idempotency key has already been used."""
-    existing = await session.get(IdempotencyKey, key)
-    if existing is None:
-        return None
-    return JSONResponse(
-        content=existing.response_body,
-        status_code=existing.response_status,
-    )
-
-
-async def _remember_idempotent(
-    session: AsyncSession,
-    key: UUID,
-    body: dict[str, Any],
-    status_code: int,
-) -> None:
-    """Record this response under ``key`` so future retries replay it."""
-    row = IdempotencyKey(
-        key=key,
-        response_body=body,
-        response_status=status_code,
-    )
-    session.add(row)
-    await session.flush()
+    return header.strip()
 
 
 def _dump(contact: Contact) -> dict[str, Any]:
@@ -221,10 +199,22 @@ async def create_contact(
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
     key = _parse_idempotency_key(idempotency_key)
+
     if key is not None:
-        replay = await _idempotent_replay(session, key)
-        if replay is not None:
-            return replay
+        raw_body = await request.body()
+        body_sha256 = hashlib.sha256(raw_body).hexdigest()
+        claim = await claim_or_fetch(session, key, tenant_id, body_sha256)
+        if claim.status == ClaimStatus.CONFLICT:
+            return JSONResponse(
+                {"code": "idempotency_key_conflict", "message": "X-Idempotency-Key reused with a different request body"},
+                status_code=422,
+            )
+        if claim.status == ClaimStatus.REPLAY:
+            return JSONResponse(
+                content=json.loads(claim.response_body) if claim.response_body else {},
+                status_code=claim.response_status or 201,
+            )
+        # CLAIMED — fall through to write
 
     company_id = await _first_company_id(session, tenant_id)
     try:
@@ -243,7 +233,7 @@ async def create_contact(
     await session.refresh(contact)
     body = _dump(contact)
     if key is not None:
-        await _remember_idempotent(session, key, body, 201)
+        await store_response(session, key, 201, json.dumps(body).encode())
         await session.commit()
     return JSONResponse(body, status_code=201)
 
@@ -276,9 +266,19 @@ async def update_contact(
     tenant_id = resolve_tenant_id(request)
 
     if key is not None:
-        replay = await _idempotent_replay(session, key)
-        if replay is not None:
-            return replay
+        raw_body = await request.body()
+        body_sha256 = hashlib.sha256(raw_body).hexdigest()
+        claim = await claim_or_fetch(session, key, tenant_id, body_sha256)
+        if claim.status == ClaimStatus.CONFLICT:
+            return JSONResponse(
+                {"code": "idempotency_key_conflict", "message": "X-Idempotency-Key reused with a different request body"},
+                status_code=422,
+            )
+        if claim.status == ClaimStatus.REPLAY:
+            return JSONResponse(
+                content=json.loads(claim.response_body) if claim.response_body else {},
+                status_code=claim.response_status or 200,
+            )
 
     # Belt-and-braces: check the contact exists and is owned by this
     # tenant before we attempt the update. RLS already enforces this,
@@ -302,7 +302,7 @@ async def update_contact(
             current=ContactOut.model_validate(exc.current),
         ).model_dump(mode="json")
         if key is not None:
-            await _remember_idempotent(session, key, body, 409)
+            await store_response(session, key, 409, json.dumps(body).encode())
             await session.commit()
         return JSONResponse(body, status_code=409)
     except ValueError as exc:
@@ -314,7 +314,7 @@ async def update_contact(
     await session.refresh(contact)
     body = _dump(contact)
     if key is not None:
-        await _remember_idempotent(session, key, body, 200)
+        await store_response(session, key, 200, json.dumps(body).encode())
         await session.commit()
     return JSONResponse(body, status_code=200)
 
@@ -346,9 +346,19 @@ async def archive_contact(
     tenant_id = resolve_tenant_id(request)
 
     if key is not None:
-        replay = await _idempotent_replay(session, key)
-        if replay is not None:
-            return replay
+        raw_body = await request.body()
+        body_sha256 = hashlib.sha256(raw_body).hexdigest()
+        claim = await claim_or_fetch(session, key, tenant_id, body_sha256)
+        if claim.status == ClaimStatus.CONFLICT:
+            return JSONResponse(
+                {"code": "idempotency_key_conflict", "message": "X-Idempotency-Key reused with a different request body"},
+                status_code=422,
+            )
+        if claim.status == ClaimStatus.REPLAY:
+            return JSONResponse(
+                content=json.loads(claim.response_body) if claim.response_body else {},
+                status_code=claim.response_status or 204,
+            )
 
     if await svc.get(session, contact_id, tenant_id=tenant_id) is None:
         raise HTTPException(404, "Contact not found")
@@ -367,12 +377,13 @@ async def archive_contact(
             current=ContactOut.model_validate(exc.current),
         ).model_dump(mode="json")
         if key is not None:
-            await _remember_idempotent(session, key, body, 409)
+            await store_response(session, key, 409, json.dumps(body).encode())
             await session.commit()
         return JSONResponse(body, status_code=409)
     if contact is None:
         raise HTTPException(404, "Contact not found")
     if key is not None:
-        await _remember_idempotent(session, key, {"archived": str(contact.id)}, 204)
+        archived_body = json.dumps({"archived": str(contact.id)}).encode()
+        await store_response(session, key, 204, archived_body)
         await session.commit()
     return Response(status_code=204)
