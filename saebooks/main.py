@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from saebooks.api.errors import register_handlers
 from saebooks.api.v1 import router as api_v1_router
 from saebooks.config import settings
 from saebooks.grpc_server import serve as grpc_serve
@@ -164,6 +165,11 @@ def create_app() -> FastAPI:
         return schema
 
     app.openapi = _filtered_openapi  # type: ignore[method-assign]
+
+    # RFC 7807 Problem Details — convert HTTPException and validation errors
+    # to application/problem+json when the caller sets Accept: application/json.
+    # HTML routes and browser callers are unaffected.
+    register_handlers(app)
 
     # Prometheus /metrics + per-request latency histogram. Install last
     # so the middleware sits outside every router + mount, capturing
