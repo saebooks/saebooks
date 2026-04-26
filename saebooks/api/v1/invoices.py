@@ -20,6 +20,7 @@ is scoped by the request tenant.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import date
 from typing import Any
@@ -44,6 +45,7 @@ from saebooks.models.company import Company
 from saebooks.models.invoice import InvoiceStatus
 from saebooks.services import invoices as svc
 from saebooks.services.features import FLAG_STRIPE_INTEGRATION, require_feature
+from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 from saebooks.services.integrations import StripeError, StripeNotConfiguredError
 from saebooks.services.integrations.stripe_links import create_payment_link
 
@@ -83,6 +85,13 @@ def _parse_if_match(header: str | None) -> int | None:
         return int(cleaned)
     except ValueError as exc:
         raise HTTPException(400, f"If-Match must be an integer version, got '{header}'") from exc
+
+
+def _parse_idempotency_key(header: str | None) -> str | None:
+    """Return the raw idempotency key string, or None if absent."""
+    if header is None or not header.strip():
+        return None
+    return header.strip()
 
 
 def _dump(inv: Any) -> dict[str, Any]:
@@ -161,10 +170,28 @@ async def get_invoice(
 async def create_invoice(
     payload: InvoiceCreate,
     request: Request,
+    idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
+    key = _parse_idempotency_key(idempotency_key)
+
+    if key is not None:
+        raw_body = await request.body()
+        body_sha256 = hashlib.sha256(raw_body).hexdigest()
+        claim = await claim_or_fetch(session, key, tenant_id, body_sha256)
+        if claim.status == ClaimStatus.CONFLICT:
+            return JSONResponse(
+                {"code": "idempotency_key_conflict", "message": "X-Idempotency-Key reused with a different request body"},
+                status_code=422,
+            )
+        if claim.status == ClaimStatus.REPLAY:
+            return JSONResponse(
+                content=json.loads(claim.response_body) if claim.response_body else {},
+                status_code=claim.response_status or 201,
+            )
+
     company_id = await _first_company_id(session, tenant_id)
     try:
         inv = await svc.api_create(
@@ -184,6 +211,9 @@ async def create_invoice(
         raise HTTPException(422, str(exc)) from exc
 
     body = _dump(inv)
+    if key is not None:
+        await store_response(session, key, 201, json.dumps(body).encode())
+        await session.commit()
     return JSONResponse(body, status_code=201)
 
 
@@ -315,6 +345,7 @@ async def post_invoice(
     invoice_id: UUID,
     request: Request,
     if_match: str | None = Header(default=None, alias="If-Match"),
+    idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
 ) -> Any:
@@ -324,6 +355,23 @@ async def post_invoice(
         raise HTTPException(428, "If-Match header with invoice version is required")
 
     tenant_id = resolve_tenant_id(request)
+    key = _parse_idempotency_key(idempotency_key)
+
+    if key is not None:
+        raw_body = await request.body()
+        body_sha256 = hashlib.sha256(raw_body).hexdigest()
+        claim = await claim_or_fetch(session, key, tenant_id, body_sha256)
+        if claim.status == ClaimStatus.CONFLICT:
+            return JSONResponse(
+                {"code": "idempotency_key_conflict", "message": "X-Idempotency-Key reused with a different request body"},
+                status_code=422,
+            )
+        if claim.status == ClaimStatus.REPLAY:
+            return JSONResponse(
+                content=json.loads(claim.response_body) if claim.response_body else {},
+                status_code=claim.response_status or 200,
+            )
+
     if await svc.api_get(session, invoice_id, tenant_id=tenant_id) is None:
         raise HTTPException(404, "Invoice not found")
 
@@ -340,6 +388,9 @@ async def post_invoice(
             detail="version mismatch",
             current=InvoiceOut.model_validate(exc.current),
         ).model_dump(mode="json")
+        if key is not None:
+            await store_response(session, key, 409, json.dumps(body).encode())
+            await session.commit()
         return JSONResponse(body, status_code=409)
     except (ValueError, svc.InvoiceError) as exc:
         msg = str(exc)
@@ -348,6 +399,9 @@ async def post_invoice(
         raise HTTPException(422, msg) from exc
 
     body = _dump(inv)
+    if key is not None:
+        await store_response(session, key, 200, json.dumps(body).encode())
+        await session.commit()
     return JSONResponse(body, status_code=200)
 
 
@@ -367,6 +421,7 @@ async def void_invoice_transition(
     invoice_id: UUID,
     request: Request,
     if_match: str | None = Header(default=None, alias="If-Match"),
+    idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
 ) -> Any:
@@ -376,6 +431,23 @@ async def void_invoice_transition(
         raise HTTPException(428, "If-Match header with invoice version is required")
 
     tenant_id = resolve_tenant_id(request)
+    key = _parse_idempotency_key(idempotency_key)
+
+    if key is not None:
+        raw_body = await request.body()
+        body_sha256 = hashlib.sha256(raw_body).hexdigest()
+        claim = await claim_or_fetch(session, key, tenant_id, body_sha256)
+        if claim.status == ClaimStatus.CONFLICT:
+            return JSONResponse(
+                {"code": "idempotency_key_conflict", "message": "X-Idempotency-Key reused with a different request body"},
+                status_code=422,
+            )
+        if claim.status == ClaimStatus.REPLAY:
+            return JSONResponse(
+                content=json.loads(claim.response_body) if claim.response_body else {},
+                status_code=claim.response_status or 200,
+            )
+
     if await svc.api_get(session, invoice_id, tenant_id=tenant_id) is None:
         raise HTTPException(404, "Invoice not found")
 
@@ -392,6 +464,9 @@ async def void_invoice_transition(
             detail="version mismatch",
             current=InvoiceOut.model_validate(exc.current),
         ).model_dump(mode="json")
+        if key is not None:
+            await store_response(session, key, 409, json.dumps(body).encode())
+            await session.commit()
         return JSONResponse(body, status_code=409)
     except (ValueError, svc.InvoiceError) as exc:
         msg = str(exc)
@@ -400,6 +475,9 @@ async def void_invoice_transition(
         raise HTTPException(422, msg) from exc
 
     body = _dump(inv)
+    if key is not None:
+        await store_response(session, key, 200, json.dumps(body).encode())
+        await session.commit()
     return JSONResponse(body, status_code=200)
 
 
