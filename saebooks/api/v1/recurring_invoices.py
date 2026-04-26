@@ -18,6 +18,7 @@ on a cadence. This endpoint covers CRUD + listing only — invoice generation
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any
 from uuid import UUID
@@ -39,10 +40,10 @@ from saebooks.api.v1.schemas import (
     RecurringInvoiceUpdate,
 )
 from saebooks.models.company import Company
-from saebooks.models.idempotency_key import IdempotencyKey
 from saebooks.models.recurring_invoice import RecurrenceStatus
 from saebooks.services import recurrence as recurrence_svc
 from saebooks.services import recurring_invoices as svc
+from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 
 router = APIRouter(
     prefix="/recurring_invoices",
@@ -84,28 +85,11 @@ def _parse_if_match(header: str | None) -> int | None:
         ) from exc
 
 
-def _parse_idempotency_key(header: str | None) -> UUID | None:
+def _parse_idempotency_key(header: str | None) -> str | None:
+    """Return the raw idempotency key string, or None if absent."""
     if header is None or not header.strip():
         return None
-    try:
-        return UUID(header.strip())
-    except ValueError as exc:
-        raise HTTPException(400, "X-Idempotency-Key must be a UUID") from exc
-
-
-async def _idempotent_replay(session, key: UUID) -> JSONResponse | None:
-    existing = await session.get(IdempotencyKey, key)
-    if existing is None:
-        return None
-    return JSONResponse(content=existing.response_body, status_code=existing.response_status)
-
-
-async def _remember_idempotent(
-    session, key: UUID, body: dict[str, Any], status_code: int
-) -> None:
-    row = IdempotencyKey(key=key, response_body=body, response_status=status_code)
-    session.add(row)
-    await session.flush()
+    return header.strip()
 
 
 def _dump(ri: Any) -> dict[str, Any]:
@@ -182,12 +166,23 @@ async def create_recurring_invoice(
     session: AsyncSession = Depends(get_session),
 ) -> Any:
     key = _parse_idempotency_key(idempotency_key)
-    if key is not None:
-        replay = await _idempotent_replay(session, key)
-        if replay is not None:
-            return replay
-
     tenant_id = resolve_tenant_id(request)
+
+    if key is not None:
+        raw_body = await request.body()
+        body_sha256 = hashlib.sha256(raw_body).hexdigest()
+        claim = await claim_or_fetch(session, key, tenant_id, body_sha256)
+        if claim.status == ClaimStatus.CONFLICT:
+            return JSONResponse(
+                {"code": "idempotency_key_conflict", "message": "X-Idempotency-Key reused with a different request body"},
+                status_code=422,
+            )
+        if claim.status == ClaimStatus.REPLAY:
+            return JSONResponse(
+                content=json.loads(claim.response_body) if claim.response_body else {},
+                status_code=claim.response_status or 201,
+            )
+
     company_id = await _first_company_id(session, tenant_id)
     try:
         ri = await svc.create(
@@ -213,7 +208,7 @@ async def create_recurring_invoice(
 
     body = _dump(ri)
     if key is not None:
-        await _remember_idempotent(session, key, body, 201)
+        await store_response(session, key, 201, json.dumps(body).encode())
         await session.commit()
     return JSONResponse(body, status_code=201)
 
@@ -250,9 +245,19 @@ async def update_recurring_invoice(
         raise HTTPException(404, "Recurring invoice not found")
 
     if key is not None:
-        replay = await _idempotent_replay(session, key)
-        if replay is not None:
-            return replay
+        raw_body = await request.body()
+        body_sha256 = hashlib.sha256(raw_body).hexdigest()
+        claim = await claim_or_fetch(session, key, tenant_id, body_sha256)
+        if claim.status == ClaimStatus.CONFLICT:
+            return JSONResponse(
+                {"code": "idempotency_key_conflict", "message": "X-Idempotency-Key reused with a different request body"},
+                status_code=422,
+            )
+        if claim.status == ClaimStatus.REPLAY:
+            return JSONResponse(
+                content=json.loads(claim.response_body) if claim.response_body else {},
+                status_code=claim.response_status or 200,
+            )
 
     # Extract lines separately; pass remaining fields as kwargs.
     raw = payload.model_dump(exclude_unset=True)
@@ -287,7 +292,7 @@ async def update_recurring_invoice(
             current=RecurringInvoiceOut.model_validate(exc.current),
         ).model_dump(mode="json")
         if key is not None:
-            await _remember_idempotent(session, key, body, 409)
+            await store_response(session, key, 409, json.dumps(body).encode())
             await session.commit()
         return JSONResponse(body, status_code=409)
     except (ValueError, svc.RecurringInvoiceApiError) as exc:
@@ -298,7 +303,7 @@ async def update_recurring_invoice(
 
     body = _dump(ri)
     if key is not None:
-        await _remember_idempotent(session, key, body, 200)
+        await store_response(session, key, 200, json.dumps(body).encode())
         await session.commit()
     return JSONResponse(body, status_code=200)
 
@@ -530,12 +535,23 @@ async def generate_invoice(
         raise HTTPException(428, "If-Match header with template version is required")
     key = _parse_idempotency_key(idempotency_key)
 
-    if key is not None:
-        replay = await _idempotent_replay(session, key)
-        if replay is not None:
-            return replay
-
     tenant_id = resolve_tenant_id(request)
+
+    if key is not None:
+        raw_body = await request.body()
+        body_sha256 = hashlib.sha256(raw_body).hexdigest()
+        claim = await claim_or_fetch(session, key, tenant_id, body_sha256)
+        if claim.status == ClaimStatus.CONFLICT:
+            return JSONResponse(
+                {"code": "idempotency_key_conflict", "message": "X-Idempotency-Key reused with a different request body"},
+                status_code=422,
+            )
+        if claim.status == ClaimStatus.REPLAY:
+            return JSONResponse(
+                content=json.loads(claim.response_body) if claim.response_body else {},
+                status_code=claim.response_status or 201,
+            )
+
     ri = await svc.get(session, ri_id, tenant_id=tenant_id)
     if ri is None:
         raise HTTPException(404, "Recurring invoice not found")
@@ -546,7 +562,7 @@ async def generate_invoice(
             current=RecurringInvoiceOut.model_validate(ri),
         ).model_dump(mode="json")
         if key is not None:
-            await _remember_idempotent(session, key, body, 409)
+            await store_response(session, key, 409, json.dumps(body).encode())
             await session.commit()
         return JSONResponse(body, status_code=409)
 
@@ -572,7 +588,7 @@ async def generate_invoice(
         "invoice": invoice_body,
     }
     if key is not None:
-        await _remember_idempotent(session, key, body, 201)
+        await store_response(session, key, 201, json.dumps(body).encode())
         await session.commit()
 
     return JSONResponse(body, status_code=201)
