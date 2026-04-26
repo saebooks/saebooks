@@ -29,7 +29,8 @@ The single DB round-trip uses::
     ON CONFLICT (idempotency_key)
     DO UPDATE SET idempotency_key = EXCLUDED.idempotency_key
     RETURNING idempotency_key, tenant_id, body_sha256,
-              response_status, response_body
+              response_status, response_body,
+              (xmax = 0) AS was_inserted
 
 The ``DO UPDATE SET idempotency_key = EXCLUDED.idempotency_key`` is a
 deliberate no-op (the PK cannot change) whose only purpose is to make
@@ -37,23 +38,35 @@ PostgreSQL always fire the RETURNING clause — even on conflict.  Without
 this trick, an ``ON CONFLICT DO NOTHING RETURNING`` returns zero rows on
 conflict and requires a second SELECT to read the existing row.
 
+``(xmax = 0) AS was_inserted`` distinguishes the two cases:
+
+* ``xmax = 0`` → the INSERT branch fired (this transaction owns the fresh
+  row).  The caller gets ``CLAIMED`` and must process the request then
+  call ``store_response``.
+* ``xmax != 0`` → the ON CONFLICT UPDATE branch fired; the row was already
+  present (committed by a prior transaction, or being written by a
+  concurrent transaction that already took the tuple lock).  The caller
+  gets ``REPLAY`` (if the body hash matches and a response is stored) or
+  ``CONFLICT`` (different body hash), or ``IN_FLIGHT`` (same hash, but
+  response not yet stored by the winning writer).
+
 When the first writer inserts successfully, RETURNING gives back its own
-``(response_status=0, response_body=b'')``, which the CLAIMED code path
-recognises as a sentinel meaning "no stored response yet — go process
-your request."
+``(response_status=0, xmax=0)``, which the CLAIMED code path recognises
+as a sentinel meaning "no stored response yet — go process your request."
 
-When a later writer conflicts, RETURNING gives back the *existing* row.
-If ``body_sha256`` matches the caller's hash and ``response_status != 0``
-the response is ready to replay.  If ``body_sha256`` differs the key was
-used with a different body → 422.
+When a later writer conflicts, RETURNING gives back the *existing* row
+with ``xmax != 0``.  If ``body_sha256`` matches and ``response_status
+!= 0`` the response is ready to replay.  If ``body_sha256`` differs the
+key was used with a different body → 422 (CONFLICT).  If ``body_sha256``
+matches but ``response_status == 0`` the winning writer has not committed
+yet → the caller must retry (``IN_FLIGHT``).
 
-Edge case: two concurrent writers both see ``response_status == 0``
-(the first writer hasn't committed yet).  The second writer returns
-``ClaimStatus.REPLAY`` with an empty body, which the caller should
-treat as "in flight — retry later".  In practice the caller will retry
-the whole request (banking clients retry on network failure), and by then
-the first writer has committed; the retry sees the real stored response.
-This is the expected behaviour for an in-flight idempotency window.
+Two concurrent writers on the same key:
+* Writer A INSERTs, takes the tuple lock, returns ``CLAIMED``.
+* Writer B's INSERT blocks at the PostgreSQL level, waiting for A to
+  commit or rollback.  After A commits, B's ON CONFLICT Update fires and
+  B gets back A's row (possibly still pending if A hasn't called
+  ``store_response`` yet, or ready to replay if A has).
 """
 from __future__ import annotations
 
@@ -76,6 +89,10 @@ class ClaimStatus(enum.Enum):
 
     CONFLICT = "conflict"
     """Same key, different body — return HTTP 422."""
+
+    IN_FLIGHT = "in_flight"
+    """Same key, same body, but the first writer has not committed yet.
+    The caller should return HTTP 409 / 503 and ask the client to retry."""
 
 
 @dataclass
@@ -133,7 +150,8 @@ async def claim_or_fetch(
             tenant_id,
             body_sha256,
             response_status,
-            response_body
+            response_body,
+            (xmax = 0) AS was_inserted
         """
     )
     row = (
@@ -149,19 +167,31 @@ async def claim_or_fetch(
         )
     ).mappings().one()
 
+    was_inserted: bool = row["was_inserted"]
     stored_sha256: str = row["body_sha256"]
     stored_status: int = row["response_status"]
     stored_body: bytes = row["response_body"] or b""
 
-    # First writer: RETURNING gives back our own inserted row (pending sentinel).
-    if stored_status == _PENDING_STATUS and stored_sha256 == body_sha256:
+    # First writer: INSERT branch fired (xmax = 0) — this transaction owns
+    # the fresh pending row.  Caller must process the request then call
+    # store_response before committing.
+    if was_inserted:
         return ClaimResult(status=ClaimStatus.CLAIMED)
+
+    # ON CONFLICT branch fired — the row already existed (or was being
+    # written by a concurrent winning transaction).
 
     # Same key, different body — RFC 8417 §2.1.
     if stored_sha256 != body_sha256:
         return ClaimResult(status=ClaimStatus.CONFLICT)
 
-    # Matching key + matching hash → replay the cached response.
+    # Matching key + matching hash but no stored response yet — the first
+    # writer won the INSERT race but has not committed store_response yet.
+    # Caller should ask the client to retry after a short delay.
+    if stored_status == _PENDING_STATUS:
+        return ClaimResult(status=ClaimStatus.IN_FLIGHT)
+
+    # Matching key + matching hash + stored response → replay.
     return ClaimResult(
         status=ClaimStatus.REPLAY,
         response_status=stored_status,

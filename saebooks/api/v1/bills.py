@@ -182,6 +182,12 @@ async def create_bill(
                 {"code": "idempotency_key_conflict", "message": "X-Idempotency-Key reused with a different request body"},
                 status_code=422,
             )
+        if claim.status == ClaimStatus.IN_FLIGHT:
+            return JSONResponse(
+                {"code": "request_in_flight", "message": "A request with this idempotency key is currently being processed. Retry after 1 second."},
+                status_code=503,
+                headers={"Retry-After": "1"},
+            )
         if claim.status == ClaimStatus.REPLAY:
             return JSONResponse(
                 content=json.loads(claim.response_body) if claim.response_body else {},
@@ -361,6 +367,12 @@ async def post_bill(
                 {"code": "idempotency_key_conflict", "message": "X-Idempotency-Key reused with a different request body"},
                 status_code=422,
             )
+        if claim.status == ClaimStatus.IN_FLIGHT:
+            return JSONResponse(
+                {"code": "request_in_flight", "message": "A request with this idempotency key is currently being processed. Retry after 1 second."},
+                status_code=503,
+                headers={"Retry-After": "1"},
+            )
         if claim.status == ClaimStatus.REPLAY:
             return JSONResponse(
                 content=json.loads(claim.response_body) if claim.response_body else {},
@@ -436,6 +448,12 @@ async def void_bill_transition(
             return JSONResponse(
                 {"code": "idempotency_key_conflict", "message": "X-Idempotency-Key reused with a different request body"},
                 status_code=422,
+            )
+        if claim.status == ClaimStatus.IN_FLIGHT:
+            return JSONResponse(
+                {"code": "request_in_flight", "message": "A request with this idempotency key is currently being processed. Retry after 1 second."},
+                status_code=503,
+                headers={"Retry-After": "1"},
             )
         if claim.status == ClaimStatus.REPLAY:
             return JSONResponse(
