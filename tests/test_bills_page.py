@@ -23,12 +23,13 @@ from httpx import AsyncClient
 from sqlalchemy import select
 
 from saebooks.db import AsyncSessionLocal
-from saebooks.models.account import Account
+from saebooks.models.account import Account, AccountType
 from saebooks.models.bill import Bill
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
 from saebooks.models.document_counter import DocumentCounter
 from saebooks.models.tax_code import TaxCode
+from saebooks.models.tenant import Tenant
 from saebooks.services import bills as svc
 
 
@@ -266,3 +267,86 @@ async def test_bill_archive_redirects(client: AsyncClient) -> None:
     r = await client.post(f"/bills/{bill.id}/archive", follow_redirects=False)
     assert r.status_code in (302, 303)
     assert r.headers["location"] == "/bills"
+
+
+@pytest.mark.asyncio
+async def test_bills_create_rejects_cross_tenant_fks(client: AsyncClient) -> None:
+    """CIVL-1: POST /bills must reject contact_id, account_id, tax_code_id
+    that belong to a foreign tenant (cross-tenant write gap on AP lane)."""
+    _cid, own_contact, own_acct, own_gst = await _ctx()
+    today = date(2026, 4, 20)
+
+    # Seed a second isolated tenant/company so each FK is a valid DB row
+    # that belongs to a *different* company from the one the web handler
+    # resolves via _first_company().
+    foreign_tid = uuid.uuid4()
+    foreign_cid = uuid.uuid4()
+    async with AsyncSessionLocal() as session:
+        session.add(Tenant(
+            id=foreign_tid,
+            name=f"ForeignCo-CIVL1-{foreign_tid.hex[:6]}",
+            slug=f"civl1-{foreign_tid.hex[:6]}",
+        ))
+        await session.flush()
+        session.add(Company(
+            id=foreign_cid,
+            tenant_id=foreign_tid,
+            name=f"Foreign Corp CIVL1 {foreign_tid.hex[:6]}",
+        ))
+        await session.flush()
+        f_contact = Contact(
+            company_id=foreign_cid, tenant_id=foreign_tid,
+            name="Foreign Supplier CIVL1",
+            contact_type=ContactType.SUPPLIER,
+        )
+        f_acct = Account(
+            company_id=foreign_cid, tenant_id=foreign_tid,
+            code=f"6-{foreign_tid.hex[:4]}",
+            name="Foreign Expense CIVL1",
+            account_type=AccountType.EXPENSE,
+            is_header=False,
+        )
+        f_tc = TaxCode(
+            company_id=foreign_cid, tenant_id=foreign_tid,
+            code=f"G{foreign_tid.hex[:3]}",
+            name="Foreign GST CIVL1",
+            rate=Decimal("10"),
+        )
+        session.add_all([f_contact, f_acct, f_tc])
+        await session.commit()
+        await session.refresh(f_contact)
+        await session.refresh(f_acct)
+        await session.refresh(f_tc)
+
+    base_data: dict[str, str] = {
+        "contact_id": str(own_contact),
+        "issue_date": today.isoformat(),
+        "due_date": (today + timedelta(days=30)).isoformat(),
+        "line_0_description": "CIVL1 cross-tenant test",
+        "line_0_account_id": str(own_acct),
+        "line_0_tax_code_id": str(own_gst),
+        "line_0_quantity": "1",
+        "line_0_unit_price": "100",
+        "line_0_discount_pct": "0",
+    }
+
+    r = await client.post(
+        "/bills",
+        data={**base_data, "contact_id": str(f_contact.id)},
+        follow_redirects=False,
+    )
+    assert r.status_code == 422, f"foreign contact_id: expected 422, got {r.status_code}"
+
+    r = await client.post(
+        "/bills",
+        data={**base_data, "line_0_account_id": str(f_acct.id)},
+        follow_redirects=False,
+    )
+    assert r.status_code == 422, f"foreign account_id: expected 422, got {r.status_code}"
+
+    r = await client.post(
+        "/bills",
+        data={**base_data, "line_0_tax_code_id": str(f_tc.id)},
+        follow_redirects=False,
+    )
+    assert r.status_code == 422, f"foreign tax_code_id: expected 422, got {r.status_code}"

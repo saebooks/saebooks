@@ -53,6 +53,33 @@ _BILL_ACCOUNT_TYPES = {
 }
 
 
+async def _validate_fks(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    contact_id: uuid.UUID,
+    lines: list[dict[str, object]],
+) -> None:
+    """Reject bill FKs that belong to a foreign tenant (CIVL-1 guard).
+
+    Validates contact_id, each line's account_id, and each line's
+    tax_code_id against company_id before the row is inserted/updated.
+    Raises BillError (→ 422 on the form) if any FK is missing or
+    cross-tenant.
+    """
+    contact = await session.get(Contact, contact_id)
+    if contact is None or contact.company_id != company_id:
+        raise svc.BillError(f"Unknown contact {contact_id}")
+    for line in lines:
+        acct = await session.get(Account, uuid.UUID(str(line["account_id"])))
+        if acct is None or acct.company_id != company_id:
+            raise svc.BillError(f"Unknown account {line['account_id']}")
+        tc_raw = line.get("tax_code_id")
+        if tc_raw is not None:
+            tc = await session.get(TaxCode, uuid.UUID(str(tc_raw)))
+            if tc is None or tc.company_id != company_id:
+                raise svc.BillError(f"Unknown tax code {tc_raw}")
+
+
 async def _first_company() -> Company:
     async with AsyncSessionLocal() as session:
         result = await session.execute(
@@ -271,6 +298,9 @@ async def bills_create(request: Request) -> RedirectResponse | HTMLResponse:
         if not kwargs["lines"]:
             raise svc.BillError("At least one line with description is required")
         async with AsyncSessionLocal() as session:
+            await _validate_fks(
+                session, company.id, kwargs["contact_id"], kwargs["lines"]
+            )
             bill = await svc.create_draft(session, company_id=company.id, **kwargs)
     except (ValueError, svc.BillError) as exc:
         async with AsyncSessionLocal() as session:
@@ -372,18 +402,22 @@ async def bills_update(
     tenant_id = resolve_tenant_id(request)
     form = dict(await request.form())
     try:
+        contact_id = uuid.UUID(str(form["contact_id"]))
+        lines = _parse_lines_from_form(form)
         async with AsyncSessionLocal() as session:
+            existing = await svc.get(session, bill_id, tenant_id=tenant_id)
+            await _validate_fks(session, existing.company_id, contact_id, lines)
             await svc.update_draft(
                 session,
                 bill_id,
                 tenant_id=tenant_id,
-                contact_id=uuid.UUID(str(form["contact_id"])),
+                contact_id=contact_id,
                 issue_date=_parse_date(str(form["issue_date"]), "issue_date"),
                 due_date=_parse_date(str(form["due_date"]), "due_date"),
                 supplier_reference=str(form.get("supplier_reference") or "").strip()
                 or None,
                 notes=str(form.get("notes") or "").strip() or None,
-                lines=_parse_lines_from_form(form),
+                lines=lines,
             )
     except (ValueError, svc.BillError) as exc:
         async with AsyncSessionLocal() as session:
