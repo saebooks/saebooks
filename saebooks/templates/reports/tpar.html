@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}TPAR — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Taxable Payments Annual Report (TPAR)</h1>
+  <div class="meta">{{ company_name }} — {{ report.from_date }} to {{ report.to_date }}</div>
+</div>
+
+<form class="report-filter" method="get">
+  <label>From <input name="from" type="date" value="{{ from_date }}"></label>
+  <label>To <input name="to" type="date" value="{{ to_date }}"></label>
+  <button type="submit" class="btn-secondary">Run</button>
+</form>
+
+<p class="dim" style="margin-bottom:1rem">
+  Lists all POSTED bills to contacts flagged as TPAR sub-contractors in the period.
+  Flag a contact as a TPAR sub-contractor in <a href="/contacts">Contacts → Edit</a>.
+</p>
+
+{% if report.payees %}
+<table class="report-table">
+  <thead>
+    <tr>
+      <th>Payee</th>
+      <th>ABN</th>
+      <th class="num">Gross (excl. GST)</th>
+      <th class="num">GST</th>
+      <th class="num">Total (incl. GST)</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for p in report.payees %}
+    <tr>
+      <td><a href="/contacts/{{ p.contact_id }}">{{ p.contact_name }}</a></td>
+      <td>{{ p.abn or '— no ABN —' }}</td>
+      <td class="num">{{ "%.2f"|format(p.total_excl_gst) }}</td>
+      <td class="num">{{ "%.2f"|format(p.total_gst) }}</td>
+      <td class="num">{{ "%.2f"|format(p.total_incl_gst) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr class="grand-total">
+      <td colspan="2"><strong>Grand total</strong></td>
+      <td class="num"><strong>{{ "%.2f"|format(report.grand_total_excl_gst) }}</strong></td>
+      <td class="num"><strong>{{ "%.2f"|format(report.grand_total_gst) }}</strong></td>
+      <td class="num"><strong>{{ "%.2f"|format(report.grand_total_incl_gst) }}</strong></td>
+    </tr>
+  </tfoot>
+</table>
+{% else %}
+<p class="dim">No TPAR sub-contractor payments in this period. Flag contacts as TPAR sub-contractors in <a href="/contacts">Contacts</a>.</p>
+{% endif %}
+{% endblock %}

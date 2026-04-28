@@ -78,6 +78,7 @@ def _parse_form_fields(
     tfn: str = "",
     share_percentage: str = "",
     default_income_classification: str = "",
+    is_tpar_supplier: str = "off",
 ) -> dict:
     """Normalise form values into kwargs for the service layer."""
     from decimal import Decimal, InvalidOperation
@@ -106,6 +107,7 @@ def _parse_form_fields(
         "tfn": tfn.strip() or None,
         "share_percentage": share_pct,
         "default_income_classification": default_income_classification.strip() or None,
+        "is_tpar_supplier": is_tpar_supplier.lower() in {"1", "true", "on"},
     }
 
 
@@ -210,6 +212,7 @@ async def contacts_create(
     tfn: str = Form(""),
     share_percentage: str = Form(""),
     default_income_classification: str = Form(""),
+    is_tpar_supplier: str = Form("off"),
 ) -> RedirectResponse | HTMLResponse:
     company = await _first_company()
     kwargs = _parse_form_fields(
@@ -217,6 +220,7 @@ async def contacts_create(
         address_line1, address_line2, city, state, postcode,
         notes, default_account_id, default_tax_code,
         tfn, share_percentage, default_income_classification,
+        is_tpar_supplier,
     )
     try:
         async with AsyncSessionLocal() as session:
@@ -444,6 +448,7 @@ async def contacts_update(
     tfn: str = Form(""),
     share_percentage: str = Form(""),
     default_income_classification: str = Form(""),
+    is_tpar_supplier: str = Form("off"),
 ) -> RedirectResponse | HTMLResponse:
     tenant_id = resolve_tenant_id(request)
     kwargs = _parse_form_fields(
@@ -451,6 +456,7 @@ async def contacts_update(
         address_line1, address_line2, city, state, postcode,
         notes, default_account_id, default_tax_code,
         tfn, share_percentage, default_income_classification,
+        is_tpar_supplier,
     )
     try:
         async with AsyncSessionLocal() as session:

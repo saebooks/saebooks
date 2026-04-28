@@ -186,6 +186,7 @@ async def create(
     tfn: str | None = None,
     share_percentage: object = None,
     default_income_classification: str | None = None,
+    is_tpar_supplier: bool = False,
 ) -> Contact:
     """Create a new contact. Validate ABN format if provided (11 digits)."""
     if abn is not None:
@@ -212,6 +213,7 @@ async def create(
         tfn=tfn,
         share_percentage=share_percentage,
         default_income_classification=default_income_classification,
+        is_tpar_supplier=is_tpar_supplier,
         version=1,
     )
     session.add(contact)
@@ -270,6 +272,7 @@ async def update(
         "country", "notes", "default_account_id", "default_tax_code",
         "currency_code",
         "tfn", "share_percentage", "default_income_classification",
+        "is_tpar_supplier",
     }
 
     before = audit_svc.capture(contact)
