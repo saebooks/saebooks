@@ -840,6 +840,8 @@ async def api_update(
     due_date: date | None = None,
     notes: str | None = None,
     reference: str | None = None,
+    currency: str | None = None,
+    fx_rate: Decimal | None = None,
     lines: list[dict] | None = None,
 ) -> Bill:
     """Update a bill draft with optimistic locking + change_log.
@@ -868,8 +870,14 @@ async def api_update(
         bill.notes = notes
     if reference is not None:
         bill.supplier_reference = reference
+    if currency is not None:
+        bill.currency = currency.upper()
+    if fx_rate is not None:
+        bill.fx_rate = fx_rate
     if lines is not None:
         await _replace_lines(session, bill, lines)
+        await _recalc(session, bill)
+    elif fx_rate is not None:
         await _recalc(session, bill)
 
     bill.version = bill.version + 1

@@ -28,11 +28,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
-from saebooks.api.v1.deps import get_session
+from saebooks.api.v1.deps import get_active_company_id, get_session
 from saebooks.api.v1.schemas import (
     BillConflictBody,
     BillCreate,
@@ -41,7 +40,6 @@ from saebooks.api.v1.schemas import (
     BillUpdate,
 )
 from saebooks.models.bill import BillStatus
-from saebooks.models.company import Company
 from saebooks.services import bills as svc
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 
@@ -55,22 +53,6 @@ router = APIRouter(
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
-
-
-async def _first_company_id(session: AsyncSession, tenant_id: UUID) -> UUID:
-    """Return the first active company for the request tenant."""
-    result = await session.execute(
-        select(Company)
-        .where(
-            Company.tenant_id == tenant_id,
-            Company.archived_at.is_(None),
-        )
-        .order_by(Company.created_at)
-    )
-    company = result.scalars().first()
-    if company is None:
-        raise HTTPException(404, "No active company for tenant")
-    return company.id
 
 
 def _parse_if_match(header: str | None) -> int | None:
@@ -109,6 +91,7 @@ async def list_bills(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> BillListOut:
     offset = (page - 1) * page_size
     status_enum: BillStatus | None = None
@@ -119,7 +102,6 @@ async def list_bills(
             raise HTTPException(400, f"Invalid status '{status}'") from exc
 
     tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
     bills, total = await svc.list_active(
         session,
         company_id,
@@ -169,6 +151,7 @@ async def create_bill(
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
     key = _parse_idempotency_key(idempotency_key)
@@ -194,7 +177,6 @@ async def create_bill(
                 status_code=claim.response_status or 201,
             )
 
-    company_id = await _first_company_id(session, tenant_id)
     try:
         bill = await svc.api_create(
             session,
@@ -208,6 +190,7 @@ async def create_bill(
             reference=payload.supplier_reference,
             notes=payload.notes,
             currency=payload.currency,
+            fx_rate=payload.fx_rate,
         )
     except (ValueError, svc.BillError) as exc:
         raise HTTPException(422, str(exc)) from exc
@@ -263,6 +246,8 @@ async def update_bill(
             due_date=payload.due_date,
             notes=payload.notes,
             reference=payload.supplier_reference,
+            currency=payload.currency,
+            fx_rate=payload.fx_rate,
             lines=lines_data,
         )
     except svc.VersionConflict as exc:

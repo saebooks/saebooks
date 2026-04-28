@@ -757,6 +757,7 @@ class BillBase(BaseModel):
     notes: str | None = None
     supplier_reference: str | None = None
     currency: str = Field(default="AUD", min_length=3, max_length=3)
+    fx_rate: Decimal = Field(default=Decimal("1"), gt=Decimal("0"))
 
 
 class BillCreate(BillBase):
@@ -775,6 +776,8 @@ class BillUpdate(BaseModel):
     due_date: date | None = None
     notes: str | None = None
     supplier_reference: str | None = None
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    fx_rate: Decimal | None = Field(default=None, gt=Decimal("0"))
     lines: list[BillLineCreate] | None = None
 
 
