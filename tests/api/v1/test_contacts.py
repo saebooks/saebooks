@@ -181,6 +181,32 @@ async def test_idempotent_replay_returns_cached_body(api_client: AsyncClient) ->
     assert len([c for c in r3.json()["items"] if c["name"] == name]) == 1
 
 
+async def test_currency_code_roundtrip(api_client: AsyncClient) -> None:
+    """currency_code stored and returned on create + patch (gap ETSY-2)."""
+    r = await api_client.post(
+        "/api/v1/contacts",
+        json={"name": _rand_name("JPSupplier"), "contact_type": "SUPPLIER", "country": "Japan", "currency_code": "JPY"},
+    )
+    assert r.status_code == 201, r.text
+    data = r.json()
+    assert data["currency_code"] == "JPY"
+    cid = data["id"]
+
+    # PATCH updates currency
+    r = await api_client.patch(
+        f"/api/v1/contacts/{cid}",
+        json={"currency_code": "USD"},
+        headers={"If-Match": "1"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["currency_code"] == "USD"
+
+    # GET returns updated value
+    r = await api_client.get(f"/api/v1/contacts/{cid}")
+    assert r.status_code == 200
+    assert r.json()["currency_code"] == "USD"
+
+
 async def test_change_log_entries_for_writes(api_client: AsyncClient) -> None:
     async with AsyncSessionLocal() as session:
         before = (
