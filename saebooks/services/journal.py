@@ -74,6 +74,11 @@ async def create_draft(
     if not ref:
         ref = await next_ref(session)
 
+    if len(ref) > 32:
+        raise PostingError(
+            f"Reference must be 32 characters or less (you provided {len(ref)})"
+        )
+
     entry = JournalEntry(
         company_id=company_id,
         ref=ref,
@@ -179,6 +184,10 @@ async def update_draft(
     if description is not None:
         entry.description = description
     if ref is not None:
+        if len(ref) > 32:
+            raise PostingError(
+                f"Reference must be 32 characters or less (you provided {len(ref)})"
+            )
         entry.ref = ref
 
     if lines is not None:

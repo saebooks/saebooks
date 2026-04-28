@@ -429,6 +429,48 @@ async def test_trust_debit_to_liability_allowed() -> None:
         assert posted.status == EntryStatus.POSTED
 
 
+async def test_ref_too_long_on_create_draft_raises_422() -> None:
+    """gap RLES-7: create_draft with ref >32 chars must raise PostingError (not propagate as 500)."""
+    company_id, acct_a, acct_b = await _ctx()
+    long_ref = "A" * 33
+    async with AsyncSessionLocal() as session:
+        with pytest.raises(PostingError, match="32 characters or less"):
+            await svc.create_draft(
+                session,
+                company_id=company_id,
+                entry_date=date(2026, 4, 28),
+                ref=long_ref,
+                lines=[
+                    {"account_id": acct_a, "debit": 100, "credit": 0},
+                    {"account_id": acct_b, "debit": 0, "credit": 100},
+                ],
+            )
+
+
+async def test_ref_too_long_on_update_draft_raises_422() -> None:
+    """gap RLES-7: update_draft with ref >32 chars must raise PostingError."""
+    company_id, acct_a, acct_b = await _ctx()
+    async with AsyncSessionLocal() as session:
+        entry = await svc.create_draft(
+            session,
+            company_id=company_id,
+            entry_date=date(2026, 4, 28),
+            lines=[
+                {"account_id": acct_a, "debit": 50, "credit": 0},
+                {"account_id": acct_b, "debit": 0, "credit": 50},
+            ],
+        )
+        entry_id = entry.id
+
+    async with AsyncSessionLocal() as session:
+        with pytest.raises(PostingError, match="32 characters or less"):
+            await svc.update_draft(
+                session,
+                entry_id,
+                ref="B" * 33,
+            )
+
+
 async def test_cross_tenant_account_rejected_on_create_draft() -> None:
     """create_draft must reject line accounts from a foreign tenant (gap PRTR-1)."""
     company_id, acct_a, _acct_b = await _ctx()
