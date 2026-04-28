@@ -209,6 +209,20 @@ class CompanyUpdate(BaseModel):
     audit_mode: str | None = None
 
 
+class CompanyCreate(BaseModel):
+    """POST body for creating a new company."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str = Field(min_length=1, max_length=255)
+    legal_name: str | None = None
+    trading_name: str | None = None
+    abn: str | None = None
+    acn: str | None = None
+    base_currency: str = Field(default="AUD", min_length=3, max_length=3)
+    fin_year_start_month: int = Field(default=7, ge=1, le=12)
+
+
 class CompanyConflictBody(BaseModel):
     detail: str
     current: CompanyOut
@@ -591,6 +605,8 @@ class InvoiceLineOut(BaseModel):
     line_total: Decimal
     project_id: uuid.UUID | None = None
     item_id: uuid.UUID | None = None
+    service_start_date: date | None = None
+    service_end_date: date | None = None
 
 
 class InvoiceLineCreate(BaseModel):
@@ -604,6 +620,8 @@ class InvoiceLineCreate(BaseModel):
     discount_pct: Decimal = Decimal("0")
     project_id: uuid.UUID | None = None
     item_id: uuid.UUID | None = None
+    service_start_date: date | None = None
+    service_end_date: date | None = None
 
 
 class InvoiceBase(BaseModel):

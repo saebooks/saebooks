@@ -152,6 +152,8 @@ def _parse_lines_from_form(form: dict[str, Any]) -> list[dict[str, object]]:
         desc = (raw.get("description") or "").strip()
         if not desc:
             continue
+        ssd_raw = (raw.get("service_start_date") or "").strip()
+        sed_raw = (raw.get("service_end_date") or "").strip()
         lines.append(
             {
                 "description": desc,
@@ -165,6 +167,8 @@ def _parse_lines_from_form(form: dict[str, Any]) -> list[dict[str, object]]:
                 "project_id": uuid.UUID(raw["project_id"])
                 if raw.get("project_id")
                 else None,
+                "service_start_date": ssd_raw or None,
+                "service_end_date": sed_raw or None,
             }
         )
     return lines

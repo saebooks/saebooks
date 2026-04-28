@@ -38,6 +38,7 @@ from saebooks.services import change_log as change_log_svc
 from saebooks.services import items as items_svc
 from saebooks.services import journal as journal_svc
 from saebooks.services import numbering
+from saebooks.services import settings as settings_svc
 
 _TWOPLACES = Decimal("0.01")
 
@@ -65,6 +66,8 @@ class _LineInput:
     discount_pct: Decimal
     project_id: uuid.UUID | None
     item_id: uuid.UUID | None
+    service_start_date: date | None = None
+    service_end_date: date | None = None
 
 
 def _compute_line_totals(
@@ -173,6 +176,17 @@ async def _replace_lines(
                 raise InvoiceError(f"Unknown item {item_id}")
             account_id = item.income_account_id
 
+        ssd = raw.get("service_start_date")
+        sed = raw.get("service_end_date")
+        service_start = (
+            date.fromisoformat(str(ssd)) if isinstance(ssd, str) and ssd
+            else ssd if isinstance(ssd, date) else None
+        )
+        service_end = (
+            date.fromisoformat(str(sed)) if isinstance(sed, str) and sed
+            else sed if isinstance(sed, date) else None
+        )
+
         line_input = _LineInput(
             description=str(raw["description"]),
             account_id=account_id,
@@ -182,6 +196,8 @@ async def _replace_lines(
             discount_pct=Decimal(str(raw.get("discount_pct", 0))),
             project_id=project_id if isinstance(project_id, uuid.UUID) else None,
             item_id=item_id if isinstance(item_id, uuid.UUID) else None,
+            service_start_date=service_start,
+            service_end_date=service_end,
         )
         tax_rate = await _resolve_tax_rate(session, line_input.tax_code_id)
         subtotal, tax, total = _compute_line_totals(line_input, tax_rate)
@@ -200,6 +216,8 @@ async def _replace_lines(
                 line_total=total,
                 project_id=line_input.project_id,
                 item_id=line_input.item_id,
+                service_start_date=line_input.service_start_date,
+                service_end_date=line_input.service_end_date,
             )
         )
     await session.flush()
@@ -359,6 +377,43 @@ async def _get_ar_account(
     return acct
 
 
+async def _get_unearned_income_account(
+    session: AsyncSession, company_id: uuid.UUID
+) -> Account | None:
+    result = await session.execute(
+        select(Account).where(
+            Account.company_id == company_id,
+            Account.code == "2-1760",
+            Account.archived_at.is_(None),
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def _get_gst_collected_account(
+    session: AsyncSession, company_id: uuid.UUID
+) -> Account | None:
+    code = await settings_svc.get(session, "gst_collected_account_code", "")
+    if not code:
+        return None
+    result = await session.execute(
+        select(Account).where(
+            Account.company_id == company_id,
+            Account.code == str(code),
+            Account.archived_at.is_(None),
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+def _is_deferred_line(line: InvoiceLine) -> bool:
+    """True when a line's service period spans more than one calendar month."""
+    if line.service_start_date is None or line.service_end_date is None:
+        return False
+    s, e = line.service_start_date, line.service_end_date
+    return (s.year, s.month) != (e.year, e.month)
+
+
 async def post_invoice(
     session: AsyncSession,
     invoice_id: uuid.UUID,
@@ -384,6 +439,11 @@ async def post_invoice(
 
     ar_account = await _get_ar_account(session, inv.company_id)
 
+    # Deferred-revenue: look up Unearned Income (2-1760) and GST Collected
+    # once per invoice so we don't hit the DB for every deferred line.
+    unearned_acct = await _get_unearned_income_account(session, inv.company_id)
+    gst_collected_acct = await _get_gst_collected_account(session, inv.company_id)
+
     # Post the journal in base currency. For AUD-only installs
     # ``fx_rate`` is 1 and base_* equal their unscaled counterparts, so
     # the math is identical to the pre-FX shape. For foreign-currency
@@ -406,22 +466,51 @@ async def post_invoice(
     # For item lines we also issue stock (which reads WAC) and append
     # the paired Dr COGS / Cr Inventory lines at WAC — the sale line
     # stays at sale price, the cost line moves at cost.
+    # Deferred-revenue lines: Cr Unearned Income instead of the income
+    # account; GST Collected is added explicitly because the auto-poster
+    # only fires for INCOME/OTHER_INCOME account types, not LIABILITY.
     for line in inv.lines:
         line_base_subtotal = _q2(line.line_subtotal * rate)
         line_base_tax = (
             _q2(line.line_tax * rate) if line.line_tax > 0 else None
         )
-        journal_lines.append(
-            {
-                "account_id": line.account_id,
-                "description": f"{inv.number}: {line.description}",
-                "debit": Decimal("0"),
-                "credit": line_base_subtotal,
-                "tax_code_id": line.tax_code_id,
-                "gst_amount": line_base_tax,
-                "project_id": line.project_id,
-            }
-        )
+        deferred = _is_deferred_line(line) and unearned_acct is not None
+        if deferred:
+            # Cr Unearned Income — no tax fields so auto-poster skips it
+            journal_lines.append(
+                {
+                    "account_id": unearned_acct.id,  # type: ignore[union-attr]
+                    "description": (
+                        f"{inv.number}: {line.description} "
+                        f"(deferred {line.service_start_date} – {line.service_end_date})"
+                    ),
+                    "debit": Decimal("0"),
+                    "credit": line_base_subtotal,
+                    "project_id": line.project_id,
+                }
+            )
+            # Explicit Cr GST Collected (auto-poster won't fire for liability acct)
+            if line_base_tax and gst_collected_acct is not None:
+                journal_lines.append(
+                    {
+                        "account_id": gst_collected_acct.id,
+                        "description": f"GST on {inv.number}: {line.description}",
+                        "debit": Decimal("0"),
+                        "credit": line_base_tax,
+                    }
+                )
+        else:
+            journal_lines.append(
+                {
+                    "account_id": line.account_id,
+                    "description": f"{inv.number}: {line.description}",
+                    "debit": Decimal("0"),
+                    "credit": line_base_subtotal,
+                    "tax_code_id": line.tax_code_id,
+                    "gst_amount": line_base_tax,
+                    "project_id": line.project_id,
+                }
+            )
         # Inventory: Dr COGS / Cr Inventory at WAC. issue_stock also
         # decrements on_hand_qty + raises if over-issuing. Runs inside
         # the same transaction as the journal post, so a raise here
