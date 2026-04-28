@@ -2195,3 +2195,21 @@ class BankRuleApplyOut(BaseModel):
     """Response body for POST /bank_rules/apply and POST /bank_rules/{id}/apply."""
 
     applied: int
+
+
+class YTDTurnoverReport(BaseModel):
+    """YTD gross turnover and GST registration threshold status.
+
+    fy_start / fy_end are the Australian financial-year bounds used
+    (1 July - 30 June).  ytd_turnover is the sum of all INCOME and
+    OTHER_INCOME journal credits (net of debits) for posted JEs in that
+    window.  threshold is always 75000.00 (ATO GST registration limit
+    for for-profit entities).  threshold_crossed is true when
+    ytd_turnover >= threshold.
+    """
+
+    fy_start: date
+    fy_end: date
+    ytd_turnover: float
+    threshold: float
+    threshold_crossed: bool

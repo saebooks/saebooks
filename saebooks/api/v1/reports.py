@@ -64,7 +64,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
-from saebooks.api.v1.deps import get_session
+from saebooks.api.v1.deps import get_active_company_id, get_session
 from saebooks.api.v1.schemas import (
     AgedReport,
     BASSummary,
@@ -83,11 +83,11 @@ from saebooks.api.v1.schemas import (
     PnLReport,
     TrialBalanceLine,
     TrialBalanceReport,
+    YTDTurnoverReport,
 )
 from saebooks.models.account import Account, AccountType
 from saebooks.models.bill import Bill, BillStatus
 from saebooks.models.budget import Budget
-from saebooks.models.company import Company
 from saebooks.models.contact import Contact
 from saebooks.models.depreciation_model import DepreciationModel
 from saebooks.models.fixed_asset import FixedAsset
@@ -103,26 +103,27 @@ router = APIRouter(
     dependencies=[Depends(require_bearer)],
 )
 
+_GST_THRESHOLD = Decimal("75000.00")
+
+
+def _current_fy_bounds(today: date | None = None) -> tuple[date, date]:
+    """Return (fy_start, fy_end) for the Australian FY that contains today.
+
+    Australian FY runs 1 July - 30 June.
+    """
+    d = today or date.today()
+    if d.month >= 7:
+        fy_start = date(d.year, 7, 1)
+        fy_end = date(d.year + 1, 6, 30)
+    else:
+        fy_start = date(d.year - 1, 7, 1)
+        fy_end = date(d.year, 6, 30)
+    return fy_start, fy_end
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-async def _first_company_id(session: AsyncSession, tenant_id: UUID) -> UUID:
-    """Return the first active company for the request tenant."""
-    result = await session.execute(
-        select(Company)
-        .where(
-            Company.tenant_id == tenant_id,
-            Company.archived_at.is_(None),
-        )
-        .order_by(Company.created_at)
-    )
-    company = result.scalars().first()
-    if company is None:
-        raise HTTPException(404, "No active company for tenant")
-    return company.id
 
 
 def _build_bucket_labels(bucket_days: list[int]) -> list[str]:
@@ -244,6 +245,7 @@ async def aged_receivables(
     as_of_date: date | None = Query(default=None),
     bucket_days: list[int] = Query(default=[0, 30, 60, 90]),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> AgedReport:
     """Aged receivables as at ``as_of_date`` (default today).
 
@@ -259,7 +261,6 @@ async def aged_receivables(
     labels = _build_bucket_labels(bd)
 
     tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
 
     stmt = (
         select(Invoice, Contact.name)
@@ -292,6 +293,7 @@ async def aged_payables(
     as_of_date: date | None = Query(default=None),
     bucket_days: list[int] = Query(default=[0, 30, 60, 90]),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> AgedReport:
     """Aged payables as at ``as_of_date`` (default today).
 
@@ -306,7 +308,6 @@ async def aged_payables(
     labels = _build_bucket_labels(bd)
 
     tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
 
     stmt = (
         select(Bill, Contact.name)
@@ -346,6 +347,7 @@ async def profit_loss(
     to_date: date = Query(...),
     include_draft: bool = Query(default=False),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> PnLReport:
     """Profit & Loss for a date range.
 
@@ -362,7 +364,6 @@ async def profit_loss(
         statuses.append(EntryStatus.DRAFT)
 
     tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
 
     stmt = (
         select(
@@ -468,6 +469,7 @@ async def balance_sheet(
     request: Request,
     as_of_date: date = Query(...),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> BSReport:
     """Balance sheet as at ``as_of_date``.
 
@@ -488,7 +490,6 @@ async def balance_sheet(
     ``abs(total_assets - total_liabilities - total_equity) < 0.01``.
     """
     tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
 
     stmt = (
         select(
@@ -619,6 +620,7 @@ async def bas_summary(
     from_date: date = Query(...),
     to_date: date = Query(...),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> BASSummary:
     """Australian BAS summary for a date range.
 
@@ -639,7 +641,6 @@ async def bas_summary(
     * G2/G10 are always 0 in v1 (no export or capital acquisition tracking).
     """
     tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
 
     stmt = (
         select(
@@ -725,6 +726,7 @@ async def cashflow(
     from_date: date = Query(...),
     to_date: date = Query(...),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> CashflowStatement:
     """Indirect-method cashflow statement for a date range.
 
@@ -739,7 +741,6 @@ async def cashflow(
     line items (depreciation, AR/AP movement) to the operating section.
     """
     tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
 
     # --- Single GL query for the period covering all account types ---
     stmt = (
@@ -956,6 +957,7 @@ async def depreciation_schedule(
     as_of_date: date | None = Query(default=None),
     method: str | None = Query(default=None),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> DepreciationSchedule:
     """Depreciation schedule for all active (non-disposed, non-archived) assets.
 
@@ -985,7 +987,6 @@ async def depreciation_schedule(
             )
 
     tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
 
     # Build query: non-archived, non-disposed assets for this tenant+company.
     where_clauses = [
@@ -1075,6 +1076,7 @@ async def fx_revaluation(
     as_of_date: date = Query(...),
     base_currency: str = Query(default="AUD"),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> FXRevaluationReport:
     """FX revaluation report as at ``as_of_date``.
 
@@ -1089,7 +1091,6 @@ async def fx_revaluation(
     the operator can confirm no residual exposure.
     """
     tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
 
     # --- POSTED invoices with non-base currency ---
     inv_stmt = (
@@ -1187,6 +1188,7 @@ async def trial_balance(
     as_of_date: date | None = Query(default=None),
     include_zero_balance: bool = Query(default=False),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> TrialBalanceReport:
     """Trial balance as at ``as_of_date`` (default today).
 
@@ -1199,7 +1201,6 @@ async def trial_balance(
     as_of = as_of_date or date.today()
 
     tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
 
     stmt = (
         select(
@@ -1272,6 +1273,7 @@ async def budget_vs_actual(
     year: int = Query(...),
     month: int | None = Query(default=None),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> BudgetVsActualReport:
     """Budget vs actual for a year (or a single month within that year).
 
@@ -1287,7 +1289,6 @@ async def budget_vs_actual(
         raise HTTPException(422, "month must be between 1 and 12")
 
     tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
 
     # --- Actuals ---
     actual_conditions: list[Any] = [
@@ -1424,6 +1425,7 @@ async def pl_by_segment(
     to_date: date = Query(...),
     segment_type: str = Query(default="project"),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> PLBySegmentReport:
     """P&L by segment (project) for a date range.
 
@@ -1445,8 +1447,7 @@ async def pl_by_segment(
             },
         )
 
-    tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
+    resolve_tenant_id(request)
 
     segment_rows = await reports_svc.pl_by_segment(
         session,
@@ -1498,4 +1499,62 @@ async def pl_by_segment(
         to_date=to_date,
         segment_type=segment_type,
         segments=output_segments,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/reports/ytd_turnover
+# ---------------------------------------------------------------------------
+
+
+@router.get("/ytd_turnover", response_model=YTDTurnoverReport)
+async def ytd_turnover(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> YTDTurnoverReport:
+    """YTD gross turnover for the current Australian financial year.
+
+    Sums all INCOME and OTHER_INCOME journal credits (net of debits) for
+    POSTED journal entries whose entry_date falls within the current
+    Australian FY (1 July - 30 June).  Used by the dashboard to display
+    the $75k GST registration threshold banner.
+
+    Income accounts are credit-normal, so turnover = credit - debit for
+    each matching journal line.  The result is always >= 0 (net credits
+    cannot go negative for normal business income).
+    """
+    tenant_id = resolve_tenant_id(request)
+    fy_start, fy_end = _current_fy_bounds()
+    today = date.today()
+    effective_end = min(fy_end, today)
+
+    stmt = (
+        select(
+            func.coalesce(func.sum(JournalLine.credit - JournalLine.debit), 0)
+        )
+        .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+        .join(Account, JournalLine.account_id == Account.id)
+        .where(
+            and_(
+                JournalEntry.company_id == company_id,
+                JournalEntry.tenant_id == tenant_id,
+                JournalEntry.status == EntryStatus.POSTED,
+                JournalEntry.archived_at.is_(None),
+                JournalEntry.entry_date >= fy_start,
+                JournalEntry.entry_date <= effective_end,
+                Account.account_type.in_(_INCOME_TYPES),
+            )
+        )
+    )
+    result = await session.execute(stmt)
+    raw = result.scalar_one()
+    ytd = max(Decimal(str(raw)), Decimal("0"))
+
+    return YTDTurnoverReport(
+        fy_start=fy_start,
+        fy_end=fy_end,
+        ytd_turnover=float(ytd),
+        threshold=float(_GST_THRESHOLD),
+        threshold_crossed=ytd >= _GST_THRESHOLD,
     )
