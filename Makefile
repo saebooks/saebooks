@@ -22,7 +22,7 @@ seed:
 	$(APP) python -m saebooks.seed.load_au_coa
 
 test:
-	$(APP) pytest -q
+	$(APP) pytest -q --asyncio-mode=auto
 
 lint:
 	$(APP) ruff check .
