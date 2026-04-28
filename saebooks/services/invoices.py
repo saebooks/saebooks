@@ -31,6 +31,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy import func
 
 from saebooks.models.account import Account
+from saebooks.models.contact import Contact
 from saebooks.models.invoice import Invoice, InvoiceLine, InvoiceStatus
 from saebooks.models.item import Item
 from saebooks.models.tax_code import TaxCode
@@ -807,6 +808,94 @@ async def api_get(
 
 
 # ---------------------------------------------------------------------------
+# Cross-tenant FK validation (BKPR-1 P0 fix)
+#
+# Mirror of the CIVL-1 fix in services/bills.py. The invoice API must
+# reject any contact_id, account_id, or tax_code_id that belongs to a
+# different tenant before any INSERT or UPDATE. Raises InvoiceError with
+# the message "<entity> not found in current tenant" so the router maps
+# it to HTTP 422, matching the expected contract.
+# ---------------------------------------------------------------------------
+
+
+async def _validate_contact_tenant(
+    session: AsyncSession,
+    contact_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+) -> None:
+    """Raise ``InvoiceError`` if ``contact_id`` does not belong to ``tenant_id``."""
+    result = await session.execute(
+        select(Contact.id).where(
+            Contact.id == contact_id,
+            Contact.tenant_id == tenant_id,
+        )
+    )
+    if result.scalar_one_or_none() is None:
+        raise InvoiceError("contact not found in current tenant")
+
+
+async def _validate_account_tenant(
+    session: AsyncSession,
+    account_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+) -> None:
+    """Raise ``InvoiceError`` if ``account_id`` does not belong to ``tenant_id``."""
+    result = await session.execute(
+        select(Account.id).where(
+            Account.id == account_id,
+            Account.tenant_id == tenant_id,
+        )
+    )
+    if result.scalar_one_or_none() is None:
+        raise InvoiceError("account not found in current tenant")
+
+
+async def _validate_tax_code_tenant(
+    session: AsyncSession,
+    tax_code_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+) -> None:
+    """Raise ``InvoiceError`` if ``tax_code_id`` does not belong to ``tenant_id``."""
+    result = await session.execute(
+        select(TaxCode.id).where(
+            TaxCode.id == tax_code_id,
+            TaxCode.tenant_id == tenant_id,
+        )
+    )
+    if result.scalar_one_or_none() is None:
+        raise InvoiceError("tax_code not found in current tenant")
+
+
+async def _validate_line_fks(
+    session: AsyncSession,
+    lines: list[dict],
+    tenant_id: uuid.UUID,
+) -> None:
+    """Validate every line's ``account_id`` + optional ``tax_code_id``.
+
+    Each id must belong to ``tenant_id``; otherwise ``InvoiceError`` is raised.
+    """
+    for raw in lines:
+        account_raw = raw.get("account_id")
+        if account_raw is not None:
+            account_id = (
+                account_raw
+                if isinstance(account_raw, uuid.UUID)
+                else uuid.UUID(str(account_raw))
+            )
+            await _validate_account_tenant(session, account_id, tenant_id)
+
+        tax_code_raw = raw.get("tax_code_id")
+        if tax_code_raw:
+            tax_code_id = (
+                tax_code_raw
+                if isinstance(tax_code_raw, uuid.UUID)
+                else uuid.UUID(str(tax_code_raw))
+            )
+            await _validate_tax_code_tenant(session, tax_code_id, tenant_id)
+
+
+# ---------------------------------------------------------------------------
 # Write operations
 # ---------------------------------------------------------------------------
 
@@ -827,7 +916,17 @@ async def api_create(
     currency: str = "AUD",
     fx_rate: Decimal | None = None,
 ) -> Invoice:
-    """Create an invoice draft with version=1 and a change_log row."""
+    """Create an invoice draft with version=1 and a change_log row.
+
+    BKPR-1 P0 fix: ``contact_id`` and every line's ``account_id`` /
+    ``tax_code_id`` are validated against ``tenant_id`` before any
+    INSERT. Cross-tenant FK injection raises ``InvoiceError`` (HTTP 422
+    via the router).
+    """
+    await _validate_contact_tenant(session, contact_id, tenant_id)
+    if lines:
+        await _validate_line_fks(session, lines, tenant_id)
+
     inv = Invoice(
         company_id=company_id,
         tenant_id=tenant_id,
@@ -880,7 +979,13 @@ async def api_update(
     payment_terms: str | None = None,
     lines: list[dict] | None = None,
 ) -> Invoice:
-    """Update an invoice draft with optimistic locking + change_log."""
+    """Update an invoice draft with optimistic locking + change_log.
+
+    BKPR-1 P0 fix: when ``contact_id`` or ``lines`` are supplied, every
+    referenced contact / account / tax_code is validated against the
+    invoice's owning ``tenant_id``. Cross-tenant FK injection raises
+    ``InvoiceError`` (HTTP 422 via the router).
+    """
     inv = await _get_with_lines(session, invoice_id)
     if inv is None:
         raise InvoiceError(f"Invoice {invoice_id} not found")
@@ -888,7 +993,10 @@ async def api_update(
         raise VersionConflict(inv)
 
     if contact_id is not None:
+        await _validate_contact_tenant(session, contact_id, inv.tenant_id)
         inv.contact_id = contact_id
+    if lines is not None:
+        await _validate_line_fks(session, lines, inv.tenant_id)
     if issue_date is not None:
         inv.issue_date = issue_date
     if due_date is not None:
