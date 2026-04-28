@@ -15,7 +15,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from saebooks.models.account import Account
+from saebooks.models.account import Account, AccountType
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine, PeriodLock
 from saebooks.services import audit as audit_svc
 from saebooks.services import gst as gst_svc
@@ -226,31 +226,39 @@ async def _check_trust_commingling(
     session: AsyncSession,
     entry: JournalEntry,
 ) -> None:
-    """Raise PostingError if the JE moves funds between trust and non-trust bank accounts.
+    """Raise PostingError for either of two trust-violation patterns.
 
-    Under NSW Property and Stock Agents Act 2002, trust funds must be kept
-    strictly segregated from operating funds. A JE that debits an operating
-    bank account and credits a trust bank account (or vice versa) is a
-    commingling breach. Trust disbursements must go through a dedicated
-    disbursement workflow that enforces the management-fee split.
+    Pattern 1 (RLES-1): the JE moves funds between trust and non-trust bank
+    accounts. Under NSW Property and Stock Agents Act 2002, trust funds must
+    be kept strictly segregated from operating funds. A JE that debits an
+    operating bank account and credits a trust bank account (or vice versa)
+    is a commingling breach.
 
-    Only reconcilable ASSET accounts (bank accounts) are examined; income,
-    expense, and non-reconcilable accounts are ignored.
+    Pattern 2 (RLES-2): the JE debits a trust bank account and credits a
+    revenue/income account. Rent collected on behalf of landlords is trust
+    money — it is never the agency's income. The credit must go to a trust
+    liability account (e.g. Landlord / Owner Trust Liability). This pattern
+    inflates BAS G1 because the revenue account flows into GST turnover
+    while the actual agency revenue is only the management fee.
+
+    Only reconcilable ASSET accounts (bank accounts) are examined for bank
+    classification; income and expense account types are checked by
+    account_type for Pattern 2.
     """
     if not entry.lines:
         return
 
     account_ids = [line.account_id for line in entry.lines]
     result = await session.execute(
-        select(Account.id, Account.is_trust_account, Account.reconcile).where(
+        select(Account.id, Account.is_trust_account, Account.reconcile, Account.account_type).where(
             Account.id.in_(account_ids)
         )
     )
-    rows = {r.id: (r.is_trust_account, r.reconcile) for r in result.all()}
+    rows = {r.id: (r.is_trust_account, r.reconcile, r.account_type) for r in result.all()}
 
-    # Only bank accounts (reconcile=True) are relevant — expense/income lines are ignored.
-    trust_banks = [aid for aid, (is_trust, reconcile) in rows.items() if reconcile and is_trust]
-    non_trust_banks = [aid for aid, (is_trust, reconcile) in rows.items() if reconcile and not is_trust]
+    # Pattern 1: trust bank ↔ operating bank transfer.
+    trust_banks = [aid for aid, (is_trust, reconcile, _t) in rows.items() if reconcile and is_trust]
+    non_trust_banks = [aid for aid, (is_trust, reconcile, _t) in rows.items() if reconcile and not is_trust]
 
     if trust_banks and non_trust_banks:
         raise PostingError(
@@ -259,6 +267,31 @@ async def _check_trust_commingling(
             "the NSW Property and Stock Agents Act 2002. Use a trust disbursement workflow "
             "to transfer funds between trust and operating accounts."
         )
+
+    # Pattern 2: trust bank debited + revenue/income account credited.
+    # Trust money received (e.g. rent) must credit a trust liability, not revenue.
+    trust_bank_debited = any(
+        line.debit > Decimal("0")
+        for line in entry.lines
+        if rows.get(line.account_id, (False, False, None))[0]
+        and rows.get(line.account_id, (False, False, None))[1]
+    )
+    if trust_bank_debited:
+        income_credited = any(
+            line.credit > Decimal("0")
+            for line in entry.lines
+            if rows.get(line.account_id, (False, False, None))[2]
+            in (AccountType.INCOME, AccountType.OTHER_INCOME)
+        )
+        if income_credited:
+            raise PostingError(
+                "This journal entry debits a trust bank account and credits a revenue "
+                "account. Rent and other funds collected in trust on behalf of clients "
+                "are not agency income — the credit must go to a trust liability account "
+                "(e.g. Landlord / Owner Trust Liability, account 2-1780). Only management "
+                "fees and commissions earned by the agency should credit revenue accounts. "
+                "See gap RLES-2."
+            )
 
 
 async def _check_period_lock(

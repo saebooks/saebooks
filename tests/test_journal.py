@@ -334,6 +334,101 @@ async def test_trust_payment_to_expense_allowed() -> None:
         assert posted.status == EntryStatus.POSTED
 
 
+async def test_trust_debit_to_revenue_blocked() -> None:
+    """gap RLES-2: Dr Trust Bank / Cr Revenue must be blocked.
+
+    Rent collected on behalf of landlords is trust money — crediting a
+    revenue account inflates BAS G1 and misrepresents agency turnover.
+    """
+    company_id, _a, _b = await _ctx()
+    uid = str(uuid.uuid4())[:6].upper()
+
+    async with AsyncSessionLocal() as session:
+        trust_bank = Account(
+            company_id=company_id,
+            tenant_id=_DEFAULT_TENANT,
+            code=f"1-TRB{uid}",
+            name="Trust Bank — Rent",
+            account_type=AccountType.ASSET,
+            reconcile=True,
+            is_trust_account=True,
+        )
+        revenue_acct = Account(
+            company_id=company_id,
+            tenant_id=_DEFAULT_TENANT,
+            code=f"4-RNT{uid}",
+            name="Rent Revenue",
+            account_type=AccountType.INCOME,
+            reconcile=False,
+        )
+        session.add(trust_bank)
+        session.add(revenue_acct)
+        await session.commit()
+        tb_id = trust_bank.id
+        rev_id = revenue_acct.id
+
+    async with AsyncSessionLocal() as session:
+        entry = await svc.create_draft(
+            session,
+            company_id=company_id,
+            entry_date=date(2026, 4, 28),
+            description="RLES2-RentToRevenue",
+            lines=[
+                {"account_id": tb_id, "debit": 2400, "credit": 0},
+                {"account_id": rev_id, "debit": 0, "credit": 2400},
+            ],
+        )
+        with pytest.raises(PostingError, match="RLES-2"):
+            await svc.post(session, entry.id, posted_by="test")
+
+
+async def test_trust_debit_to_liability_allowed() -> None:
+    """gap RLES-2 positive control: Dr Trust Bank / Cr Trust Liability must post.
+
+    This is the correct pattern for receiving rent on behalf of a landlord.
+    """
+    company_id, _a, _b = await _ctx()
+    uid = str(uuid.uuid4())[:6].upper()
+
+    async with AsyncSessionLocal() as session:
+        trust_bank = Account(
+            company_id=company_id,
+            tenant_id=_DEFAULT_TENANT,
+            code=f"1-TBL{uid}",
+            name="Trust Bank — Rent",
+            account_type=AccountType.ASSET,
+            reconcile=True,
+            is_trust_account=True,
+        )
+        trust_liability = Account(
+            company_id=company_id,
+            tenant_id=_DEFAULT_TENANT,
+            code=f"2-OTL{uid}",
+            name="Landlord / Owner Trust Liability",
+            account_type=AccountType.LIABILITY,
+            reconcile=False,
+        )
+        session.add(trust_bank)
+        session.add(trust_liability)
+        await session.commit()
+        tb_id = trust_bank.id
+        tl_id = trust_liability.id
+
+    async with AsyncSessionLocal() as session:
+        entry = await svc.create_draft(
+            session,
+            company_id=company_id,
+            entry_date=date(2026, 4, 28),
+            description="RLES2-RentToTrustLiability",
+            lines=[
+                {"account_id": tb_id, "debit": 2400, "credit": 0},
+                {"account_id": tl_id, "debit": 0, "credit": 2400},
+            ],
+        )
+        posted = await svc.post(session, entry.id, posted_by="test")
+        assert posted.status == EntryStatus.POSTED
+
+
 async def test_cross_tenant_account_rejected_on_create_draft() -> None:
     """create_draft must reject line accounts from a foreign tenant (gap PRTR-1)."""
     company_id, acct_a, _acct_b = await _ctx()

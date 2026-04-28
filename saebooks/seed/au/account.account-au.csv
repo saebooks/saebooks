@@ -57,6 +57,7 @@
 "au_21600","21600","Customer Deposits","liability_current","","False","","au_tax_sale_10","","Deposits or advances from customers for goods or services not yet delivered."
 "au_21700","21700","Other Current Liabilities","liability_current","","False","","","","All other current liabilities not included elsewhere, including funds held in trust for a third party."
 "au_21760","21760","Unearned Income from System","liability_current","","False","","","","Revenue or income, excluding grants, received in advance that span more than the current financial year."
+"au_21780","21780","Landlord / Owner Trust Liability","liability_current","","False","","","","Funds collected on behalf of landlords and held in trust by the real estate agency pending disbursement to property owners. Rent receipts should credit this account, not agency revenue."
 "au_21800","21800","Deductions","liability_current","","True","","","","Miscellaneous deductions from employee wages payable to third parties, such as medical insurance."
 "au_22100","22100","Mortgages Payable","liability_non_current","","False","","","","Long-term component of mortgages payable by the organization, not due within 12 months."
 "au_22200","22200","Notes Payable","liability_non_current","","False","","","","Long-term component of loans or notes payable to banks or others, not due within 12 months."
