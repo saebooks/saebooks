@@ -266,10 +266,12 @@ async def invoices_create(request: Request) -> RedirectResponse | HTMLResponse:
     company = await _first_company()
     form = dict(await request.form())
     try:
+        sd_raw = str(form.get("settlement_date") or "").strip()
         kwargs: dict[str, Any] = {
             "contact_id": uuid.UUID(str(form["contact_id"])),
             "issue_date": _parse_date(str(form["issue_date"]), "issue_date"),
             "due_date": _parse_date(str(form["due_date"]), "due_date"),
+            "settlement_date": _parse_date(sd_raw, "settlement_date") if sd_raw else None,
             "notes": str(form.get("notes") or "").strip() or None,
             "payment_terms": str(form.get("payment_terms") or "").strip() or None,
             "lines": _parse_lines_from_form(form),
@@ -399,6 +401,7 @@ async def invoices_update(
     tenant_id = resolve_tenant_id(request)
     form = dict(await request.form())
     try:
+        sd_raw_u = str(form.get("settlement_date") or "").strip()
         async with AsyncSessionLocal() as session:
             await svc.update_draft(
                 session,
@@ -407,6 +410,7 @@ async def invoices_update(
                 contact_id=uuid.UUID(str(form["contact_id"])),
                 issue_date=_parse_date(str(form["issue_date"]), "issue_date"),
                 due_date=_parse_date(str(form["due_date"]), "due_date"),
+                settlement_date=_parse_date(sd_raw_u, "settlement_date") if sd_raw_u else None,
                 notes=str(form.get("notes") or "").strip() or None,
                 payment_terms=str(form.get("payment_terms") or "").strip() or None,
                 lines=_parse_lines_from_form(form),

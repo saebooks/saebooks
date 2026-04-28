@@ -113,6 +113,11 @@ class Invoice(CompanyScoped, Base):
     base_amount_paid: Mapped[Decimal] = mapped_column(
         Numeric(18, 2), nullable=False, default=Decimal("0")
     )
+    # Real-estate commission timing (RLES-6). When set, the GL posting
+    # uses this date as entry_date instead of issue_date so BAS period
+    # attribution reflects unconditional exchange or settlement rather
+    # than the invoice issue date.
+    settlement_date: Mapped[date | None] = mapped_column(Date)
     notes: Mapped[str | None] = mapped_column(Text)
     payment_terms: Mapped[str | None] = mapped_column(Text)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

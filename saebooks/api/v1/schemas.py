@@ -647,6 +647,7 @@ class InvoiceBase(BaseModel):
     contact_id: uuid.UUID
     issue_date: date
     due_date: date
+    settlement_date: date | None = None
     notes: str | None = None
     payment_terms: str | None = None
     currency: str = Field(default="AUD", min_length=3, max_length=3)
@@ -666,6 +667,7 @@ class InvoiceUpdate(BaseModel):
     contact_id: uuid.UUID | None = None
     issue_date: date | None = None
     due_date: date | None = None
+    settlement_date: date | None = None
     notes: str | None = None
     payment_terms: str | None = None
     lines: list[InvoiceLineCreate] | None = None
@@ -683,6 +685,7 @@ class InvoiceOut(BaseModel):
     number: str | None = None
     issue_date: date
     due_date: date
+    settlement_date: date | None = None
     status: str
     subtotal: Decimal
     tax_total: Decimal

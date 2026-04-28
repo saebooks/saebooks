@@ -125,6 +125,7 @@ async def create_draft(
     payment_terms: str | None = None,
     currency: str = "AUD",
     fx_rate: Decimal | None = None,
+    settlement_date: date | None = None,
 ) -> Invoice:
     inv = Invoice(
         company_id=company_id,
@@ -136,6 +137,7 @@ async def create_draft(
         status=InvoiceStatus.DRAFT,
         currency=currency.upper(),
         fx_rate=fx_rate if fx_rate is not None else Decimal("1"),
+        settlement_date=settlement_date,
     )
     session.add(inv)
     await session.flush()
@@ -360,6 +362,7 @@ async def update_draft(
     currency: str | None = None,
     fx_rate: Decimal | None = None,
     tenant_id: uuid.UUID | None = None,
+    settlement_date: date | None = None,
 ) -> Invoice:
     inv = await get(session, invoice_id, tenant_id=tenant_id)
     if inv.status != InvoiceStatus.DRAFT:
@@ -381,6 +384,8 @@ async def update_draft(
         inv.currency = currency.upper()
     if fx_rate is not None:
         inv.fx_rate = fx_rate
+    if settlement_date is not None:
+        inv.settlement_date = settlement_date
     if lines is not None:
         await _replace_lines(session, inv, lines)
     await _recalc(session, inv)
@@ -623,10 +628,14 @@ async def post_invoice(
                     }
                 )
 
+    # Use settlement_date as the GL entry date when set (RLES-6). Real
+    # estate commissions are earned at unconditional exchange/settlement,
+    # which is when BAS attribution should occur, not the issue date.
+    gl_entry_date = inv.settlement_date if inv.settlement_date is not None else inv.issue_date
     entry = await journal_svc.create_draft(
         session,
         company_id=inv.company_id,
-        entry_date=inv.issue_date,
+        entry_date=gl_entry_date,
         description=f"Invoice {inv.number}",
         lines=journal_lines,
     )
@@ -735,6 +744,7 @@ _INV_COLUMNS: tuple[str, ...] = (
     "number",
     "issue_date",
     "due_date",
+    "settlement_date",
     "status",
     "subtotal",
     "tax_total",
@@ -974,6 +984,7 @@ async def api_create(
     payment_terms: str | None = None,
     currency: str = "AUD",
     fx_rate: Decimal | None = None,
+    settlement_date: date | None = None,
 ) -> Invoice:
     """Create an invoice draft with version=1 and a change_log row.
 
@@ -1005,6 +1016,7 @@ async def api_create(
         currency=currency.upper(),
         fx_rate=fx_rate if fx_rate is not None else Decimal("1"),
         version=1,
+        settlement_date=settlement_date,
     )
     session.add(inv)
     await session.flush()
@@ -1044,6 +1056,7 @@ async def api_update(
     notes: str | None = None,
     payment_terms: str | None = None,
     lines: list[dict] | None = None,
+    settlement_date: date | None = None,
 ) -> Invoice:
     """Update an invoice draft with optimistic locking + change_log.
 
@@ -1071,6 +1084,8 @@ async def api_update(
         inv.notes = notes
     if payment_terms is not None:
         inv.payment_terms = payment_terms
+    if settlement_date is not None:
+        inv.settlement_date = settlement_date
     if lines is not None:
         await _replace_lines(session, inv, lines)
         await _recalc(session, inv)

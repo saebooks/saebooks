@@ -621,3 +621,87 @@ async def test_no_retention_uses_standard_ar_path() -> None:
     assert len(debit_lines) == 1
     assert debit_lines[0].debit == Decimal("110000.00")
     assert inv.lines[0].margin_acq_cost is None
+
+
+# ---------------------------------------------------------------------------
+# RLES-6: settlement_date drives BAS period attribution
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_settlement_date_used_as_journal_entry_date() -> None:
+    """GL entry_date uses settlement_date, not issue_date, when set (RLES-6).
+
+    Real estate commissions are earned at unconditional exchange/settlement.
+    BAS period must follow settlement_date so the monthly allocation is correct.
+    """
+    cid, contact, acct, gst, _fre = await _ctx()
+    issue = date(2026, 5, 1)
+    settlement = date(2026, 6, 28)  # ~8 weeks later — different BAS period
+
+    async with AsyncSessionLocal() as session:
+        inv = await svc.create_draft(
+            session,
+            company_id=cid,
+            contact_id=contact,
+            issue_date=issue,
+            due_date=issue + timedelta(days=30),
+            settlement_date=settlement,
+            lines=[
+                {
+                    "description": "Commission — 123 Main St",
+                    "account_id": acct,
+                    "tax_code_id": gst,
+                    "quantity": "1",
+                    "unit_price": "11000",
+                    "discount_pct": "0",
+                }
+            ],
+        )
+    assert inv.settlement_date == settlement
+
+    async with AsyncSessionLocal() as session:
+        posted = await svc.post_invoice(session, inv.id, posted_by="test")
+
+    assert posted.journal_entry_id is not None
+    async with AsyncSessionLocal() as session:
+        je = await session.get(JournalEntry, posted.journal_entry_id)
+        assert je is not None
+        # GL date must be settlement, not issue — this is the BAS attribution date
+        assert je.entry_date == settlement
+        assert je.entry_date != issue
+
+
+@pytest.mark.asyncio
+async def test_no_settlement_date_falls_back_to_issue_date() -> None:
+    """Without settlement_date the GL entry_date is issue_date (existing behaviour)."""
+    cid, contact, acct, gst, _fre = await _ctx()
+    issue = date(2026, 5, 15)
+
+    async with AsyncSessionLocal() as session:
+        inv = await svc.create_draft(
+            session,
+            company_id=cid,
+            contact_id=contact,
+            issue_date=issue,
+            due_date=issue + timedelta(days=30),
+            lines=[
+                {
+                    "description": "Commission — no settlement date",
+                    "account_id": acct,
+                    "tax_code_id": gst,
+                    "quantity": "1",
+                    "unit_price": "5500",
+                    "discount_pct": "0",
+                }
+            ],
+        )
+    assert inv.settlement_date is None
+
+    async with AsyncSessionLocal() as session:
+        posted = await svc.post_invoice(session, inv.id, posted_by="test")
+
+    async with AsyncSessionLocal() as session:
+        je = await session.get(JournalEntry, posted.journal_entry_id)
+        assert je is not None
+        assert je.entry_date == issue

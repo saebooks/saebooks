@@ -21,6 +21,11 @@
       value="{{ invoice.issue_date if invoice else today }}" /></label>
     <label>Due date <input type="date" name="due_date" required
       value="{{ invoice.due_date if invoice else default_due }}" /></label>
+    <label>Settlement / exchange date
+      <input type="date" name="settlement_date"
+        value="{{ invoice.settlement_date if invoice and invoice.settlement_date else '' }}" />
+      <span class="hint">Optional. Real estate: date of unconditional exchange or settlement. Used for BAS period attribution.</span>
+    </label>
     <p class="dim">Next number: <code>{{ preview_number }}</code> (allocated on post)</p>
   </fieldset>
 

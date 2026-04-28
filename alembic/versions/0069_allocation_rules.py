@@ -43,7 +43,7 @@ def upgrade() -> None:
             sa.ForeignKey("accounts.id", ondelete="RESTRICT"),
             nullable=False,
         ),
-        sa.Column("targets", JSONB, nullable=False, server_default="'[]'::jsonb"),
+        sa.Column("targets", JSONB, nullable=False, server_default=sa.text("'[]'::jsonb")),
         sa.Column("is_active", sa.Boolean, nullable=False, server_default="true"),
         sa.Column("version", sa.Integer, nullable=False, server_default="1"),
         sa.Column(

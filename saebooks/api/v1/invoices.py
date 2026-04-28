@@ -28,11 +28,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, Response
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
-from saebooks.api.v1.deps import get_session
+from saebooks.api.v1.deps import get_active_company_id, get_session
 from saebooks.api.v1.schemas import (
     InvoiceConflictBody,
     InvoiceCreate,
@@ -41,7 +40,6 @@ from saebooks.api.v1.schemas import (
     InvoiceUpdate,
 )
 from saebooks.config import settings
-from saebooks.models.company import Company
 from saebooks.models.invoice import InvoiceStatus
 from saebooks.services import invoices as svc
 from saebooks.services.features import FLAG_STRIPE_INTEGRATION, require_feature
@@ -59,22 +57,6 @@ router = APIRouter(
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
-
-
-async def _first_company_id(session: AsyncSession, tenant_id: UUID) -> UUID:
-    """Return the first active company for the request tenant."""
-    result = await session.execute(
-        select(Company)
-        .where(
-            Company.tenant_id == tenant_id,
-            Company.archived_at.is_(None),
-        )
-        .order_by(Company.created_at)
-    )
-    company = result.scalars().first()
-    if company is None:
-        raise HTTPException(404, "No active company for tenant")
-    return company.id
 
 
 def _parse_if_match(header: str | None) -> int | None:
@@ -113,6 +95,7 @@ async def list_invoices(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> InvoiceListOut:
     offset = (page - 1) * page_size
     status_enum: InvoiceStatus | None = None
@@ -123,7 +106,6 @@ async def list_invoices(
             raise HTTPException(400, f"Invalid status '{status}'") from exc
 
     tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
     invoices, total = await svc.list_active(
         session,
         company_id,
@@ -173,6 +155,7 @@ async def create_invoice(
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
     key = _parse_idempotency_key(idempotency_key)
@@ -198,7 +181,6 @@ async def create_invoice(
                 status_code=claim.response_status or 201,
             )
 
-    company_id = await _first_company_id(session, tenant_id)
     try:
         inv = await svc.api_create(
             session,
@@ -212,6 +194,7 @@ async def create_invoice(
             notes=payload.notes,
             payment_terms=payload.payment_terms,
             currency=payload.currency,
+            settlement_date=payload.settlement_date,
         )
     except (ValueError, svc.InvoiceError) as exc:
         raise HTTPException(422, str(exc)) from exc
@@ -269,6 +252,7 @@ async def update_invoice(
             notes=payload.notes,
             payment_terms=payload.payment_terms,
             lines=lines_data,
+            settlement_date=payload.settlement_date,
         )
     except svc.VersionConflict as exc:
         body = InvoiceConflictBody(
