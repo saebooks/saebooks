@@ -6,6 +6,7 @@ Endpoints:
   GET  /api/v1/companies          — list all active companies
   GET  /api/v1/companies/{id}     — get one company
   PATCH /api/v1/companies/{id}    — update metadata with If-Match
+  GET  /api/v1/companies/{id}/gst-backdate-preview — preview affected invoices
 
 Create and archive are intentionally omitted from the JSON API at
 Phase 1: creating companies requires licence-cap enforcement via the
@@ -17,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import date
 from typing import Any
 from uuid import UUID
 
@@ -34,6 +36,7 @@ from saebooks.api.v1.schemas import (
     CompanyUpdate,
 )
 from saebooks.models.company import Company
+from saebooks.models.invoice import Invoice, InvoiceStatus
 from saebooks.services import companies as svc
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 
@@ -228,3 +231,56 @@ async def update_company(
         await store_response(session, key, 200, json.dumps(body).encode())
         await session.commit()
     return JSONResponse(body, status_code=200)
+
+
+# ---------------------------------------------------------------------------
+# GST backdate preview (HOBB-5)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{company_id}/gst-backdate-preview")
+async def gst_backdate_preview(
+    request: Request,
+    company_id: UUID,
+    effective_date: date = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> JSONResponse:
+    """Return the count of invoices issued on or after effective_date that carry no GST.
+
+    These are the invoices an operator would need to retroactively amend when
+    backdating their GST registration (ATO: up to 4 years).  The response is
+    informational only — no data is mutated.
+    """
+    tenant_id = resolve_tenant_id(request)
+    existing = await svc.get(session, company_id)
+    if existing is None or existing.archived_at is not None or existing.tenant_id != tenant_id:
+        raise HTTPException(404, "Company not found")
+
+    today = date.today()
+    if effective_date > today:
+        raise HTTPException(422, "effective_date cannot be in the future")
+    earliest = today.replace(year=today.year - 4)
+    if effective_date < earliest:
+        raise HTTPException(422, "effective_date cannot be more than 4 years in the past (ATO limit)")
+
+    # Count non-draft invoices on or after the backdated date with no GST charged.
+    count_stmt = (
+        select(func.count())
+        .select_from(Invoice)
+        .where(
+            Invoice.company_id == company_id,
+            Invoice.archived_at.is_(None),
+            Invoice.status != InvoiceStatus.DRAFT,
+            Invoice.issue_date >= effective_date,
+            Invoice.tax_total == 0,
+        )
+    )
+    invoice_count = int((await session.execute(count_stmt)).scalar_one())
+
+    return JSONResponse(
+        {
+            "company_id": str(company_id),
+            "effective_date": effective_date.isoformat(),
+            "invoice_count": invoice_count,
+        }
+    )

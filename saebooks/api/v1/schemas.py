@@ -215,8 +215,17 @@ class CompanyUpdate(BaseModel):
     @field_validator("gst_effective_date")
     @classmethod
     def effective_date_not_future(cls, v: date | None) -> date | None:
-        if v is not None and v > date.today():
+        if v is None:
+            return v
+        today = date.today()
+        if v > today:
             raise ValueError("gst_effective_date cannot be in the future")
+        # ATO allows backdating up to 4 years
+        earliest = today.replace(year=today.year - 4)
+        if v < earliest:
+            raise ValueError(
+                "gst_effective_date cannot be more than 4 years in the past (ATO limit)"
+            )
         return v
 
 
