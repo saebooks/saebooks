@@ -805,3 +805,135 @@ async def test_create_je_reference_at_max_length_accepted(
         f"Expected 201 for reference == 32 chars, got {r.status_code}: {r.text}"
     )
     assert r.json()["ref"] == unique_ref
+
+
+# ---------------------------------------------------------------------------
+# PSI-5: period-lock enforcement via POST /{id}/post (gap PSI-5 carousel 20260427T220251Z)
+# ---------------------------------------------------------------------------
+
+
+async def test_je_post_blocked_by_period_lock(
+    api_client: AsyncClient,
+    account_ids: dict[str, str],
+) -> None:
+    """POST /{id}/post must return 4xx when the JE date falls inside a locked period.
+
+    Gap PSI-5 (P1): before the fix, PostingError from _check_period_lock()
+    escaped api_post() uncaught and produced a 500 instead of a 4xx, leaving
+    the entry DRAFT but returning no useful error to the caller. The fix
+    translates PostingError → JournalEntryError so the router returns 422.
+
+    Setup: create a fresh company with an explicit period lock at the end of
+    March 2026, then try to post a JE dated 2026-03-15 (inside the lock).
+    """
+    from saebooks.models.company import Company
+    from saebooks.models.journal import PeriodLock
+    from saebooks.services import journal as journal_svc
+
+    # Create an isolated company under the DEFAULT tenant so the dev bearer
+    # token (which resolves to the default tenant) can authenticate against it.
+    # Using a separate company avoids polluting the shared default company with
+    # a period lock that would break other posting tests.
+    _DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+    lock_cid = uuid.uuid4()
+    async with AsyncSessionLocal() as session:
+        session.add(Company(
+            id=lock_cid,
+            tenant_id=_DEFAULT_TENANT_ID,
+            name=f"PSI5 Corp {lock_cid.hex[:6]}",
+        ))
+        await session.flush()
+        # Seed two accounts for the isolated company
+        from saebooks.models.account import Account
+        iso_asset = Account(
+            company_id=lock_cid, tenant_id=_DEFAULT_TENANT_ID,
+            code=f"1-{lock_cid.hex[:4]}",
+            name="PSI5 Asset",
+            account_type=AccountType.ASSET,
+            is_header=False,
+        )
+        iso_expense = Account(
+            company_id=lock_cid, tenant_id=_DEFAULT_TENANT_ID,
+            code=f"6-{lock_cid.hex[:4]}",
+            name="PSI5 Expense",
+            account_type=AccountType.EXPENSE,
+            is_header=False,
+        )
+        session.add_all([iso_asset, iso_expense])
+        await session.flush()
+        # Lock the period through 2026-03-31 for this company only
+        await journal_svc.lock_period(
+            session, lock_cid, date(2026, 3, 31), locked_by="test-psi5"
+        )
+        await session.refresh(iso_asset)
+        await session.refresh(iso_expense)
+        iso_asset_id = str(iso_asset.id)
+        iso_expense_id = str(iso_expense.id)
+
+    # Use the standard API client but direct it at the isolated company via header
+    from saebooks.api.v1.auth import current_token
+    token = current_token()
+    from httpx import ASGITransport, AsyncClient as _AC
+    from saebooks.main import app as _app
+    async with _AC(
+        transport=ASGITransport(app=_app),
+        base_url="http://test",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "X-Company-Id": str(lock_cid),
+        },
+    ) as iso_client:
+        # Create a JE dated inside the locked period
+        payload = {
+            "entry_date": "2026-03-15",
+            "narration": "PSI-5 test — locked period",
+            "lines": [
+                {"account_id": iso_asset_id, "debit": "100.00", "credit": "0.00"},
+                {"account_id": iso_expense_id, "debit": "0.00", "credit": "100.00"},
+            ],
+        }
+        rc = await iso_client.post("/api/v1/journal_entries", json=payload)
+        assert rc.status_code == 201, rc.text
+        entry_id = rc.json()["id"]
+        version = rc.json()["version"]
+
+        # Attempt to post — must be rejected with a 4xx (period is locked)
+        rp = await iso_client.post(
+            f"/api/v1/journal_entries/{entry_id}/post",
+            headers={"If-Match": str(version)},
+        )
+        assert rp.status_code in range(400, 500), (
+            f"Expected 4xx for posting into locked period, got {rp.status_code}: {rp.text}"
+        )
+        body = rp.json()
+        detail_str = str(body).lower()
+        assert "lock" in detail_str or "period" in detail_str, (
+            f"Expected 'lock' or 'period' in error body, got: {body}"
+        )
+
+        # Entry must still be DRAFT
+        rg = await iso_client.get(f"/api/v1/journal_entries/{entry_id}")
+        assert rg.status_code == 200, rg.text
+        assert rg.json()["status"] == "DRAFT", (
+            f"Entry should remain DRAFT after rejected post, got: {rg.json()['status']}"
+        )
+
+        # Positive control: JE after the lock boundary must post successfully
+        payload_ok = {
+            "entry_date": "2026-04-15",
+            "narration": "PSI-5 positive control",
+            "lines": [
+                {"account_id": iso_asset_id, "debit": "50.00", "credit": "0.00"},
+                {"account_id": iso_expense_id, "debit": "0.00", "credit": "50.00"},
+            ],
+        }
+        rok = await iso_client.post("/api/v1/journal_entries", json=payload_ok)
+        assert rok.status_code == 201, rok.text
+        rok_v = rok.json()["version"]
+        rpost_ok = await iso_client.post(
+            f"/api/v1/journal_entries/{rok.json()['id']}/post",
+            headers={"If-Match": str(rok_v)},
+        )
+        assert rpost_ok.status_code == 200, (
+            f"Expected 200 for post after lock boundary, got {rpost_ok.status_code}: {rpost_ok.text}"
+        )

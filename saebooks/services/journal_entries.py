@@ -421,7 +421,13 @@ async def api_post(
         )
 
     # Delegate to legacy journal service (checks period lock, GST, balance, commits).
-    entry = await journal_svc.post(session, entry_id, posted_by=actor)
+    # PostingError (period lock, trust commingling, balance) is a legacy exception
+    # type unknown to this module's router; translate it to JournalEntryError so the
+    # router's existing except clause returns 422 instead of propagating a 500.
+    try:
+        entry = await journal_svc.post(session, entry_id, posted_by=actor)
+    except journal_svc.PostingError as exc:
+        raise JournalEntryError(str(exc)) from exc
 
     # Bump version + append change_log in a second transaction.
     entry.version = entry.version + 1
