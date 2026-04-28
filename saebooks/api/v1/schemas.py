@@ -2304,7 +2304,8 @@ class YTDTurnoverReport(BaseModel):
     OTHER_INCOME journal credits (net of debits) for posted JEs in that
     window.  threshold is always 75000.00 (ATO GST registration limit
     for for-profit entities).  threshold_crossed is true when
-    ytd_turnover >= threshold.
+    ytd_turnover >= threshold.  threshold_approaching is true when
+    ytd_turnover >= 80% of threshold but < threshold (amber warning zone).
     """
 
     fy_start: date
@@ -2312,6 +2313,7 @@ class YTDTurnoverReport(BaseModel):
     ytd_turnover: float
     threshold: float
     threshold_crossed: bool
+    threshold_approaching: bool
 
 
 # ---------------------------------------------------------------------------

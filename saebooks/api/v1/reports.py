@@ -1598,10 +1598,12 @@ async def ytd_turnover(
     raw = result.scalar_one()
     ytd = max(Decimal(str(raw)), Decimal("0"))
 
+    _approaching_floor = _GST_THRESHOLD * Decimal("0.80")
     return YTDTurnoverReport(
         fy_start=fy_start,
         fy_end=fy_end,
         ytd_turnover=float(ytd),
         threshold=float(_GST_THRESHOLD),
         threshold_crossed=ytd >= _GST_THRESHOLD,
+        threshold_approaching=_approaching_floor <= ytd < _GST_THRESHOLD,
     )
