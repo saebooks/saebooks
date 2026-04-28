@@ -53,12 +53,21 @@
   </tbody>
   <tfoot>
     <tr>
-      <th>Grand total</th>
+      <th>Trade Debtors</th>
       {% for k in bucket_keys %}
       <th class="right">{{ "%.2f"|format(report.grand_totals[k]) }}</th>
       {% endfor %}
       <th class="right">{{ "%.2f"|format(report.grand_total) }}</th>
     </tr>
+    {% if report.retentions_grand_total > 0 %}
+    <tr>
+      <th>Retentions Receivable</th>
+      {% for k in bucket_keys %}
+      <th class="right">{{ "%.2f"|format(report.retentions_grand_totals[k]) if report.retentions_grand_totals[k] else "" }}</th>
+      {% endfor %}
+      <th class="right">{{ "%.2f"|format(report.retentions_grand_total) }}</th>
+    </tr>
+    {% endif %}
   </tfoot>
 </table>
 {% else %}

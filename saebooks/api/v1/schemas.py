@@ -1747,14 +1747,19 @@ class AgedReport(BaseModel):
     ``buckets`` is the ordered list of bucket label strings.
     ``contacts`` is one row per contact (each row has keys matching
     ``buckets`` plus ``contact_id``, ``contact_name``, ``total``).
-    ``totals`` is the grand-total row with the same bucket keys plus
-    ``total``.
+    ``totals`` is the grand-total row (Trade Debtors only — excludes
+    retentions) with the same bucket keys plus ``total``.
+    ``retentions_receivable`` is present on AR reports only; it carries
+    the cumulative Retentions Receivable balance split by aging bucket,
+    matching the same bucket keys as ``totals``.  None when there are no
+    outstanding retentions (or for AP reports where retentions don't apply).
     """
 
     as_of_date: date
     buckets: list[str]
     contacts: list[dict]
     totals: dict
+    retentions_receivable: dict | None = None
 
 
 # ---------------------------------------------------------------------------
