@@ -669,6 +669,107 @@ async def dispose_asset(
 
 
 # ---------------------------------------------------------------------- #
+# Demonstrator conversion — FA → inventory                              #
+# ---------------------------------------------------------------------- #
+
+
+async def convert_to_inventory(
+    session: AsyncSession,
+    asset_id: uuid.UUID,
+    *,
+    conversion_date: date,
+    inventory_account_id: uuid.UUID,
+    posted_by: str | None = None,
+) -> tuple[FixedAsset, Decimal]:
+    """Convert a demonstrator (or similar) fixed asset into used inventory.
+
+    Motor dealers depreciate demonstrator vehicles on the FA register then
+    move them to used-vehicle stock for sale. This event closes the asset
+    with a zero-proceeds disposal (no gain/loss) and books the NBV into
+    the nominated inventory GL account.
+
+    Journal posted:
+        DR inventory_account_id   (NBV — only if NBV > 0)
+        DR accum_dep_account_id   (accumulated depreciation — if any)
+        CR cost_account_id        (full original cost)
+
+    The asset is stamped ``disposed`` with ``disposal_proceeds = NBV``
+    so that ``gain_loss = 0`` on downstream reports. Returns
+    ``(asset, nbv)``.
+    """
+    asset = await get(session, asset_id)
+    if asset is None:
+        raise ValueError(f"Fixed asset {asset_id} not found")
+    if asset.status != "active":
+        raise ValueError(
+            f"Cannot convert asset in status {asset.status!r} — must be active"
+        )
+
+    # Step 1: bring depreciation current through conversion_date.
+    await post_depreciation(
+        session, asset_id, conversion_date, posted_by=posted_by
+    )
+    asset = await get(session, asset_id)
+    assert asset is not None
+
+    # Step 2: compute NBV.
+    accum_dep = await cumulative_depreciation_through(
+        session, asset, conversion_date
+    )
+    nbv = (asset.cost - accum_dep).quantize(_CENT)
+
+    # Step 3: build the conversion journal.
+    lines: list[dict[str, object]] = []
+
+    if nbv > 0:
+        lines.append(
+            {
+                "account_id": inventory_account_id,
+                "description": f"Inventory receipt from FA conversion: {asset.code}",
+                "debit": nbv,
+                "credit": Decimal("0"),
+            }
+        )
+
+    if accum_dep > 0:
+        lines.append(
+            {
+                "account_id": asset.accum_dep_account_id,
+                "description": f"Clear accum dep for {asset.code}",
+                "debit": accum_dep,
+                "credit": Decimal("0"),
+            }
+        )
+
+    lines.append(
+        {
+            "account_id": asset.cost_account_id,
+            "description": f"Clear cost of {asset.code} on inventory conversion",
+            "debit": Decimal("0"),
+            "credit": asset.cost,
+        }
+    )
+
+    entry = await journal_svc.create_draft(
+        session,
+        company_id=asset.company_id,
+        entry_date=conversion_date,
+        description=f"FA→Inventory conversion: {asset.code} {asset.name}",
+        lines=lines,
+    )
+    posted = await journal_svc.post(session, entry.id, posted_by=posted_by)
+
+    # Step 4: stamp asset as disposed (proceeds = NBV → zero gain/loss).
+    asset.status = "disposed"
+    asset.disposal_date = conversion_date
+    asset.disposal_proceeds = nbv
+    asset.disposal_journal_id = posted.id
+    await session.commit()
+    await session.refresh(asset)
+    return asset, nbv
+
+
+# ---------------------------------------------------------------------- #
 # Partial disposal (Batch MM/3)                                          #
 # ---------------------------------------------------------------------- #
 

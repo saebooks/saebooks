@@ -25,7 +25,7 @@ import pytest
 from sqlalchemy import select
 
 from saebooks.db import AsyncSessionLocal
-from saebooks.models.account import Account
+from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.models.fixed_asset import FixedAsset
 from saebooks.models.journal import EntryStatus, JournalEntry
@@ -393,5 +393,140 @@ async def test_cannot_dispose_already_disposed() -> None:
                 disposal_date=date(2026, 7, 1),
                 proceeds=Decimal("100"),
                 cash_account_id=ctx.cash_acct_id,
+                posted_by="test",
+            )
+
+
+# ---------------------------------------------------------------------- #
+# Convert to inventory (MOTR-3)                                          #
+# ---------------------------------------------------------------------- #
+
+
+async def _inventory_acct_id(ctx: _Ctx) -> uuid.UUID:
+    """Fetch the Trading Stock on Hand account (1-1330) for tests."""
+    async with AsyncSessionLocal() as session:
+        acct = (
+            await session.execute(
+                select(Account).where(
+                    Account.company_id == ctx.company_id,
+                    Account.code == "1-1330",
+                )
+            )
+        ).scalar_one_or_none()
+        # Fall back to any non-header asset account if seed lacks 1-1330.
+        if acct is None:
+            acct = (
+                await session.execute(
+                    select(Account).where(
+                        Account.company_id == ctx.company_id,
+                        Account.is_header.is_(False),
+                        Account.archived_at.is_(None),
+                        Account.account_type == AccountType.ASSET,
+                    ).order_by(Account.code).limit(1)
+                )
+            ).scalar_one()
+        return acct.id
+
+
+async def test_convert_to_inventory_posts_journal_and_marks_disposed() -> None:
+    """Conversion journal balances; asset stamped disposed; proceeds = NBV."""
+    ctx = await _ctx()
+    inv_id = await _inventory_acct_id(ctx)
+    asset = await _fresh_asset(
+        ctx,
+        name="Demo vehicle MOTR-3",
+        cost=Decimal("80000"),
+        model="asset_5_year_linear",
+        in_service=date(2026, 1, 1),
+    )
+    async with AsyncSessionLocal() as session:
+        refreshed, nbv = await svc.convert_to_inventory(
+            session,
+            asset.id,
+            conversion_date=date(2026, 5, 1),
+            inventory_account_id=inv_id,
+            posted_by="test",
+        )
+
+        assert refreshed.status == "disposed"
+        assert refreshed.disposal_date == date(2026, 5, 1)
+        assert refreshed.disposal_proceeds == nbv
+        assert refreshed.disposal_journal_id is not None
+        assert nbv > Decimal("0")  # 4 months of 5-year dep, still has value
+
+        entry = await session.get(JournalEntry, refreshed.disposal_journal_id)
+        assert entry is not None
+        assert entry.status == EntryStatus.POSTED
+        await session.refresh(entry, ["lines"])
+
+        total_debit = sum(ln.debit for ln in entry.lines)
+        total_credit = sum(ln.credit for ln in entry.lines)
+        assert total_debit == total_credit, "Conversion journal must balance"
+
+        # Inventory account must be debited at NBV.
+        inv_lines = [ln for ln in entry.lines if ln.account_id == inv_id]
+        assert len(inv_lines) == 1
+        assert inv_lines[0].debit == nbv
+
+        # Cost account must be credited at full cost.
+        cost_lines = [ln for ln in entry.lines if ln.account_id == ctx.cost_acct_id]
+        assert len(cost_lines) == 1
+        assert cost_lines[0].credit == Decimal("80000.00")
+
+
+async def test_convert_fully_depreciated_asset() -> None:
+    """Fully depreciated asset (NBV=0) converts without an inventory line."""
+    ctx = await _ctx()
+    inv_id = await _inventory_acct_id(ctx)
+    asset = await _fresh_asset(
+        ctx,
+        name="Fully dep demo MOTR-3",
+        cost=Decimal("10000"),
+        model="asset_3_year_linear",
+        in_service=date(2020, 1, 1),
+    )
+    async with AsyncSessionLocal() as session:
+        refreshed, nbv = await svc.convert_to_inventory(
+            session,
+            asset.id,
+            conversion_date=date(2026, 5, 1),
+            inventory_account_id=inv_id,
+            posted_by="test",
+        )
+        assert nbv == Decimal("0.00")
+        assert refreshed.status == "disposed"
+
+        entry = await session.get(JournalEntry, refreshed.disposal_journal_id)
+        assert entry is not None
+        await session.refresh(entry, ["lines"])
+        # No inventory line when NBV = 0; journal still balances.
+        inv_lines = [ln for ln in entry.lines if ln.account_id == inv_id]
+        assert len(inv_lines) == 0
+        total_debit = sum(ln.debit for ln in entry.lines)
+        total_credit = sum(ln.credit for ln in entry.lines)
+        assert total_debit == total_credit
+
+
+async def test_cannot_convert_already_disposed() -> None:
+    ctx = await _ctx()
+    inv_id = await _inventory_acct_id(ctx)
+    asset = await _fresh_asset(
+        ctx, name="Double convert MOTR-3", cost=Decimal("5000"),
+        model="asset_no_depreciation",
+    )
+    async with AsyncSessionLocal() as session:
+        await svc.convert_to_inventory(
+            session,
+            asset.id,
+            conversion_date=date(2026, 5, 1),
+            inventory_account_id=inv_id,
+            posted_by="test",
+        )
+        with pytest.raises(ValueError, match="Cannot convert asset"):
+            await svc.convert_to_inventory(
+                session,
+                asset.id,
+                conversion_date=date(2026, 6, 1),
+                inventory_account_id=inv_id,
                 posted_by="test",
             )

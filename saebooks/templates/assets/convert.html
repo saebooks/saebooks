@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Convert to Inventory · {{ asset.code }} — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Convert to Inventory · {{ asset.code }} {{ asset.name }}</h1>
+  <div class="meta">{{ company_name }}</div>
+</div>
+
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
+<p class="dim">
+  Moves a demonstrator (or similar) asset from the fixed-asset register into
+  used-vehicle stock. Depreciation is caught up to the conversion date first,
+  then a single journal posts:
+  <br>DR Inventory account (NBV) · DR Accumulated depreciation · CR FA cost.
+  The asset is marked disposed with proceeds equal to NBV (zero gain/loss).
+</p>
+
+<table class="acct-table" style="max-width:28rem;margin-bottom:1.5rem">
+  <tr><td>Cost</td><td>{{ '%.2f'|format(asset.cost) }}</td></tr>
+  <tr><td>Current NBV (as of today)</td><td><strong>{{ '%.2f'|format(nbv) }}</strong></td></tr>
+</table>
+
+<form method="post" action="/assets/{{ asset.id }}/convert" class="tc-form" style="max-width:32rem">
+  <label>Conversion date
+    <input name="conversion_date" type="date" required value="{{ today.isoformat() }}">
+  </label>
+  <label>Inventory account (stock will be received here at NBV)
+    <select name="inventory_account_id" required>
+      {% for a in inventory_accounts %}
+      <option value="{{ a.id }}">{{ a.code }} {{ a.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <div class="form-actions">
+    <button type="submit" class="btn">Convert to inventory</button>
+    <a href="/assets/{{ asset.id }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

@@ -94,10 +94,21 @@ async def _form_dropdowns(
         a for a in accounts
         if a.account_type == AccountType.ASSET and a.code.startswith("1-1")
     ]
+    # Inventory accounts: current asset range 1-13xx (excludes cash/bank 1-11xx,
+    # receivables 1-12xx, and fixed-asset 1-3xxx ranges).
+    inventory_accounts = [
+        a for a in accounts
+        if a.account_type == AccountType.ASSET and a.code.startswith("1-13")
+    ]
+    # If no 1-13xx accounts exist in this CoA, fall back to all asset accounts
+    # so the form is never empty.
+    if not inventory_accounts:
+        inventory_accounts = asset_accounts
     return {
         "asset_accounts": asset_accounts,
         "expense_accounts": expense_accounts,
         "cash_accounts": cash_accounts,
+        "inventory_accounts": inventory_accounts,
         "models": models,
         "contacts": contacts,
     }
@@ -670,6 +681,91 @@ async def assets_dispose_partial(
         )
     # Redirect back to the parent — the child row is visible on the list.
     return RedirectResponse(f"/assets/{parent.id}", status_code=303)
+
+
+# ---------------------------------------------------------------------- #
+# Convert to inventory (MOTR-3)                                          #
+# ---------------------------------------------------------------------- #
+
+
+@router.get("/{asset_id}/convert", response_class=HTMLResponse)
+async def assets_convert_form(request: Request, asset_id: UUID) -> HTMLResponse:
+    async with AsyncSessionLocal() as session:
+        asset = await svc.get(session, asset_id)
+        if asset is None:
+            raise HTTPException(404, "Asset not found")
+        if asset.status != "active":
+            raise HTTPException(
+                400, f"Cannot convert — asset status is {asset.status!r}"
+            )
+        company = await session.get(Company, asset.company_id)
+        dropdowns = await _form_dropdowns(session, asset.company_id)
+
+        today = date.today()
+        cumulative = await svc.cumulative_depreciation_through(
+            session, asset, today
+        )
+        nbv = (asset.cost - cumulative).quantize(Decimal("0.01"))
+
+    return templates.TemplateResponse(
+        request,
+        "assets/convert.html",
+        {
+            "edition": settings.edition,
+            "company_name": company.name if company else "",
+            "asset": asset,
+            "inventory_accounts": dropdowns["inventory_accounts"],
+            "today": today,
+            "nbv": nbv,
+            "error": None,
+        },
+    )
+
+
+@router.post("/{asset_id}/convert", response_model=None)
+async def assets_convert(
+    request: Request,
+    asset_id: UUID,
+    conversion_date: str = Form(...),
+    inventory_account_id: str = Form(...),
+) -> RedirectResponse | HTMLResponse:
+    try:
+        async with AsyncSessionLocal() as session:
+            await svc.convert_to_inventory(
+                session,
+                asset_id,
+                conversion_date=_parse_date(conversion_date, "conversion_date"),
+                inventory_account_id=uuid.UUID(inventory_account_id),
+                posted_by="web",
+            )
+    except ValueError as exc:
+        async with AsyncSessionLocal() as session:
+            asset = await svc.get(session, asset_id)
+            if asset is None:
+                raise HTTPException(404, "Asset not found") from exc
+            company = await session.get(Company, asset.company_id)
+            dropdowns = await _form_dropdowns(session, asset.company_id)
+            today = date.today()
+            from saebooks.services import assets as _svc
+            cumulative = await _svc.cumulative_depreciation_through(
+                session, asset, today
+            )
+            nbv = (asset.cost - cumulative).quantize(Decimal("0.01"))
+        return templates.TemplateResponse(
+            request,
+            "assets/convert.html",
+            {
+                "edition": settings.edition,
+                "company_name": company.name if company else "",
+                "asset": asset,
+                "inventory_accounts": dropdowns["inventory_accounts"],
+                "today": today,
+                "nbv": nbv,
+                "error": str(exc),
+            },
+            status_code=422,
+        )
+    return RedirectResponse(f"/assets/{asset_id}", status_code=303)
 
 
 # ---------------------------------------------------------------------- #
