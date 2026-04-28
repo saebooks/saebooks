@@ -24,7 +24,7 @@ os.environ.setdefault("SAEBOOKS_ENV", "test")
 from httpx import AsyncClient
 from sqlalchemy import delete as sa_delete
 
-from saebooks.app import app
+from saebooks.main import app
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.user import User
 from saebooks.services.jwt_tokens import _reset_secret_cache, create_access_token
