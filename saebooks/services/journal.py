@@ -30,16 +30,24 @@ async def _validate_line_accounts(
     session: AsyncSession,
     company_id: uuid.UUID,
     lines: list[dict[str, object]],
+    *,
+    tenant_id: uuid.UUID | None = None,
 ) -> None:
-    """Raise PostingError if any line account belongs to a different company."""
+    """Raise PostingError if any line account belongs to a different company or tenant."""
     if not lines:
         return
     ids = [uuid.UUID(str(ln["account_id"])) for ln in lines]
     result = await session.execute(
-        select(Account.id, Account.company_id).where(Account.id.in_(ids))
+        select(Account.id, Account.company_id, Account.tenant_id).where(Account.id.in_(ids))
     )
-    rows = {r.id: r.company_id for r in result.all()}
-    bad = [i for i in ids if rows.get(i) != company_id]
+    rows = {r.id: r for r in result.all()}
+    bad = []
+    for i in ids:
+        row = rows.get(i)
+        if row is None or row.company_id != company_id:
+            bad.append(i)
+        elif tenant_id is not None and row.tenant_id != tenant_id:
+            bad.append(i)
     if bad:
         raise PostingError(
             "Account(s) do not belong to this company: "
@@ -61,6 +69,7 @@ async def create_draft(
     description: str | None = None,
     ref: str | None = None,
     lines: list[dict[str, object]] | None = None,
+    tenant_id: uuid.UUID | None = None,
 ) -> JournalEntry:
     if not ref:
         ref = await next_ref(session)
@@ -76,7 +85,7 @@ async def create_draft(
     await session.flush()
 
     if lines:
-        await _validate_line_accounts(session, company_id, lines)
+        await _validate_line_accounts(session, company_id, lines, tenant_id=tenant_id)
         for i, line_data in enumerate(lines, 1):
             session.add(
                 JournalLine(
@@ -171,7 +180,7 @@ async def update_draft(
         entry.ref = ref
 
     if lines is not None:
-        await _validate_line_accounts(session, entry.company_id, lines)
+        await _validate_line_accounts(session, entry.company_id, lines, tenant_id=entry.tenant_id)
         # Replace all lines
         for old_line in entry.lines:
             await session.delete(old_line)

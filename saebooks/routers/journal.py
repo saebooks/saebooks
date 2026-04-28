@@ -223,6 +223,7 @@ async def journal_save(request: Request) -> RedirectResponse | HTMLResponse:
                     description=description or None,
                     ref=ref or None,
                     lines=lines,
+                    tenant_id=tenant_id,
                 )
 
             if action == "post":

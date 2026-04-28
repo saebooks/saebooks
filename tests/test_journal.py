@@ -7,9 +7,10 @@ import pytest
 from sqlalchemy import select
 
 from saebooks.db import AsyncSessionLocal
-from saebooks.models.account import Account
+from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.models.journal import EntryStatus
+from saebooks.models.tenant import Tenant
 from saebooks.services import journal as svc
 from saebooks.services.journal import PostingError
 
@@ -194,3 +195,41 @@ async def test_gst_amount_on_lines() -> None:
         )
         assert entry.lines[0].gst_amount == Decimal("10.00")
         assert entry.lines[1].gst_amount is None
+
+
+async def test_cross_tenant_account_rejected_on_create_draft() -> None:
+    """create_draft must reject line accounts from a foreign tenant (gap PRTR-1)."""
+    company_id, acct_a, _acct_b = await _ctx()
+    home_tenant_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+    foreign_tenant_id = uuid.uuid4()
+
+    async with AsyncSessionLocal() as session:
+        session.add(Tenant(
+            id=foreign_tenant_id,
+            name="Foreign Corp",
+            slug=f"foreign-{foreign_tenant_id}",
+        ))
+        await session.flush()
+        foreign_acct = Account(
+            company_id=company_id,
+            tenant_id=foreign_tenant_id,
+            code=f"9-XT{str(foreign_tenant_id)[:4].upper()}",
+            name="Cross-Tenant Test Account",
+            account_type=AccountType.EXPENSE,
+        )
+        session.add(foreign_acct)
+        await session.commit()
+        foreign_acct_id = foreign_acct.id
+
+    async with AsyncSessionLocal() as session:
+        with pytest.raises(PostingError, match="do not belong"):
+            await svc.create_draft(
+                session,
+                company_id=company_id,
+                entry_date=date(2026, 4, 10),
+                tenant_id=home_tenant_id,
+                lines=[
+                    {"account_id": acct_a, "debit": 100, "credit": 0},
+                    {"account_id": foreign_acct_id, "debit": 0, "credit": 100},
+                ],
+            )
