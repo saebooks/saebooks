@@ -35,7 +35,7 @@ async def api_client() -> AsyncClient:
 
 
 @pytest.fixture
-async def invoice_deps() -> dict[str, str]:
+async def invoice_deps(api_client: AsyncClient) -> dict[str, str]:
     async with AsyncSessionLocal() as session:
         income = (
             await session.execute(
@@ -50,11 +50,21 @@ async def invoice_deps() -> dict[str, str]:
                 select(Contact).where(Contact.archived_at.is_(None)).limit(1)
             )
         ).scalars().first()
-    assert income is not None
-    assert contact is not None
+    assert income is not None, "Test DB needs an INCOME account — run `python -m saebooks.cli.seed_dev`"
+    if contact is None:
+        # Bootstrap a contact via the public API so all RLS / tenant /
+        # version columns are populated correctly.
+        r = await api_client.post(
+            "/api/v1/contacts",
+            json={"name": "HardDeleteTestCustomer", "contact_type": "CUSTOMER"},
+        )
+        assert r.status_code == 201, f"contact bootstrap failed: {r.status_code} {r.text}"
+        contact_id = r.json()["id"]
+    else:
+        contact_id = str(contact.id)
     return {
         "income_account_id": str(income.id),
-        "contact_id": str(contact.id),
+        "contact_id": contact_id,
     }
 
 
