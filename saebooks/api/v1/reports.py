@@ -1473,22 +1473,23 @@ async def pl_by_segment(
     session: AsyncSession = Depends(get_session),
     company_id: UUID = Depends(get_active_company_id),
 ) -> PLBySegmentReport:
-    """P&L by segment (project) for a date range.
+    """P&L by segment for a date range.
 
-    v1 supports ``segment_type="project"`` only.  JournalLine.project_id
-    is used for grouping; lines with no project tag appear under the
-    "Unassigned" segment.
+    Supported ``segment_type`` values: ``project``, ``department``,
+    ``cost_centre``.  JournalLine is grouped by the matching dimension
+    column; lines with no tag appear under the "Unassigned" segment.
 
-    Returns HTTP 501 if an unsupported segment_type is requested.
+    Returns HTTP 422 if an unsupported segment_type is requested.
     """
-    if segment_type != "project":
+    valid = {"project", "department", "cost_centre"}
+    if segment_type not in valid:
         raise HTTPException(
-            501,
+            422,
             {
-                "status": "not_implemented",
+                "status": "invalid_segment_type",
                 "note": (
-                    f"Segment type {segment_type!r} is not implemented in v1. "
-                    "Only 'project' is supported."
+                    f"segment_type {segment_type!r} is not supported. "
+                    f"Valid values: {sorted(valid)}"
                 ),
             },
         )
@@ -1500,7 +1501,7 @@ async def pl_by_segment(
         company_id,
         from_date=from_date,
         to_date=to_date,
-        segment="project",
+        segment=segment_type,
     )
 
     # Convert service dataclasses to API schema

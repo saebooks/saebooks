@@ -220,6 +220,153 @@ async def test_pl_by_segment_rejects_unsupported_segment() -> None:
             )
 
 
+async def test_pl_by_segment_department_returns_rows() -> None:
+    """Department-tagged lines appear under the correct segment label."""
+    from saebooks.models.department import Department
+    from saebooks.db import AsyncSessionLocal as S
+
+    cid, income, expense = await _ctx()
+
+    # Create a department directly in the DB.
+    async with S() as session:
+        # Need a tenant for the FK.
+        from saebooks.models.tenant import Tenant
+        tenant = (await session.execute(select(Tenant).limit(1))).scalars().first()
+        assert tenant is not None
+        dept = Department(
+            id=uuid.uuid4(),
+            company_id=cid,
+            tenant_id=tenant.id,
+            code="DEPT-SEG-A",
+            name="Segment Dept A",
+        )
+        session.add(dept)
+        await session.commit()
+        dept_id = dept.id
+
+    # Post a JE with department_id on both lines.
+    async with S() as session:
+        entry = await journal_svc.create_draft(
+            session,
+            company_id=cid,
+            entry_date=date(2099, 5, 1),
+            description="dept-segment-test",
+            lines=[
+                {
+                    "account_id": expense,
+                    "debit": Decimal("300"),
+                    "credit": Decimal("0"),
+                    "department_id": dept_id,
+                },
+                {
+                    "account_id": income,
+                    "debit": Decimal("0"),
+                    "credit": Decimal("300"),
+                    "department_id": dept_id,
+                },
+            ],
+        )
+        await journal_svc.post(session, entry.id, posted_by="tests")
+
+    async with S() as session:
+        rows = await svc.pl_by_segment(
+            session, cid,
+            from_date=date(2099, 5, 1),
+            to_date=date(2099, 5, 31),
+            segment="department",
+        )
+
+    dept_rows = [r for r in rows if r.segment_id == dept_id]
+    assert dept_rows, "Department segment not found in report"
+    assert "DEPT-SEG-A" in dept_rows[0].segment_label
+
+    # Cleanup
+    async with S() as session:
+        entries = (await session.execute(
+            select(JournalEntry).where(JournalEntry.description == "dept-segment-test")
+        )).scalars().all()
+        for e in entries:
+            await session.execute(delete(JournalLine).where(JournalLine.entry_id == e.id))
+            await session.delete(e)
+        from saebooks.models.department import Department as D
+        d = await session.get(D, dept_id)
+        if d:
+            await session.delete(d)
+        await session.commit()
+
+
+async def test_pl_by_segment_cost_centre_returns_rows() -> None:
+    """Cost-centre-tagged lines appear under the correct segment label."""
+    from saebooks.models.department import CostCentre
+    from saebooks.db import AsyncSessionLocal as S
+
+    cid, income, expense = await _ctx()
+
+    async with S() as session:
+        from saebooks.models.tenant import Tenant
+        tenant = (await session.execute(select(Tenant).limit(1))).scalars().first()
+        assert tenant is not None
+        cc = CostCentre(
+            id=uuid.uuid4(),
+            company_id=cid,
+            tenant_id=tenant.id,
+            code="CC-SEG-B",
+            name="Segment CC B",
+        )
+        session.add(cc)
+        await session.commit()
+        cc_id = cc.id
+
+    async with S() as session:
+        entry = await journal_svc.create_draft(
+            session,
+            company_id=cid,
+            entry_date=date(2099, 6, 1),
+            description="cc-segment-test",
+            lines=[
+                {
+                    "account_id": expense,
+                    "debit": Decimal("150"),
+                    "credit": Decimal("0"),
+                    "cost_centre_id": cc_id,
+                },
+                {
+                    "account_id": income,
+                    "debit": Decimal("0"),
+                    "credit": Decimal("150"),
+                    "cost_centre_id": cc_id,
+                },
+            ],
+        )
+        await journal_svc.post(session, entry.id, posted_by="tests")
+
+    async with S() as session:
+        rows = await svc.pl_by_segment(
+            session, cid,
+            from_date=date(2099, 6, 1),
+            to_date=date(2099, 6, 30),
+            segment="cost_centre",
+        )
+
+    cc_rows = [r for r in rows if r.segment_id == cc_id]
+    assert cc_rows, "Cost centre segment not found in report"
+    assert "CC-SEG-B" in cc_rows[0].segment_label
+
+    # Cleanup
+    async with S() as session:
+        entries = (await session.execute(
+            select(JournalEntry).where(JournalEntry.description == "cc-segment-test")
+        )).scalars().all()
+        for e in entries:
+            await session.execute(delete(JournalLine).where(JournalLine.entry_id == e.id))
+            await session.delete(e)
+        from saebooks.models.department import CostCentre as CC
+        c = await session.get(CC, cc_id)
+        if c:
+            await session.delete(c)
+        await session.commit()
+
+
 async def test_pl_by_segment_router_renders(client) -> None:  # type: ignore[no-untyped-def]
     r = await client.get(
         "/reports/pl-by-segment?from=2099-01-01&to=2099-12-31"

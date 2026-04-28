@@ -98,6 +98,8 @@ async def create_draft(
                     tax_code_id=line_data.get("tax_code_id"),
                     gst_amount=line_data.get("gst_amount"),
                     project_id=line_data.get("project_id"),
+                    department_id=line_data.get("department_id"),
+                    cost_centre_id=line_data.get("cost_centre_id"),
                 )
             )
 
@@ -197,6 +199,8 @@ async def update_draft(
                     tax_code_id=line_data.get("tax_code_id"),
                     gst_amount=line_data.get("gst_amount"),
                     project_id=line_data.get("project_id"),
+                    department_id=line_data.get("department_id"),
+                    cost_centre_id=line_data.get("cost_centre_id"),
                 )
             )
 
@@ -412,6 +416,8 @@ async def reverse(
                 # auto_post_gst_lines to add a duplicate GST line on post().
                 gst_amount=None,
                 project_id=line.project_id,
+                department_id=line.department_id,
+                cost_centre_id=line.cost_centre_id,
             )
         )
 

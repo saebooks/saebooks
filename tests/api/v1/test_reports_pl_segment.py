@@ -112,10 +112,25 @@ async def _create_and_post_je(
 # ---------------------------------------------------------------------------
 
 
-async def test_pl_by_segment_unsupported_type_returns_501(
+async def test_pl_by_segment_unsupported_type_returns_422(
     api_client: AsyncClient,
 ) -> None:
-    """Requesting segment_type other than 'project' returns HTTP 501."""
+    """Requesting an invalid segment_type returns HTTP 422."""
+    r = await api_client.get(
+        "/api/v1/reports/pl_by_segment",
+        params={
+            "from_date": "2026-01-01",
+            "to_date": "2026-12-31",
+            "segment_type": "contact",
+        },
+    )
+    assert r.status_code == 422, r.text
+
+
+async def test_pl_by_segment_department_returns_200(
+    api_client: AsyncClient,
+) -> None:
+    """segment_type=department no longer returns 501; it returns 200 with segments list."""
     r = await api_client.get(
         "/api/v1/reports/pl_by_segment",
         params={
@@ -124,7 +139,28 @@ async def test_pl_by_segment_unsupported_type_returns_501(
             "segment_type": "department",
         },
     )
-    assert r.status_code == 501, r.text
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["segment_type"] == "department"
+    assert isinstance(body["segments"], list)
+
+
+async def test_pl_by_segment_cost_centre_returns_200(
+    api_client: AsyncClient,
+) -> None:
+    """segment_type=cost_centre returns 200 with segments list."""
+    r = await api_client.get(
+        "/api/v1/reports/pl_by_segment",
+        params={
+            "from_date": "2026-01-01",
+            "to_date": "2026-12-31",
+            "segment_type": "cost_centre",
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["segment_type"] == "cost_centre"
+    assert isinstance(body["segments"], list)
 
 
 async def test_pl_by_segment_project_groups_by_project_id(

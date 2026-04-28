@@ -107,6 +107,14 @@ class JournalLine(Base):
     project_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL")
     )
+    # Optional department tag for P&L-by-department reporting (FITC-5).
+    department_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("departments.id", ondelete="SET NULL")
+    )
+    # Optional cost-centre tag for P&L-by-cost-centre reporting (FITC-5).
+    cost_centre_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("cost_centres.id", ondelete="SET NULL")
+    )
     # Imputation / franking-credit annotation (PRTR-4). Records the tax
     # offset riding alongside a dividend income line so beneficiary
     # statements can show grossed-up income and imputation credits.

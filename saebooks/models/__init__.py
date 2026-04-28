@@ -18,6 +18,7 @@ from saebooks.models.distribution import (
 )
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
+from saebooks.models.department import CostCentre, Department
 from saebooks.models.depreciation_model import DepreciationModel
 from saebooks.models.fixed_asset import FixedAsset
 from saebooks.models.idempotency_key import IdempotencyKey, IdempotencyRecord
@@ -50,7 +51,9 @@ __all__ = [
     "Company",
     "Contact",
     "ContactType",
+    "CostCentre",
     "CostMethod",
+    "Department",
     "DepreciationModel",
     "EntryStatus",
     "FixedAsset",

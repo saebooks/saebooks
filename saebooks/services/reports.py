@@ -19,6 +19,7 @@ from saebooks.models.account import Account, AccountType
 from saebooks.models.bill import Bill, BillStatus
 from saebooks.models.budget import Budget
 from saebooks.models.contact import Contact
+from saebooks.models.department import CostCentre, Department
 from saebooks.models.invoice import Invoice, InvoiceStatus
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
 from saebooks.models.project import Project
@@ -621,6 +622,9 @@ class SegmentRow:
     net_profit: Decimal = Decimal("0")
 
 
+_VALID_SEGMENTS = frozenset({"project", "department", "cost_centre"})
+
+
 async def pl_by_segment(
     session: AsyncSession,
     company_id: uuid.UUID,
@@ -631,18 +635,23 @@ async def pl_by_segment(
 ) -> list[SegmentRow]:
     """P&L grouped by segment tag.
 
-    v1 supports ``segment="project"`` only — lines without a project
-    tag are collected under an "Unassigned" bucket so the grand-total
-    still reconciles with :func:`profit_and_loss` for the same window.
-
-    Contact-segment needs ``JournalEntry.contact_id`` (not present
-    today) — raises :class:`ValueError` if asked for anything else.
+    Supported values for ``segment``: ``"project"``, ``"department"``,
+    ``"cost_centre"``.  Lines without the relevant tag land in an
+    "Unassigned" bucket so the grand-total reconciles with
+    :func:`profit_and_loss` for the same window.
     """
-    if segment != "project":
+    if segment not in _VALID_SEGMENTS:
         raise ValueError(
-            f"Unsupported segment {segment!r}; only 'project' is "
-            "implemented in v1"
+            f"Unsupported segment {segment!r}; valid values: "
+            f"{sorted(_VALID_SEGMENTS)}"
         )
+
+    # Map segment name → the JournalLine column to group by.
+    seg_col = {
+        "project": JournalLine.project_id,
+        "department": JournalLine.department_id,
+        "cost_centre": JournalLine.cost_centre_id,
+    }[segment]
 
     conditions = [
         JournalEntry.company_id == company_id,
@@ -655,7 +664,7 @@ async def pl_by_segment(
 
     stmt = (
         select(
-            JournalLine.project_id,
+            seg_col,
             JournalLine.account_id,
             Account.code,
             Account.name,
@@ -686,15 +695,28 @@ async def pl_by_segment(
         bucket[acct_id].debit += debit
         bucket[acct_id].credit += credit
 
-    # Resolve project labels up front. ``None`` stays "Unassigned".
-    project_ids = {sid for sid in per_segment if sid is not None}
+    # Resolve dimension labels up front. ``None`` stays "Unassigned".
+    dim_ids = {sid for sid in per_segment if sid is not None}
     labels: dict[uuid.UUID, str] = {}
-    if project_ids:
-        proj_stmt = select(Project.id, Project.code, Project.name).where(
-            Project.id.in_(project_ids)
-        )
-        for pid, pcode, pname in (await session.execute(proj_stmt)).all():
-            labels[pid] = f"{pcode} — {pname}"
+    if dim_ids:
+        if segment == "project":
+            lbl_stmt = select(Project.id, Project.code, Project.name).where(
+                Project.id.in_(dim_ids)
+            )
+            for pid, pcode, pname in (await session.execute(lbl_stmt)).all():
+                labels[pid] = f"{pcode} — {pname}"
+        elif segment == "department":
+            lbl_stmt = select(Department.id, Department.code, Department.name).where(
+                Department.id.in_(dim_ids)
+            )
+            for did, dcode, dname in (await session.execute(lbl_stmt)).all():
+                labels[did] = f"{dcode} — {dname}"
+        else:  # cost_centre
+            lbl_stmt = select(CostCentre.id, CostCentre.code, CostCentre.name).where(
+                CostCentre.id.in_(dim_ids)
+            )
+            for cid, ccode, cname in (await session.execute(lbl_stmt)).all():
+                labels[cid] = f"{ccode} — {cname}"
 
     rows: list[SegmentRow] = []
     for seg_id, bucket in per_segment.items():
