@@ -464,3 +464,16 @@ async def lock_period(
     session.add(lock)
     await session.commit()
     return lock
+
+
+async def get_locked_through(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+) -> date | None:
+    """Return the most recent period-lock end date for ``company_id``, or None."""
+    result = await session.execute(
+        select(func.max(PeriodLock.locked_through)).where(
+            PeriodLock.company_id == company_id
+        )
+    )
+    return result.scalar_one_or_none()

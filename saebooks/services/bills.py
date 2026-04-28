@@ -852,6 +852,13 @@ async def api_create(
     if lines:
         await _validate_line_fks(session, lines, tenant_id)
 
+    locked_through = await journal_svc.get_locked_through(session, company_id)
+    if locked_through is not None and issue_date <= locked_through:
+        raise BillError(
+            f"Bill date {issue_date} falls inside locked period "
+            f"(ends {locked_through}); contact your controller to adjust period lock"
+        )
+
     bill = Bill(
         company_id=company_id,
         tenant_id=tenant_id,
@@ -1032,11 +1039,16 @@ async def api_post_bill(
 
     # Delegate to the legacy pipeline (mints number, builds JE, posts it,
     # commits internally). After this call the session is in a fresh state.
-    bill = await post_bill(
-        session,
-        bill_id,
-        posted_by=actor,
-    )
+    # PostingError (period lock, trust commingling, balance) is a legacy
+    # exception type; translate it to BillError so the router returns 422.
+    try:
+        bill = await post_bill(
+            session,
+            bill_id,
+            posted_by=actor,
+        )
+    except journal_svc.PostingError as exc:
+        raise BillError(str(exc)) from exc
 
     # Bump version + append change_log in the same transaction.
     bill.version = bill.version + 1
