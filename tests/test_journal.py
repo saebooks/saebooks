@@ -197,6 +197,143 @@ async def test_gst_amount_on_lines() -> None:
         assert entry.lines[1].gst_amount is None
 
 
+_DEFAULT_TENANT = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+
+async def test_trust_commingling_blocked_on_post() -> None:
+    """gap RLES-1: posting a JE that moves funds between trust and operating bank accounts
+    must raise PostingError — commingling is a NSW Property Act breach."""
+    company_id, _a, _b = await _ctx()
+    uid = str(uuid.uuid4())[:6].upper()
+
+    async with AsyncSessionLocal() as session:
+        trust_acct = Account(
+            company_id=company_id,
+            tenant_id=_DEFAULT_TENANT,
+            code=f"1-T{uid}",
+            name="Trust — Sales Deposits",
+            account_type=AccountType.ASSET,
+            reconcile=True,
+            is_trust_account=True,
+        )
+        op_acct = Account(
+            company_id=company_id,
+            tenant_id=_DEFAULT_TENANT,
+            code=f"1-O{uid}",
+            name="Bank — Operating",
+            account_type=AccountType.ASSET,
+            reconcile=True,
+            is_trust_account=False,
+        )
+        session.add(trust_acct)
+        session.add(op_acct)
+        await session.commit()
+        trust_id = trust_acct.id
+        op_id = op_acct.id
+
+    # Dr Operating / Cr Trust — the RLES-1 commingling pattern — must be blocked.
+    async with AsyncSessionLocal() as session:
+        entry = await svc.create_draft(
+            session,
+            company_id=company_id,
+            entry_date=date(2026, 4, 28),
+            description="RLES28-Comingle",
+            lines=[
+                {"account_id": op_id, "debit": 52000, "credit": 0},
+                {"account_id": trust_id, "debit": 0, "credit": 52000},
+            ],
+        )
+        with pytest.raises(PostingError, match="trust"):
+            await svc.post(session, entry.id, posted_by="test")
+
+
+async def test_trust_to_trust_transfer_allowed() -> None:
+    """A JE moving funds between two trust bank accounts is not commingling — must post."""
+    company_id, _a, _b = await _ctx()
+    uid = str(uuid.uuid4())[:6].upper()
+
+    async with AsyncSessionLocal() as session:
+        trust1 = Account(
+            company_id=company_id,
+            tenant_id=_DEFAULT_TENANT,
+            code=f"1-A{uid}",
+            name="Trust — Sales A",
+            account_type=AccountType.ASSET,
+            reconcile=True,
+            is_trust_account=True,
+        )
+        trust2 = Account(
+            company_id=company_id,
+            tenant_id=_DEFAULT_TENANT,
+            code=f"1-B{uid}",
+            name="Trust — Sales B",
+            account_type=AccountType.ASSET,
+            reconcile=True,
+            is_trust_account=True,
+        )
+        session.add(trust1)
+        session.add(trust2)
+        await session.commit()
+        t1_id = trust1.id
+        t2_id = trust2.id
+
+    async with AsyncSessionLocal() as session:
+        entry = await svc.create_draft(
+            session,
+            company_id=company_id,
+            entry_date=date(2026, 4, 28),
+            lines=[
+                {"account_id": t1_id, "debit": 1000, "credit": 0},
+                {"account_id": t2_id, "debit": 0, "credit": 1000},
+            ],
+        )
+        posted = await svc.post(session, entry.id, posted_by="test")
+        assert posted.status == EntryStatus.POSTED
+
+
+async def test_trust_payment_to_expense_allowed() -> None:
+    """Dr Expense / Cr Trust is a valid trust disbursement — must not be blocked."""
+    company_id, _a, _b = await _ctx()
+    uid = str(uuid.uuid4())[:6].upper()
+
+    async with AsyncSessionLocal() as session:
+        trust_acct = Account(
+            company_id=company_id,
+            tenant_id=_DEFAULT_TENANT,
+            code=f"1-E{uid}",
+            name="Trust — Expense Test",
+            account_type=AccountType.ASSET,
+            reconcile=True,
+            is_trust_account=True,
+        )
+        expense_acct = Account(
+            company_id=company_id,
+            tenant_id=_DEFAULT_TENANT,
+            code=f"6-E{uid}",
+            name="Trust Expenses Payable",
+            account_type=AccountType.EXPENSE,
+            reconcile=False,
+        )
+        session.add(trust_acct)
+        session.add(expense_acct)
+        await session.commit()
+        tr_id = trust_acct.id
+        ex_id = expense_acct.id
+
+    async with AsyncSessionLocal() as session:
+        entry = await svc.create_draft(
+            session,
+            company_id=company_id,
+            entry_date=date(2026, 4, 28),
+            lines=[
+                {"account_id": ex_id, "debit": 500, "credit": 0},
+                {"account_id": tr_id, "debit": 0, "credit": 500},
+            ],
+        )
+        posted = await svc.post(session, entry.id, posted_by="test")
+        assert posted.status == EntryStatus.POSTED
+
+
 async def test_cross_tenant_account_rejected_on_create_draft() -> None:
     """create_draft must reject line accounts from a foreign tenant (gap PRTR-1)."""
     company_id, acct_a, _acct_b = await _ctx()

@@ -62,6 +62,10 @@ class Account(CompanyScoped, Base):
         Boolean, default=False, nullable=False,
         comment="System-managed accounts (GST, etc.) — auto-posted by the engine",
     )
+    is_trust_account: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False,
+        comment="NSW Property Act: designates a trust bank account; commingling guard enforced on post",
+    )
     # ABA / Direct Entry — populated only on bank accounts. Remitter
     # side of the APCA agreement: BSB + account + account title, plus
     # the sponsor bank's 6-digit User ID and 3-letter abbreviation.

@@ -222,6 +222,45 @@ async def _check_balance(entry: JournalEntry) -> None:
         raise PostingError(f"Entry {entry.ref} has no lines")
 
 
+async def _check_trust_commingling(
+    session: AsyncSession,
+    entry: JournalEntry,
+) -> None:
+    """Raise PostingError if the JE moves funds between trust and non-trust bank accounts.
+
+    Under NSW Property and Stock Agents Act 2002, trust funds must be kept
+    strictly segregated from operating funds. A JE that debits an operating
+    bank account and credits a trust bank account (or vice versa) is a
+    commingling breach. Trust disbursements must go through a dedicated
+    disbursement workflow that enforces the management-fee split.
+
+    Only reconcilable ASSET accounts (bank accounts) are examined; income,
+    expense, and non-reconcilable accounts are ignored.
+    """
+    if not entry.lines:
+        return
+
+    account_ids = [line.account_id for line in entry.lines]
+    result = await session.execute(
+        select(Account.id, Account.is_trust_account, Account.reconcile).where(
+            Account.id.in_(account_ids)
+        )
+    )
+    rows = {r.id: (r.is_trust_account, r.reconcile) for r in result.all()}
+
+    # Only bank accounts (reconcile=True) are relevant — expense/income lines are ignored.
+    trust_banks = [aid for aid, (is_trust, reconcile) in rows.items() if reconcile and is_trust]
+    non_trust_banks = [aid for aid, (is_trust, reconcile) in rows.items() if reconcile and not is_trust]
+
+    if trust_banks and non_trust_banks:
+        raise PostingError(
+            "This journal entry moves funds between a trust bank account and an operating "
+            "bank account. Commingling trust funds with operating funds is prohibited under "
+            "the NSW Property and Stock Agents Act 2002. Use a trust disbursement workflow "
+            "to transfer funds between trust and operating accounts."
+        )
+
+
 async def _check_period_lock(
     session: AsyncSession,
     company_id: uuid.UUID,
@@ -260,6 +299,10 @@ async def post(
         raise PostingError(f"Entry {entry.ref} has been reversed")
 
     await _check_period_lock(session, entry.company_id, entry.entry_date, override_reason)
+
+    # Trust commingling guard — must run BEFORE GST auto-posting so GST lines
+    # can't mask a trust→operating transfer that was originally balanced without them.
+    await _check_trust_commingling(session, entry)
 
     # Auto-generate GST account lines BEFORE balancing.
     # Lines may carry `gst_amount` as the net/gross split metadata —

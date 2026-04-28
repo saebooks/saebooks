@@ -63,6 +63,7 @@ _ACCOUNT_COLUMNS: tuple[str, ...] = (
     "is_header",
     "reconcile",
     "system_managed",
+    "is_trust_account",
     "bsb",
     "bank_account_number",
     "bank_account_title",
@@ -510,6 +511,7 @@ async def create(
     account_type: AccountType,
     reconcile: bool = False,
     is_header: bool = False,
+    is_trust_account: bool = False,
     tax_code_default: str | None = None,
     skip_validation: bool = False,
     actor: str = "web",
@@ -534,6 +536,7 @@ async def create(
         parent_id=parent.id if parent else None,
         reconcile=reconcile,
         is_header=is_header,
+        is_trust_account=is_trust_account,
         tax_code_default=tax_code_default,
         version=1,
     )
@@ -562,6 +565,7 @@ async def update(
     account_type: AccountType | None = None,
     reconcile: bool | None = None,
     is_header: bool | None = None,
+    is_trust_account: bool | None = None,
     tax_code_default: str | None = None,
     skip_validation: bool = False,
     performed_by: str | None = None,
@@ -604,6 +608,8 @@ async def update(
         account.reconcile = reconcile
     if is_header is not None:
         account.is_header = is_header
+    if is_trust_account is not None:
+        account.is_trust_account = is_trust_account
     if tax_code_default is not None:
         account.tax_code_default = tax_code_default or None
 
