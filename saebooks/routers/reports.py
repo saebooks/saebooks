@@ -16,6 +16,7 @@ from saebooks.services import bas as bas_svc
 from saebooks.services import gst as gst_svc
 from saebooks.services import period_close as period_close_svc
 from saebooks.services import reports as svc
+from saebooks.services import trust_reports as trust_svc
 from saebooks.services.fx import rates as fx_rates_svc
 from saebooks.services.fx import reval as fx_reval_svc
 from saebooks.web import templates
@@ -551,6 +552,55 @@ async def fx_revalue_submit(request: Request) -> RedirectResponse:
         f"/reports/fx-revalue?through={through_date.isoformat()}"
         f"&posted={result.posted_count}",
         status_code=303,
+    )
+
+
+@router.get("/trust-cashbook", response_class=HTMLResponse)
+async def trust_cashbook_report(
+    request: Request,
+    from_date: str | None = Query(None, alias="from"),
+    to_date: str | None = Query(None, alias="to"),
+) -> HTMLResponse:
+    """Trust Account Receipts & Payments Cash Book (NSW PSAA 2002 s.105)."""
+    company = await _first_company()
+    fd = _parse_date(from_date)
+    td = _parse_date(to_date)
+    async with AsyncSessionLocal() as session:
+        reports = await trust_svc.trust_cashbook(session, company.id, from_date=fd, to_date=td)
+    return templates.TemplateResponse(
+        request,
+        "reports/trust_cashbook.html",
+        {
+            "edition": settings.edition,
+            "company_name": company.name,
+            "reports": reports,
+            "from_date": from_date or "",
+            "to_date": to_date or "",
+        },
+    )
+
+
+@router.get("/trust-balances", response_class=HTMLResponse)
+async def trust_balances_report(
+    request: Request,
+    as_of: str | None = Query(None),
+) -> HTMLResponse:
+    """Unreconciled Trust Balances — liability to beneficiaries (NSW PSAA 2002)."""
+    company = await _first_company()
+    as_of_date = _parse_date(as_of)
+    async with AsyncSessionLocal() as session:
+        report = await trust_svc.unreconciled_trust_balances(
+            session, company.id, as_of=as_of_date
+        )
+    return templates.TemplateResponse(
+        request,
+        "reports/trust_balances.html",
+        {
+            "edition": settings.edition,
+            "company_name": company.name,
+            "report": report,
+            "as_of": as_of or "",
+        },
     )
 
 

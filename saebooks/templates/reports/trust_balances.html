@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Unreconciled Trust Balances — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Unreconciled Trust Balances</h1>
+  <div class="meta">{{ company_name }} — as at {{ report.as_of }}</div>
+</div>
+
+<form class="report-filter" method="get">
+  <label>As at <input name="as_of" type="date" value="{{ as_of }}"></label>
+  <button type="submit" class="btn-secondary">Run</button>
+</form>
+
+{% if not report.lines %}
+<p class="dim">No unreconciled trust balances as at {{ report.as_of }}.</p>
+{% else %}
+<table class="report-table">
+  <thead>
+    <tr>
+      <th>Code</th>
+      <th>Account</th>
+      <th class="num">Balance (liability to beneficiaries)</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for ln in report.lines %}
+    <tr>
+      <td class="code">{{ ln.account_code }}</td>
+      <td>{{ ln.account_name }}</td>
+      <td class="num">{{ "%.2f"|format(ln.balance) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr class="grand-total">
+      <td colspan="2"><strong>Total unreconciled trust liability</strong></td>
+      <td class="num"><strong>{{ "%.2f"|format(report.total_balance) }}</strong></td>
+    </tr>
+  </tfoot>
+</table>
+<p class="dim">This total must equal the closing balance of the trust bank account(s) for the reconciliation to pass.</p>
+{% endif %}
+{% endblock %}

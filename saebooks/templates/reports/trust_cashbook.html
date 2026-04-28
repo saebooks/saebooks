@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Trust Cash Book — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Trust Account Receipts &amp; Payments</h1>
+  <div class="meta">{{ company_name }} — Cash Book (NSW PSAA 2002 s.105)</div>
+</div>
+
+<form class="report-filter" method="get">
+  <label>From <input name="from" type="date" value="{{ from_date }}"></label>
+  <label>To <input name="to" type="date" value="{{ to_date }}"></label>
+  <button type="submit" class="btn-secondary">Run</button>
+</form>
+
+{% if not reports %}
+<p class="dim">No trust bank accounts found. Flag an account as a trust bank account to use this report.</p>
+{% else %}
+{% for r in reports %}
+<h2>{{ r.account_name }}</h2>
+
+<table class="report-table">
+  <thead>
+    <tr>
+      <th>Date</th>
+      <th>Reference</th>
+      <th>Description</th>
+      <th class="num">Receipts</th>
+      <th class="num">Payments</th>
+      <th class="num">Balance</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr class="section-header">
+      <td colspan="5"><strong>Opening balance</strong></td>
+      <td class="num"><strong>{{ "%.2f"|format(r.opening_balance) }}</strong></td>
+    </tr>
+    {% for ln in r.lines %}
+    <tr>
+      <td>{{ ln.entry_date }}</td>
+      <td><a href="/journal/{{ ln.entry_id }}">{{ ln.ref }}</a></td>
+      <td>{{ ln.description }}</td>
+      <td class="num">{{ "%.2f"|format(ln.receipts) if ln.receipts else "" }}</td>
+      <td class="num">{{ "%.2f"|format(ln.payments) if ln.payments else "" }}</td>
+      <td class="num">{{ "%.2f"|format(ln.running_balance) }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="dim">No transactions in this period.</td></tr>
+    {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr class="section-total">
+      <td colspan="3"><strong>Period totals</strong></td>
+      <td class="num"><strong>{{ "%.2f"|format(r.total_receipts) }}</strong></td>
+      <td class="num"><strong>{{ "%.2f"|format(r.total_payments) }}</strong></td>
+      <td class="num"></td>
+    </tr>
+    <tr class="grand-total">
+      <td colspan="5"><strong>Closing balance</strong></td>
+      <td class="num"><strong>{{ "%.2f"|format(r.closing_balance) }}</strong></td>
+    </tr>
+  </tfoot>
+</table>
+{% endfor %}
+{% endif %}
+{% endblock %}
