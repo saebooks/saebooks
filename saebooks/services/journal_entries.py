@@ -23,6 +23,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from saebooks.models.account import Account
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
 from saebooks.services import change_log as change_log_svc
 
@@ -202,6 +203,27 @@ async def get(
 _DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
+async def _validate_accounts_tenant(
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    lines: list[dict[str, Any]],
+) -> None:
+    """Raise JournalEntryError if any line account belongs to a different tenant."""
+    if not lines:
+        return
+    ids = [uuid.UUID(str(ln["account_id"])) for ln in lines]
+    result = await session.execute(
+        select(Account.id, Account.tenant_id).where(Account.id.in_(ids))
+    )
+    rows = {r.id: r.tenant_id for r in result.all()}
+    bad = [i for i in ids if rows.get(i) != tenant_id]
+    if bad:
+        raise JournalEntryError(
+            "Account(s) do not belong to this tenant: "
+            + ", ".join(str(i) for i in bad)
+        )
+
+
 def _assert_lines_balanced(lines: list[dict[str, Any]], ref: str = "entry") -> None:
     """Raise JournalEntryError if the lines list is not debit-credit balanced.
 
@@ -238,6 +260,7 @@ async def create(
 
     if lines:
         _assert_lines_balanced(lines, reference or "(pending-ref)")
+        await _validate_accounts_tenant(session, tenant_id, lines)
 
     ref = reference or await next_ref(session)
 
@@ -306,6 +329,7 @@ async def update(
 
     if lines is not None:
         _assert_lines_balanced(lines, entry.ref)
+        await _validate_accounts_tenant(session, entry.tenant_id, lines)
         # Replace all lines
         for old_line in list(entry.lines):
             await session.delete(old_line)

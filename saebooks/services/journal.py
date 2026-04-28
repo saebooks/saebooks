@@ -15,6 +15,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from saebooks.models.account import Account
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine, PeriodLock
 from saebooks.services import audit as audit_svc
 from saebooks.services import gst as gst_svc
@@ -23,6 +24,27 @@ from saebooks.services import settings as settings_svc
 
 class PostingError(Exception):
     pass
+
+
+async def _validate_line_accounts(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    lines: list[dict[str, object]],
+) -> None:
+    """Raise PostingError if any line account belongs to a different company."""
+    if not lines:
+        return
+    ids = [uuid.UUID(str(ln["account_id"])) for ln in lines]
+    result = await session.execute(
+        select(Account.id, Account.company_id).where(Account.id.in_(ids))
+    )
+    rows = {r.id: r.company_id for r in result.all()}
+    bad = [i for i in ids if rows.get(i) != company_id]
+    if bad:
+        raise PostingError(
+            "Account(s) do not belong to this company: "
+            + ", ".join(str(i) for i in bad)
+        )
 
 
 async def next_ref(session: AsyncSession) -> str:
@@ -54,6 +76,7 @@ async def create_draft(
     await session.flush()
 
     if lines:
+        await _validate_line_accounts(session, company_id, lines)
         for i, line_data in enumerate(lines, 1):
             session.add(
                 JournalLine(
@@ -148,6 +171,7 @@ async def update_draft(
         entry.ref = ref
 
     if lines is not None:
+        await _validate_line_accounts(session, entry.company_id, lines)
         # Replace all lines
         for old_line in entry.lines:
             await session.delete(old_line)

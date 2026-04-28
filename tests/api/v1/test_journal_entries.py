@@ -29,6 +29,8 @@ from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.account import Account, AccountType
 from saebooks.models.change_log import ChangeLog
+from saebooks.models.company import Company
+from saebooks.models.tenant import Tenant
 
 
 # ---------------------------------------------------------------------------
@@ -669,4 +671,83 @@ async def test_update_unbalanced_lines_returns_422(
     )
     assert r2.status_code == 422, (
         f"Expected 422 for unbalanced line update, got {r2.status_code}: {r2.text}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# PRTR-1 regression: cross-tenant account reference must be rejected
+# ---------------------------------------------------------------------------
+
+
+async def test_create_je_rejects_cross_tenant_account(
+    api_client: AsyncClient,
+    account_ids: dict[str, str],
+) -> None:
+    """PRTR-1: POST /api/v1/journal_entries with a line referencing an account
+    from a different tenant must return 422, not 201/303.
+
+    Carousel run: 20260427T203251Z, gap PRTR-1 (cross_tenant_write).
+    """
+    foreign_tid = uuid.uuid4()
+    foreign_cid = uuid.uuid4()
+    async with AsyncSessionLocal() as session:
+        session.add(Tenant(
+            id=foreign_tid,
+            name=f"ForeignTenant-PRTR1-{foreign_tid.hex[:6]}",
+            slug=f"prtr1-{foreign_tid.hex[:6]}",
+        ))
+        await session.flush()
+        session.add(Company(
+            id=foreign_cid,
+            tenant_id=foreign_tid,
+            name=f"Foreign Corp PRTR1 {foreign_tid.hex[:6]}",
+        ))
+        await session.flush()
+        f_asset = Account(
+            company_id=foreign_cid, tenant_id=foreign_tid,
+            code=f"1-{foreign_tid.hex[:4]}",
+            name="Foreign Asset PRTR1",
+            account_type=AccountType.ASSET,
+            is_header=False,
+        )
+        f_expense = Account(
+            company_id=foreign_cid, tenant_id=foreign_tid,
+            code=f"6-{foreign_tid.hex[:4]}",
+            name="Foreign Expense PRTR1",
+            account_type=AccountType.EXPENSE,
+            is_header=False,
+        )
+        session.add_all([f_asset, f_expense])
+        await session.commit()
+        await session.refresh(f_asset)
+        await session.refresh(f_expense)
+
+    # Mixed-tenant lines: line 1 own tenant, line 2 foreign tenant (the attack)
+    payload = {
+        "entry_date": "2026-04-10",
+        "narration": "Cross-tenant attack (PRTR-1)",
+        "lines": [
+            {
+                "account_id": account_ids["asset_id"],
+                "debit": "100.00",
+                "credit": "0.00",
+                "description": "Own-tenant debit",
+            },
+            {
+                "account_id": str(f_expense.id),
+                "debit": "0.00",
+                "credit": "100.00",
+                "description": "Foreign-tenant credit — must be rejected",
+            },
+        ],
+    }
+    r = await api_client.post("/api/v1/journal_entries", json=payload)
+    assert r.status_code == 422, (
+        f"Expected 422 for cross-tenant account, got {r.status_code}: {r.text}"
+    )
+
+    # Positive control: same-tenant accounts must still work
+    r2 = await api_client.post("/api/v1/journal_entries", json=_entry_payload(account_ids))
+    assert r2.status_code == 201, (
+        f"Same-tenant JE should succeed, got {r2.status_code}: {r2.text}"
     )
