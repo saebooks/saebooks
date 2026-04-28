@@ -45,6 +45,7 @@ from saebooks.routers import (
     tax_codes,
     templates,
 )
+from saebooks.routers.contacts import beneficiaries_router
 from saebooks.services import metrics as metrics_svc
 from saebooks.services import observability, tenant
 
@@ -120,6 +121,7 @@ def create_app() -> FastAPI:
     # beats the catch-all /contacts/{contact_id} path (same trick as
     # /invoices/recurring vs /invoices/{invoice_id} below).
     app.include_router(integrations.router)
+    app.include_router(beneficiaries_router)
     app.include_router(contacts.router)
     # recurring_invoices mounts at /invoices/recurring — must register
     # BEFORE invoices.router so `/invoices/recurring` beats the catch-all

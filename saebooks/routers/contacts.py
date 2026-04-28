@@ -19,6 +19,9 @@ from saebooks.services.features import FLAG_ABR_LOOKUP, is_enabled, require_feat
 from saebooks.web import templates
 
 router = APIRouter(prefix="/contacts")
+# Beneficiary register lives at /beneficiaries (no prefix) — separate router so
+# it can be mounted at the top level alongside /contacts.
+beneficiaries_router = APIRouter()
 
 
 async def _first_company() -> Company:
@@ -72,8 +75,20 @@ def _parse_form_fields(
     notes: str,
     default_account_id: str,
     default_tax_code: str,
+    tfn: str = "",
+    share_percentage: str = "",
+    default_income_classification: str = "",
 ) -> dict:
     """Normalise form values into kwargs for the service layer."""
+    from decimal import Decimal, InvalidOperation
+
+    share_pct = None
+    if share_percentage.strip():
+        try:
+            share_pct = Decimal(share_percentage.strip())
+        except InvalidOperation:
+            raise ValueError(f"Invalid share percentage: {share_percentage!r}")
+
     return {
         "name": name,
         "contact_type": ContactType(contact_type),
@@ -88,12 +103,34 @@ def _parse_form_fields(
         "notes": notes.strip() or None,
         "default_account_id": uuid.UUID(default_account_id) if default_account_id.strip() else None,
         "default_tax_code": default_tax_code.strip() or None,
+        "tfn": tfn.strip() or None,
+        "share_percentage": share_pct,
+        "default_income_classification": default_income_classification.strip() or None,
     }
 
 
 # ---------------------------------------------------------------------------
 # List
 # ---------------------------------------------------------------------------
+
+
+@beneficiaries_router.get("/beneficiaries", response_class=HTMLResponse)
+async def beneficiaries_list(request: Request) -> HTMLResponse:
+    """Beneficiary register — all BENEFICIARY contacts for the active company."""
+    company = await _first_company()
+    async with AsyncSessionLocal() as session:
+        contacts = await svc.list_active(
+            session, company.id, contact_type=ContactType.BENEFICIARY
+        )
+    return templates.TemplateResponse(
+        request,
+        "contacts/beneficiaries.html",
+        {
+            "edition": settings.edition,
+            "company_name": company.name,
+            "beneficiaries": contacts,
+        },
+    )
 
 
 @router.get("", response_class=HTMLResponse)
@@ -104,7 +141,7 @@ async def contacts_list(
 ) -> HTMLResponse:
     company = await _first_company()
     contact_type = None
-    if type and type in ("CUSTOMER", "SUPPLIER", "BOTH"):
+    if type and type in ("CUSTOMER", "SUPPLIER", "BOTH", "BENEFICIARY"):
         contact_type = ContactType(type)
 
     async with AsyncSessionLocal() as session:
@@ -170,12 +207,16 @@ async def contacts_create(
     notes: str = Form(""),
     default_account_id: str = Form(""),
     default_tax_code: str = Form(""),
+    tfn: str = Form(""),
+    share_percentage: str = Form(""),
+    default_income_classification: str = Form(""),
 ) -> RedirectResponse | HTMLResponse:
     company = await _first_company()
     kwargs = _parse_form_fields(
         name, contact_type, email, phone, abn,
         address_line1, address_line2, city, state, postcode,
         notes, default_account_id, default_tax_code,
+        tfn, share_percentage, default_income_classification,
     )
     try:
         async with AsyncSessionLocal() as session:
@@ -400,12 +441,16 @@ async def contacts_update(
     notes: str = Form(""),
     default_account_id: str = Form(""),
     default_tax_code: str = Form(""),
+    tfn: str = Form(""),
+    share_percentage: str = Form(""),
+    default_income_classification: str = Form(""),
 ) -> RedirectResponse | HTMLResponse:
     tenant_id = resolve_tenant_id(request)
     kwargs = _parse_form_fields(
         name, contact_type, email, phone, abn,
         address_line1, address_line2, city, state, postcode,
         notes, default_account_id, default_tax_code,
+        tfn, share_percentage, default_income_classification,
     )
     try:
         async with AsyncSessionLocal() as session:

@@ -90,4 +90,11 @@ class BeneficiaryEntitlement(Base):
     )
     notes: Mapped[str | None] = mapped_column(String(256))
 
+    # Optional link to a Contact row of type BENEFICIARY. Null-safe — the
+    # beneficiary_name string is the authoritative display value; this FK is
+    # for reporting joins only.
+    contact_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True
+    )
+
     distribution: Mapped[TrustDistribution] = relationship(back_populates="entitlements")

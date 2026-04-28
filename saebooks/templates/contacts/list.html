@@ -12,6 +12,8 @@
     <a href="/contacts" class="{{ 'active' if type_filter == 'all' }}">All</a>
     <a href="/contacts?type=CUSTOMER" class="{{ 'active' if type_filter == 'CUSTOMER' }}">Customers</a>
     <a href="/contacts?type=SUPPLIER" class="{{ 'active' if type_filter == 'SUPPLIER' }}">Suppliers</a>
+    <a href="/contacts?type=BENEFICIARY" class="{{ 'active' if type_filter == 'BENEFICIARY' }}">Beneficiaries</a>
+    <a href="/beneficiaries">Register</a>
   </div>
   <form method="get" action="/contacts" style="display:inline">
     {% if type_filter != 'all' %}<input type="hidden" name="type" value="{{ type_filter }}">{% endif %}

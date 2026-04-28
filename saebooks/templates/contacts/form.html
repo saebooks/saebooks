@@ -12,10 +12,11 @@
 <form method="post" action="{{ '/contacts/' + contact.id|string if contact else '/contacts' }}" class="tc-form" style="max-width:40rem">
   <label>Name <input name="name" required value="{{ contact.name if contact else '' }}"></label>
   <label>Type
-    <select name="contact_type">
+    <select name="contact_type" id="contact_type_sel">
       <option value="CUSTOMER" {{ 'selected' if contact and contact.contact_type.value == 'CUSTOMER' }}>Customer</option>
       <option value="SUPPLIER" {{ 'selected' if contact and contact.contact_type.value == 'SUPPLIER' }}>Supplier</option>
       <option value="BOTH" {{ 'selected' if contact and contact.contact_type.value == 'BOTH' }}>Both</option>
+      <option value="BENEFICIARY" {{ 'selected' if contact and contact.contact_type.value == 'BENEFICIARY' }}>Beneficiary</option>
     </select>
   </label>
   <label>Email <input name="email" type="email" value="{{ contact.email if contact and contact.email else '' }}"></label>
@@ -62,6 +63,39 @@
     </select>
   </label>
   <label class="wide">Notes <textarea name="notes" rows="3" style="font:14px/1.4 inherit;width:100%;padding:0.3rem;border:1px solid var(--rule)">{{ contact.notes if contact and contact.notes else '' }}</textarea></label>
+
+  {# Beneficiary-specific fields — shown/hidden by JS based on type selection #}
+  <div id="beneficiary-fields" style="display:none;border-top:1px solid var(--rule);margin-top:1rem;padding-top:1rem">
+    <p class="dim" style="margin:0 0 0.75rem">Beneficiary fields (section 97 statement data)</p>
+    <label>TFN
+      <input name="tfn" maxlength="11" placeholder="xxxxxxxxx"
+             value="{{ contact.tfn if contact and contact.tfn else '' }}">
+    </label>
+    <label>Default share %
+      <input name="share_percentage" type="number" step="0.0001" min="0" max="100"
+             placeholder="e.g. 50.0000"
+             value="{{ contact.share_percentage if contact and contact.share_percentage else '' }}">
+    </label>
+    <label>Income classification
+      <select name="default_income_classification">
+        <option value="">— none —</option>
+        {% for cls in ['Individual', 'Company', 'Trust', 'SMSF', 'Partnership', 'Other'] %}
+        <option value="{{ cls }}" {{ 'selected' if contact and contact.default_income_classification == cls }}>{{ cls }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </div>
+
+  <script>
+    (function () {
+      var sel = document.getElementById("contact_type_sel");
+      var panel = document.getElementById("beneficiary-fields");
+      function toggle() { panel.style.display = sel.value === "BENEFICIARY" ? "" : "none"; }
+      sel.addEventListener("change", toggle);
+      toggle();
+    })();
+  </script>
+
   <div class="form-actions">
     <button type="submit" class="btn">{{ 'Save' if contact else 'Create' }}</button>
     <a href="{{ '/contacts/' + contact.id|string if contact else '/contacts' }}">Cancel</a>

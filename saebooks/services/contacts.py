@@ -11,6 +11,7 @@ as today).
 import re
 import uuid
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import select
@@ -68,6 +69,9 @@ _CONTACT_COLUMNS: tuple[str, ...] = (
     "bank_bsb",
     "bank_account_number",
     "bank_account_title",
+    "tfn",
+    "share_percentage",
+    "default_income_classification",
     "created_at",
     "updated_at",
     "archived_at",
@@ -89,6 +93,8 @@ def _serialise(contact: Contact) -> dict[str, Any]:
             val = str(val)
         elif isinstance(val, datetime):
             val = val.isoformat()
+        elif isinstance(val, Decimal):
+            val = str(val)
         elif hasattr(val, "value"):  # StrEnum
             val = val.value
         data[key] = val
@@ -175,6 +181,9 @@ async def create(
     notes: str | None = None,
     default_account_id: uuid.UUID | None = None,
     default_tax_code: str | None = None,
+    tfn: str | None = None,
+    share_percentage: object = None,
+    default_income_classification: str | None = None,
 ) -> Contact:
     """Create a new contact. Validate ABN format if provided (11 digits)."""
     if abn is not None:
@@ -197,6 +206,9 @@ async def create(
         notes=notes,
         default_account_id=default_account_id,
         default_tax_code=default_tax_code,
+        tfn=tfn,
+        share_percentage=share_percentage,
+        default_income_classification=default_income_classification,
         version=1,
     )
     session.add(contact)
@@ -253,6 +265,7 @@ async def update(
         "name", "contact_type", "email", "phone", "abn",
         "address_line1", "address_line2", "city", "state", "postcode",
         "country", "notes", "default_account_id", "default_tax_code",
+        "tfn", "share_percentage", "default_income_classification",
     }
 
     before = audit_svc.capture(contact)

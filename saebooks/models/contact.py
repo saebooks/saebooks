@@ -1,8 +1,9 @@
 import enum
 import uuid
 from datetime import datetime
+from decimal import Decimal
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String, Text, func
+from sqlalchemy import DateTime, Enum, ForeignKey, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -14,6 +15,7 @@ class ContactType(enum.StrEnum):
     CUSTOMER = "CUSTOMER"
     SUPPLIER = "SUPPLIER"
     BOTH = "BOTH"
+    BENEFICIARY = "BENEFICIARY"
 
 
 class Contact(CompanyScoped, Base):
@@ -63,6 +65,16 @@ class Contact(CompanyScoped, Base):
     bank_account_number: Mapped[str | None] = mapped_column(String(9))
     bank_account_title: Mapped[str | None] = mapped_column(
         String(32), comment="Name on the payee's bank account (ABA field)"
+    )
+    # Beneficiary-specific fields. Only populated when contact_type = BENEFICIARY.
+    tfn: Mapped[str | None] = mapped_column(
+        String(11), comment="Tax File Number — 8 or 9 digits without spaces"
+    )
+    share_percentage: Mapped[Decimal | None] = mapped_column(
+        Numeric(7, 4), comment="Default entitlement share 0.0000 – 100.0000"
+    )
+    default_income_classification: Mapped[str | None] = mapped_column(
+        String(64), comment="e.g. Individual, Company, Trust, SMSF"
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
