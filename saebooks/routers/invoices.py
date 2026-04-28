@@ -169,6 +169,9 @@ def _parse_lines_from_form(form: dict[str, Any]) -> list[dict[str, object]]:
                 else None,
                 "service_start_date": ssd_raw or None,
                 "service_end_date": sed_raw or None,
+                "retention_pct": _parse_decimal(
+                    raw.get("retention_pct", "0"), "retention_pct"
+                ),
             }
         )
     return lines

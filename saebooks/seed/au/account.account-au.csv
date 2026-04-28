@@ -7,6 +7,7 @@
 "au_11200","11200","Trade Debtors","asset_receivable","","True","","","","Gross accounts receivable owed by customers, expected to be collected within the next 12 months."
 "au_11201","11201","Trade Debtors (PoS)","asset_receivable","","True","","","","Gross accounts receivable from customers owed to the organization through the point of sale system."
 "au_11210","11210","Less Prov'n for Doubtful Debts","asset_current","","False","","","","Estimate of debts not expected to be received from outstanding debtors (also referred to as Allowance)."
+"au_11220","11220","Retentions Receivable","asset_receivable","","True","","","","Amounts withheld by customers as retention under construction contracts, due upon practical completion."
 "au_11310","11310","Raw Materials","asset_current","","False","","","","Inventory items held for resale or manufacturing, expected to be consumed within the next financial year."
 "au_11320","11320","Finished Goods","asset_current","","False","","","","Manufactured or finished goods held in inventory for resale, expected within the next financial year."
 "au_11330","11330","Trading Stock on Hand","asset_current","","False","","","","Trading stock held for resale, including fundraising inventory, publications, and commercial stock."

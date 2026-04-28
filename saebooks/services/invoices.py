@@ -70,6 +70,7 @@ class _LineInput:
     service_start_date: date | None = None
     service_end_date: date | None = None
     margin_acq_cost: Decimal | None = None
+    retention_pct: Decimal = Decimal("0")
 
 
 def _compute_line_totals(
@@ -206,6 +207,16 @@ async def _replace_lines(
             Decimal(str(raw_acq)) if raw_acq not in (None, "", "0", 0) else None
         )
 
+        raw_ret = raw.get("retention_pct")
+        retention_pct = (
+            Decimal(str(raw_ret)) if raw_ret not in (None, "", "0", 0)
+            else Decimal("0")
+        )
+        if not (Decimal("0") <= retention_pct <= Decimal("100")):
+            raise InvoiceError(
+                f"retention_pct must be between 0 and 100 (got {retention_pct})"
+            )
+
         line_input = _LineInput(
             description=str(raw["description"]),
             account_id=account_id,
@@ -218,6 +229,7 @@ async def _replace_lines(
             service_start_date=service_start,
             service_end_date=service_end,
             margin_acq_cost=margin_acq_cost,
+            retention_pct=retention_pct,
         )
         tax_code = await _resolve_tax_code(session, line_input.tax_code_id)
         subtotal, tax, total = _compute_line_totals(line_input, tax_code)
@@ -239,6 +251,7 @@ async def _replace_lines(
                 service_start_date=line_input.service_start_date,
                 service_end_date=line_input.service_end_date,
                 margin_acq_cost=line_input.margin_acq_cost,
+                retention_pct=line_input.retention_pct,
             )
         )
     await session.flush()
@@ -427,6 +440,25 @@ async def _get_gst_collected_account(
     return result.scalar_one_or_none()
 
 
+async def _get_retentions_receivable_account(
+    session: AsyncSession, company_id: uuid.UUID
+) -> Account:
+    result = await session.execute(
+        select(Account).where(
+            Account.company_id == company_id,
+            Account.code == "1-1220",
+            Account.archived_at.is_(None),
+        )
+    )
+    acct = result.scalar_one_or_none()
+    if acct is None:
+        raise InvoiceError(
+            "Retentions Receivable account 1-1220 is missing — "
+            "re-run the CoA seed or add account 1-1220 manually."
+        )
+    return acct
+
+
 def _is_deferred_line(line: InvoiceLine) -> bool:
     """True when a line's service period spans more than one calendar month."""
     if line.service_start_date is None or line.service_end_date is None:
@@ -472,15 +504,42 @@ async def post_invoice(
     # invoice's rate.
     rate = Decimal(str(inv.fx_rate or Decimal("1")))
 
-    journal_lines: list[dict[str, object]] = [
-        # Line 1: Dr Trade Debtors for the base-currency invoice total.
-        {
+    # Calculate total retention amount across all lines (in base currency).
+    # Retention is withheld from the ex-GST portion only — GST is always
+    # charged on the full claim amount per ATO requirements.
+    total_retention_base = sum(
+        _q2(_q2(line.line_subtotal * Decimal(str(line.retention_pct))) / Decimal("100") * rate)
+        for line in inv.lines
+    )
+
+    journal_lines: list[dict[str, object]] = []
+
+    if total_retention_base > Decimal("0"):
+        # Split Dr AR: Trade Debtors receives the net-payable portion
+        # (ex-GST at 100%-retention + full GST); Retentions Receivable
+        # receives the withheld ex-GST amount. Revenue recognised in full.
+        retention_acct = await _get_retentions_receivable_account(session, inv.company_id)
+        net_ar = _q2(inv.base_total - total_retention_base)
+        journal_lines.append({
+            "account_id": ar_account.id,
+            "description": f"Invoice {inv.number} (net payable)",
+            "debit": net_ar,
+            "credit": Decimal("0"),
+        })
+        journal_lines.append({
+            "account_id": retention_acct.id,
+            "description": f"Invoice {inv.number}: retention held",
+            "debit": total_retention_base,
+            "credit": Decimal("0"),
+        })
+    else:
+        # Standard path — no retention, single Dr Trade Debtors line.
+        journal_lines.append({
             "account_id": ar_account.id,
             "description": f"Invoice {inv.number}",
             "debit": inv.base_total,
             "credit": Decimal("0"),
-        },
-    ]
+        })
     # One Cr line per income account per invoice line; GST auto-poster
     # appends the matching Cr GST Collected. project_id is carried
     # through so the GL can drive P&L-by-project reports directly.

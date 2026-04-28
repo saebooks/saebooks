@@ -24,11 +24,11 @@ import pytest
 from sqlalchemy import select
 
 from saebooks.db import AsyncSessionLocal
-from saebooks.models.account import Account
+from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
 from saebooks.models.invoice import InvoiceStatus
-from saebooks.models.journal import EntryStatus, JournalEntry
+from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import invoices as svc
 
@@ -434,4 +434,190 @@ async def test_margin_scheme_zero_acq_cost_treated_as_full_margin() -> None:
 
     # margin = $11,000 − $0 = $11,000; GST = $11,000 / 11 = $1,000.00
     assert inv.tax_total == Decimal("1000.00")
+
+
+# ---------------------------------------------------------------------------
+# CIVL-2: retention_pct on invoice lines
+# ---------------------------------------------------------------------------
+
+
+async def _ensure_retentions_receivable(company_id: uuid.UUID) -> uuid.UUID:
+    """Create Retentions Receivable (1-1220) if the seed hasn't added it yet."""
+    async with AsyncSessionLocal() as session:
+        existing = (
+            await session.execute(
+                select(Account).where(
+                    Account.company_id == company_id,
+                    Account.code == "1-1220",
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            return existing.id
+        acct = Account(
+            company_id=company_id,
+            code="1-1220",
+            name="Retentions Receivable",
+            account_type=AccountType.ASSET,
+            reconcile=True,
+            is_header=False,
+        )
+        session.add(acct)
+        await session.commit()
+        await session.refresh(acct)
+        return acct.id
+
+
+@pytest.mark.asyncio
+async def test_retention_pct_stored_on_line() -> None:
+    """retention_pct is persisted on invoice lines and invoice totals are unaffected."""
+    cid, contact, acct, gst, _fre = await _ctx()
+    async with AsyncSessionLocal() as session:
+        inv = await svc.create_draft(
+            session,
+            company_id=cid,
+            contact_id=contact,
+            issue_date=date(2026, 4, 28),
+            due_date=date(2026, 5, 28),
+            lines=[
+                {
+                    "description": "Civil progress claim #1",
+                    "account_id": acct,
+                    "tax_code_id": gst,
+                    "quantity": Decimal("1"),
+                    "unit_price": Decimal("440000"),
+                    "discount_pct": Decimal("0"),
+                    "retention_pct": Decimal("5"),
+                },
+            ],
+        )
+    # Totals reflect the full claim (not net of retention); retention is a
+    # payment withholding, not a price reduction or GST reduction.
+    assert inv.subtotal == Decimal("440000.00")
+    assert inv.tax_total == Decimal("44000.00")
+    assert inv.total == Decimal("484000.00")
+    assert inv.lines[0].retention_pct == Decimal("5.00")
+
+
+@pytest.mark.asyncio
+async def test_retention_pct_splits_ar_on_post() -> None:
+    """Posting an invoice with retention splits Dr AR into Trade Debtors + Retentions Receivable.
+
+    Scenario: $440k progress claim, 5% retention, 10% GST.
+    Expected GL (base currency AUD):
+      Dr Trade Debtors        462,000   (net payable: 418k + 44k GST)
+      Dr Retentions Receivable 22,000   (5% of 440k, withheld until PC)
+        Cr Income             440,000   (full revenue recognised)
+        Cr GST Collected       44,000   (auto-posted: full GST on claim)
+    """
+    cid, contact, acct, gst, _fre = await _ctx()
+    ret_acct_id = await _ensure_retentions_receivable(cid)
+
+    async with AsyncSessionLocal() as session:
+        inv = await svc.create_draft(
+            session,
+            company_id=cid,
+            contact_id=contact,
+            issue_date=date(2026, 4, 28),
+            due_date=date(2026, 5, 28),
+            lines=[
+                {
+                    "description": "Civil progress claim #2",
+                    "account_id": acct,
+                    "tax_code_id": gst,
+                    "quantity": Decimal("1"),
+                    "unit_price": Decimal("440000"),
+                    "discount_pct": Decimal("0"),
+                    "retention_pct": Decimal("5"),
+                },
+            ],
+        )
+        posted = await svc.post_invoice(session, inv.id)
+
+    assert posted.status == InvoiceStatus.POSTED
+    assert posted.journal_entry_id is not None
+
+    async with AsyncSessionLocal() as session:
+        from sqlalchemy.orm import selectinload
+        je = (
+            await session.execute(
+                select(JournalEntry)
+                .options(selectinload(JournalEntry.lines))
+                .where(JournalEntry.id == posted.journal_entry_id)
+            )
+        ).scalar_one()
+        lines = je.lines
+
+    # Build a lookup: account_id → (total_debit, total_credit)
+    by_acct: dict[uuid.UUID, tuple[Decimal, Decimal]] = {}
+    for jl in lines:
+        d, c = by_acct.get(jl.account_id, (Decimal("0"), Decimal("0")))
+        by_acct[jl.account_id] = (d + jl.debit, c + jl.credit)
+
+    # Retentions Receivable: Dr 22,000
+    assert ret_acct_id in by_acct, "Retentions Receivable not debited"
+    ret_dr, ret_cr = by_acct[ret_acct_id]
+    assert ret_dr == Decimal("22000.00"), f"Expected Dr 22000, got {ret_dr}"
+    assert ret_cr == Decimal("0.00")
+
+    # AR (Trade Debtors 1-1200): Dr 462,000
+    async with AsyncSessionLocal() as session:
+        ar_acct = (
+            await session.execute(
+                select(Account).where(
+                    Account.company_id == cid,
+                    Account.code == "1-1200",
+                )
+            )
+        ).scalar_one()
+    ar_dr, ar_cr = by_acct[ar_acct.id]
+    assert ar_dr == Decimal("462000.00"), f"Expected Dr AR 462000, got {ar_dr}"
+    assert ar_cr == Decimal("0.00")
+
+    # Total debits equal total invoice amount (484,000)
+    total_dr = sum(d for d, _c in by_acct.values())
+    assert total_dr == Decimal("484000.00")
+
+
+@pytest.mark.asyncio
+async def test_no_retention_uses_standard_ar_path() -> None:
+    """Positive control: zero retention_pct uses single Dr Trade Debtors (no regression)."""
+    cid, contact, acct, gst, _fre = await _ctx()
+    async with AsyncSessionLocal() as session:
+        inv = await svc.create_draft(
+            session,
+            company_id=cid,
+            contact_id=contact,
+            issue_date=date(2026, 4, 28),
+            due_date=date(2026, 5, 28),
+            lines=[
+                {
+                    "description": "Standard invoice no retention",
+                    "account_id": acct,
+                    "tax_code_id": gst,
+                    "quantity": Decimal("1"),
+                    "unit_price": Decimal("100000"),
+                    "discount_pct": Decimal("0"),
+                    # retention_pct omitted — defaults to 0
+                },
+            ],
+        )
+        posted = await svc.post_invoice(session, inv.id)
+
+    assert posted.status == InvoiceStatus.POSTED
+    async with AsyncSessionLocal() as session:
+        from sqlalchemy.orm import selectinload
+        je = (
+            await session.execute(
+                select(JournalEntry)
+                .options(selectinload(JournalEntry.lines))
+                .where(JournalEntry.id == posted.journal_entry_id)
+            )
+        ).scalar_one()
+        lines = je.lines
+
+    debit_lines = [jl for jl in lines if jl.debit > Decimal("0")]
+    # Only one Dr line — Trade Debtors for full 110,000
+    assert len(debit_lines) == 1
+    assert debit_lines[0].debit == Decimal("110000.00")
     assert inv.lines[0].margin_acq_cost is None

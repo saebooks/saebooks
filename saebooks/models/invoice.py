@@ -236,5 +236,14 @@ class InvoiceLine(Base):
     # 1/11 × (line_subtotal − margin_acq_cost) rather than rate % of
     # subtotal. NULL for all non-margin-scheme lines.
     margin_acq_cost: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+    # Retention percentage (CIVL-2). Civil/construction progress claims
+    # often withhold a percentage (e.g. 5%) pending practical completion.
+    # At posting, the Dr AR side is split: Trade Debtors receives
+    # line_subtotal × (1 - retention_pct/100) + full GST, while
+    # Retentions Receivable (1-1220) receives line_subtotal × retention_pct/100.
+    # Revenue and GST are recognised on the full claim amount — not reduced.
+    retention_pct: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), nullable=False, default=Decimal("0")
+    )
 
     invoice: Mapped[Invoice] = relationship(back_populates="lines")

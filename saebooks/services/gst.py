@@ -50,14 +50,26 @@ async def is_auto_post_enabled(session: AsyncSession) -> bool:
 async def _get_gst_account(
     session: AsyncSession, company_id: uuid.UUID, setting_key: str
 ) -> Account | None:
-    """Look up a GST system account by its code stored in settings."""
-    code = await settings_svc.get(session, setting_key, "")
-    if not code:
+    """Look up a GST system account by its code stored in settings.
+
+    Accounts are stored with hyphenated codes (e.g. "2-1310") after migration
+    0010, but settings may have been written with flat codes (e.g. "21310").
+    We try both forms so installs set up before the code-hyphenation migration
+    keep working without requiring a manual settings update.
+    """
+    raw = await settings_svc.get(session, setting_key, "")
+    if not raw:
         return None
+    code = str(raw)
+    # Derive the hyphenated form: "21310" -> "2-1310" (insert dash after first char).
+    if "-" not in code and len(code) >= 2 and code[0].isdigit():
+        hyphenated = code[0] + "-" + code[1:]
+    else:
+        hyphenated = code
     result = await session.execute(
         select(Account).where(
             Account.company_id == company_id,
-            Account.code == str(code),
+            Account.code.in_([code, hyphenated]),
             Account.archived_at.is_(None),
         )
     )
