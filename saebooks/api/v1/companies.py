@@ -237,9 +237,10 @@ async def update_company(
 # ---------------------------------------------------------------------------
 
 # Tables that hold a company_id FK — checked at hard-delete pre-flight.
-# Order matches the brief; the DELETE blocks if ANY of these have any
-# row referencing the target company (archived OR live), since archived
-# rows still pin the FK.
+# The DELETE blocks if ANY of these have any row referencing the target
+# company (archived OR live), since archived rows still pin the FK.
+# Sourced from `SELECT table_name FROM information_schema.columns WHERE
+# column_name = 'company_id'` against a freshly-migrated DB.
 _COMPANY_REF_TABLES: tuple[str, ...] = (
     "invoices",
     "bills",
@@ -263,11 +264,10 @@ _COMPANY_REF_TABLES: tuple[str, ...] = (
     "cost_centres",
     "trust_distributions",
     "ato_sbr_configs",
-    "depreciation_models",
     "document_counters",
     "bank_feed_clients",
     "bank_feed_accounts",
-    "bank_feed_issues",
+    "period_locks",
 )
 
 
