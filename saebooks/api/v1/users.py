@@ -43,10 +43,12 @@ from saebooks.api.v1.schemas import (
     UserPermissionsBody,
     UserUpdate,
 )
+from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.models.permission import Permission, UserPermission
 from saebooks.models.user import VALID_ROLES, User
 from saebooks.services import permissions as perm_svc
 from saebooks.services import users as svc
+from saebooks.services.hard_delete import hard_delete_with_audit
 
 router = APIRouter(
     prefix="/users",
@@ -251,16 +253,23 @@ async def archive_user(
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    hard: bool = Depends(hard_delete_admin_gate),
 ) -> Any:
-    expected = _parse_if_match(if_match)
-    if expected is None:
-        raise HTTPException(428, "If-Match header with user version is required")
-
     tenant_id = resolve_tenant_id(request)
-    # Verify user belongs to this tenant before archiving
     existing = await svc.get(session, user_id, tenant_id=tenant_id)
     if existing is None:
         raise HTTPException(404, "User not found")
+
+    if hard:
+        await hard_delete_with_audit(
+            session, existing, "users", getattr(request.state, "user", None)
+        )
+        await session.commit()
+        return Response(status_code=204)
+
+    expected = _parse_if_match(if_match)
+    if expected is None:
+        raise HTTPException(428, "If-Match header with user version is required")
 
     try:
         user = await svc.archive_with_version(

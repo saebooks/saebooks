@@ -40,9 +40,11 @@ from saebooks.api.v1.schemas import (
     InvoiceUpdate,
 )
 from saebooks.config import settings
+from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.models.invoice import InvoiceStatus
 from saebooks.services import invoices as svc
 from saebooks.services.features import FLAG_STRIPE_INTEGRATION, require_feature
+from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 from saebooks.services.integrations import StripeError, StripeNotConfiguredError
 from saebooks.services.integrations.stripe_links import create_payment_link
@@ -288,14 +290,23 @@ async def void_invoice(
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    hard: bool = Depends(hard_delete_admin_gate),
 ) -> Any:
+    tenant_id = resolve_tenant_id(request)
+    existing = await svc.api_get(session, invoice_id, tenant_id=tenant_id)
+    if existing is None:
+        raise HTTPException(404, "Invoice not found")
+
+    if hard:
+        await hard_delete_with_audit(
+            session, existing, "invoices", getattr(request.state, "user", None)
+        )
+        await session.commit()
+        return Response(status_code=204)
+
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with invoice version is required")
-
-    tenant_id = resolve_tenant_id(request)
-    if await svc.api_get(session, invoice_id, tenant_id=tenant_id) is None:
-        raise HTTPException(404, "Invoice not found")
 
     try:
         await svc.api_void(

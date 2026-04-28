@@ -31,9 +31,11 @@ from saebooks.api.v1.schemas import (
     JournalTemplateOut,
     JournalTemplateUpdate,
 )
+from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.models.company import Company
 from saebooks.models.journal_template import JournalTemplate
 from saebooks.services import journal_templates as svc
+from saebooks.services.hard_delete import hard_delete_with_audit
 
 router = APIRouter(
     prefix="/journal_templates",
@@ -212,6 +214,7 @@ async def archive_journal_template(
     template_id: UUID,
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    hard: bool = Depends(hard_delete_admin_gate),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
     company_id = await _first_company_id(session, tenant_id)
@@ -219,6 +222,13 @@ async def archive_journal_template(
     tmpl = await svc.get(session, template_id)
     if tmpl is None or tmpl.company_id != company_id:
         raise HTTPException(404, "Journal template not found")
+
+    if hard:
+        await hard_delete_with_audit(
+            session, tmpl, "journal_templates", getattr(request.state, "user", None)
+        )
+        await session.commit()
+        return Response(status_code=204)
 
     await svc.archive(session, template_id)
     return Response(status_code=204)

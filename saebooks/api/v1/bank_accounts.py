@@ -31,7 +31,9 @@ from saebooks.api.v1.schemas import (
     BankAccountOut,
     BankAccountUpdate,
 )
+from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.services import bank_accounts as svc
+from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 
 router = APIRouter(
@@ -280,12 +282,23 @@ async def delete_bank_account(
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    hard: bool = Depends(hard_delete_admin_gate),
 ) -> Any:
+    tenant_id = resolve_tenant_id(request)
+    if hard:
+        existing = await svc.api_get(session, bank_account_id, tenant_id=tenant_id)
+        if existing is None:
+            raise HTTPException(404, "Bank account not found")
+        await hard_delete_with_audit(
+            session, existing, "bank_accounts", getattr(request.state, "user", None)
+        )
+        await session.commit()
+        return Response(status_code=204)
+
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with bank account version is required")
 
-    tenant_id = resolve_tenant_id(request)
     if await svc.api_get(session, bank_account_id, tenant_id=tenant_id) is None:
         raise HTTPException(404, "Bank account not found")
 

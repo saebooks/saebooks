@@ -37,9 +37,11 @@ from saebooks.api.v1.schemas import (
     TaxCodeOut,
     TaxCodeUpdate,
 )
+from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.models.company import Company
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import tax_codes as svc
+from saebooks.services.hard_delete import hard_delete_with_audit
 
 router = APIRouter(
     prefix="/tax_codes",
@@ -250,14 +252,23 @@ async def archive_tax_code(
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    hard: bool = Depends(hard_delete_admin_gate),
 ) -> Any:
+    tenant_id = resolve_tenant_id(request)
+    existing = await svc.get(session, tax_code_id, tenant_id=tenant_id)
+    if existing is None:
+        raise HTTPException(404, "Tax code not found")
+
+    if hard:
+        await hard_delete_with_audit(
+            session, existing, "tax_codes", getattr(request.state, "user", None)
+        )
+        await session.commit()
+        return Response(status_code=204)
+
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with tax code version is required")
-
-    tenant_id = resolve_tenant_id(request)
-    if await svc.get(session, tax_code_id, tenant_id=tenant_id) is None:
-        raise HTTPException(404, "Tax code not found")
 
     try:
         tc = await svc.archive_with_version(

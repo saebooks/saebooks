@@ -31,6 +31,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_session
+from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
+from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.api.v1.schemas import (
     AccountConflictBody,
     AccountCreate,
@@ -316,12 +318,23 @@ async def archive_account(
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    hard: bool = Depends(hard_delete_admin_gate),
 ) -> Any:
+    tenant_id = resolve_tenant_id(request)
+    if hard:
+        existing = await svc.get(session, account_id, tenant_id=tenant_id)
+        if existing is None:
+            raise HTTPException(404, "Account not found")
+        await hard_delete_with_audit(
+            session, existing, "accounts", getattr(request.state, "user", None)
+        )
+        await session.commit()
+        return Response(status_code=204)
+
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with account version is required")
     key = _parse_idempotency_key(idempotency_key)
-    tenant_id = resolve_tenant_id(request)
 
     if key is not None:
         raw_body = await request.body()
