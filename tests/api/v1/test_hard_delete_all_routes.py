@@ -23,7 +23,7 @@ from saebooks.main import app
 HARD_DELETE_ROUTES: tuple[str, ...] = (
     "account_ranges",
     "accounts",
-    "allocations",
+    "allocation_rules",  # router prefix differs from gap-list name
     "bank_accounts",
     "bank_rules",
     "bank_statement_lines",
