@@ -188,6 +188,7 @@ class CompanyOut(BaseModel):
     audit_mode: str
     gst_registered: bool = False
     gst_effective_date: date | None = None
+    psi_status: str = "unsure"
     version: int
     created_at: datetime
     archived_at: datetime | None = None
@@ -213,6 +214,17 @@ class CompanyUpdate(BaseModel):
     audit_mode: str | None = None
     gst_registered: bool | None = None
     gst_effective_date: date | None = None
+    psi_status: str | None = None
+
+    @field_validator("psi_status")
+    @classmethod
+    def psi_status_valid(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        valid = {"yes", "no", "unsure"}
+        if v not in valid:
+            raise ValueError(f"psi_status must be one of: {sorted(valid)}")
+        return v
 
     @field_validator("gst_effective_date")
     @classmethod
