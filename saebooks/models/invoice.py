@@ -250,5 +250,13 @@ class InvoiceLine(Base):
     retention_pct: Mapped[Decimal] = mapped_column(
         Numeric(5, 2), nullable=False, default=Decimal("0")
     )
+    # Trade-in flag (MOTR-2). When True this line represents a vehicle
+    # acquired via trade-in. It is excluded from the invoice GL posting
+    # (so G1 shows the full new-car sale price, not the net settlement),
+    # and post_invoice auto-creates a companion AP bill
+    # (Dr Inventory / Cr Trade Creditors) with independent GST treatment.
+    is_trade_in: Mapped[bool] = mapped_column(
+        nullable=False, default=False
+    )
 
     invoice: Mapped[Invoice] = relationship(back_populates="lines")

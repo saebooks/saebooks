@@ -705,3 +705,205 @@ async def test_no_settlement_date_falls_back_to_issue_date() -> None:
         je = await session.get(JournalEntry, posted.journal_entry_id)
         assert je is not None
         assert je.entry_date == issue
+
+
+# ---------------------------------------------------------------------------
+# MOTR-2: trade-in vehicle recorded as separate AP bill, not negative line
+# ---------------------------------------------------------------------------
+
+
+async def _ensure_inventory_account(company_id: uuid.UUID) -> uuid.UUID:
+    """Return (or create) a test asset account for trade-in vehicle inventory."""
+    async with AsyncSessionLocal() as session:
+        existing = (
+            await session.execute(
+                select(Account).where(
+                    Account.company_id == company_id,
+                    Account.code == "1-1350",
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            return existing.id
+        acct = Account(
+            company_id=company_id,
+            code="1-1350",
+            name="Used Vehicle Stock",
+            account_type=AccountType.ASSET,
+            is_header=False,
+        )
+        session.add(acct)
+        await session.commit()
+        await session.refresh(acct)
+        return acct.id
+
+
+@pytest.mark.asyncio
+async def test_trade_in_excluded_from_invoice_totals() -> None:
+    """Trade-in line (is_trade_in=True) is excluded from the invoice G1 total.
+
+    New-car sale $65,000 + GST $6,500 → invoice total $71,500.
+    Trade-in $15,000 (is_trade_in=True) does NOT reduce that total.
+    """
+    cid, contact, income_acct, gst, _fre = await _ctx()
+    inv_acct = await _ensure_inventory_account(cid)
+
+    async with AsyncSessionLocal() as session:
+        inv = await svc.create_draft(
+            session,
+            company_id=cid,
+            contact_id=contact,
+            issue_date=date(2026, 5, 1),
+            due_date=date(2026, 5, 31),
+            lines=[
+                {
+                    "description": "New vehicle sale",
+                    "account_id": income_acct,
+                    "tax_code_id": gst,
+                    "quantity": Decimal("1"),
+                    "unit_price": Decimal("65000"),
+                    "discount_pct": Decimal("0"),
+                },
+                {
+                    "description": "Trade-in: 2019 Toyota Camry",
+                    "account_id": inv_acct,
+                    "tax_code_id": gst,
+                    "quantity": Decimal("1"),
+                    "unit_price": Decimal("15000"),
+                    "discount_pct": Decimal("0"),
+                    "is_trade_in": True,
+                },
+            ],
+        )
+
+    # Invoice header totals reflect only the new-car sale, not the trade-in
+    assert inv.subtotal == Decimal("65000.00")
+    assert inv.tax_total == Decimal("6500.00")
+    assert inv.total == Decimal("71500.00")
+
+    # Both lines are stored; trade-in flag is persisted
+    assert len(inv.lines) == 2
+    trade_in_line = next(ln for ln in inv.lines if ln.is_trade_in)
+    assert trade_in_line.line_subtotal == Decimal("15000.00")
+    assert trade_in_line.line_tax == Decimal("1500.00")
+
+
+@pytest.mark.asyncio
+async def test_trade_in_post_creates_companion_bill() -> None:
+    """Posting an invoice with a trade-in line auto-creates a companion AP bill.
+
+    Invoice (G1 sale):   Dr AR 71,500 / Cr Income 65,000 / Cr GST Collected 6,500
+    Companion bill (AP): Dr Vehicle Inventory 15,000 / Dr GST Paid 1,500 / Cr AP 16,500
+    Net cash settlement: $71,500 AR − $16,500 AP = $55,000  (but each leg is separate)
+    """
+    from saebooks.models.bill import Bill, BillStatus
+    from saebooks.models.journal import JournalLine
+
+    cid, contact, income_acct, gst, _fre = await _ctx()
+    inv_acct = await _ensure_inventory_account(cid)
+
+    async with AsyncSessionLocal() as session:
+        inv = await svc.create_draft(
+            session,
+            company_id=cid,
+            contact_id=contact,
+            issue_date=date(2026, 5, 2),
+            due_date=date(2026, 6, 2),
+            lines=[
+                {
+                    "description": "New vehicle — VIN XYZ999",
+                    "account_id": income_acct,
+                    "tax_code_id": gst,
+                    "quantity": Decimal("1"),
+                    "unit_price": Decimal("65000"),
+                    "discount_pct": Decimal("0"),
+                },
+                {
+                    "description": "Trade-in: 2020 Mazda CX-5",
+                    "account_id": inv_acct,
+                    "tax_code_id": gst,
+                    "quantity": Decimal("1"),
+                    "unit_price": Decimal("15000"),
+                    "discount_pct": Decimal("0"),
+                    "is_trade_in": True,
+                },
+            ],
+        )
+        posted = await svc.post_invoice(session, inv.id, posted_by="test")
+
+    # Invoice GL — only the new-car sale; trade-in is NOT a line here
+    assert posted.status == InvoiceStatus.POSTED
+    assert posted.total == Decimal("71500.00")
+
+    async with AsyncSessionLocal() as session:
+        from sqlalchemy.orm import selectinload
+
+        je = (
+            await session.execute(
+                select(JournalEntry)
+                .options(selectinload(JournalEntry.lines))
+                .where(JournalEntry.id == posted.journal_entry_id)
+            )
+        ).scalar_one()
+        inv_je_debit_total = sum(jl.debit for jl in je.lines)
+        inv_je_credit_total = sum(jl.credit for jl in je.lines)
+
+    # Invoice journal must balance and Dr AR = 71,500
+    assert inv_je_debit_total == inv_je_credit_total
+    assert inv_je_debit_total == Decimal("71500.00")
+
+    # A companion bill must exist for the trade-in, posted, with correct total
+    async with AsyncSessionLocal() as session:
+        bills = (
+            await session.execute(
+                select(Bill)
+                .where(
+                    Bill.company_id == cid,
+                    Bill.contact_id == contact,
+                    Bill.status == BillStatus.POSTED,
+                    Bill.supplier_reference == posted.number,
+                )
+            )
+        ).scalars().all()
+
+    assert len(bills) == 1, "Expected exactly one trade-in bill to be auto-created"
+    bill = bills[0]
+    assert bill.total == Decimal("16500.00"), (
+        f"Trade-in bill total should be 15,000 + 10% GST = 16,500 (got {bill.total})"
+    )
+
+
+@pytest.mark.asyncio
+async def test_trade_in_negative_unit_price_rejected() -> None:
+    """Negative unit_price on a trade-in line is rejected at create time."""
+    cid, contact, income_acct, gst, _fre = await _ctx()
+    inv_acct = await _ensure_inventory_account(cid)
+
+    with pytest.raises(svc.InvoiceError, match="positive value"):
+        async with AsyncSessionLocal() as session:
+            await svc.create_draft(
+                session,
+                company_id=cid,
+                contact_id=contact,
+                issue_date=date(2026, 5, 3),
+                due_date=date(2026, 6, 3),
+                lines=[
+                    {
+                        "description": "New vehicle",
+                        "account_id": income_acct,
+                        "tax_code_id": gst,
+                        "quantity": Decimal("1"),
+                        "unit_price": Decimal("65000"),
+                        "discount_pct": Decimal("0"),
+                    },
+                    {
+                        "description": "Trade-in (wrong: negative price)",
+                        "account_id": inv_acct,
+                        "tax_code_id": gst,
+                        "quantity": Decimal("1"),
+                        "unit_price": Decimal("-15000"),
+                        "discount_pct": Decimal("0"),
+                        "is_trade_in": True,
+                    },
+                ],
+            )

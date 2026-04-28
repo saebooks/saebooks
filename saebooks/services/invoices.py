@@ -35,6 +35,7 @@ from saebooks.models.contact import Contact
 from saebooks.models.invoice import Invoice, InvoiceLine, InvoiceStatus
 from saebooks.models.item import Item
 from saebooks.models.tax_code import TaxCode
+from saebooks.services import bills as bills_svc
 from saebooks.services import change_log as change_log_svc
 from saebooks.services import items as items_svc
 from saebooks.services import journal as journal_svc
@@ -71,6 +72,7 @@ class _LineInput:
     service_end_date: date | None = None
     margin_acq_cost: Decimal | None = None
     retention_pct: Decimal = Decimal("0")
+    is_trade_in: bool = False
 
 
 def _compute_line_totals(
@@ -219,12 +221,21 @@ async def _replace_lines(
                 f"retention_pct must be between 0 and 100 (got {retention_pct})"
             )
 
+        is_trade_in = bool(raw.get("is_trade_in", False))
+        raw_up = raw.get("unit_price", 0)
+        unit_price = Decimal(str(raw_up))
+        if is_trade_in and unit_price < Decimal("0"):
+            raise InvoiceError(
+                "Trade-in unit_price must be a positive value representing the "
+                "trade-in vehicle's acquisition cost (not a negative discount)"
+            )
+
         line_input = _LineInput(
             description=str(raw["description"]),
             account_id=account_id,
             tax_code_id=tax_code_id if isinstance(tax_code_id, uuid.UUID) else None,
             quantity=Decimal(str(raw.get("quantity", 1))),
-            unit_price=Decimal(str(raw.get("unit_price", 0))),
+            unit_price=unit_price,
             discount_pct=Decimal(str(raw.get("discount_pct", 0))),
             project_id=project_id if isinstance(project_id, uuid.UUID) else None,
             item_id=item_id if isinstance(item_id, uuid.UUID) else None,
@@ -232,6 +243,7 @@ async def _replace_lines(
             service_end_date=service_end,
             margin_acq_cost=margin_acq_cost,
             retention_pct=retention_pct,
+            is_trade_in=is_trade_in,
         )
         tax_code = await _resolve_tax_code(session, line_input.tax_code_id)
         subtotal, tax, total = _compute_line_totals(line_input, tax_code)
@@ -254,6 +266,7 @@ async def _replace_lines(
                 service_end_date=line_input.service_end_date,
                 margin_acq_cost=line_input.margin_acq_cost,
                 retention_pct=line_input.retention_pct,
+                is_trade_in=line_input.is_trade_in,
             )
         )
     await session.flush()
@@ -271,8 +284,12 @@ async def _recalc(session: AsyncSession, inv: Invoice) -> None:
             select(InvoiceLine).where(InvoiceLine.invoice_id == inv.id)
         )
     ).scalars().all()
-    subtotal = sum((ln.line_subtotal for ln in lines), Decimal("0"))
-    tax = sum((ln.line_tax for ln in lines), Decimal("0"))
+    # Trade-in lines are excluded from the invoice header totals. They do
+    # not contribute to G1 (they are purchases, not sales) and will be
+    # posted as a separate AP bill at post_invoice time.
+    sale_lines = [ln for ln in lines if not ln.is_trade_in]
+    subtotal = sum((ln.line_subtotal for ln in sale_lines), Decimal("0"))
+    tax = sum((ln.line_tax for ln in sale_lines), Decimal("0"))
     inv.subtotal = _q2(Decimal(subtotal))
     inv.tax_total = _q2(Decimal(tax))
     inv.total = inv.subtotal + inv.tax_total
@@ -283,9 +300,9 @@ async def _recalc(session: AsyncSession, inv: Invoice) -> None:
     # drift between Dr AR base_total and Cr income per line).
     rate = Decimal(str(inv.fx_rate or Decimal("1")))
     base_subtotal = sum(
-        (_q2(ln.line_subtotal * rate) for ln in lines), Decimal("0")
+        (_q2(ln.line_subtotal * rate) for ln in sale_lines), Decimal("0")
     )
-    base_tax = sum((_q2(ln.line_tax * rate) for ln in lines), Decimal("0"))
+    base_tax = sum((_q2(ln.line_tax * rate) for ln in sale_lines), Decimal("0"))
     inv.base_subtotal = _q2(Decimal(base_subtotal))
     inv.base_tax_total = _q2(Decimal(base_tax))
     inv.base_total = inv.base_subtotal + inv.base_tax_total
@@ -509,12 +526,18 @@ async def post_invoice(
     # invoice's rate.
     rate = Decimal(str(inv.fx_rate or Decimal("1")))
 
-    # Calculate total retention amount across all lines (in base currency).
+    # Separate trade-in lines from sale lines before any intermediate commit.
+    # invoice.lines may not be re-accessed after bills_svc commits below
+    # because async SQLAlchemy does not support implicit lazy loads.
+    trade_in_lines = [line for line in inv.lines if line.is_trade_in]
+    sale_lines = [line for line in inv.lines if not line.is_trade_in]
+
+    # Calculate total retention amount across sale lines only (in base currency).
     # Retention is withheld from the ex-GST portion only — GST is always
     # charged on the full claim amount per ATO requirements.
     total_retention_base = sum(
         _q2(_q2(line.line_subtotal * Decimal(str(line.retention_pct))) / Decimal("100") * rate)
-        for line in inv.lines
+        for line in sale_lines
     )
 
     journal_lines: list[dict[str, object]] = []
@@ -545,7 +568,7 @@ async def post_invoice(
             "debit": inv.base_total,
             "credit": Decimal("0"),
         })
-    # One Cr line per income account per invoice line; GST auto-poster
+    # One Cr line per income account per sale line; GST auto-poster
     # appends the matching Cr GST Collected. project_id is carried
     # through so the GL can drive P&L-by-project reports directly.
     # For item lines we also issue stock (which reads WAC) and append
@@ -554,7 +577,8 @@ async def post_invoice(
     # Deferred-revenue lines: Cr Unearned Income instead of the income
     # account; GST Collected is added explicitly because the auto-poster
     # only fires for INCOME/OTHER_INCOME account types, not LIABILITY.
-    for line in inv.lines:
+    # Trade-in lines are excluded here — they are handled below.
+    for line in sale_lines:
         line_base_subtotal = _q2(line.line_subtotal * rate)
         line_base_tax = (
             _q2(line.line_tax * rate) if line.line_tax > 0 else None
@@ -627,6 +651,41 @@ async def post_invoice(
                         "project_id": line.project_id,
                     }
                 )
+
+    # Auto-create and post a companion AP bill (Dr Inventory / Cr Trade
+    # Creditors) for each trade-in line. This keeps the full new-car sale
+    # in G1 and records the trade-in acquisition in AP/inventory with its
+    # own independent GST treatment (MOTR-2).
+    # bills_svc calls commit() internally; inv attributes set before this
+    # loop are safe because they are scalar writes, not relationship reads.
+    for tl in trade_in_lines:
+        bill_draft = await bills_svc.create_draft(
+            session,
+            company_id=inv.company_id,
+            contact_id=inv.contact_id,
+            issue_date=inv.issue_date,
+            due_date=inv.issue_date,
+            supplier_reference=inv.number,
+            notes=f"Trade-in acquisition for invoice {inv.number}",
+            lines=[
+                {
+                    "description": tl.description,
+                    "account_id": str(tl.account_id),
+                    "tax_code_id": str(tl.tax_code_id) if tl.tax_code_id else None,
+                    "quantity": str(tl.quantity),
+                    "unit_price": str(tl.unit_price),
+                    "discount_pct": str(tl.discount_pct),
+                }
+            ],
+            currency=inv.currency,
+            fx_rate=inv.fx_rate,
+        )
+        await bills_svc.post_bill(
+            session,
+            bill_draft.id,
+            posted_by=posted_by,
+            override_reason=override_reason,
+        )
 
     # Use settlement_date as the GL entry date when set (RLES-6). Real
     # estate commissions are earned at unconditional exchange/settlement,
