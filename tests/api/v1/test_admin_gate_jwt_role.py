@@ -15,17 +15,20 @@ from __future__ import annotations
 
 import os
 import uuid
+from typing import AsyncIterator
+
 import pytest
+import pytest_asyncio
 
 # SAEBOOKS_ENV is normally set by conftest at the project level, but be
 # explicit here so this file is safe in isolation too.
 os.environ.setdefault("SAEBOOKS_ENV", "test")
 
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete as sa_delete
 
-from saebooks.main import app
 from saebooks.db import AsyncSessionLocal
+from saebooks.main import app
 from saebooks.models.user import User
 from saebooks.services.jwt_tokens import _reset_secret_cache, create_access_token
 
@@ -43,8 +46,8 @@ def _mint(user: User) -> str:
     )
 
 
-@pytest.fixture
-async def bookkeeper_user():
+@pytest_asyncio.fixture
+async def bookkeeper_user() -> AsyncIterator[User]:
     user = User(
         id=uuid.uuid4(),
         tenant_id=_TENANT,
@@ -56,14 +59,16 @@ async def bookkeeper_user():
         session.add(user)
         await session.commit()
         await session.refresh(user)
-    yield user
-    async with AsyncSessionLocal() as session:
-        await session.execute(sa_delete(User).where(User.id == user.id))
-        await session.commit()
+    try:
+        yield user
+    finally:
+        async with AsyncSessionLocal() as session:
+            await session.execute(sa_delete(User).where(User.id == user.id))
+            await session.commit()
 
 
-@pytest.fixture
-async def admin_user():
+@pytest_asyncio.fixture
+async def admin_user() -> AsyncIterator[User]:
     user = User(
         id=uuid.uuid4(),
         tenant_id=_TENANT,
@@ -75,10 +80,12 @@ async def admin_user():
         session.add(user)
         await session.commit()
         await session.refresh(user)
-    yield user
-    async with AsyncSessionLocal() as session:
-        await session.execute(sa_delete(User).where(User.id == user.id))
-        await session.commit()
+    try:
+        yield user
+    finally:
+        async with AsyncSessionLocal() as session:
+            await session.execute(sa_delete(User).where(User.id == user.id))
+            await session.commit()
 
 
 async def test_bookkeeper_jwt_with_x_admin_header_is_rejected_on_users_list(
@@ -86,7 +93,9 @@ async def test_bookkeeper_jwt_with_x_admin_header_is_rejected_on_users_list(
 ) -> None:
     """A bookkeeper-role JWT cannot bypass /api/v1/users gate by adding X-Admin: true."""
     token = _mint(bookkeeper_user)
-    async with AsyncClient(app=app, base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
         r = await client.get(
             "/api/v1/users",
             headers={
@@ -100,13 +109,11 @@ async def test_bookkeeper_jwt_with_x_admin_header_is_rejected_on_users_list(
 async def test_bookkeeper_jwt_with_x_admin_header_is_rejected_on_hard_delete(
     bookkeeper_user: User,
 ) -> None:
-    """A bookkeeper-role JWT cannot hard-delete by adding X-Admin: true.
-
-    Hits an arbitrary entity DELETE with ?hard=true and asserts 403
-    before the gate even reaches the route handler.
-    """
+    """A bookkeeper-role JWT cannot hard-delete by adding X-Admin: true."""
     token = _mint(bookkeeper_user)
-    async with AsyncClient(app=app, base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
         r = await client.delete(
             f"/api/v1/invoices/{uuid.uuid4()}?hard=true",
             headers={
@@ -120,11 +127,11 @@ async def test_bookkeeper_jwt_with_x_admin_header_is_rejected_on_hard_delete(
 async def test_admin_jwt_passes_admin_gate(admin_user: User) -> None:
     """Sanity: an admin-role JWT passes /api/v1/users gate (no X-Admin needed)."""
     token = _mint(admin_user)
-    async with AsyncClient(app=app, base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
         r = await client.get(
             "/api/v1/users",
             headers={"Authorization": f"Bearer {token}"},
         )
-    # 200 when admin; we don't care about the body — just that the gate
-    # didn't 403.
     assert r.status_code == 200, r.text
