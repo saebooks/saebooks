@@ -9,7 +9,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from saebooks.models.contact import ContactType
 from saebooks.models.account import AccountType
@@ -184,6 +184,8 @@ class CompanyOut(BaseModel):
     base_currency: str
     fin_year_start_month: int
     audit_mode: str
+    gst_registered: bool = False
+    gst_effective_date: date | None = None
     version: int
     created_at: datetime
     archived_at: datetime | None = None
@@ -207,6 +209,15 @@ class CompanyUpdate(BaseModel):
     base_currency: str | None = Field(default=None, min_length=3, max_length=3)
     fin_year_start_month: int | None = Field(default=None, ge=1, le=12)
     audit_mode: str | None = None
+    gst_registered: bool | None = None
+    gst_effective_date: date | None = None
+
+    @field_validator("gst_effective_date")
+    @classmethod
+    def effective_date_not_future(cls, v: date | None) -> date | None:
+        if v is not None and v > date.today():
+            raise ValueError("gst_effective_date cannot be in the future")
+        return v
 
 
 class CompanyCreate(BaseModel):

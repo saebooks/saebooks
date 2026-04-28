@@ -211,6 +211,21 @@ async def http_exception_handler(
     return resp
 
 
+def _safe_errors(exc: RequestValidationError) -> list[dict]:
+    """Return validation errors with ctx values stringified for JSON safety.
+
+    Pydantic v2 puts the original exception object into the ``ctx`` dict
+    when a field_validator raises ValueError — that object is not
+    JSON-serialisable, so we stringify every ctx value before sending.
+    """
+    safe = []
+    for err in exc.errors():
+        if "ctx" in err:
+            err = {**err, "ctx": {k: str(v) for k, v in err["ctx"].items()}}
+        safe.append(err)
+    return safe
+
+
 async def validation_exception_handler(
     request: Request,
     exc: RequestValidationError,
@@ -230,7 +245,7 @@ async def validation_exception_handler(
         status=422,
         code="validation_failed",
         detail="Request body or query parameters failed validation.",
-        extra={"errors": exc.errors()},
+        extra={"errors": _safe_errors(exc)},
     )
 
 

@@ -176,6 +176,132 @@ async def test_companies_stale_if_match_409(api_client: AsyncClient) -> None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# POST /companies — gated on FLAG_MULTI_COMPANY
+# ---------------------------------------------------------------------------
+
+
+async def test_post_company_requires_feature_flag(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST /companies returns 404 when FLAG_MULTI_COMPANY is disabled (community edition)."""
+    from saebooks.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "edition", "community")
+    resp = await api_client.post("/api/v1/companies", json={"name": "TestCo"})
+    assert resp.status_code == 404
+
+
+async def test_post_company_creates_with_enterprise_edition(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST /companies creates a company when FLAG_MULTI_COMPANY is enabled (enterprise = unlimited cap)."""
+    from saebooks.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "edition", "enterprise")
+
+    tag = uuid.uuid4().hex[:8]
+    name = f"TestCo_{tag}"
+    try:
+        resp = await api_client.post("/api/v1/companies", json={"name": name})
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["name"] == name
+        assert "id" in body
+        assert body["version"] == 1
+    finally:
+        # Cleanup the row so company-cap counters in neighbouring tests stay sane.
+        from sqlalchemy import delete
+
+        from saebooks.models.company import Company
+
+        async with AsyncSessionLocal() as session:
+            await session.execute(delete(Company).where(Company.name == name))
+            await session.commit()
+
+
+# ---------------------------------------------------------------------------
+# X-Company-Id header — get_active_company_id dep
+# ---------------------------------------------------------------------------
+
+
+async def test_x_company_id_header_invalid_uuid_returns_400(api_client: AsyncClient) -> None:
+    """X-Company-Id with a malformed UUID returns 400 from get_active_company_id."""
+    resp = await api_client.get(
+        "/api/v1/contacts",
+        headers={"X-Company-Id": "not-a-uuid"},
+    )
+    assert resp.status_code == 400
+
+
+async def test_x_company_id_header_unknown_uuid_returns_404(api_client: AsyncClient) -> None:
+    """X-Company-Id with a UUID that does not belong to the tenant returns 404."""
+    resp = await api_client.get(
+        "/api/v1/contacts",
+        headers={"X-Company-Id": str(uuid.uuid4())},
+    )
+    assert resp.status_code == 404
+
+
+async def test_x_company_id_header_valid_uuid_returns_200(api_client: AsyncClient) -> None:
+    """X-Company-Id with a tenant-owned UUID resolves and returns 200."""
+    company_id, _ = await _get_seed_company()
+    resp = await api_client.get(
+        "/api/v1/contacts",
+        headers={"X-Company-Id": company_id},
+    )
+    assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# HOBB-1 — gst_registered + gst_effective_date fields
+# ---------------------------------------------------------------------------
+
+
+async def test_companies_gst_fields_present_in_response(api_client: AsyncClient) -> None:
+    """CompanyOut always includes gst_registered and gst_effective_date."""
+    company_id, _ = await _get_seed_company()
+    r = await api_client.get(f"/api/v1/companies/{company_id}")
+    assert r.status_code == 200
+    body = r.json()
+    assert "gst_registered" in body
+    assert isinstance(body["gst_registered"], bool)
+    assert "gst_effective_date" in body
+
+
+async def test_companies_patch_gst_fields(api_client: AsyncClient) -> None:
+    """PATCH gst_registered + gst_effective_date round-trips correctly."""
+    company_id, version = await _get_seed_company()
+    r = await api_client.patch(
+        f"/api/v1/companies/{company_id}",
+        json={"gst_registered": True, "gst_effective_date": "2024-07-01"},
+        headers={"If-Match": str(version)},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["gst_registered"] is True
+    assert body["gst_effective_date"] == "2024-07-01"
+    assert body["version"] == version + 1
+
+    # Restore
+    await api_client.patch(
+        f"/api/v1/companies/{company_id}",
+        json={"gst_registered": False},
+        headers={"If-Match": str(version + 1)},
+    )
+
+
+async def test_companies_gst_effective_date_future_rejected(api_client: AsyncClient) -> None:
+    """gst_effective_date in the future returns 422."""
+    company_id, version = await _get_seed_company()
+    r = await api_client.patch(
+        f"/api/v1/companies/{company_id}",
+        json={"gst_effective_date": "2099-01-01"},
+        headers={"If-Match": str(version)},
+    )
+    assert r.status_code == 422
+
+
 async def test_companies_change_log_on_update(api_client: AsyncClient) -> None:
     company_id, version = await _get_seed_company()
 

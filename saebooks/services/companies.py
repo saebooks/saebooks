@@ -10,6 +10,7 @@ only covers admin seats, not companies.
 """
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 import uuid
 
@@ -42,6 +43,8 @@ _COMPANY_COLUMNS: tuple[str, ...] = (
     "base_currency",
     "fin_year_start_month",
     "audit_mode",
+    "gst_registered",
+    "gst_effective_date",
     "version",
     "created_at",
     "archived_at",
@@ -50,7 +53,7 @@ _COMPANY_COLUMNS: tuple[str, ...] = (
 
 def _serialise(company: Company) -> dict[str, Any]:
     """Row → JSON-safe dict for change_log.payload (excludes encrypted SISS fields)."""
-    from datetime import datetime as _dt
+    from datetime import date as _date, datetime as _dt
 
     data: dict[str, Any] = {}
     for key in _COMPANY_COLUMNS:
@@ -58,6 +61,8 @@ def _serialise(company: Company) -> dict[str, Any]:
         if isinstance(val, uuid.UUID):
             val = str(val)
         elif isinstance(val, _dt):
+            val = val.isoformat()
+        elif isinstance(val, _date):
             val = val.isoformat()
         data[key] = val
     return data
@@ -185,6 +190,8 @@ async def update(
     base_currency: str | None = None,
     fin_year_start_month: int | None = None,
     audit_mode: str | None = None,
+    gst_registered: bool | None = None,
+    gst_effective_date: date | None = None,
     expected_version: int | None = None,
     actor: str = "web",
 ) -> Company:
@@ -217,6 +224,10 @@ async def update(
         if audit_mode not in valid_modes:
             raise ValueError(f"audit_mode must be one of: {', '.join(sorted(valid_modes))}")
         company.audit_mode = audit_mode
+    if gst_registered is not None:
+        company.gst_registered = gst_registered
+    if gst_effective_date is not None:
+        company.gst_effective_date = gst_effective_date
 
     company.version = company.version + 1
 

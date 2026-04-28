@@ -1,8 +1,8 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -41,6 +41,9 @@ class Company(Base):
     siss_client_secret_encrypted: Mapped[str | None] = mapped_column(String)
     siss_subscription_key_encrypted: Mapped[str | None] = mapped_column(String)
     siss_environment: Mapped[str | None] = mapped_column(String(32))
+
+    gst_registered: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    gst_effective_date: Mapped[date | None] = mapped_column(Date)
 
     # Optimistic-locking version — bumped on every write through the API.
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
