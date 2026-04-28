@@ -74,8 +74,27 @@ async def list_active(
     return list(result.scalars().all())
 
 
-async def get(session: AsyncSession, project_id: uuid.UUID) -> Project | None:
-    return await session.get(Project, project_id)
+async def get(
+    session: AsyncSession,
+    project_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
+) -> Project | None:
+    """Fetch a project by id.
+
+    When ``tenant_id`` is supplied, the lookup is filtered by tenant —
+    a foreign-tenant id returns ``None`` even if the row exists, so
+    cross-tenant probes 404. Belt-and-braces complement to FORCE RLS.
+    """
+    if tenant_id is None:
+        return await session.get(Project, project_id)
+    result = await session.execute(
+        select(Project).where(
+            Project.id == project_id,
+            Project.tenant_id == tenant_id,
+        )
+    )
+    return result.scalars().first()
 
 
 async def create(
@@ -117,10 +136,15 @@ async def update(
     project_id: uuid.UUID,
     *,
     performed_by: str | None = None,
+    tenant_id: uuid.UUID | None = None,
     **kwargs: Any,
 ) -> Project:
-    """Update project fields. Only fields in `_ALLOWED_UPDATE_FIELDS`."""
-    project = await session.get(Project, project_id)
+    """Update project fields. Only fields in `_ALLOWED_UPDATE_FIELDS`.
+
+    When ``tenant_id`` is supplied, a foreign-tenant id raises
+    ``ValueError`` (treated as not found) — cross-tenant probes 404.
+    """
+    project = await get(session, project_id, tenant_id=tenant_id)
     if project is None:
         raise ValueError(f"Project {project_id} not found")
 
@@ -158,9 +182,14 @@ async def archive(
     project_id: uuid.UUID,
     *,
     performed_by: str | None = None,
+    tenant_id: uuid.UUID | None = None,
 ) -> None:
-    """Soft-delete. Also bumps status to ARCHIVED so list filters pick it up."""
-    project = await session.get(Project, project_id)
+    """Soft-delete. Also bumps status to ARCHIVED so list filters pick it up.
+
+    When ``tenant_id`` is supplied, a foreign-tenant id is silently
+    treated as "no row" — cross-tenant archive becomes a no-op.
+    """
+    project = await get(session, project_id, tenant_id=tenant_id)
     if project is None:
         return
     before = audit_svc.capture(project)

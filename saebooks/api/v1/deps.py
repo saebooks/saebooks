@@ -61,14 +61,16 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
+from uuid import UUID
 
-from fastapi import Request
-from sqlalchemy import event, text
+from fastapi import Depends, Header, HTTPException, Request
+from sqlalchemy import event, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from saebooks.api.v1.auth import resolve_tenant_id
 from saebooks.db import AsyncSessionLocal
+from saebooks.models.company import Company
 
 
 def _set_current_tenant_on_begin(
@@ -132,3 +134,47 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
         # is fine — the listener interpolates verbatim.
         session.info["tenant_id"] = str(tenant_id)
         yield session
+
+
+async def get_active_company_id(
+    request: Request,
+    x_company_id: str | None = Header(default=None, alias="X-Company-Id"),
+    session: AsyncSession = Depends(get_session),
+) -> UUID:
+    """Resolve the active company for the request.
+
+    Reads the optional ``X-Company-Id`` request header. If present and
+    the UUID belongs to the authenticated tenant, returns it. If
+    absent, falls back to the first active company for the tenant
+    (matching the original ``_first_company_id`` behaviour).
+
+    Raises:
+        HTTPException(400): when ``X-Company-Id`` is not a valid UUID.
+        HTTPException(404): when the requested company does not exist
+            for this tenant, or when the tenant has no active company.
+    """
+    tenant_id = resolve_tenant_id(request)
+    if x_company_id is not None:
+        try:
+            cid = UUID(x_company_id)
+        except ValueError as exc:
+            raise HTTPException(400, "X-Company-Id must be a valid UUID") from exc
+        result = await session.execute(
+            select(Company).where(
+                Company.id == cid,
+                Company.tenant_id == tenant_id,
+                Company.archived_at.is_(None),
+            )
+        )
+        if result.scalars().first() is None:
+            raise HTTPException(404, "Company not found")
+        return cid
+    result = await session.execute(
+        select(Company)
+        .where(Company.tenant_id == tenant_id, Company.archived_at.is_(None))
+        .order_by(Company.created_at)
+    )
+    company = result.scalars().first()
+    if company is None:
+        raise HTTPException(404, "No active company for tenant")
+    return company.id

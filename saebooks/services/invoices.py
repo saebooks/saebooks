@@ -241,12 +241,27 @@ async def _recalc(session: AsyncSession, inv: Invoice) -> None:
     inv.base_amount_paid = _q2(Decimal(inv.amount_paid) * rate)
 
 
-async def get(session: AsyncSession, invoice_id: uuid.UUID) -> Invoice:
-    result = await session.execute(
+async def get(
+    session: AsyncSession,
+    invoice_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
+) -> Invoice:
+    """Fetch an invoice by id.
+
+    When ``tenant_id`` is supplied, the lookup is filtered by tenant —
+    a foreign-tenant id raises ``InvoiceError`` (treated as not found),
+    so cross-tenant probes 404 even if the underlying row exists.
+    Belt-and-braces complement to FORCE RLS at the DB layer.
+    """
+    stmt = (
         select(Invoice)
         .options(selectinload(Invoice.lines))
         .where(Invoice.id == invoice_id)
     )
+    if tenant_id is not None:
+        stmt = stmt.where(Invoice.tenant_id == tenant_id)
+    result = await session.execute(stmt)
     inv = result.scalar_one_or_none()
     if inv is None:
         raise InvoiceError(f"Invoice {invoice_id} not found")
@@ -292,8 +307,9 @@ async def update_draft(
     payment_terms: str | None = None,
     currency: str | None = None,
     fx_rate: Decimal | None = None,
+    tenant_id: uuid.UUID | None = None,
 ) -> Invoice:
-    inv = await get(session, invoice_id)
+    inv = await get(session, invoice_id, tenant_id=tenant_id)
     if inv.status != InvoiceStatus.DRAFT:
         raise InvoiceError(
             f"Cannot edit invoice {inv.id} in state {inv.status.value}; "
@@ -503,9 +519,12 @@ async def mark_sent(
 
 
 async def archive(
-    session: AsyncSession, invoice_id: uuid.UUID
+    session: AsyncSession,
+    invoice_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
 ) -> Invoice:
-    inv = await get(session, invoice_id)
+    inv = await get(session, invoice_id, tenant_id=tenant_id)
     inv.archived_at = datetime.now(UTC)
     await session.commit()
     return inv

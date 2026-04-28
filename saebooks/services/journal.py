@@ -73,12 +73,27 @@ async def create_draft(
     return await get(session, entry.id)
 
 
-async def get(session: AsyncSession, entry_id: uuid.UUID) -> JournalEntry:
-    result = await session.execute(
+async def get(
+    session: AsyncSession,
+    entry_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
+) -> JournalEntry:
+    """Fetch a journal entry by id.
+
+    When ``tenant_id`` is supplied, the lookup is filtered by tenant —
+    a foreign-tenant id raises ``ValueError`` (treated as not found),
+    so cross-tenant probes 404 even if the underlying row exists.
+    Belt-and-braces complement to FORCE RLS at the DB layer.
+    """
+    stmt = (
         select(JournalEntry)
         .options(selectinload(JournalEntry.lines))
         .where(JournalEntry.id == entry_id)
     )
+    if tenant_id is not None:
+        stmt = stmt.where(JournalEntry.tenant_id == tenant_id)
+    result = await session.execute(stmt)
     entry = result.scalar_one_or_none()
     if entry is None:
         raise ValueError(f"Journal entry {entry_id} not found")
@@ -115,8 +130,9 @@ async def update_draft(
     ref: str | None = None,
     lines: list[dict[str, object]] | None = None,
     performed_by: str | None = None,
+    tenant_id: uuid.UUID | None = None,
 ) -> JournalEntry:
-    entry = await get(session, entry_id)
+    entry = await get(session, entry_id, tenant_id=tenant_id)
     if entry.status != EntryStatus.DRAFT:
         audit_mode = await settings_svc.get(session, "audit_mode", "immutable")
         if audit_mode == "immutable":
@@ -158,7 +174,7 @@ async def update_draft(
         performed_by=performed_by,
     )
     await session.commit()
-    return await get(session, entry_id)
+    return await get(session, entry_id, tenant_id=tenant_id)
 
 
 async def _check_balance(entry: JournalEntry) -> None:
@@ -202,8 +218,9 @@ async def post(
     *,
     posted_by: str | None = None,
     override_reason: str | None = None,
+    tenant_id: uuid.UUID | None = None,
 ) -> JournalEntry:
-    entry = await get(session, entry_id)
+    entry = await get(session, entry_id, tenant_id=tenant_id)
     if entry.status == EntryStatus.POSTED:
         raise PostingError(f"Entry {entry.ref} is already posted")
     if entry.status == EntryStatus.REVERSED:
@@ -241,9 +258,10 @@ async def reverse(
     reversal_date: date | None = None,
     posted_by: str | None = None,
     override_reason: str | None = None,
+    tenant_id: uuid.UUID | None = None,
 ) -> JournalEntry:
     """Create and post a reversal of a posted entry."""
-    original = await get(session, entry_id)
+    original = await get(session, entry_id, tenant_id=tenant_id)
     if original.status != EntryStatus.POSTED:
         raise PostingError(f"Can only reverse posted entries (current: {original.status})")
 
@@ -307,9 +325,10 @@ async def delete(
     entry_id: uuid.UUID,
     *,
     performed_by: str | None = None,
+    tenant_id: uuid.UUID | None = None,
 ) -> None:
     """Delete a journal entry and its lines. Any status — MYOB-style."""
-    entry = await get(session, entry_id)
+    entry = await get(session, entry_id, tenant_id=tenant_id)
     await audit_svc.snapshot_row(
         session, entry,
         action="delete",

@@ -25,6 +25,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from saebooks.api.v1.auth import resolve_tenant_id
 from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
@@ -300,8 +301,12 @@ async def bills_create(request: Request) -> RedirectResponse | HTMLResponse:
 
 @router.get("/{bill_id}", response_class=HTMLResponse)
 async def bills_detail(request: Request, bill_id: UUID) -> HTMLResponse:
+    tenant_id = resolve_tenant_id(request)
     async with AsyncSessionLocal() as session:
-        bill = await svc.get(session, bill_id)
+        try:
+            bill = await svc.get(session, bill_id, tenant_id=tenant_id)
+        except svc.BillError as exc:
+            raise HTTPException(404, "Bill not found") from exc
         company = await session.get(Company, bill.company_id)
         contact = await session.get(Contact, bill.contact_id)
         account_ids = {ln.account_id for ln in bill.lines}
@@ -334,8 +339,12 @@ async def bills_detail(request: Request, bill_id: UUID) -> HTMLResponse:
 
 @router.get("/{bill_id}/edit", response_class=HTMLResponse)
 async def bills_edit(request: Request, bill_id: UUID) -> HTMLResponse:
+    tenant_id = resolve_tenant_id(request)
     async with AsyncSessionLocal() as session:
-        bill = await svc.get(session, bill_id)
+        try:
+            bill = await svc.get(session, bill_id, tenant_id=tenant_id)
+        except svc.BillError as exc:
+            raise HTTPException(404, "Bill not found") from exc
         company = await session.get(Company, bill.company_id)
         dropdowns = await _form_dropdowns(session, bill.company_id)
     if bill.status != BillStatus.DRAFT:
@@ -360,12 +369,14 @@ async def bills_edit(request: Request, bill_id: UUID) -> HTMLResponse:
 async def bills_update(
     request: Request, bill_id: UUID
 ) -> RedirectResponse | HTMLResponse:
+    tenant_id = resolve_tenant_id(request)
     form = dict(await request.form())
     try:
         async with AsyncSessionLocal() as session:
             await svc.update_draft(
                 session,
                 bill_id,
+                tenant_id=tenant_id,
                 contact_id=uuid.UUID(str(form["contact_id"])),
                 issue_date=_parse_date(str(form["issue_date"]), "issue_date"),
                 due_date=_parse_date(str(form["due_date"]), "due_date"),
@@ -376,7 +387,10 @@ async def bills_update(
             )
     except (ValueError, svc.BillError) as exc:
         async with AsyncSessionLocal() as session:
-            bill = await svc.get(session, bill_id)
+            try:
+                bill = await svc.get(session, bill_id, tenant_id=tenant_id)
+            except svc.BillError as bexc:
+                raise HTTPException(404, "Bill not found") from bexc
             company = await session.get(Company, bill.company_id)
             dropdowns = await _form_dropdowns(session, bill.company_id)
         return templates.TemplateResponse(
@@ -417,7 +431,13 @@ async def bills_void(bill_id: UUID) -> RedirectResponse:
 
 
 @router.post("/{bill_id}/archive")
-async def bills_archive(bill_id: UUID) -> RedirectResponse:
+async def bills_archive(request: Request, bill_id: UUID) -> RedirectResponse:
+    tenant_id = resolve_tenant_id(request)
     async with AsyncSessionLocal() as session:
-        await svc.archive(session, bill_id)
+        try:
+            await svc.archive(session, bill_id, tenant_id=tenant_id)
+        except svc.BillError:
+            # Cross-tenant or already-archived: silently no-op so users
+            # never learn whether the bill exists in another tenant.
+            pass
     return RedirectResponse("/bills", status_code=303)

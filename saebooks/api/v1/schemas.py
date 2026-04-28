@@ -9,7 +9,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from saebooks.models.contact import ContactType
 from saebooks.models.account import AccountType
@@ -184,6 +184,8 @@ class CompanyOut(BaseModel):
     base_currency: str
     fin_year_start_month: int
     audit_mode: str
+    gst_registered: bool = False
+    gst_effective_date: date | None = None
     version: int
     created_at: datetime
     archived_at: datetime | None = None
@@ -207,6 +209,29 @@ class CompanyUpdate(BaseModel):
     base_currency: str | None = Field(default=None, min_length=3, max_length=3)
     fin_year_start_month: int | None = Field(default=None, ge=1, le=12)
     audit_mode: str | None = None
+    gst_registered: bool | None = None
+    gst_effective_date: date | None = None
+
+    @field_validator("gst_effective_date")
+    @classmethod
+    def effective_date_not_future(cls, v: date | None) -> date | None:
+        if v is not None and v > date.today():
+            raise ValueError("gst_effective_date cannot be in the future")
+        return v
+
+
+class CompanyCreate(BaseModel):
+    """POST body for creating a new company."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str = Field(min_length=1, max_length=255)
+    legal_name: str | None = None
+    trading_name: str | None = None
+    abn: str | None = None
+    acn: str | None = None
+    base_currency: str = Field(default="AUD", min_length=3, max_length=3)
+    fin_year_start_month: int = Field(default=7, ge=1, le=12)
 
 
 class CompanyConflictBody(BaseModel):
@@ -453,7 +478,7 @@ class JournalEntryBase(BaseModel):
 
     entry_date: date
     narration: str | None = None
-    reference: str | None = None
+    reference: str | None = Field(default=None, max_length=32)
 
 
 class JournalEntryCreate(JournalEntryBase):
@@ -483,7 +508,7 @@ class JournalEntryUpdate(BaseModel):
 
     entry_date: date | None = None
     narration: str | None = None
-    reference: str | None = None
+    reference: str | None = Field(default=None, max_length=32)
     status: str | None = None
     lines: list[JournalLineCreate] | None = None
 
@@ -535,6 +560,12 @@ class JournalEntryListOut(BaseModel):
 class JournalEntryConflictBody(BaseModel):
     detail: str
     current: JournalEntryOut
+
+
+class JournalEntryPostBody(BaseModel):
+    """Optional body for POST /{id}/post — carries override_reason for period-lock bypass."""
+
+    override_reason: str | None = None
 
 
 class PermissionOut(BaseModel):
@@ -591,6 +622,8 @@ class InvoiceLineOut(BaseModel):
     line_total: Decimal
     project_id: uuid.UUID | None = None
     item_id: uuid.UUID | None = None
+    service_start_date: date | None = None
+    service_end_date: date | None = None
 
 
 class InvoiceLineCreate(BaseModel):
@@ -604,6 +637,8 @@ class InvoiceLineCreate(BaseModel):
     discount_pct: Decimal = Decimal("0")
     project_id: uuid.UUID | None = None
     item_id: uuid.UUID | None = None
+    service_start_date: date | None = None
+    service_end_date: date | None = None
 
 
 class InvoiceBase(BaseModel):
@@ -612,6 +647,7 @@ class InvoiceBase(BaseModel):
     contact_id: uuid.UUID
     issue_date: date
     due_date: date
+    settlement_date: date | None = None
     notes: str | None = None
     payment_terms: str | None = None
     currency: str = Field(default="AUD", min_length=3, max_length=3)
@@ -631,6 +667,7 @@ class InvoiceUpdate(BaseModel):
     contact_id: uuid.UUID | None = None
     issue_date: date | None = None
     due_date: date | None = None
+    settlement_date: date | None = None
     notes: str | None = None
     payment_terms: str | None = None
     lines: list[InvoiceLineCreate] | None = None
@@ -648,6 +685,7 @@ class InvoiceOut(BaseModel):
     number: str | None = None
     issue_date: date
     due_date: date
+    settlement_date: date | None = None
     status: str
     subtotal: Decimal
     tax_total: Decimal
@@ -728,6 +766,7 @@ class BillBase(BaseModel):
     notes: str | None = None
     supplier_reference: str | None = None
     currency: str = Field(default="AUD", min_length=3, max_length=3)
+    fx_rate: Decimal = Field(default=Decimal("1"), gt=Decimal("0"))
 
 
 class BillCreate(BillBase):
@@ -746,6 +785,8 @@ class BillUpdate(BaseModel):
     due_date: date | None = None
     notes: str | None = None
     supplier_reference: str | None = None
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    fx_rate: Decimal | None = Field(default=None, gt=Decimal("0"))
     lines: list[BillLineCreate] | None = None
 
 
@@ -1020,6 +1061,7 @@ class BankAccountCreate(BaseModel):
     bank_account_title: str | None = Field(default=None, max_length=32)
     apca_user_id: str | None = Field(default=None, max_length=6)
     bank_abbreviation: str | None = Field(default=None, max_length=3)
+    is_trust_account: bool = False
 
 
 class BankAccountUpdate(BaseModel):
@@ -1034,6 +1076,7 @@ class BankAccountUpdate(BaseModel):
     bank_account_title: str | None = None
     apca_user_id: str | None = None
     bank_abbreviation: str | None = None
+    is_trust_account: bool | None = None
 
 
 class BankAccountOut(BaseModel):
@@ -1051,6 +1094,7 @@ class BankAccountOut(BaseModel):
     bank_account_title: str | None = None
     apca_user_id: str | None = None
     bank_abbreviation: str | None = None
+    is_trust_account: bool = False
     version: int
     created_at: datetime
     archived_at: datetime | None = None
@@ -1157,6 +1201,37 @@ class BankStatementLineMatchRequest(BaseModel):
     matched_to_id: uuid.UUID = Field(
         ..., description="UUID of the matching payment or journal entry"
     )
+
+
+class SplitAllocation(BaseModel):
+    """One GL allocation row for a split-match journal entry."""
+
+    account_id: uuid.UUID
+    debit: Decimal = Field(default=Decimal("0"), ge=0)
+    credit: Decimal = Field(default=Decimal("0"), ge=0)
+    description: str | None = None
+    tax_code_id: uuid.UUID | None = None
+
+    @model_validator(mode="after")
+    def _not_both_zero(self) -> "SplitAllocation":
+        if self.debit == 0 and self.credit == 0:
+            raise ValueError("Each allocation must have a non-zero debit or credit")
+        return self
+
+
+class BankStatementLineSplitMatchRequest(BaseModel):
+    """POST body for /bank_statement_lines/{id}/split_match.
+
+    ``allocations`` are the non-bank-account sides of the journal entry.
+    The bank account side is auto-generated from the BSL amount.
+
+    Validation: sum(credit) - sum(debit) across allocations must equal the
+    BSL amount (positive for deposits, negative for withdrawals).
+    """
+
+    allocations: list[SplitAllocation] = Field(min_length=1)
+    entry_date: date | None = None
+    description: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -1675,6 +1750,10 @@ class BASSummary(BaseModel):
       G11 — Other (non-capital) acquisitions (taxable expenses)
       1A  — GST collected on sales (G1 × 10%)
       1B  — GST credits on purchases (G11 × 1/11, i.e. tax-inclusive component)
+
+    When registration_effective_date is set (mid-quarter GST registration),
+    G1 is split into pre- and post-registration totals. Only g1_post_registration
+    feeds into 1A; g1_total_sales is the sum of both for ATO disclosure.
     """
 
     from_date: date
@@ -1688,6 +1767,10 @@ class BASSummary(BaseModel):
     label_1b_gst_on_purchases: float
     net_gst: float
     remit_or_refund: str  # "REMIT" | "REFUND"
+    # Mid-quarter GST registration split (None when not applicable)
+    registration_effective_date: date | None = None
+    g1_pre_registration: float = 0.0
+    g1_post_registration: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -1844,6 +1927,42 @@ class DepreciationRunAllResponse(BaseModel):
     total_amount: Decimal
     results: list[DepreciationRunAllResultItem]
     errors: list[str]  # any assets that failed (asset code + error message)
+
+
+# ---------------------------------------------------------------------------
+# Fixed Asset Convert-to-Inventory — gap MOTR-3
+# ---------------------------------------------------------------------------
+
+
+class FixedAssetConvertToInventory(BaseModel):
+    """POST body for converting an active FA demonstrator to used-inventory stock.
+
+    The conversion journal debits the inventory account at NBV, debits the
+    accumulated-depreciation account (clearing this asset's share), and credits
+    the FA cost account (clearing the full original cost). The asset is then
+    stamped disposed at NBV proceeds and an inventory Item is created with
+    on_hand_qty=1, wac_cost=NBV.
+
+    ``sku`` defaults to the asset's FA code when not supplied.
+    ``vin`` is stored as the item's description for used-vehicle tracking.
+    """
+
+    conversion_date: date
+    inventory_account_id: uuid.UUID
+    cogs_account_id: uuid.UUID
+    income_account_id: uuid.UUID
+    sku: str | None = None
+    vin: str | None = None
+
+
+class FixedAssetConvertToInventoryResponse(BaseModel):
+    """Response from POST /{id}/convert_to_inventory."""
+
+    asset: FixedAssetOut
+    item_id: uuid.UUID
+    item_sku: str
+    nbv: Decimal
+    journal_id: uuid.UUID
 
 
 # ---------------------------------------------------------------------------
@@ -2166,3 +2285,118 @@ class BankRuleApplyOut(BaseModel):
     """Response body for POST /bank_rules/apply and POST /bank_rules/{id}/apply."""
 
     applied: int
+
+
+class YTDTurnoverReport(BaseModel):
+    """YTD gross turnover and GST registration threshold status.
+
+    fy_start / fy_end are the Australian financial-year bounds used
+    (1 July - 30 June).  ytd_turnover is the sum of all INCOME and
+    OTHER_INCOME journal credits (net of debits) for posted JEs in that
+    window.  threshold is always 75000.00 (ATO GST registration limit
+    for for-profit entities).  threshold_crossed is true when
+    ytd_turnover >= threshold.
+    """
+
+    fy_start: date
+    fy_end: date
+    ytd_turnover: float
+    threshold: float
+    threshold_crossed: bool
+
+
+# ---------------------------------------------------------------------------
+# Allocation rules
+# ---------------------------------------------------------------------------
+
+
+class AllocationTarget(BaseModel):
+    """One target entry in an allocation rule."""
+
+    account_id: uuid.UUID
+    label: str = Field(default="", max_length=200)
+    percentage: Decimal = Field(gt=Decimal("0"), le=Decimal("100"))
+
+
+class AllocationRuleCreate(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+    source_account_id: uuid.UUID
+    targets: list[AllocationTarget] = Field(min_length=1)
+    is_active: bool = True
+
+    @model_validator(mode="after")
+    def targets_sum_100(self) -> "AllocationRuleCreate":
+        total = sum(t.percentage for t in self.targets)
+        if abs(total - Decimal("100")) > Decimal("0.01"):
+            raise ValueError(
+                f"Target percentages must sum to 100 (got {total})"
+            )
+        return self
+
+
+class AllocationRuleUpdate(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = None
+    source_account_id: uuid.UUID | None = None
+    targets: list[AllocationTarget] | None = None
+    is_active: bool | None = None
+
+    @model_validator(mode="after")
+    def targets_sum_100(self) -> "AllocationRuleUpdate":
+        if self.targets is not None:
+            total = sum(t.percentage for t in self.targets)
+            if abs(total - Decimal("100")) > Decimal("0.01"):
+                raise ValueError(
+                    f"Target percentages must sum to 100 (got {total})"
+                )
+        return self
+
+
+class AllocationRuleOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    tenant_id: uuid.UUID
+    name: str
+    description: str | None
+    source_account_id: uuid.UUID
+    targets: list[dict]
+    is_active: bool
+    version: int
+    created_at: datetime
+    updated_at: datetime
+    archived_at: datetime | None
+
+
+class AllocationRuleListOut(BaseModel):
+    items: list[AllocationRuleOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class AllocationRuleConflictBody(BaseModel):
+    current: AllocationRuleOut
+    message: str = "Version conflict — record was modified by another request"
+
+
+class AllocationApplyIn(BaseModel):
+    """Request body for POST /api/v1/allocation_rules/{id}/apply."""
+
+    entry_date: date
+    amount: Decimal = Field(gt=Decimal("0"))
+    description: str | None = None
+
+
+class AllocationApplyOut(BaseModel):
+    """Response from apply — the generated journal entry id."""
+
+    journal_entry_id: uuid.UUID
+    lines_count: int
+    total_amount: Decimal

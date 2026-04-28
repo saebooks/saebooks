@@ -567,8 +567,14 @@ async def update(
     performed_by: str | None = None,
     actor: str | None = None,
     expected_version: int | None = None,
+    tenant_id: uuid.UUID | None = None,
 ) -> Account:
-    account = await session.get(Account, account_id)
+    """Update an account.
+
+    When ``tenant_id`` is supplied, a foreign-tenant id raises
+    ``ValueError`` (treated as not found) — cross-tenant probes 404.
+    """
+    account = await get(session, account_id, tenant_id=tenant_id)
     if account is None:
         raise ValueError(f"Account {account_id} not found")
 
@@ -640,8 +646,14 @@ async def archive(
     performed_by: str | None = None,
     actor: str | None = None,
     expected_version: int | None = None,
+    tenant_id: uuid.UUID | None = None,
 ) -> Account | None:
-    account = await session.get(Account, account_id)
+    """Soft-archive an account.
+
+    When ``tenant_id`` is supplied, a foreign-tenant id returns ``None``
+    silently — cross-tenant archive is a no-op.
+    """
+    account = await get(session, account_id, tenant_id=tenant_id)
     if account is None:
         return None
     if expected_version is not None and account.version != expected_version:
