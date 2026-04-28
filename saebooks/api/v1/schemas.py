@@ -765,6 +765,7 @@ class BillLineOut(BaseModel):
     line_total: Decimal
     project_id: uuid.UUID | None = None
     item_id: uuid.UUID | None = None
+    tracking_vehicle_id: str | None = None
 
 
 class BillLineCreate(BaseModel):
@@ -778,6 +779,7 @@ class BillLineCreate(BaseModel):
     discount_pct: Decimal = Decimal("0")
     project_id: uuid.UUID | None = None
     item_id: uuid.UUID | None = None
+    tracking_vehicle_id: str | None = Field(default=None, max_length=64)
 
 
 class BillBase(BaseModel):
