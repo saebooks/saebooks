@@ -73,3 +73,22 @@ async def api_version() -> dict[str, str]:
         "version": _package_version(),
         "api": "v1",
     }
+
+
+@router.get("/license")
+async def api_license() -> dict[str, object]:
+    """Return the active edition and per-flag matrix.
+
+    Deliberately open (no bearer) — the edition and enabled flags are
+    non-sensitive public metadata already shown on the /admin/license
+    HTML page. The web frontend calls this to conditionally render
+    multi-company UI elements without burning an auth'd call.
+    """
+    from saebooks.services.features import ALL_FLAGS, TIER_ORDER, active_flags
+
+    return {
+        "edition": settings.edition,
+        "flags": active_flags(),
+        "all_flags": list(ALL_FLAGS),
+        "tier_order": list(TIER_ORDER),
+    }
