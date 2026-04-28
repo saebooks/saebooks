@@ -11,6 +11,11 @@ from saebooks.models.bank_rule import BankRule, MatchType
 from saebooks.models.bank_statement import BankStatementLine, StatementLineStatus
 from saebooks.models.budget import Budget
 from saebooks.models.change_log import ChangeLog
+from saebooks.models.distribution import (
+    BeneficiaryEntitlement,
+    DistributionStatus,
+    TrustDistribution,
+)
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
 from saebooks.models.depreciation_model import DepreciationModel
@@ -37,8 +42,11 @@ __all__ = [
     "BankFeedIssueStatus",
     "BankRule",
     "BankStatementLine",
+    "BeneficiaryEntitlement",
     "Budget",
     "ChangeLog",
+    "DistributionStatus",
+    "TrustDistribution",
     "Company",
     "Contact",
     "ContactType",

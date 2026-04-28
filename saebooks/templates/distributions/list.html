@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Trust Distributions — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Trust Distributions</h1>
+  <div class="meta">{{ company_name }}</div>
+</div>
+
+<div class="contact-filter">
+  <a href="/distributions/new" class="btn">+ New distribution</a>
+</div>
+
+{% if distributions %}
+<table class="acct-table">
+  <thead>
+    <tr>
+      <th>FY</th>
+      <th>Date</th>
+      <th class="num">Total</th>
+      <th>Beneficiaries</th>
+      <th>Status</th>
+      <th>Minuted</th>
+      <th class="actions"></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for d in distributions %}
+    <tr>
+      <td>FY{{ d.financial_year }}</td>
+      <td>{{ d.distribution_date.strftime('%d %b %Y') }}</td>
+      <td class="num">{{ '%.2f'|format(d.total_amount) }}</td>
+      <td>{{ d.entitlements|length }} beneficiar{{ 'y' if d.entitlements|length == 1 else 'ies' }}</td>
+      <td>
+        <span class="badge badge-{{ d.status.lower() }}">{{ d.status }}</span>
+      </td>
+      <td>{{ d.resolution_minuted_date.strftime('%d %b %Y') if d.resolution_minuted_date else '—' }}</td>
+      <td class="actions"><a href="/distributions/{{ d.id }}">view</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="dim">No distributions yet. Click <em>+ New distribution</em> to record a year-end trust resolution.</p>
+{% endif %}
+
+<p class="dim" style="margin-top:2rem">
+  Distributions record trustee resolutions under s.97 ITAA 1936. Once posted,
+  each distribution creates a balanced journal entry (Dr Trust Income / Cr Beneficiary Payable).
+</p>
+{% endblock %}

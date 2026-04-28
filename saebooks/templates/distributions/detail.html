@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}Distribution FY{{ dist.financial_year }} — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Trust Distribution — FY{{ dist.financial_year }}</h1>
+  <div class="meta">{{ company_name }} · {{ dist.distribution_date.strftime('%d %b %Y') }}</div>
+</div>
+
+{% if request.query_params.get("error") %}
+<div class="alert alert-error">{{ request.query_params.get("error") }}</div>
+{% endif %}
+
+<div class="detail-grid" style="margin-bottom:1.5rem">
+  <dl>
+    <dt>Status</dt>
+    <dd><span class="badge badge-{{ dist.status.lower() }}">{{ dist.status }}</span></dd>
+    <dt>Distribution date</dt>
+    <dd>{{ dist.distribution_date.strftime('%d %b %Y') }}</dd>
+    <dt>Financial year</dt>
+    <dd>FY{{ dist.financial_year }}</dd>
+    <dt>Total amount</dt>
+    <dd><strong>{{ '%.2f'|format(dist.total_amount) }}</strong></dd>
+    <dt>Resolution minuted</dt>
+    <dd>{{ dist.resolution_minuted_date.strftime('%d %b %Y') if dist.resolution_minuted_date else '— not yet minuted' }}</dd>
+    {% if dist.journal_entry_id %}
+    <dt>Journal entry</dt>
+    <dd><a href="/journal/{{ dist.journal_entry_id }}">view GL entry</a></dd>
+    {% endif %}
+    {% if dist.notes %}
+    <dt>Notes</dt>
+    <dd>{{ dist.notes }}</dd>
+    {% endif %}
+  </dl>
+</div>
+
+<h2>Beneficiary entitlements</h2>
+<table class="acct-table">
+  <thead>
+    <tr>
+      <th>Beneficiary</th>
+      <th class="num">%</th>
+      <th class="num">Amount</th>
+      <th>Payable account</th>
+      <th>Notes</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for e in dist.entitlements %}
+    <tr>
+      <td>{{ e.beneficiary_name }}</td>
+      <td class="num">{{ '%.4f'|format(e.percentage) }}</td>
+      <td class="num">{{ '%.2f'|format(e.amount) }}</td>
+      <td>
+        {% if e.account_id and e.account_id in accounts_by_id %}
+          {{ accounts_by_id[e.account_id].code }} · {{ accounts_by_id[e.account_id].name }}
+        {% else %}
+          <span class="dim">— no account set</span>
+        {% endif %}
+      </td>
+      <td>{{ e.notes or '' }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr>
+      <td><strong>Total</strong></td>
+      <td class="num"><strong>{{ '%.4f'|format(dist.entitlements|sum(attribute='percentage')) }}</strong></td>
+      <td class="num"><strong>{{ '%.2f'|format(dist.total_amount) }}</strong></td>
+      <td colspan="2"></td>
+    </tr>
+  </tfoot>
+</table>
+
+{% if dist.status != 'POSTED' %}
+<div style="margin-top:2rem;display:flex;gap:2rem;flex-wrap:wrap">
+
+  {% if dist.status != 'MINUTED' %}
+  <div>
+    <h3>Record resolution minute</h3>
+    <form method="post" action="/distributions/{{ dist.id }}/minute">
+      <label>Minuted date
+        <input type="date" name="minuted_date" value="{{ dist.distribution_date.isoformat() }}" required>
+      </label>
+      <button type="submit" class="btn" style="margin-left:0.5rem">Record minute</button>
+    </form>
+  </div>
+  {% endif %}
+
+  <div>
+    <h3>Post journal entry</h3>
+    <p class="dim" style="max-width:28rem">
+      Select the trust income / retained earnings account to debit.
+      Each beneficiary line will be credited to their payable account
+      (or this same account if none is set).
+    </p>
+    <form method="post" action="/distributions/{{ dist.id }}/post">
+      <label>Trust income account (debit)
+        <select name="income_account_id" required style="min-width:18rem">
+          <option value="">— pick account —</option>
+          {% for g, label in [
+              (equity_accounts, 'Equity'),
+              (income_accounts, 'Income'),
+          ] %}
+          {% if g %}
+          <optgroup label="{{ label }}">
+            {% for a in g %}
+            <option value="{{ a.id }}">{{ a.code }} · {{ a.name }}</option>
+            {% endfor %}
+          </optgroup>
+          {% endif %}
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit" class="btn" style="margin-left:0.5rem"
+        onclick="return confirm('Post the distribution journal entry? This cannot be undone without a reversal.')">
+        Post GL entry
+      </button>
+    </form>
+  </div>
+</div>
+{% else %}
+<p class="dim" style="margin-top:1rem">
+  This distribution is posted. To correct it, reverse the linked journal entry and create a new distribution.
+</p>
+{% endif %}
+
+{% if dist.status != 'POSTED' %}
+<div style="margin-top:2rem">
+  <form method="post" action="/distributions/{{ dist.id }}/delete"
+        onsubmit="return confirm('Delete this distribution?')">
+    <button type="submit" class="btn btn-danger">Delete</button>
+  </form>
+</div>
+{% endif %}
+
+<div style="margin-top:1.5rem">
+  <a href="/distributions">&larr; All distributions</a>
+</div>
+{% endblock %}
