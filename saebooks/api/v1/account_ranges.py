@@ -25,6 +25,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_session
+from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
+from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.api.v1.schemas import (
     AccountRangeCreate,
     AccountRangeListOut,
@@ -206,6 +208,7 @@ async def delete_account_range(
     range_id: UUID,
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    hard: bool = Depends(hard_delete_admin_gate),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
     company_id = await _first_company_id(session, tenant_id)
@@ -213,6 +216,13 @@ async def delete_account_range(
     rng = await session.get(AccountRange, range_id)
     if rng is None or rng.company_id != company_id:
         raise HTTPException(404, "Account range not found")
+
+    if hard:
+        await hard_delete_with_audit(
+            session, rng, "account_ranges", getattr(request.state, "user", None)
+        )
+        await session.commit()
+        return Response(status_code=204)
 
     try:
         await account_svc.delete_range(session, range_id)

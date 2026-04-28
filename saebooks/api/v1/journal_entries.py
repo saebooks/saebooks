@@ -43,8 +43,10 @@ from saebooks.api.v1.schemas import (
     JournalEntryPostBody,
     JournalEntryUpdate,
 )
+from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.models.journal import EntryStatus
 from saebooks.services import journal_entries as svc
+from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 
 router = APIRouter(
@@ -252,14 +254,23 @@ async def void_journal_entry(
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    hard: bool = Depends(hard_delete_admin_gate),
 ) -> Any:
+    tenant_id = resolve_tenant_id(request)
+    existing = await svc.get(session, entry_id, tenant_id=tenant_id)
+    if existing is None:
+        raise HTTPException(404, "Journal entry not found")
+
+    if hard:
+        await hard_delete_with_audit(
+            session, existing, "journal_entries", getattr(request.state, "user", None)
+        )
+        await session.commit()
+        return Response(status_code=204)
+
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with entry version is required")
-
-    tenant_id = resolve_tenant_id(request)
-    if await svc.get(session, entry_id, tenant_id=tenant_id) is None:
-        raise HTTPException(404, "Journal entry not found")
 
     try:
         await svc.void(

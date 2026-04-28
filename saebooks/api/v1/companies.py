@@ -23,12 +23,14 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
-from sqlalchemy import func, select
+from fastapi.responses import JSONResponse, Response
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_session
+from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
+from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.api.v1.schemas import (
     CompanyConflictBody,
     CompanyListOut,
@@ -234,6 +236,98 @@ async def update_company(
 
 
 # ---------------------------------------------------------------------------
+# Hard-delete (admin only — gap ADMIN-DELETE-1)
+# ---------------------------------------------------------------------------
+
+# Tables that hold a company_id FK — checked at hard-delete pre-flight.
+# The DELETE blocks if ANY of these have any row referencing the target
+# company (archived OR live), since archived rows still pin the FK.
+# Sourced from `SELECT table_name FROM information_schema.columns WHERE
+# column_name = 'company_id'` against a freshly-migrated DB.
+_COMPANY_REF_TABLES: tuple[str, ...] = (
+    "invoices",
+    "bills",
+    "payments",
+    "journal_entries",
+    "allocation_rules",
+    "bank_statement_lines",
+    "fixed_assets",
+    "recurring_invoices",
+    "contacts",
+    "credit_notes",
+    "accounts",
+    "account_ranges",
+    "bank_rules",
+    "budgets",
+    "items",
+    "journal_templates",
+    "tax_codes",
+    "projects",
+    "departments",
+    "cost_centres",
+    "trust_distributions",
+    "ato_sbr_configs",
+    "document_counters",
+    "bank_feed_clients",
+    "bank_feed_accounts",
+    "period_locks",
+)
+
+
+async def _company_ref_counts(
+    session: AsyncSession, company_id: UUID
+) -> dict[str, int]:
+    """Return non-zero ref counts per table for a candidate company hard-delete."""
+    counts: dict[str, int] = {}
+    for table in _COMPANY_REF_TABLES:
+        result = await session.execute(
+            text(f"SELECT count(*) FROM {table} WHERE company_id = :cid"),
+            {"cid": str(company_id)},
+        )
+        n = int(result.scalar() or 0)
+        if n > 0:
+            counts[table] = n
+    return counts
+
+
+@router.delete(
+    "/{company_id}",
+    responses={
+        204: {"description": "Deleted"},
+        409: {"description": "Company has linked rows; hard-delete the rows first."},
+    },
+)
+async def hard_delete_company(
+    request: Request,
+    company_id: UUID,
+    session: AsyncSession = Depends(get_session),
+    hard: bool = Depends(hard_delete_admin_gate),
+) -> Any:
+    if not hard:
+        raise HTTPException(
+            400,
+            "Company DELETE is admin-only and requires ?hard=true",
+        )
+    tenant_id = resolve_tenant_id(request)
+    company = await svc.get(session, company_id)
+    if company is None or company.tenant_id != tenant_id:
+        raise HTTPException(404, "Company not found")
+
+    blocking = await _company_ref_counts(session, company_id)
+    if blocking:
+        return JSONResponse(
+            {
+                "detail": "Company has linked rows; hard-delete the rows first.",
+                "blocking_refs": blocking,
+            },
+            status_code=409,
+        )
+
+    await hard_delete_with_audit(
+        session, company, "companies", getattr(request.state, "user", None)
+    )
+    await session.commit()
+    return Response(status_code=204)
 # GST backdate preview (HOBB-5)
 # ---------------------------------------------------------------------------
 

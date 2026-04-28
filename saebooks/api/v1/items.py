@@ -32,9 +32,11 @@ from saebooks.api.v1.schemas import (
     ItemUpdate,
     StockOut,
 )
+from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.models.company import Company
 from saebooks.models.item import Item, ItemType
 from saebooks.services import items as svc
+from saebooks.services.hard_delete import hard_delete_with_audit
 
 router = APIRouter(
     prefix="/items",
@@ -251,15 +253,23 @@ async def archive_item(
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    hard: bool = Depends(hard_delete_admin_gate),
 ) -> Any:
+    tenant_id = resolve_tenant_id(request)
+    existing = await svc.get(session, item_id, tenant_id=tenant_id)
+    if existing is None:
+        raise HTTPException(404, "Item not found")
+
+    if hard:
+        await hard_delete_with_audit(
+            session, existing, "items", getattr(request.state, "user", None)
+        )
+        await session.commit()
+        return Response(status_code=204)
+
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with item version is required")
-
-    tenant_id = resolve_tenant_id(request)
-    # Belt-and-braces: verify item belongs to this tenant
-    if await svc.get(session, item_id, tenant_id=tenant_id) is None:
-        raise HTTPException(404, "Item not found")
 
     try:
         item = await svc.archive_with_version(

@@ -43,10 +43,12 @@ from saebooks.api.v1.schemas import (
     UserPermissionsBody,
     UserUpdate,
 )
+from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.models.permission import Permission, UserPermission
-from saebooks.models.user import VALID_ROLES, User
+from saebooks.models.user import VALID_ROLES, User, UserRole, has_at_least
 from saebooks.services import permissions as perm_svc
 from saebooks.services import users as svc
+from saebooks.services.hard_delete import hard_delete_with_audit
 
 router = APIRouter(
     prefix="/users",
@@ -61,9 +63,27 @@ router = APIRouter(
 
 
 async def _require_admin(
+    request: Request,
     x_admin: str | None = Header(default=None, alias="X-Admin"),
 ) -> None:
-    """FastAPI dependency: 403 unless X-Admin: true header is present."""
+    """FastAPI dependency: enforce admin role.
+
+    Order of checks (matches ``hard_delete_admin_gate``):
+
+    1. If ``request.state.user`` is set (JWT bearer with a ``sub`` that
+       resolves to a live User), require role ≥ ADMIN. ``X-Admin: true``
+       is IGNORED on this path — a bookkeeper JWT cannot bypass with the
+       header.
+    2. Otherwise (static dev token, no user identity): fall back to the
+       ``X-Admin: true`` header. This preserves the dev/test convenience
+       where scripts hit ``/api/*`` with the static bearer + X-Admin.
+    """
+    user = getattr(request.state, "user", None)
+    if user is not None:
+        role = getattr(request.state, "role", None) or user.role
+        if not has_at_least(role, UserRole.ADMIN.value):
+            raise HTTPException(403, "Admin role required")
+        return
     if x_admin is None or x_admin.lower() != "true":
         raise HTTPException(403, "Admin privileges required")
 
@@ -190,7 +210,15 @@ async def update_user(
         raise HTTPException(428, "If-Match header with user version is required")
 
     tenant_id = resolve_tenant_id(request)
-    is_admin = x_admin is not None and x_admin.lower() == "true"
+    # Role check: prefer server-side role from request.state (set by
+    # require_bearer when the JWT carries a sub). Falls back to the
+    # X-Admin header for the static-bearer path used by tests/scripts.
+    state_user = getattr(request.state, "user", None)
+    if state_user is not None:
+        state_role = getattr(request.state, "role", None) or state_user.role
+        is_admin = has_at_least(state_role, UserRole.ADMIN.value)
+    else:
+        is_admin = x_admin is not None and x_admin.lower() == "true"
     updates = payload.model_dump(exclude_unset=True)
 
     # Non-admin may only update non-privileged fields (not role)
@@ -251,16 +279,23 @@ async def archive_user(
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    hard: bool = Depends(hard_delete_admin_gate),
 ) -> Any:
-    expected = _parse_if_match(if_match)
-    if expected is None:
-        raise HTTPException(428, "If-Match header with user version is required")
-
     tenant_id = resolve_tenant_id(request)
-    # Verify user belongs to this tenant before archiving
     existing = await svc.get(session, user_id, tenant_id=tenant_id)
     if existing is None:
         raise HTTPException(404, "User not found")
+
+    if hard:
+        await hard_delete_with_audit(
+            session, existing, "users", getattr(request.state, "user", None)
+        )
+        await session.commit()
+        return Response(status_code=204)
+
+    expected = _parse_if_match(if_match)
+    if expected is None:
+        raise HTTPException(428, "If-Match header with user version is required")
 
     try:
         user = await svc.archive_with_version(

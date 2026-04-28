@@ -47,9 +47,11 @@ from saebooks.api.v1.schemas import (
     FixedAssetOut,
     FixedAssetUpdate,
 )
+from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.models.fixed_asset import FixedAsset
 from saebooks.services import assets as legacy_assets_svc
 from saebooks.services import fixed_assets as svc
+from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 
 router = APIRouter(
@@ -629,15 +631,23 @@ async def delete_fixed_asset(
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    hard: bool = Depends(hard_delete_admin_gate),
 ) -> Any:
+    tenant_id = resolve_tenant_id(request)
+    existing = await svc.get(session, asset_id, tenant_id=tenant_id)
+    if existing is None:
+        raise HTTPException(404, "Fixed asset not found")
+
+    if hard:
+        await hard_delete_with_audit(
+            session, existing, "fixed_assets", getattr(request.state, "user", None)
+        )
+        await session.commit()
+        return Response(status_code=204)
+
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with asset version is required")
-
-    tenant_id = resolve_tenant_id(request)
-    # Belt-and-braces: verify asset belongs to this tenant
-    if await svc.get(session, asset_id, tenant_id=tenant_id) is None:
-        raise HTTPException(404, "Fixed asset not found")
 
     try:
         await svc.delete(

@@ -54,9 +54,11 @@ from saebooks.api.v1.schemas import (
     ContactOut,
     ContactUpdate,
 )
+from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
 from saebooks.services import contacts as svc
+from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 
 router = APIRouter(
@@ -350,12 +352,22 @@ async def archive_contact(
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    hard: bool = Depends(hard_delete_admin_gate),
 ) -> Any:
+    tenant_id = resolve_tenant_id(request)
+    if hard:
+        existing = await svc.get(session, contact_id, tenant_id=tenant_id)
+        if existing is None:
+            raise HTTPException(404, "Contact not found")
+        await hard_delete_with_audit(
+            session, existing, "contacts", getattr(request.state, "user", None)
+        )
+        await session.commit()
+        return Response(status_code=204)
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with contact version is required")
     key = _parse_idempotency_key(idempotency_key)
-    tenant_id = resolve_tenant_id(request)
 
     if key is not None:
         raw_body = await request.body()
