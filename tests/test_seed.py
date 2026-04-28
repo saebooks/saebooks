@@ -40,6 +40,7 @@ async def test_au_coa_loaded() -> None:
             "4-5000": AccountType.OTHER_INCOME,    # Late Fees Collected
             "5-2000": AccountType.COST_OF_SALES,   # Wholesale Cost of Sales
             "6-2000": AccountType.EXPENSE,         # Late Fees Paid
+            "6-2510": AccountType.EXPENSE,         # Cash Short and Over
         }
         for code, expected_type in expected.items():
             row = (

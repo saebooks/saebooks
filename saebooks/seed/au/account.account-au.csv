@@ -113,6 +113,7 @@
 "au_62450","62450","Other Employer Expenses","expense","","False","","","","All other employment costs, such as employer taxes, not included in other accounts."
 "au_62460","62460","Child Support","expense","","False","","","","Cost of administering child support deductions within the payroll system."
 "au_62500","62500","Repairs","expense","","False","","au_tax_purchase_10_service","","Costs of repairs and maintenance for buildings, equipment, and office furniture."
+"au_62510","62510","Cash Short and Over","expense","","False","","","","Net difference between actual till cash and the expected float; debit for shortages, credit for overages."
 "au_62550","62550","Shrinkage/Spoilage","expense","","False","","","","Loss of inventory due to theft, breakage, or obsolescence, excluding bad debts written off."
 "au_62600","62600","Supplies","expense","","False","","au_tax_purchase_10_service","","Costs of consumable supplies for direct support to clients or programs."
 "au_62700","62700","Taxes","expense","","False","","","","All rates, taxes, and levies incurred by the organization from authorities."
