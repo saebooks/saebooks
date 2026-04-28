@@ -1058,6 +1058,7 @@ class BankAccountCreate(BaseModel):
     bank_account_title: str | None = Field(default=None, max_length=32)
     apca_user_id: str | None = Field(default=None, max_length=6)
     bank_abbreviation: str | None = Field(default=None, max_length=3)
+    is_trust_account: bool = False
 
 
 class BankAccountUpdate(BaseModel):
@@ -1072,6 +1073,7 @@ class BankAccountUpdate(BaseModel):
     bank_account_title: str | None = None
     apca_user_id: str | None = None
     bank_abbreviation: str | None = None
+    is_trust_account: bool | None = None
 
 
 class BankAccountOut(BaseModel):
@@ -1089,6 +1091,7 @@ class BankAccountOut(BaseModel):
     bank_account_title: str | None = None
     apca_user_id: str | None = None
     bank_abbreviation: str | None = None
+    is_trust_account: bool = False
     version: int
     created_at: datetime
     archived_at: datetime | None = None

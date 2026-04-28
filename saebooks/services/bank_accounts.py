@@ -38,6 +38,7 @@ _BA_COLUMNS: tuple[str, ...] = (
     "bank_account_title",
     "apca_user_id",
     "bank_abbreviation",
+    "is_trust_account",
     "version",
     "created_at",
     "archived_at",
@@ -172,6 +173,7 @@ async def api_create(
     bank_account_title: str | None = None,
     apca_user_id: str | None = None,
     bank_abbreviation: str | None = None,
+    is_trust_account: bool = False,
 ) -> Account:
     """Create a new bank-account row (account_type=ASSET, bsb required)."""
     # Import here to avoid circular imports at module level
@@ -184,6 +186,7 @@ async def api_create(
         name=name,
         account_type=AccountType.ASSET,
         reconcile=True,
+        is_trust_account=is_trust_account,
         tenant_id=tenant_id,
         actor=actor,
         skip_validation=True,
@@ -227,6 +230,7 @@ async def api_update(
     bank_account_title: str | None = None,
     apca_user_id: str | None = None,
     bank_abbreviation: str | None = None,
+    is_trust_account: bool | None = None,
 ) -> Account:
     """Update bank-account fields with optimistic locking + change_log."""
     account = await session.get(Account, bank_account_id)
@@ -249,6 +253,8 @@ async def api_update(
         account.apca_user_id = apca_user_id
     if bank_abbreviation is not None:
         account.bank_abbreviation = bank_abbreviation
+    if is_trust_account is not None:
+        account.is_trust_account = is_trust_account
 
     account.version = account.version + 1
     await session.flush()
