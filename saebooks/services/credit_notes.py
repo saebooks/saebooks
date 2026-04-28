@@ -1,17 +1,20 @@
 """Credit-note service — create, post, void, allocate.
 
-Postings mirror ``invoices.post_invoice`` with signs reversed:
+Two posting modes depending on line account types:
 
+Income reversal (customer credit note):
     Dr Income ........................ line_subtotal (per line)
+    Dr GST Collected ................. line_tax
     Cr AR Control (Trade Debtors) .... total
-    Dr GST Collected ................. line_tax (via reverse-sign gst flow)
 
-For the GST auto-poster to behave, we pass ``gst_amount`` with a
-negative sign on the line — the existing ``auto_post_gst_lines`` only
-uses ``abs(gst)`` so it still produces the right amount; we then
-manually swap the debit/credit by not trusting it for credit-notes.
-Simpler path: we post the credit-note GL directly rather than through
-the auto-poster, because the sign flip is the whole point.
+Contra-COGS / hold-back (manufacturer rebate):
+    Cr COGS .......................... line_subtotal (per line)
+    Cr GST Collected ................. line_tax
+    Dr AR Control (Trade Debtors) .... total  ← BAS G8 adjustment
+
+The mode is selected per-posting based on account_type of the line accounts.
+Mixing INCOME and COST_OF_SALES lines on a single credit note is rejected —
+create two separate credit notes.
 
 Allocation path: a posted credit note carries ``amount_allocated``
 which is bumped as ``PaymentAllocation`` rows with
@@ -30,7 +33,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from saebooks.models.account import Account
+from saebooks.models.account import Account, AccountType
 from saebooks.models.credit_note import CreditNote, CreditNoteLine, CreditNoteStatus
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import journal as journal_svc
@@ -301,36 +304,53 @@ async def post_credit_note(
     ar_account = await _get_ar_account(session, cn.company_id)
     gst_account = await _get_gst_collected_account(session, cn.company_id)
 
-    # Credit notes are the mirror of invoices:
-    #   Dr Income (per line)
-    #   Dr GST Collected (aggregate tax)
-    #   Cr AR control (total)
+    # Determine line account types to choose posting mode.
+    _INCOME_TYPES = frozenset({AccountType.INCOME, AccountType.OTHER_INCOME})
+    _COGS_TYPES = frozenset({AccountType.COST_OF_SALES})
+
+    line_account_ids = list({ln.account_id for ln in cn.lines})
+    acct_rows = (
+        await session.execute(select(Account).where(Account.id.in_(line_account_ids)))
+    ).scalars().all()
+    acct_type_map: dict[uuid.UUID, AccountType] = {a.id: a.account_type for a in acct_rows}
+
+    has_income = any(acct_type_map.get(ln.account_id) in _INCOME_TYPES for ln in cn.lines)
+    has_cogs = any(acct_type_map.get(ln.account_id) in _COGS_TYPES for ln in cn.lines)
+
+    if has_income and has_cogs:
+        raise CreditNoteError(
+            "Cannot mix income and COGS accounts on a single credit note; "
+            "create separate credit notes for income reversal and cost adjustments"
+        )
+
+    # Income reversal: Dr Income / Dr GST Collected / Cr AR
+    # Contra-COGS (hold-back): Cr COGS / Cr GST Collected / Dr AR  ← BAS G8
     lines: list[dict[str, object]] = []
     for line in cn.lines:
+        is_cogs = acct_type_map.get(line.account_id) in _COGS_TYPES
         lines.append(
             {
                 "account_id": line.account_id,
                 "description": f"{cn.number}: {line.description}",
-                "debit": line.line_subtotal,
-                "credit": Decimal("0"),
+                "debit": Decimal("0") if is_cogs else line.line_subtotal,
+                "credit": line.line_subtotal if is_cogs else Decimal("0"),
             }
         )
-    # GST handled manually (reverse-sign) so we can't lean on gst.py.
     if cn.tax_total > Decimal("0") and gst_account is not None:
         lines.append(
             {
                 "account_id": gst_account.id,
-                "description": f"{cn.number}: GST reversal",
-                "debit": cn.tax_total,
-                "credit": Decimal("0"),
+                "description": f"{cn.number}: GST adjustment",
+                "debit": Decimal("0") if has_cogs else cn.tax_total,
+                "credit": cn.tax_total if has_cogs else Decimal("0"),
             }
         )
     lines.append(
         {
             "account_id": ar_account.id,
             "description": f"Credit note {cn.number}",
-            "debit": Decimal("0"),
-            "credit": cn.total,
+            "debit": cn.total if has_cogs else Decimal("0"),
+            "credit": Decimal("0") if has_cogs else cn.total,
         }
     )
 

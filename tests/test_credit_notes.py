@@ -9,6 +9,8 @@ Covers:
 4. Editing a posted credit note rejected.
 5. ``void_credit_note`` on posted → reverse journal.
 6. Draft void flips status without GL touch.
+7. Contra-COGS posting (hold-back): Cr COGS / Cr GST / Dr AR (BAS G8).
+8. Mixed INCOME + COGS lines rejected at posting.
 """
 from __future__ import annotations
 
@@ -147,6 +149,21 @@ def _line(income: uuid.UUID, gst: uuid.UUID, amount: Decimal) -> dict[str, objec
         "unit_price": amount,
         "discount_pct": Decimal("0"),
     }
+
+
+async def _ctx_with_cogs() -> tuple[uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID]:
+    """Return (company_id, contact_id, income_account_id, cogs_account_id, gst_tax_code_id)."""
+    cid, contact, income, gst = await _ctx()
+    async with AsyncSessionLocal() as session:
+        cogs = (
+            await session.execute(
+                select(Account).where(
+                    Account.company_id == cid,
+                    Account.code == "5-2000",
+                )
+            )
+        ).scalar_one()
+    return cid, contact, income, cogs.id, gst
 
 
 @pytest.mark.asyncio
@@ -293,3 +310,108 @@ async def test_void_draft_flips_status_without_journal() -> None:
         voided = await svc.void_credit_note(session, cn.id)
     assert voided.status == CreditNoteStatus.VOIDED
     assert voided.void_journal_entry_id is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_prep_credit_note_counter")
+async def test_post_cogs_credit_note_contra_cogs_journal() -> None:
+    """Hold-back / rebate posted to COGS account: Cr COGS / Cr GST / Dr AR (BAS G8)."""
+    cid, contact, _income, cogs, gst = await _ctx_with_cogs()
+    async with AsyncSessionLocal() as session:
+        cn = await svc.create_draft(
+            session,
+            company_id=cid,
+            contact_id=contact,
+            issue_date=date(2026, 5, 1),
+            lines=[{
+                "description": "Manufacturer hold-back",
+                "account_id": cogs,
+                "tax_code_id": gst,
+                "quantity": Decimal("1"),
+                "unit_price": Decimal("1200.00"),
+                "discount_pct": Decimal("0"),
+            }],
+        )
+    async with AsyncSessionLocal() as session:
+        posted = await svc.post_credit_note(session, cn.id, posted_by="test")
+
+    assert posted.status == CreditNoteStatus.POSTED
+    assert posted.journal_entry_id is not None
+
+    async with AsyncSessionLocal() as session:
+        entry = await session.get(JournalEntry, posted.journal_entry_id)
+        assert entry is not None
+        assert entry.status == EntryStatus.POSTED
+        lines = (
+            await session.execute(
+                select(JournalLine)
+                .where(JournalLine.entry_id == entry.id)
+                .order_by(JournalLine.line_no)
+            )
+        ).scalars().all()
+
+        debits = sum((ln.debit for ln in lines), Decimal("0"))
+        credits = sum((ln.credit for ln in lines), Decimal("0"))
+        assert debits == credits, f"Journal imbalanced: Dr {debits} Cr {credits}"
+
+        account_debits: dict[str, Decimal] = {}
+        account_credits: dict[str, Decimal] = {}
+        for ln in lines:
+            acct = await session.get(Account, ln.account_id)
+            assert acct is not None
+            if ln.debit > 0:
+                account_debits[acct.code] = account_debits.get(acct.code, Decimal("0")) + ln.debit
+            if ln.credit > 0:
+                account_credits[acct.code] = account_credits.get(acct.code, Decimal("0")) + ln.credit
+
+        # AR debited (Dr AR — manufacturer owes dealer the hold-back)
+        assert account_debits.get("1-1200") == Decimal("1320.00"), (
+            f"Expected Dr AR 1320.00 but got {account_debits}"
+        )
+        # COGS credited (reduces cost of sale — contra-COGS)
+        assert account_credits.get("5-2000") == Decimal("1200.00"), (
+            f"Expected Cr COGS 1200.00 but got {account_credits}"
+        )
+        # G1 (income accounts) must be untouched: verify no income-type account in GL
+        from saebooks.models.account import AccountType as AT
+        for ln in lines:
+            acct_obj = await session.get(Account, ln.account_id)
+            assert acct_obj is not None
+            assert acct_obj.account_type not in (AT.INCOME, AT.OTHER_INCOME), (
+                f"Income account {acct_obj.code} should not appear in a COGS credit note GL"
+            )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_prep_credit_note_counter")
+async def test_post_rejects_mixed_income_and_cogs_lines() -> None:
+    """Mixing INCOME and COGS lines on one credit note must be rejected at posting."""
+    cid, contact, income, cogs, gst = await _ctx_with_cogs()
+    async with AsyncSessionLocal() as session:
+        cn = await svc.create_draft(
+            session,
+            company_id=cid,
+            contact_id=contact,
+            issue_date=date(2026, 5, 1),
+            lines=[
+                {
+                    "description": "Income line",
+                    "account_id": income,
+                    "tax_code_id": gst,
+                    "quantity": Decimal("1"),
+                    "unit_price": Decimal("100.00"),
+                    "discount_pct": Decimal("0"),
+                },
+                {
+                    "description": "COGS line",
+                    "account_id": cogs,
+                    "tax_code_id": gst,
+                    "quantity": Decimal("1"),
+                    "unit_price": Decimal("50.00"),
+                    "discount_pct": Decimal("0"),
+                },
+            ],
+        )
+    with pytest.raises(svc.CreditNoteError, match="Cannot mix income and COGS"):
+        async with AsyncSessionLocal() as session:
+            await svc.post_credit_note(session, cn.id, posted_by="test")
