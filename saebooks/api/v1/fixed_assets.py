@@ -31,12 +31,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
-from saebooks.api.v1.deps import get_session
+from saebooks.api.v1.deps import get_active_company_id, get_session
 from saebooks.api.v1.schemas import (
     DepreciationRunAllRequest,
     DepreciationRunAllResponse,
     DepreciationRunAllResultItem,
     FixedAssetConflictBody,
+    FixedAssetConvertToInventory,
+    FixedAssetConvertToInventoryResponse,
     FixedAssetCreate,
     FixedAssetDepreciationRunRequest,
     FixedAssetDepreciationRunResponse,
@@ -45,7 +47,6 @@ from saebooks.api.v1.schemas import (
     FixedAssetOut,
     FixedAssetUpdate,
 )
-from saebooks.models.company import Company
 from saebooks.models.fixed_asset import FixedAsset
 from saebooks.services import assets as legacy_assets_svc
 from saebooks.services import fixed_assets as svc
@@ -61,22 +62,6 @@ router = APIRouter(
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
-
-
-async def _first_company_id(session: AsyncSession, tenant_id: UUID) -> UUID:
-    """Return the first active company for the request tenant."""
-    result = await session.execute(
-        select(Company)
-        .where(
-            Company.tenant_id == tenant_id,
-            Company.archived_at.is_(None),
-        )
-        .order_by(Company.created_at)
-    )
-    company = result.scalars().first()
-    if company is None:
-        raise HTTPException(404, "No active company for tenant")
-    return company.id
 
 
 def _parse_if_match(header: str | None) -> int | None:
@@ -116,10 +101,10 @@ async def list_fixed_assets(
     depreciation_model_id: str | None = Query(default=None),
     archived: bool = Query(default=False),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> FixedAssetListOut:
     offset = (page - 1) * page_size
     tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
     items, total = await svc.list_fixed_assets(
         session,
         company_id,
@@ -152,6 +137,7 @@ async def depreciation_run_all(
     body: DepreciationRunAllRequest,
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     """Run depreciation for all active, non-disposed assets up to ``through``.
 
@@ -165,8 +151,7 @@ async def depreciation_run_all(
     field to handle partial failures.
     """
     actor = f"api:{bearer[:8]}…"
-    tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
+    resolve_tenant_id(request)
 
     # Fetch all active, non-archived assets for this company.
     result = await session.execute(
@@ -246,6 +231,7 @@ async def create_fixed_asset(
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     key = _parse_idempotency_key(idempotency_key)
     tenant_id = resolve_tenant_id(request)
@@ -271,7 +257,6 @@ async def create_fixed_asset(
                 status_code=claim.response_status or 201,
             )
 
-    company_id = await _first_company_id(session, tenant_id)
     try:
         asset = await svc.create(
             session,
@@ -548,6 +533,82 @@ async def post_depreciation(
         json.loads(response_body.model_dump_json()),
         status_code=200,
     )
+
+
+# ---------------------------------------------------------------------------
+# Convert to Inventory (demonstrator → used-vehicle stock) — gap MOTR-3
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/{asset_id}/convert_to_inventory",
+    responses={
+        201: {"model": FixedAssetConvertToInventoryResponse},
+        409: {"model": FixedAssetConflictBody, "description": "Version mismatch"},
+    },
+    status_code=201,
+)
+async def convert_to_inventory(
+    request: Request,
+    asset_id: UUID,
+    payload: FixedAssetConvertToInventory,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+    bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
+) -> Any:
+    """Convert an active FA demonstrator to used-inventory stock.
+
+    Catches depreciation up to conversion_date, posts a balanced conversion
+    journal (DR Inventory / DR Accum Dep / CR FA Cost), creates an inventory
+    Item with on_hand_qty=1 at NBV, and marks the FA disposed at NBV proceeds.
+
+    Requires If-Match: <version> for optimistic locking.
+    Returns 201 with the disposed asset, new item id/sku, NBV, and journal id.
+    Returns 409 on version conflict (current state in body).
+    Returns 422 if asset is not ACTIVE or inputs are invalid.
+    """
+    expected = _parse_if_match(if_match)
+    if expected is None:
+        raise HTTPException(428, "If-Match header with asset version is required")
+
+    actor = f"api:{bearer[:8]}…"
+    tenant_id = resolve_tenant_id(request)
+    if await svc.get(session, asset_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Fixed asset not found")
+
+    try:
+        asset, item_id, item_sku, nbv, journal_id = await svc.convert_to_inventory(
+            session,
+            asset_id,
+            actor=actor,
+            expected_version=expected,
+            conversion_date=payload.conversion_date,
+            inventory_account_id=payload.inventory_account_id,
+            cogs_account_id=payload.cogs_account_id,
+            income_account_id=payload.income_account_id,
+            sku=payload.sku,
+            vin=payload.vin,
+        )
+    except svc.VersionConflict as exc:
+        body = FixedAssetConflictBody(
+            detail="version mismatch",
+            current=FixedAssetOut.model_validate(exc.current),
+        ).model_dump(mode="json")
+        return JSONResponse(body, status_code=409)
+    except (ValueError, svc.FixedAssetApiError) as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
+
+    response_body = FixedAssetConvertToInventoryResponse(
+        asset=FixedAssetOut.model_validate(asset),
+        item_id=item_id,
+        item_sku=item_sku,
+        nbv=nbv,
+        journal_id=journal_id,
+    )
+    return JSONResponse(json.loads(response_body.model_dump_json()), status_code=201)
 
 
 # ---------------------------------------------------------------------------

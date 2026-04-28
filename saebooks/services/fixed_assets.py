@@ -450,9 +450,149 @@ async def dispose(
     return await get(session, asset_id)  # type: ignore[return-value]
 
 
+async def convert_to_inventory(
+    session: AsyncSession,
+    asset_id: uuid.UUID,
+    actor: str,
+    expected_version: int,
+    *,
+    conversion_date: Any,
+    inventory_account_id: uuid.UUID,
+    cogs_account_id: uuid.UUID,
+    income_account_id: uuid.UUID,
+    sku: str | None = None,
+    vin: str | None = None,
+) -> tuple[FixedAsset, uuid.UUID, str, Decimal, uuid.UUID]:
+    """Convert an active FA demonstrator to used-inventory stock.
+
+    Steps:
+    1. Validate asset is ACTIVE and version matches.
+    2. Catch depreciation through conversion_date so NBV is current.
+    3. Compute NBV = cost - accumulated_depreciation.
+    4. Post a single balanced conversion journal:
+       DR Inventory Account (NBV)
+       DR Accum Dep Account (accumulated depreciation)
+       CR FA Cost Account (full original cost)
+    5. Create an inventory Item with on_hand_qty=1, wac_cost=NBV.
+    6. Mark FA disposed (disposal_date=conversion_date, disposal_proceeds=NBV).
+
+    Returns (asset, item_id, item_sku, nbv, journal_id).
+    """
+    from saebooks.models.item import CostMethod, Item, ItemType
+    from saebooks.services import assets as assets_svc
+    from saebooks.services import journal as journal_svc
+
+    asset = await get(session, asset_id)
+    if asset is None:
+        raise FixedAssetApiError(f"FixedAsset {asset_id} not found")
+    if asset.status != "active":
+        raise FixedAssetApiError(
+            f"Cannot convert asset in status {asset.status!r} — must be active"
+        )
+    if asset.version != expected_version:
+        raise VersionConflict(asset)
+
+    # Step 2: bring depreciation current so NBV is accurate.
+    await assets_svc.post_depreciation(session, asset_id, conversion_date, posted_by=actor)
+    asset = await get(session, asset_id)
+    assert asset is not None
+
+    # Step 3: compute NBV.
+    accum_dep = await assets_svc.cumulative_depreciation_through(session, asset, conversion_date)
+    nbv = (asset.cost - accum_dep).quantize(Decimal("0.01"))
+    if nbv < Decimal("0"):
+        nbv = Decimal("0.00")
+
+    # Step 4: post conversion journal.
+    _CENT = Decimal("0.01")
+    lines: list[dict[str, object]] = [
+        {
+            "account_id": inventory_account_id,
+            "description": f"Conversion to inventory: {asset.code}",
+            "debit": nbv,
+            "credit": Decimal("0"),
+        },
+    ]
+    if accum_dep > 0:
+        lines.append({
+            "account_id": asset.accum_dep_account_id,
+            "description": f"Clear accum dep for {asset.code}",
+            "debit": accum_dep.quantize(_CENT),
+            "credit": Decimal("0"),
+        })
+    lines.append({
+        "account_id": asset.cost_account_id,
+        "description": f"Clear FA cost for {asset.code}",
+        "debit": Decimal("0"),
+        "credit": asset.cost,
+    })
+
+    entry = await journal_svc.create_draft(
+        session,
+        company_id=asset.company_id,
+        entry_date=conversion_date,
+        description=f"Convert to inventory: {asset.code} {asset.name}",
+        lines=lines,
+    )
+    posted_entry = await journal_svc.post(session, entry.id, posted_by=actor)
+
+    # Step 5: create inventory item.
+    resolved_sku = (sku or asset.code).strip()
+    item = Item(
+        company_id=asset.company_id,
+        tenant_id=asset.tenant_id,
+        sku=resolved_sku,
+        name=asset.name,
+        description=vin or asset.description,
+        item_type=ItemType.INVENTORY,
+        cost_method=CostMethod.WAC,
+        on_hand_qty=Decimal("1"),
+        wac_cost=nbv,
+        default_sale_price=nbv,
+        inventory_account_id=inventory_account_id,
+        cogs_account_id=cogs_account_id,
+        income_account_id=income_account_id,
+        version=1,
+    )
+    session.add(item)
+    await session.flush()
+    await session.refresh(item)
+
+    # Step 6: stamp asset as disposed.
+    asset.status = "disposed"
+    asset.disposal_date = conversion_date
+    asset.disposal_proceeds = nbv
+    asset.disposal_journal_id = posted_entry.id
+    asset.version = asset.version + 1
+    await session.flush()
+    await session.refresh(asset)
+
+    await change_log_svc.append(
+        session,
+        entity="fixed_asset",
+        entity_id=asset.id,
+        op="converted_to_inventory",
+        actor=actor,
+        payload={
+            **_serialise(asset),
+            "item_id": str(item.id),
+            "item_sku": resolved_sku,
+            "nbv": str(nbv),
+            "journal_id": str(posted_entry.id),
+        },
+        version=asset.version,
+    )
+    await session.commit()
+
+    refreshed = await get(session, asset_id)
+    assert refreshed is not None
+    return refreshed, item.id, resolved_sku, nbv, posted_entry.id
+
+
 __all__ = [
     "FixedAssetApiError",
     "VersionConflict",
+    "convert_to_inventory",
     "create",
     "delete",
     "dispose",

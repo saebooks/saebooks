@@ -1930,6 +1930,42 @@ class DepreciationRunAllResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Fixed Asset Convert-to-Inventory — gap MOTR-3
+# ---------------------------------------------------------------------------
+
+
+class FixedAssetConvertToInventory(BaseModel):
+    """POST body for converting an active FA demonstrator to used-inventory stock.
+
+    The conversion journal debits the inventory account at NBV, debits the
+    accumulated-depreciation account (clearing this asset's share), and credits
+    the FA cost account (clearing the full original cost). The asset is then
+    stamped disposed at NBV proceeds and an inventory Item is created with
+    on_hand_qty=1, wac_cost=NBV.
+
+    ``sku`` defaults to the asset's FA code when not supplied.
+    ``vin`` is stored as the item's description for used-vehicle tracking.
+    """
+
+    conversion_date: date
+    inventory_account_id: uuid.UUID
+    cogs_account_id: uuid.UUID
+    income_account_id: uuid.UUID
+    sku: str | None = None
+    vin: str | None = None
+
+
+class FixedAssetConvertToInventoryResponse(BaseModel):
+    """Response from POST /{id}/convert_to_inventory."""
+
+    asset: FixedAssetOut
+    item_id: uuid.UUID
+    item_sku: str
+    nbv: Decimal
+    journal_id: uuid.UUID
+
+
+# ---------------------------------------------------------------------------
 # Trial Balance — tier-5 (cycle 27)
 # ---------------------------------------------------------------------------
 
