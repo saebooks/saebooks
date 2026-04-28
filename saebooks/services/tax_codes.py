@@ -100,6 +100,17 @@ AU_SEED: list[dict[str, object]] = [
         "reporting_type": "out_of_scope",
         "description": "Out of scope for GST (wages, drawings, transfers)",
     },
+    {
+        "code": "MGN",
+        "name": "Margin Scheme (Div 75 s66-50)",
+        "rate": Decimal("0.000"),
+        "reporting_type": "margin_scheme",
+        "description": (
+            "Used-vehicle / real-property margin scheme — GST = 1/11 × "
+            "(sale price − acquisition cost). Enter acquisition cost in the "
+            "Acq. Cost field on each line. Div 75 GSTA 1999 s66-50."
+        ),
+    },
 ]
 
 

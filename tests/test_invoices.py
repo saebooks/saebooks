@@ -349,3 +349,89 @@ async def test_cannot_edit_posted() -> None:
     with pytest.raises(svc.InvoiceError, match="Cannot edit"):
         async with AsyncSessionLocal() as session:
             await svc.update_draft(session, inv.id, notes="nope")
+
+
+@pytest.mark.asyncio
+async def test_margin_scheme_gst_div75() -> None:
+    """Margin-scheme (MGN) lines compute GST as 1/11 × (sale − acq_cost).
+
+    ATO example: vehicle bought $22,000, sold $24,000.
+    Margin = $2,000. GST = $2,000 / 11 = $181.82 (rounded half-up).
+    Standard 10 % on $24,000 would wrongly give $2,400.
+    """
+    cid, contact, acct, _gst, _fre = await _ctx()
+
+    async with AsyncSessionLocal() as session:
+        mgn_tc = (
+            await session.execute(
+                select(TaxCode).where(
+                    TaxCode.company_id == cid,
+                    TaxCode.code == "MGN",
+                )
+            )
+        ).scalar_one()
+
+        inv = await svc.create_draft(
+            session,
+            company_id=cid,
+            contact_id=contact,
+            issue_date=date(2026, 4, 20),
+            due_date=date(2026, 5, 20),
+            lines=[
+                {
+                    "description": "Used vehicle VIN ABC123",
+                    "account_id": acct,
+                    "tax_code_id": mgn_tc.id,
+                    "quantity": Decimal("1"),
+                    "unit_price": Decimal("24000"),
+                    "discount_pct": Decimal("0"),
+                    "margin_acq_cost": Decimal("22000"),
+                },
+            ],
+        )
+
+    # subtotal = $24,000; margin = $24,000 − $22,000 = $2,000
+    # GST = $2,000 / 11 = $181.818... → $181.82
+    assert inv.subtotal == Decimal("24000.00")
+    assert inv.tax_total == Decimal("181.82")
+    assert inv.total == Decimal("24181.82")
+    assert inv.lines[0].margin_acq_cost == Decimal("22000.00")
+
+
+@pytest.mark.asyncio
+async def test_margin_scheme_zero_acq_cost_treated_as_full_margin() -> None:
+    """When margin_acq_cost is omitted, margin equals the full sale price."""
+    cid, contact, acct, _gst, _fre = await _ctx()
+
+    async with AsyncSessionLocal() as session:
+        mgn_tc = (
+            await session.execute(
+                select(TaxCode).where(
+                    TaxCode.company_id == cid,
+                    TaxCode.code == "MGN",
+                )
+            )
+        ).scalar_one()
+
+        inv = await svc.create_draft(
+            session,
+            company_id=cid,
+            contact_id=contact,
+            issue_date=date(2026, 4, 20),
+            due_date=date(2026, 5, 20),
+            lines=[
+                {
+                    "description": "Vehicle (no acq cost entered)",
+                    "account_id": acct,
+                    "tax_code_id": mgn_tc.id,
+                    "quantity": Decimal("1"),
+                    "unit_price": Decimal("11000"),
+                    "discount_pct": Decimal("0"),
+                    # margin_acq_cost intentionally omitted
+                },
+            ],
+        )
+
+    # margin = $11,000 − $0 = $11,000; GST = $11,000 / 11 = $1,000.00
+    assert inv.tax_total == Decimal("1000.00")
+    assert inv.lines[0].margin_acq_cost is None

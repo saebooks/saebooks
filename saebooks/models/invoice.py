@@ -231,5 +231,10 @@ class InvoiceLine(Base):
     service_start_date: Mapped[date | None] = mapped_column(Date)
     service_end_date: Mapped[date | None] = mapped_column(Date)
     recognized_through_date: Mapped[date | None] = mapped_column(Date)
+    # Margin-scheme acquisition cost (MOTR-1 / Div 75 s66-50). When the
+    # line's tax code has reporting_type="margin_scheme", the GST is
+    # 1/11 × (line_subtotal − margin_acq_cost) rather than rate % of
+    # subtotal. NULL for all non-margin-scheme lines.
+    margin_acq_cost: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
 
     invoice: Mapped[Invoice] = relationship(back_populates="lines")

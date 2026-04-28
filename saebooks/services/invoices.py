@@ -68,29 +68,42 @@ class _LineInput:
     item_id: uuid.UUID | None
     service_start_date: date | None = None
     service_end_date: date | None = None
+    margin_acq_cost: Decimal | None = None
 
 
 def _compute_line_totals(
-    line: _LineInput, tax_rate: Decimal
+    line: _LineInput, tax_code: TaxCode | None
 ) -> tuple[Decimal, Decimal, Decimal]:
-    """Return (subtotal, tax, total) — add-on (ex-GST) tax treatment."""
+    """Return (subtotal, tax, total) — add-on (ex-GST) tax treatment.
+
+    For margin_scheme codes (Div 75 s66-50), GST = 1/11 × max(0, subtotal − acq_cost)
+    rather than rate % of subtotal.
+    """
     gross = line.quantity * line.unit_price
     discount_factor = (Decimal("100") - line.discount_pct) / Decimal("100")
     subtotal = _q2(gross * discount_factor)
-    tax = _q2(subtotal * tax_rate / Decimal("100"))
+    if tax_code is not None and tax_code.reporting_type == "margin_scheme":
+        acq_cost = line.margin_acq_cost or Decimal("0")
+        margin = max(Decimal("0"), subtotal - acq_cost)
+        tax = _q2(margin / Decimal("11"))
+    elif tax_code is not None:
+        rate = Decimal(str(tax_code.rate or 0))
+        tax = _q2(subtotal * rate / Decimal("100"))
+    else:
+        tax = Decimal("0")
     total = subtotal + tax
     return subtotal, tax, total
 
 
-async def _resolve_tax_rate(
+async def _resolve_tax_code(
     session: AsyncSession, tax_code_id: uuid.UUID | None
-) -> Decimal:
+) -> TaxCode | None:
     if tax_code_id is None:
-        return Decimal("0")
+        return None
     tc = await session.get(TaxCode, tax_code_id)
     if tc is None:
         raise InvoiceError(f"Unknown tax code {tax_code_id}")
-    return Decimal(str(tc.rate or 0))
+    return tc
 
 
 # ---------------------------------------------------------------------- #
@@ -187,6 +200,11 @@ async def _replace_lines(
             else sed if isinstance(sed, date) else None
         )
 
+        raw_acq = raw.get("margin_acq_cost")
+        margin_acq_cost = (
+            Decimal(str(raw_acq)) if raw_acq not in (None, "", "0", 0) else None
+        )
+
         line_input = _LineInput(
             description=str(raw["description"]),
             account_id=account_id,
@@ -198,9 +216,10 @@ async def _replace_lines(
             item_id=item_id if isinstance(item_id, uuid.UUID) else None,
             service_start_date=service_start,
             service_end_date=service_end,
+            margin_acq_cost=margin_acq_cost,
         )
-        tax_rate = await _resolve_tax_rate(session, line_input.tax_code_id)
-        subtotal, tax, total = _compute_line_totals(line_input, tax_rate)
+        tax_code = await _resolve_tax_code(session, line_input.tax_code_id)
+        subtotal, tax, total = _compute_line_totals(line_input, tax_code)
         session.add(
             InvoiceLine(
                 invoice_id=inv.id,
@@ -218,6 +237,7 @@ async def _replace_lines(
                 item_id=line_input.item_id,
                 service_start_date=line_input.service_start_date,
                 service_end_date=line_input.service_end_date,
+                margin_acq_cost=line_input.margin_acq_cost,
             )
         )
     await session.flush()
