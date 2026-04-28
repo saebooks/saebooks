@@ -507,3 +507,162 @@ async def test_cross_tenant_account_rejected_on_create_draft() -> None:
                     {"account_id": foreign_acct_id, "debit": 0, "credit": 100},
                 ],
             )
+
+
+# ---------------------------------------------------------------------------
+# PSI-3: related-party wages distribution guard (ITAA97 s.86-70)
+# ---------------------------------------------------------------------------
+
+
+async def _psi_ctx() -> tuple[uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID]:
+    """Return (company_id, wages_acct_id, bank_acct_id, other_acct_id) for PSI tests.
+
+    Self-contained: creates its own company + accounts so PSI tests don't
+    depend on the shared _ctx() company having accounts seeded.
+    """
+    uid = str(uuid.uuid4())[:6].upper()
+    async with AsyncSessionLocal() as session:
+        tenant_result = await session.execute(
+            select(Tenant).where(Tenant.id == _DEFAULT_TENANT)
+        )
+        tenant = tenant_result.scalar_one_or_none()
+        if tenant is None:
+            session.add(Tenant(
+                id=_DEFAULT_TENANT,
+                name="Default Tenant",
+                slug="default",
+            ))
+            await session.flush()
+
+        co = Company(name=f"PSI Test Co {uid}", legal_name=f"PSI Test Co {uid} Pty Ltd")
+        session.add(co)
+        await session.flush()
+        company_id = co.id
+
+        wages = Account(
+            company_id=company_id,
+            tenant_id=_DEFAULT_TENANT,
+            code=f"6-243{uid[:3]}",
+            name="Wages & Salaries — PSI test",
+            account_type=AccountType.EXPENSE,
+        )
+        bank = Account(
+            company_id=company_id,
+            tenant_id=_DEFAULT_TENANT,
+            code=f"1-PSI{uid[:3]}",
+            name="Bank — PSI test",
+            account_type=AccountType.ASSET,
+            reconcile=True,
+        )
+        other = Account(
+            company_id=company_id,
+            tenant_id=_DEFAULT_TENANT,
+            code=f"6-OTH{uid[:3]}",
+            name="Other Expense — PSI test",
+            account_type=AccountType.EXPENSE,
+        )
+        session.add(wages)
+        session.add(bank)
+        session.add(other)
+        await session.commit()
+        return company_id, wages.id, bank.id, other.id
+
+
+async def test_psi_spouse_wages_blocked_on_post() -> None:
+    """gap PSI-3 negative control: Dr Wages[6-243x] with 'spouse' in description must block."""
+    company_id, wages_id, bank_id, _other_id = await _psi_ctx()
+
+    async with AsyncSessionLocal() as session:
+        entry = await svc.create_draft(
+            session,
+            company_id=company_id,
+            entry_date=date(2026, 4, 29),
+            description="Wages payment to spouse $2,000",
+            lines=[
+                {"account_id": wages_id, "debit": 2000, "credit": 0},
+                {"account_id": bank_id, "debit": 0, "credit": 2000},
+            ],
+        )
+        with pytest.raises(PostingError, match="PSI"):
+            await svc.post(session, entry.id, posted_by="test")
+
+
+async def test_psi_related_party_line_description_blocked() -> None:
+    """gap PSI-3: related-party indicator in line description (not entry) also triggers."""
+    company_id, wages_id, bank_id, _other_id = await _psi_ctx()
+
+    async with AsyncSessionLocal() as session:
+        entry = await svc.create_draft(
+            session,
+            company_id=company_id,
+            entry_date=date(2026, 4, 29),
+            lines=[
+                {"account_id": wages_id, "debit": 1500, "credit": 0,
+                 "description": "Related party — family member wage"},
+                {"account_id": bank_id, "debit": 0, "credit": 1500},
+            ],
+        )
+        with pytest.raises(PostingError, match="PSI"):
+            await svc.post(session, entry.id, posted_by="test")
+
+
+async def test_psi_override_reason_allows_post() -> None:
+    """gap PSI-3: providing override_reason records compliance and allows post."""
+    company_id, wages_id, bank_id, _other_id = await _psi_ctx()
+
+    async with AsyncSessionLocal() as session:
+        entry = await svc.create_draft(
+            session,
+            company_id=company_id,
+            entry_date=date(2026, 4, 29),
+            description="Wages — spouse, PAYG-W withheld as per STP",
+            lines=[
+                {"account_id": wages_id, "debit": 2000, "credit": 0},
+                {"account_id": bank_id, "debit": 0, "credit": 2000},
+            ],
+        )
+        posted = await svc.post(
+            session, entry.id, posted_by="test",
+            override_reason="PAYG-W withholding applied; business determination in place"
+        )
+        assert posted.status == EntryStatus.POSTED
+        assert posted.override_reason is not None
+
+
+async def test_psi_unrelated_contractor_wages_allowed() -> None:
+    """gap PSI-3 positive control: wages to unrelated contractor post without warning."""
+    company_id, wages_id, bank_id, _other_id = await _psi_ctx()
+
+    async with AsyncSessionLocal() as session:
+        entry = await svc.create_draft(
+            session,
+            company_id=company_id,
+            entry_date=date(2026, 4, 29),
+            description="Consulting fee — Dr Wages / Cr Bank $500 to Consultant Name",
+            lines=[
+                {"account_id": wages_id, "debit": 500, "credit": 0},
+                {"account_id": bank_id, "debit": 0, "credit": 500},
+            ],
+        )
+        posted = await svc.post(session, entry.id, posted_by="test")
+        assert posted.status == EntryStatus.POSTED
+
+
+async def test_psi_non_wages_account_not_flagged() -> None:
+    """gap PSI-3: 'spouse' in description for a non-wages account does not trigger."""
+    company_id, _wages_id, bank_id, other_id = await _psi_ctx()
+
+    async with AsyncSessionLocal() as session:
+        entry = await svc.create_draft(
+            session,
+            company_id=company_id,
+            entry_date=date(2026, 4, 29),
+            description="Transfer to spouse bank account — personal",
+            lines=[
+                {"account_id": other_id, "debit": 100, "credit": 0},
+                {"account_id": bank_id, "debit": 0, "credit": 100},
+            ],
+        )
+        # Should not raise — other_id is not a 6-243x wages account
+        posted = await svc.post(session, entry.id, posted_by="test")
+        assert posted.status == EntryStatus.POSTED

@@ -7,6 +7,7 @@ Business rules:
   not edited. Hybrid/Open modes allow edit with full audit trail.
 - Auto-ref: JE-NNNNNN, from a Postgres sequence. User may override.
 """
+import re
 import uuid
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -307,6 +308,67 @@ async def _check_trust_commingling(
             )
 
 
+# ITAA97 s.86-70 — wages paid to related parties under a PSI arrangement
+# are non-deductible. Flag JEs that debit a wages account (6-243x range)
+# and mention a related-party payee in any description field.
+_PSI_WAGES_PREFIX = "6-243"
+_PSI_RELATED_PATTERN = re.compile(
+    r"\b(spouse|partner|family|related[- ]party|non[- ]arms[- ]length)\b",
+    re.IGNORECASE,
+)
+
+
+async def _check_psi_distribution(
+    session: AsyncSession,
+    entry: JournalEntry,
+    override_reason: str | None,
+) -> None:
+    """Raise PostingError for wages paid to a related party without override.
+
+    Triggers when a JE debits a wages account (6-243x) and any description
+    field contains a related-party indicator (spouse, partner, family, etc.).
+    Passing override_reason records compliance acknowledgement and allows post.
+    """
+    if not entry.lines:
+        return
+
+    debited_ids = [line.account_id for line in entry.lines if line.debit > Decimal("0")]
+    if not debited_ids:
+        return
+
+    result = await session.execute(
+        select(Account.id, Account.code, Account.account_type).where(
+            Account.id.in_(debited_ids)
+        )
+    )
+    rows = {r.id: (r.code, r.account_type) for r in result.all()}
+
+    wages_debited = any(
+        code.startswith(_PSI_WAGES_PREFIX) and acct_type == AccountType.EXPENSE
+        for _id, (code, acct_type) in rows.items()
+    )
+    if not wages_debited:
+        return
+
+    texts: list[str] = []
+    if entry.description:
+        texts.append(entry.description)
+    for line in entry.lines:
+        if line.description:
+            texts.append(line.description)
+
+    if not any(_PSI_RELATED_PATTERN.search(t) for t in texts):
+        return
+
+    if not override_reason:
+        raise PostingError(
+            "Non-arms-length wage payment flagged for PSI review: "
+            "s.86-70 ITAA97 restricts deductibility of distributions to related parties. "
+            "Provide a compliance override reason (e.g. 'Business determination in place' "
+            "or 'PAYG-W withholding applied') to post this entry. (gap PSI-3)"
+        )
+
+
 async def _check_period_lock(
     session: AsyncSession,
     company_id: uuid.UUID,
@@ -349,6 +411,9 @@ async def post(
     # Trust commingling guard — must run BEFORE GST auto-posting so GST lines
     # can't mask a trust→operating transfer that was originally balanced without them.
     await _check_trust_commingling(session, entry)
+
+    # PSI distribution guard — ITAA97 s.86-70 related-party wages check.
+    await _check_psi_distribution(session, entry, override_reason)
 
     # Auto-generate GST account lines BEFORE balancing.
     # Lines may carry `gst_amount` as the net/gross split metadata —
