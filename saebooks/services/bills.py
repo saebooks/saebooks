@@ -26,6 +26,7 @@ from sqlalchemy.orm import selectinload
 
 from saebooks.models.account import Account
 from saebooks.models.bill import Bill, BillLine, BillStatus
+from saebooks.models.contact import Contact
 from saebooks.models.item import Item
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import items as items_svc
@@ -663,6 +664,102 @@ async def api_get(
 
 
 # ---------------------------------------------------------------------------
+# Cross-tenant FK validation (CIVL-1 P0 fix)
+# ---------------------------------------------------------------------------
+#
+# RLS at the DB layer (FORCE ROW LEVEL SECURITY + tenant_isolation policy
+# from migration 0055) catches cross-tenant FK injection only when the API
+# connects through a NOBYPASSRLS role. In dev / older deployments the API
+# may still run as the schema owner, where RLS is silently a no-op. The
+# helpers below add a belt-and-braces tenant scope check at the service
+# layer so the bills endpoint cannot accept a foreign-tenant contact_id,
+# account_id, or tax_code_id even if RLS is unenforced.
+#
+# Behaviour: a foreign-tenant or unknown id raises ``BillError`` with the
+# message ``"<entity> not found in current tenant"``. The router maps
+# ``BillError`` to HTTP 422, matching the contract the medium-civil-
+# contractor critic expected (gap CIVL-1).
+
+
+async def _validate_contact_tenant(
+    session: AsyncSession,
+    contact_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+) -> None:
+    """Raise ``BillError`` if ``contact_id`` does not belong to ``tenant_id``."""
+    result = await session.execute(
+        select(Contact.id).where(
+            Contact.id == contact_id,
+            Contact.tenant_id == tenant_id,
+        )
+    )
+    if result.scalar_one_or_none() is None:
+        raise BillError("contact not found in current tenant")
+
+
+async def _validate_account_tenant(
+    session: AsyncSession,
+    account_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+) -> None:
+    """Raise ``BillError`` if ``account_id`` does not belong to ``tenant_id``."""
+    result = await session.execute(
+        select(Account.id).where(
+            Account.id == account_id,
+            Account.tenant_id == tenant_id,
+        )
+    )
+    if result.scalar_one_or_none() is None:
+        raise BillError("account not found in current tenant")
+
+
+async def _validate_tax_code_tenant(
+    session: AsyncSession,
+    tax_code_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+) -> None:
+    """Raise ``BillError`` if ``tax_code_id`` does not belong to ``tenant_id``."""
+    result = await session.execute(
+        select(TaxCode.id).where(
+            TaxCode.id == tax_code_id,
+            TaxCode.tenant_id == tenant_id,
+        )
+    )
+    if result.scalar_one_or_none() is None:
+        raise BillError("tax_code not found in current tenant")
+
+
+async def _validate_line_fks(
+    session: AsyncSession,
+    lines: list[dict],
+    tenant_id: uuid.UUID,
+) -> None:
+    """Validate every line's ``account_id`` + optional ``tax_code_id``.
+
+    Each id must belong to ``tenant_id``; otherwise ``BillError`` is
+    raised with the same message contract as the helpers above.
+    """
+    for raw in lines:
+        account_raw = raw.get("account_id")
+        if account_raw is not None:
+            account_id = (
+                account_raw
+                if isinstance(account_raw, uuid.UUID)
+                else uuid.UUID(str(account_raw))
+            )
+            await _validate_account_tenant(session, account_id, tenant_id)
+
+        tax_code_raw = raw.get("tax_code_id")
+        if tax_code_raw:
+            tax_code_id = (
+                tax_code_raw
+                if isinstance(tax_code_raw, uuid.UUID)
+                else uuid.UUID(str(tax_code_raw))
+            )
+            await _validate_tax_code_tenant(session, tax_code_id, tenant_id)
+
+
+# ---------------------------------------------------------------------------
 # Write operations
 # ---------------------------------------------------------------------------
 
@@ -682,7 +779,17 @@ async def api_create(
     currency: str = "AUD",
     fx_rate: Decimal | None = None,
 ) -> Bill:
-    """Create a bill draft with version=1 and a change_log row."""
+    """Create a bill draft with version=1 and a change_log row.
+
+    CIVL-1 P0 fix: ``contact_id`` and every line's ``account_id`` /
+    ``tax_code_id`` are validated against ``tenant_id`` before any
+    INSERT. Cross-tenant FK injection raises ``BillError`` (HTTP 422
+    via the router).
+    """
+    await _validate_contact_tenant(session, contact_id, tenant_id)
+    if lines:
+        await _validate_line_fks(session, lines, tenant_id)
+
     bill = Bill(
         company_id=company_id,
         tenant_id=tenant_id,
@@ -735,7 +842,13 @@ async def api_update(
     reference: str | None = None,
     lines: list[dict] | None = None,
 ) -> Bill:
-    """Update a bill draft with optimistic locking + change_log."""
+    """Update a bill draft with optimistic locking + change_log.
+
+    CIVL-1 P0 fix: when ``contact_id`` or ``lines`` are supplied, every
+    referenced contact / account / tax_code is validated against the
+    bill's owning ``tenant_id``. Cross-tenant FK injection raises
+    ``BillError`` (HTTP 422 via the router).
+    """
     bill = await _get_with_lines(session, bill_id)
     if bill is None:
         raise BillError(f"Bill {bill_id} not found")
@@ -743,7 +856,10 @@ async def api_update(
         raise VersionConflict(bill)
 
     if contact_id is not None:
+        await _validate_contact_tenant(session, contact_id, bill.tenant_id)
         bill.contact_id = contact_id
+    if lines is not None:
+        await _validate_line_fks(session, lines, bill.tenant_id)
     if issue_date is not None:
         bill.issue_date = issue_date
     if due_date is not None:

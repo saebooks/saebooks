@@ -273,6 +273,11 @@ async def update_bill(
         return JSONResponse(body, status_code=409)
     except (ValueError, svc.BillError) as exc:
         msg = str(exc)
+        # CIVL-1: cross-tenant FK injection is a validation error (422),
+        # not a "missing entity" 404 — the supplied UUID exists, it just
+        # doesn't belong to the caller's tenant.
+        if "not found in current tenant" in msg.lower():
+            raise HTTPException(422, msg) from exc
         if "not found" in msg.lower():
             raise HTTPException(404, msg) from exc
         raise HTTPException(422, msg) from exc
