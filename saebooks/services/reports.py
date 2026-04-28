@@ -1173,3 +1173,86 @@ async def cashflow_forecast(
         items=items,
         weeks=weeks,
     )
+
+
+# ---------------------------------------------------------------------- #
+# Revenue by customer                                                     #
+# ---------------------------------------------------------------------- #
+
+
+@dataclass
+class CustomerRevenueRow:
+    """One customer's total invoiced revenue (ex-GST) for a date range."""
+
+    contact_id: uuid.UUID
+    contact_name: str
+    revenue: Decimal  # sum of invoice subtotals (net of GST)
+
+
+@dataclass
+class RevenueByCustomerResult:
+    """Revenue breakdown by customer, with concentration metrics."""
+
+    from_date: date
+    to_date: date
+    rows: list[CustomerRevenueRow]      # sorted by revenue desc
+    total_revenue: Decimal
+    top_customer_pct: float | None       # None when total_revenue == 0
+    concentration_warning: bool          # True when top customer >= 80 %
+
+
+async def revenue_by_customer(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    *,
+    from_date: date,
+    to_date: date,
+) -> RevenueByCustomerResult:
+    """Sum invoiced revenue (subtotal, ex-GST) per customer for a date range.
+
+    Uses POSTED invoices issued within [from_date, to_date].  Voided and
+    archived invoices are excluded.  Concentration warning fires when the
+    top customer accounts for >= 80 % of total revenue — the ATO's 80/20
+    PSI rule threshold.
+    """
+    from saebooks.models.invoice import Invoice, InvoiceStatus
+
+    stmt = (
+        select(
+            Invoice.contact_id,
+            Contact.name,
+            func.sum(Invoice.subtotal).label("revenue"),
+        )
+        .join(Contact, Invoice.contact_id == Contact.id)
+        .where(
+            Invoice.company_id == company_id,
+            Invoice.status == InvoiceStatus.POSTED,
+            Invoice.archived_at.is_(None),
+            Invoice.issue_date >= from_date,
+            Invoice.issue_date <= to_date,
+        )
+        .group_by(Invoice.contact_id, Contact.name)
+        .order_by(func.sum(Invoice.subtotal).desc())
+    )
+
+    result = await session.execute(stmt)
+    rows: list[CustomerRevenueRow] = [
+        CustomerRevenueRow(
+            contact_id=row.contact_id,
+            contact_name=row.name,
+            revenue=Decimal(str(row.revenue or "0")),
+        )
+        for row in result.all()
+    ]
+
+    total_revenue = sum((r.revenue for r in rows), Decimal("0"))
+    top_pct = float(rows[0].revenue / total_revenue * 100) if total_revenue > 0 and rows else None
+
+    return RevenueByCustomerResult(
+        from_date=from_date,
+        to_date=to_date,
+        rows=rows,
+        total_revenue=total_revenue,
+        top_customer_pct=top_pct,
+        concentration_warning=top_pct is not None and top_pct >= 80.0,
+    )

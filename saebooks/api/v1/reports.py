@@ -81,6 +81,8 @@ from saebooks.api.v1.schemas import (
     PLSegmentRow,
     PLSegmentSection,
     PnLReport,
+    RevenueByCustomerReport,
+    RevenueByCustomerRow,
     TrialBalanceLine,
     TrialBalanceReport,
     YTDTurnoverReport,
@@ -1546,6 +1548,58 @@ async def pl_by_segment(
         to_date=to_date,
         segment_type=segment_type,
         segments=output_segments,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/reports/revenue_by_customer — gap PSI-2
+# ---------------------------------------------------------------------------
+
+
+@router.get("/revenue_by_customer", response_model=RevenueByCustomerReport)
+async def revenue_by_customer(
+    request: Request,
+    from_date: date = Query(...),
+    to_date: date = Query(...),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> RevenueByCustomerReport:
+    """Revenue (ex-GST) broken down by customer for a date range.
+
+    Uses POSTED invoices (issue_date within the window).  Returns rows
+    sorted by revenue descending plus a concentration_warning flag that
+    fires when the top customer accounts for >= 80 % of total revenue
+    (the ATO 80/20 PSI rule threshold).
+    """
+    resolve_tenant_id(request)
+
+    result = await reports_svc.revenue_by_customer(
+        session,
+        company_id,
+        from_date=from_date,
+        to_date=to_date,
+    )
+
+    total = float(result.total_revenue)
+    rows = [
+        RevenueByCustomerRow(
+            contact_id=r.contact_id,
+            contact_name=r.contact_name,
+            revenue=float(r.revenue),
+            pct_of_total=float(r.revenue / result.total_revenue * 100)
+            if result.total_revenue > 0
+            else 0.0,
+        )
+        for r in result.rows
+    ]
+
+    return RevenueByCustomerReport(
+        from_date=from_date,
+        to_date=to_date,
+        rows=rows,
+        total_revenue=total,
+        top_customer_pct=result.top_customer_pct,
+        concentration_warning=result.concentration_warning,
     )
 
 

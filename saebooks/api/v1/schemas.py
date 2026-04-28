@@ -2084,6 +2084,31 @@ class PLBySegmentReport(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Revenue by Customer — gap PSI-2
+# ---------------------------------------------------------------------------
+
+
+class RevenueByCustomerRow(BaseModel):
+    """One customer's invoiced revenue for the period."""
+
+    contact_id: uuid.UUID
+    contact_name: str
+    revenue: float
+    pct_of_total: float
+
+
+class RevenueByCustomerReport(BaseModel):
+    """Revenue breakdown by customer with PSI concentration metrics."""
+
+    from_date: date
+    to_date: date
+    rows: list[RevenueByCustomerRow]
+    total_revenue: float
+    top_customer_pct: float | None
+    concentration_warning: bool
+
+
+# ---------------------------------------------------------------------------
 # Journal Templates — cycle 40
 # ---------------------------------------------------------------------------
 
