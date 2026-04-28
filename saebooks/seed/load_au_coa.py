@@ -221,6 +221,41 @@ async def _load_depreciation_models(session: AsyncSession) -> int:
     return n
 
 
+async def _seed_period_locks(session: AsyncSession, company: Company) -> int:
+    """Idempotently seed period locks for closed quarters.
+
+    Seeds a Q1 2026 lock (through 2026-03-31) representing the first BAS
+    quarter that should be closed on a fresh install. Any existing lock on
+    that same date is skipped.
+    """
+    from datetime import date as _date
+
+    from sqlalchemy import select
+
+    from saebooks.models.journal import PeriodLock
+
+    q1_lock_date = _date(2026, 3, 31)
+    existing = await session.execute(
+        select(PeriodLock).where(
+            PeriodLock.company_id == company.id,
+            PeriodLock.locked_through == q1_lock_date,
+        )
+    )
+    if existing.scalar_one_or_none() is not None:
+        return 0
+
+    session.add(
+        PeriodLock(
+            company_id=company.id,
+            locked_through=q1_lock_date,
+            locked_by="seed",
+            reason="Q1 2026 BAS quarter closed (initial seed)",
+        )
+    )
+    await session.commit()
+    return 1
+
+
 async def main() -> None:
     logging.basicConfig(level=logging.INFO)
     async with AsyncSessionLocal() as session:
@@ -231,6 +266,9 @@ async def main() -> None:
         logger.info(
             "Accounts for %s: %d inserted, %d already present", company.name, inserted, skipped
         )
+
+        locks_seeded = await _seed_period_locks(session, company)
+        logger.info("Period locks seeded: %d", locks_seeded)
 
         raw_sources = [
             ("raw_au_tax_codes", "account.tax-au.csv"),

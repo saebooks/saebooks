@@ -562,6 +562,12 @@ class JournalEntryConflictBody(BaseModel):
     current: JournalEntryOut
 
 
+class JournalEntryPostBody(BaseModel):
+    """Optional body for POST /{id}/post — carries override_reason for period-lock bypass."""
+
+    override_reason: str | None = None
+
+
 class PermissionOut(BaseModel):
     """One entry in the permission catalogue."""
 

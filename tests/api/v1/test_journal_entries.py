@@ -937,3 +937,140 @@ async def test_je_post_blocked_by_period_lock(
         assert rpost_ok.status_code == 200, (
             f"Expected 200 for post after lock boundary, got {rpost_ok.status_code}: {rpost_ok.text}"
         )
+
+
+# ---------------------------------------------------------------------------
+# FITC-4: period-lock gate + override_reason bypass (gap FITC-4 from medium-fitness-chain)
+# ---------------------------------------------------------------------------
+
+
+async def test_fitc4_period_lock_gate_and_override(
+    api_client: AsyncClient,
+    account_ids: dict[str, str],
+) -> None:
+    """POST /{id}/post must reject entries dated inside a locked period (FITC-4).
+
+    Gap FITC-4 (P1): the period_locks table was empty on the dev instance so
+    every entry_date was accepted. The fix seeds Q1 2026 (locked_through
+    2026-03-31) and exposes override_reason in the /post request body so a
+    bookkeeper can still post with an explicit justification.
+
+    This test:
+    1. Creates an isolated company with a period lock at 2026-03-31.
+    2. Verifies that posting a JE dated 2026-03-15 returns 422 with a
+       meaningful error message.
+    3. Verifies that re-posting with override_reason succeeds (200) and
+       the reason is stored on the returned entry.
+    4. Positive control: posting a JE dated 2026-04-01 (after the lock)
+       succeeds without any override.
+    """
+    from saebooks.models.account import Account
+    from saebooks.models.company import Company
+    from saebooks.services import journal as journal_svc
+
+    _DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+    cid = uuid.uuid4()
+    async with AsyncSessionLocal() as session:
+        session.add(Company(
+            id=cid,
+            tenant_id=_DEFAULT_TENANT_ID,
+            name=f"FITC4 Corp {cid.hex[:6]}",
+        ))
+        await session.flush()
+
+        asset_acct = Account(
+            company_id=cid, tenant_id=_DEFAULT_TENANT_ID,
+            code=f"1-{cid.hex[:4]}", name="FITC4 Asset",
+            account_type=AccountType.ASSET, is_header=False,
+        )
+        expense_acct = Account(
+            company_id=cid, tenant_id=_DEFAULT_TENANT_ID,
+            code=f"6-{cid.hex[:4]}", name="FITC4 Expense",
+            account_type=AccountType.EXPENSE, is_header=False,
+        )
+        session.add_all([asset_acct, expense_acct])
+        await session.flush()
+
+        await journal_svc.lock_period(
+            session, cid, date(2026, 3, 31), locked_by="test-fitc4"
+        )
+        await session.refresh(asset_acct)
+        await session.refresh(expense_acct)
+        asset_id = str(asset_acct.id)
+        expense_id = str(expense_acct.id)
+
+    from saebooks.api.v1.auth import current_token
+    from httpx import ASGITransport, AsyncClient as _AC
+    from saebooks.main import app as _app
+
+    token = current_token()
+    async with _AC(
+        transport=ASGITransport(app=_app),
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {token}", "X-Company-Id": str(cid)},
+    ) as iso:
+        # 1. Create DRAFT JE dated inside the locked period
+        r_create = await iso.post("/api/v1/journal_entries", json={
+            "entry_date": "2026-03-15",
+            "narration": "FITC-4 backdated entry",
+            "lines": [
+                {"account_id": asset_id, "debit": "200.00", "credit": "0.00"},
+                {"account_id": expense_id, "debit": "0.00", "credit": "200.00"},
+            ],
+        })
+        assert r_create.status_code == 201, r_create.text
+        entry_id = r_create.json()["id"]
+        version = r_create.json()["version"]
+
+        # 2. Attempt to post without override → must be rejected (period locked)
+        r_block = await iso.post(
+            f"/api/v1/journal_entries/{entry_id}/post",
+            headers={"If-Match": str(version)},
+        )
+        assert r_block.status_code in range(400, 500), (
+            f"FITC-4: expected 4xx for locked-period post, got {r_block.status_code}: {r_block.text}"
+        )
+        detail_str = str(r_block.json()).lower()
+        assert "lock" in detail_str or "period" in detail_str, (
+            f"FITC-4: expected 'lock' or 'period' in error body, got: {r_block.json()}"
+        )
+
+        # Entry must still be DRAFT after rejected post
+        r_check = await iso.get(f"/api/v1/journal_entries/{entry_id}")
+        assert r_check.json()["status"] == "DRAFT", (
+            f"FITC-4: entry must remain DRAFT after rejected post"
+        )
+
+        # 3. Post with override_reason → must succeed
+        r_override = await iso.post(
+            f"/api/v1/journal_entries/{entry_id}/post",
+            headers={"If-Match": str(version)},
+            json={"override_reason": "CFO approved late entry — corrects March payroll accrual"},
+        )
+        assert r_override.status_code == 200, (
+            f"FITC-4: expected 200 with override_reason, got {r_override.status_code}: {r_override.text}"
+        )
+        posted = r_override.json()
+        assert posted["status"] == "POSTED", f"FITC-4: entry must be POSTED after override"
+        assert posted["override_reason"] is not None, "FITC-4: override_reason must be stored"
+        assert "CFO" in posted["override_reason"], (
+            f"FITC-4: override_reason not persisted correctly: {posted['override_reason']}"
+        )
+
+        # 4. Positive control: JE dated after the lock posts without override
+        r_after = await iso.post("/api/v1/journal_entries", json={
+            "entry_date": "2026-04-01",
+            "narration": "FITC-4 positive control",
+            "lines": [
+                {"account_id": asset_id, "debit": "100.00", "credit": "0.00"},
+                {"account_id": expense_id, "debit": "0.00", "credit": "100.00"},
+            ],
+        })
+        assert r_after.status_code == 201, r_after.text
+        r_post_after = await iso.post(
+            f"/api/v1/journal_entries/{r_after.json()['id']}/post",
+            headers={"If-Match": str(r_after.json()["version"])},
+        )
+        assert r_post_after.status_code == 200, (
+            f"FITC-4: post after lock boundary must succeed, got {r_post_after.status_code}: {r_post_after.text}"
+        )

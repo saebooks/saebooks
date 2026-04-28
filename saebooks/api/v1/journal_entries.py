@@ -29,21 +29,20 @@ from datetime import date
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
-from saebooks.api.v1.deps import get_session
+from saebooks.api.v1.deps import get_active_company_id, get_session
 from saebooks.api.v1.schemas import (
     JournalEntryConflictBody,
     JournalEntryCreate,
     JournalEntryListOut,
     JournalEntryOut,
+    JournalEntryPostBody,
     JournalEntryUpdate,
 )
-from saebooks.models.company import Company
 from saebooks.models.journal import EntryStatus
 from saebooks.services import journal_entries as svc
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
@@ -58,22 +57,6 @@ router = APIRouter(
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
-
-
-async def _first_company_id(session: AsyncSession, tenant_id: UUID) -> UUID:
-    """Return the first active company for the request tenant."""
-    result = await session.execute(
-        select(Company)
-        .where(
-            Company.tenant_id == tenant_id,
-            Company.archived_at.is_(None),
-        )
-        .order_by(Company.created_at)
-    )
-    company = result.scalars().first()
-    if company is None:
-        raise HTTPException(404, "No active company for tenant")
-    return company.id
 
 
 def _parse_if_match(header: str | None) -> int | None:
@@ -111,6 +94,7 @@ async def list_journal_entries(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> JournalEntryListOut:
     offset = (page - 1) * page_size
     status_enum: EntryStatus | None = None
@@ -121,7 +105,6 @@ async def list_journal_entries(
             raise HTTPException(400, f"Invalid status '{status}'") from exc
 
     tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
     entries, total = await svc.list_active(
         session,
         company_id,
@@ -169,9 +152,9 @@ async def create_journal_entry(
     request: Request,
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
     try:
         entry = await svc.create(
             session,
@@ -315,6 +298,7 @@ async def void_journal_entry(
 async def post_journal_entry(
     entry_id: UUID,
     request: Request,
+    payload: JournalEntryPostBody = Body(default_factory=JournalEntryPostBody),
     if_match: str | None = Header(default=None, alias="If-Match"),
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
@@ -324,6 +308,8 @@ async def post_journal_entry(
 
     Checks period lock, auto-posts GST lines, verifies balance.
     Returns 422 if the entry is already POSTED or REVERSED.
+    Returns 422 with "Period is locked" if entry_date falls in a locked period
+    and no override_reason is supplied in the request body.
     """
     expected = _parse_if_match(if_match)
     if expected is None:
@@ -362,6 +348,7 @@ async def post_journal_entry(
             entry_id,
             actor=f"api:{bearer[:8]}…",
             expected_version=expected,
+            override_reason=payload.override_reason or None,
         )
     except svc.VersionConflict as exc:
         body = JournalEntryConflictBody(

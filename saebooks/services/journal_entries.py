@@ -397,12 +397,17 @@ async def api_post(
     entry_id: uuid.UUID,
     actor: str,
     expected_version: int,
+    *,
+    override_reason: str | None = None,
 ) -> JournalEntry:
     """Transition DRAFT → POSTED with optimistic locking + change_log.
 
     Delegates to ``services.journal.post()`` which checks period locks,
     auto-posts GST lines, and verifies balance. After that completes, we
     bump ``version`` and append a change_log row.
+
+    ``override_reason`` is passed through to the period-lock check — when
+    non-empty it bypasses the lock and is stored on the entry for audit.
     """
     from saebooks.services import journal as journal_svc  # avoid circular at module level
 
@@ -425,7 +430,9 @@ async def api_post(
     # type unknown to this module's router; translate it to JournalEntryError so the
     # router's existing except clause returns 422 instead of propagating a 500.
     try:
-        entry = await journal_svc.post(session, entry_id, posted_by=actor)
+        entry = await journal_svc.post(
+            session, entry_id, posted_by=actor, override_reason=override_reason
+        )
     except journal_svc.PostingError as exc:
         raise JournalEntryError(str(exc)) from exc
 
