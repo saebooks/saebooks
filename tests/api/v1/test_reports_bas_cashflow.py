@@ -399,6 +399,86 @@ async def test_bas_tenant_isolation(
         )
 
 
+async def test_bas_mid_quarter_registration_split(
+    api_client: AsyncClient,
+    gl_accounts: dict[str, str],
+    tax_codes: dict[str, str],
+) -> None:
+    """Mid-quarter GST registration: pre-reg sales in G1 but excluded from 1A.
+
+    Scenario (HOBB-3 fix):
+      Quarter     2027-07-01 to 2027-09-30
+      Registration effective 2027-08-01
+      Pre-reg sale  2027-07-15  AUD 2000 taxable
+      Post-reg sale 2027-08-10  AUD 3000 taxable
+    Expected:
+      g1_total_sales = 5000  (all sales disclosed)
+      g1_pre_registration = 2000
+      g1_post_registration = 3000
+      label_1a_gst_on_sales = 300  (3000 x 10% — pre-reg excluded)
+    """
+    income_id = gl_accounts[AccountType.INCOME.value]
+    asset_id = gl_accounts[AccountType.ASSET.value]
+    gst_id = tax_codes["taxable"]
+
+    # Pre-registration sale (2027-07-15)
+    await _create_and_post_je(
+        api_client,
+        "2027-07-15",
+        lines=[
+            {"account_id": asset_id, "debit": "2000.00", "credit": "0"},
+            {
+                "account_id": income_id,
+                "debit": "0",
+                "credit": "2000.00",
+                "tax_code_id": gst_id,
+            },
+        ],
+    )
+
+    # Post-registration sale (2027-08-10)
+    await _create_and_post_je(
+        api_client,
+        "2027-08-10",
+        lines=[
+            {"account_id": asset_id, "debit": "3000.00", "credit": "0"},
+            {
+                "account_id": income_id,
+                "debit": "0",
+                "credit": "3000.00",
+                "tax_code_id": gst_id,
+            },
+        ],
+    )
+
+    r = await api_client.get(
+        "/api/v1/reports/bas_summary",
+        params={
+            "from_date": "2027-07-01",
+            "to_date": "2027-09-30",
+            "registration_effective_date": "2027-08-01",
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    assert body["registration_effective_date"] == "2027-08-01"
+    assert body["g1_total_sales"] >= 5000.0, f"g1_total_sales={body['g1_total_sales']}"
+    assert body["g1_pre_registration"] >= 2000.0, (
+        f"g1_pre_registration={body['g1_pre_registration']}"
+    )
+    assert body["g1_post_registration"] >= 3000.0, (
+        f"g1_post_registration={body['g1_post_registration']}"
+    )
+    # 1A must be based only on post-registration sales (3000 x 10% = 300)
+    assert body["label_1a_gst_on_sales"] == pytest.approx(
+        body["g1_post_registration"] * 0.10, abs=0.02
+    ), f"1A should be post-reg G1 x 10%, got {body['label_1a_gst_on_sales']}"
+    assert body["label_1a_gst_on_sales"] < body["g1_total_sales"] * 0.10, (
+        "1A must be less than it would be if all sales were taxable"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Cashflow tests
 # ---------------------------------------------------------------------------

@@ -54,7 +54,7 @@ active company (single-company phase-1 assumption).
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -614,34 +614,14 @@ _GST_RATE = Decimal("0.10")
 _GST_INCLUSIVE_FRACTION = Decimal("1") / Decimal("11")
 
 
-@router.get("/bas_summary", response_model=BASSummary)
-async def bas_summary(
-    request: Request,
-    from_date: date = Query(...),
-    to_date: date = Query(...),
-    session: AsyncSession = Depends(get_session),
-    company_id: UUID = Depends(get_active_company_id),
-) -> BASSummary:
-    """Australian BAS summary for a date range.
-
-    Queries POSTED JournalLine rows for the period joined to Account
-    and (outer-joined) to TaxCode via ``tax_code_id`` on the line.
-    Lines without a tax code are treated as out-of-scope and contribute
-    nothing to BAS buckets.
-
-    BAS logic:
-    * G1  — lines on INCOME/OTHER_INCOME accounts with reporting_type
-             "taxable": net = credit - debit.
-    * G3  — lines on INCOME/OTHER_INCOME accounts with reporting_type
-             "gst_free": net = credit - debit.
-    * G11 — lines on EXPENSE/COST_OF_SALES/OTHER_EXPENSE accounts with
-             reporting_type "taxable": net = debit - credit.
-    * 1A  = G1 × 10%  (GST collected, calculated from GST-exclusive base).
-    * 1B  = G11 × 1/11 (GST credits, tax-inclusive component of purchase).
-    * G2/G10 are always 0 in v1 (no export or capital acquisition tracking).
-    """
-    tenant_id = resolve_tenant_id(request)
-
+async def _bas_aggregate(
+    session: AsyncSession,
+    company_id: UUID,
+    tenant_id: UUID,
+    from_date: date,
+    to_date: date,
+) -> tuple[Decimal, Decimal, Decimal]:
+    """Aggregate G1, G3, G11 totals for POSTED lines in [from_date, to_date]."""
     stmt = (
         select(
             Account.account_type,
@@ -673,25 +653,88 @@ async def bas_summary(
     for acc_type, reporting_type, total_debit, total_credit in rows:
         total_debit = Decimal(total_debit or "0")
         total_credit = Decimal(total_credit or "0")
-        rt = reporting_type or ""  # None when no tax code attached — skip
+        rt = reporting_type or ""
 
         if acc_type in _INCOME_TYPES:
-            net = total_credit - total_debit  # income is credit-normal
+            net = total_credit - total_debit
             if rt == _TAXABLE_REPORTING_TYPE:
                 g1 += net
             elif rt == _GST_FREE_REPORTING_TYPE:
                 g3 += net
         elif acc_type in _EXPENSE_TYPES:
-            net = total_debit - total_credit  # expenses are debit-normal
+            net = total_debit - total_credit
             if rt == _TAXABLE_REPORTING_TYPE:
                 g11 += net
 
+    return g1, g3, g11
+
+
+@router.get("/bas_summary", response_model=BASSummary)
+async def bas_summary(
+    request: Request,
+    from_date: date = Query(...),
+    to_date: date = Query(...),
+    registration_effective_date: date | None = Query(None),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> BASSummary:
+    """Australian BAS summary for a date range.
+
+    Queries POSTED JournalLine rows for the period joined to Account
+    and (outer-joined) to TaxCode via ``tax_code_id`` on the line.
+    Lines without a tax code are treated as out-of-scope and contribute
+    nothing to BAS buckets.
+
+    BAS logic:
+    * G1  — lines on INCOME/OTHER_INCOME accounts with reporting_type
+             "taxable": net = credit - debit.
+    * G3  — lines on INCOME/OTHER_INCOME accounts with reporting_type
+             "gst_free": net = credit - debit.
+    * G11 — lines on EXPENSE/COST_OF_SALES/OTHER_EXPENSE accounts with
+             reporting_type "taxable": net = debit - credit.
+    * 1A  = G1 × 10%  (GST collected, calculated from GST-exclusive base).
+    * 1B  = G11 × 1/11 (GST credits, tax-inclusive component of purchase).
+    * G2/G10 are always 0 in v1 (no export or capital acquisition tracking).
+
+    When registration_effective_date falls within the period, G1 is split:
+    pre-registration sales are disclosed but excluded from 1A; only
+    post-registration sales drive 1A and 1B (ATO compliance for mid-quarter
+    GST registration, e.g. crossing the $75k threshold mid-BAS-period).
+    """
+    tenant_id = resolve_tenant_id(request)
+
+    # Determine whether a mid-period split applies.
+    _split = (
+        registration_effective_date is not None
+        and from_date < registration_effective_date <= to_date
+    )
+
+    g1_pre = Decimal("0")
+    g1_post = Decimal("0")
+
+    if _split:
+        assert registration_effective_date is not None  # narrowing
+        pre_end = registration_effective_date - timedelta(days=1)
+        g1_pre, g3_pre, _g11_pre = await _bas_aggregate(
+            session, company_id, tenant_id, from_date, pre_end
+        )
+        g1_post, g3_post, g11_post = await _bas_aggregate(
+            session, company_id, tenant_id, registration_effective_date, to_date
+        )
+        g1 = g1_pre + g1_post
+        g3 = g3_pre + g3_post
+        g11 = g11_post  # ITCs only claimable from registration date
+    else:
+        g1, g3, g11 = await _bas_aggregate(
+            session, company_id, tenant_id, from_date, to_date
+        )
+        g1_post = g1
+
     # 1A: GST collected on taxable sales (10% of GST-exclusive base).
-    label_1a = (g1 * _GST_RATE).quantize(Decimal("0.01"))
+    # Only post-registration sales attract GST when a split applies.
+    label_1a = (g1_post * _GST_RATE).quantize(Decimal("0.01"))
 
     # 1B: GST credits on taxable purchases (1/11 of GST-inclusive amount).
-    # G11 represents the gross (GST-inclusive) purchase amount on the
-    # expense line.  The embedded GST component is gross × 1/11.
     label_1b = (g11 * _GST_INCLUSIVE_FRACTION).quantize(Decimal("0.01"))
 
     net_gst = label_1a - label_1b
@@ -708,6 +751,9 @@ async def bas_summary(
         label_1b_gst_on_purchases=float(label_1b),
         net_gst=float(net_gst),
         remit_or_refund="REMIT" if net_gst > Decimal("0") else "REFUND",
+        registration_effective_date=registration_effective_date if _split else None,
+        g1_pre_registration=float(g1_pre),
+        g1_post_registration=float(g1_post),
     )
 
 

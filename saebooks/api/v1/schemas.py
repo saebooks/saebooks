@@ -1704,6 +1704,10 @@ class BASSummary(BaseModel):
       G11 — Other (non-capital) acquisitions (taxable expenses)
       1A  — GST collected on sales (G1 × 10%)
       1B  — GST credits on purchases (G11 × 1/11, i.e. tax-inclusive component)
+
+    When registration_effective_date is set (mid-quarter GST registration),
+    G1 is split into pre- and post-registration totals. Only g1_post_registration
+    feeds into 1A; g1_total_sales is the sum of both for ATO disclosure.
     """
 
     from_date: date
@@ -1717,6 +1721,10 @@ class BASSummary(BaseModel):
     label_1b_gst_on_purchases: float
     net_gst: float
     remit_or_refund: str  # "REMIT" | "REFUND"
+    # Mid-quarter GST registration split (None when not applicable)
+    registration_effective_date: date | None = None
+    g1_pre_registration: float = 0.0
+    g1_post_registration: float = 0.0
 
 
 # ---------------------------------------------------------------------------
