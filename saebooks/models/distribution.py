@@ -50,6 +50,12 @@ class TrustDistribution(CompanyScoped, Base):
         String(16), nullable=False, default=DistributionStatus.DRAFT
     )
     total_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    # Franking credits (PRTR-4): total imputation credits attached to the
+    # trust's dividend income for this distribution period.  The grossed-up
+    # distributable income = total_amount + total_franking_credits.
+    total_franking_credits: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=Decimal("0")
+    )
     notes: Mapped[str | None] = mapped_column(Text)
     # FK set once the JE is created — null until POSTED.
     journal_entry_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -65,6 +71,11 @@ class TrustDistribution(CompanyScoped, Base):
         cascade="all, delete-orphan",
         order_by="BeneficiaryEntitlement.sort_order",
     )
+
+    @property
+    def grossed_up_income(self) -> Decimal:
+        """Cash distributable income + imputation credits (s97 gross-up)."""
+        return self.total_amount + self.total_franking_credits
 
 
 class BeneficiaryEntitlement(Base):
@@ -83,6 +94,11 @@ class BeneficiaryEntitlement(Base):
     # percentage (0.00 – 100.00); must sum to 100 across a distribution.
     percentage: Mapped[Decimal] = mapped_column(Numeric(7, 4), nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    # Per-beneficiary franking credit share (PRTR-4).  Set by the service
+    # as percentage% of total_franking_credits.  Used in s97 statements.
+    franking_credit_amount: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=Decimal("0")
+    )
     # Payable account (e.g. "Beneficiary Payable – Alice") — nullable so
     # the form can be saved without forcing the user to pre-create accounts.
     account_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -98,3 +114,8 @@ class BeneficiaryEntitlement(Base):
     )
 
     distribution: Mapped[TrustDistribution] = relationship(back_populates="entitlements")
+
+    @property
+    def grossed_up_entitlement(self) -> Decimal:
+        """Beneficiary's grossed-up amount: cash + imputation credit."""
+        return self.amount + self.franking_credit_amount

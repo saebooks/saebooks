@@ -78,12 +78,18 @@ async def create(
     financial_year: int,
     distribution_date: date,
     total_amount: Decimal,
+    total_franking_credits: Decimal = Decimal("0"),
     notes: str | None,
     entitlements: list[dict],
 ) -> TrustDistribution:
     """Create a DRAFT distribution with its beneficiary entitlements.
 
-    Each entitlement dict: {beneficiary_name, percentage, amount, account_id?, notes?}
+    Each entitlement dict: {beneficiary_name, percentage, amount,
+                            account_id?, notes?, franking_credit_amount?}
+
+    If ``franking_credit_amount`` is absent from an entitlement dict,
+    it is computed as ``percentage / 100 * total_franking_credits``
+    so callers can omit it and let the service gross up automatically.
     """
     _validate_entitlements(entitlements)
 
@@ -92,6 +98,7 @@ async def create(
         financial_year=financial_year,
         distribution_date=distribution_date,
         total_amount=total_amount,
+        total_franking_credits=total_franking_credits,
         notes=notes or None,
         status=DistributionStatus.DRAFT,
     )
@@ -100,13 +107,22 @@ async def create(
 
     for i, e in enumerate(entitlements):
         acct_id = e.get("account_id")
+        pct = Decimal(str(e["percentage"]))
+        # Accept an explicit franking_credit_amount or compute from total.
+        if "franking_credit_amount" in e and e["franking_credit_amount"] not in (None, ""):
+            fc_amount = Decimal(str(e["franking_credit_amount"]))
+        else:
+            fc_amount = (pct / Decimal("100") * total_franking_credits).quantize(
+                Decimal("0.01")
+            )
         session.add(
             BeneficiaryEntitlement(
                 distribution_id=dist.id,
                 sort_order=i,
                 beneficiary_name=str(e["beneficiary_name"]).strip(),
-                percentage=Decimal(str(e["percentage"])),
+                percentage=pct,
                 amount=Decimal(str(e["amount"])),
+                franking_credit_amount=fc_amount,
                 account_id=uuid.UUID(str(acct_id)) if acct_id else None,
                 notes=str(e["notes"]).strip() if e.get("notes") else None,
             )

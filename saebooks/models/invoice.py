@@ -215,5 +215,12 @@ class InvoiceLine(Base):
         UUID(as_uuid=True),
         ForeignKey("items.id", ondelete="SET NULL"),
     )
+    # Franking credit annotation (PRTR-4). When a line represents dividend
+    # income, these fields carry the imputation credit and percentage so
+    # grossed-up income can be calculated without a separate GL account.
+    # franking_percentage is the % of the dividend that is franked (0-100);
+    # franking_credit_amount is the absolute dollar value of the tax offset.
+    franking_credit_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+    franking_percentage: Mapped[Decimal | None] = mapped_column(Numeric(7, 4))
 
     invoice: Mapped[Invoice] = relationship(back_populates="lines")

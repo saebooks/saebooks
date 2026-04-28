@@ -107,6 +107,12 @@ class JournalLine(Base):
     project_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL")
     )
+    # Imputation / franking-credit annotation (PRTR-4). Records the tax
+    # offset riding alongside a dividend income line so beneficiary
+    # statements can show grossed-up income and imputation credits.
+    # Null means no franking dimension — standard non-dividend lines never
+    # need to set this.
+    franking_credit_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
 
     entry: Mapped[JournalEntry] = relationship(back_populates="lines")
 
