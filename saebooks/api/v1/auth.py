@@ -63,6 +63,39 @@ def current_token() -> str:
     return os.environ.get(_ENV_VAR, _TOKEN)
 
 
+async def _stamp_user_from_sub(request: Request, claims: dict[str, object]) -> None:
+    """Resolve JWT ``sub`` to a User row and stamp request.state.
+
+    Best-effort: any failure (no sub, malformed sub, missing user, DB
+    hiccup, archived user) leaves ``request.state.user`` and
+    ``request.state.role`` as None. The downstream admin gates already
+    fall back to the X-Admin header in that case (used by the static
+    dev-bearer path in tests/scripts).
+    """
+    sub = claims.get("sub")
+    if not sub:
+        return
+    try:
+        user_id = uuid.UUID(str(sub))
+    except (ValueError, TypeError):
+        return
+
+    # Local imports to avoid circulars at module load time.
+    from saebooks.db import AsyncSessionLocal  # noqa: PLC0415
+    from saebooks.models.user import User  # noqa: PLC0415
+
+    try:
+        async with AsyncSessionLocal() as session:
+            user = await session.get(User, user_id)
+    except Exception as exc:  # defensive — DB hiccup shouldn't 500
+        logger.warning("require_bearer user lookup failed for sub=%s: %s", sub, exc)
+        return
+    if user is None or user.archived_at is not None:
+        return
+    request.state.user = user
+    request.state.role = user.role
+
+
 def _is_dev_env() -> bool:
     """True when the process is in a dev/test environment.
 
@@ -134,7 +167,14 @@ async def require_bearer(
 
     On success, when the bearer is a JWT, stamps the decoded claims
     onto ``request.state.jwt_claims`` so ``get_session`` /
-    ``resolve_tenant_id`` can read the tenant.
+    ``resolve_tenant_id`` can read the tenant. Additionally, when the
+    JWT carries a ``sub`` claim that resolves to a live User row,
+    stamps ``request.state.user`` and ``request.state.role`` so admin
+    gates (``users._require_admin``, ``hard_delete_admin_gate``) can
+    enforce role server-side instead of trusting a self-asserted
+    ``X-Admin: true`` header. This closes the JSON-API admin-elevation
+    hole — a bookkeeper JWT cannot bypass the gate by adding the
+    header.
     """
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(
@@ -152,6 +192,7 @@ async def require_bearer(
         # downstream handlers can see the tenant. Old code decoded and
         # discarded the claims — this was bug #3 in the leak diagnosis.
         request.state.jwt_claims = claims
+        await _stamp_user_from_sub(request, claims)
         return presented
     except JWTError:
         pass

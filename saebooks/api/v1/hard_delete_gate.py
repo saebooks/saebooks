@@ -1,15 +1,18 @@
 """Shared FastAPI dep for the JSON-API ``?hard=true`` admin gate.
 
 The JSON API at ``/api/`` is exempt from the ForwardAuth middleware (see
-``OPEN_PATH_PREFIXES`` in ``middleware.auth``), so ``request.state.user``
-is None for static-bearer requests. The existing JSON-API admin
-convention is the ``X-Admin: true`` request header (see
-``users.py:_require_admin``); we mirror that.
+``OPEN_PATH_PREFIXES`` in ``middleware.auth``). However, ``require_bearer``
+loads the User from the JWT ``sub`` claim and stamps
+``request.state.user`` + ``request.state.role`` — so JWT-authenticated
+requests get a server-side role check here.
 
-When ``request.state.user`` IS populated (forward-auth from saebooks-web,
-JWT with sub claim resolving to a User row), we additionally require the
-user's role to be ADMIN — so a bookkeeper-JWT request with ``X-Admin:
-true`` still 403s.
+A bookkeeper-JWT request with ``X-Admin: true`` is rejected: the
+state-user path runs first and the X-Admin header is ignored.
+
+The static dev-token path (no JWT, no ``sub``) leaves ``request.state.user``
+as None; in that case the gate falls back to the ``X-Admin: true`` header.
+This preserves the dev/test convenience for scripts that hit ``/api/*``
+with the static bearer + X-Admin (``SAEBOOKS_DEV_API_TOKEN``).
 
 The gate is a no-op when ``hard`` is absent or false — the route falls
 through to its normal soft-delete path.
