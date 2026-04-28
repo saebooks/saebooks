@@ -1191,6 +1191,37 @@ class BankStatementLineMatchRequest(BaseModel):
     )
 
 
+class SplitAllocation(BaseModel):
+    """One GL allocation row for a split-match journal entry."""
+
+    account_id: uuid.UUID
+    debit: Decimal = Field(default=Decimal("0"), ge=0)
+    credit: Decimal = Field(default=Decimal("0"), ge=0)
+    description: str | None = None
+    tax_code_id: uuid.UUID | None = None
+
+    @model_validator(mode="after")
+    def _not_both_zero(self) -> "SplitAllocation":
+        if self.debit == 0 and self.credit == 0:
+            raise ValueError("Each allocation must have a non-zero debit or credit")
+        return self
+
+
+class BankStatementLineSplitMatchRequest(BaseModel):
+    """POST body for /bank_statement_lines/{id}/split_match.
+
+    ``allocations`` are the non-bank-account sides of the journal entry.
+    The bank account side is auto-generated from the BSL amount.
+
+    Validation: sum(credit) - sum(debit) across allocations must equal the
+    BSL amount (positive for deposits, negative for withdrawals).
+    """
+
+    allocations: list[SplitAllocation] = Field(min_length=1)
+    entry_date: date | None = None
+    description: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # Projects — Phase 1 tier-4 (cycle 13)
 #

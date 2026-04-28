@@ -448,6 +448,158 @@ async def test_reconciliation_auto_match_matches_line(
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# POST /bank_statement_lines/{id}/split_match  (ETSY-4)
+# ---------------------------------------------------------------------------
+
+
+async def test_split_match_deposit_200(
+    api_client: AsyncClient, bank_account_id: str
+) -> None:
+    """Split-match: $970 deposit = $1000 AR credit + $30 fee debit."""
+    # Create a $970 BSL
+    r = await api_client.post(
+        "/api/v1/bank_statement_lines",
+        json={
+            "account_id": bank_account_id,
+            "txn_date": "2026-04-15",
+            "amount": "970.00",
+            "description": "Stripe payout",
+        },
+    )
+    assert r.status_code == 201, r.text
+    bsl_id = r.json()["id"]
+
+    expense_id = str(await _get_expense_account_id())
+    ar_id = str(await _get_ar_account_id())
+
+    r2 = await api_client.post(
+        f"/api/v1/bank_statement_lines/{bsl_id}/split_match",
+        json={
+            "description": "Stripe net payout split",
+            "entry_date": "2026-04-15",
+            "allocations": [
+                {"account_id": ar_id, "credit": "1000.00", "debit": "0"},
+                {"account_id": expense_id, "debit": "30.00", "credit": "0"},
+            ],
+        },
+    )
+    assert r2.status_code == 200, r2.text
+    body = r2.json()
+    assert body["id"] == bsl_id
+    assert body["status"] == "MATCHED"
+    assert body["matched_entry_id"] is not None
+    assert body["matched_to_type"] == "JOURNAL_ENTRY"
+
+
+async def test_split_match_withdrawal_200(
+    api_client: AsyncClient, bank_account_id: str
+) -> None:
+    """Split-match: -$110 withdrawal = $100 expense + $10 GST (split debit)."""
+    r = await api_client.post(
+        "/api/v1/bank_statement_lines",
+        json={
+            "account_id": bank_account_id,
+            "txn_date": "2026-04-16",
+            "amount": "-110.00",
+            "description": "Supplier payment",
+        },
+    )
+    assert r.status_code == 201, r.text
+    bsl_id = r.json()["id"]
+
+    expense_id = str(await _get_expense_account_id())
+    ar_id = str(await _get_ar_account_id())
+
+    r2 = await api_client.post(
+        f"/api/v1/bank_statement_lines/{bsl_id}/split_match",
+        json={
+            "description": "Supplier split",
+            "entry_date": "2026-04-16",
+            "allocations": [
+                {"account_id": expense_id, "debit": "100.00", "credit": "0"},
+                {"account_id": ar_id, "debit": "10.00", "credit": "0"},
+            ],
+        },
+    )
+    assert r2.status_code == 200, r2.text
+    body = r2.json()
+    assert body["status"] == "MATCHED"
+
+
+async def test_split_match_422_imbalanced(
+    api_client: AsyncClient, bank_account_id: str
+) -> None:
+    """Split-match rejects allocations that don't sum to the bank line amount."""
+    r = await api_client.post(
+        "/api/v1/bank_statement_lines",
+        json={
+            "account_id": bank_account_id,
+            "txn_date": "2026-04-17",
+            "amount": "500.00",
+            "description": "Balance test",
+        },
+    )
+    assert r.status_code == 201, r.text
+    bsl_id = r.json()["id"]
+
+    expense_id = str(await _get_expense_account_id())
+
+    r2 = await api_client.post(
+        f"/api/v1/bank_statement_lines/{bsl_id}/split_match",
+        json={
+            "allocations": [
+                {"account_id": expense_id, "credit": "400.00", "debit": "0"},
+            ],
+        },
+    )
+    assert r2.status_code == 422, r2.text
+
+
+async def test_split_match_404_unknown_bsl(api_client: AsyncClient) -> None:
+    """Split-match returns 404 for an unknown BSL ID."""
+    expense_id = str(await _get_expense_account_id())
+    r = await api_client.post(
+        f"/api/v1/bank_statement_lines/{uuid.uuid4()}/split_match",
+        json={
+            "allocations": [
+                {"account_id": expense_id, "credit": "100.00", "debit": "0"},
+            ],
+        },
+    )
+    assert r.status_code == 404, r.text
+
+
+async def _get_ar_account_id() -> uuid.UUID:
+    """Return an ASSET account that is not a bank account (for AR-like use)."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Account).where(
+                Account.archived_at.is_(None),
+                Account.account_type == AccountType.ASSET,
+                Account.reconcile.is_(False),
+            ).limit(1)
+        )
+        account = result.scalars().first()
+    if account is None:
+        # Fall back to any asset account
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(Account).where(
+                    Account.archived_at.is_(None),
+                    Account.account_type == AccountType.ASSET,
+                ).limit(1)
+            )
+            account = result.scalars().first()
+    assert account is not None, "Test DB has no ASSET account"
+    return account.id
+
+
+# ---------------------------------------------------------------------------
+# Tenant isolation
+# ---------------------------------------------------------------------------
+
+
 async def test_reconciliation_tenant_isolation_suggest(
     api_client: AsyncClient, bank_account_id: str
 ) -> None:

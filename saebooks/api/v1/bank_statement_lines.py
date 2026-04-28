@@ -22,21 +22,21 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
-from saebooks.api.v1.deps import get_session
+from saebooks.api.v1.deps import get_active_company_id, get_session
 from saebooks.api.v1.schemas import (
     BankStatementLineConflictBody,
     BankStatementLineCreate,
     BankStatementLineListOut,
     BankStatementLineMatchRequest,
     BankStatementLineOut,
+    BankStatementLineSplitMatchRequest,
     BankStatementLineUpdate,
 )
+from saebooks.services import reconciliation as recon_svc
 from saebooks.models.bank_statement import StatementLineStatus
-from saebooks.models.company import Company
 from saebooks.services import bank_statement_lines as svc
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 
@@ -50,22 +50,6 @@ router = APIRouter(
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
-
-
-async def _first_company_id(session: AsyncSession, tenant_id: UUID) -> UUID:
-    """Return the first active company for the request tenant."""
-    result = await session.execute(
-        select(Company)
-        .where(
-            Company.tenant_id == tenant_id,
-            Company.archived_at.is_(None),
-        )
-        .order_by(Company.created_at)
-    )
-    company = result.scalars().first()
-    if company is None:
-        raise HTTPException(404, "No active company for tenant")
-    return company.id
 
 
 def _parse_if_match(header: str | None) -> int | None:
@@ -116,10 +100,10 @@ async def list_bank_statement_lines(
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> BankStatementLineListOut:
     status_filter = _parse_status(status)
     tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
     items, total = await svc.list_active(
         session,
         company_id,
@@ -169,6 +153,7 @@ async def create_bank_statement_line(
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     key = _parse_idempotency_key(idempotency_key)
 
@@ -198,7 +183,6 @@ async def create_bank_statement_line(
                 status_code=claim.response_status or 201,
             )
 
-    company_id = await _first_company_id(session, tenant_id)
     try:
         line = await svc.api_create(
             session,
@@ -435,5 +419,71 @@ async def unmatch_bank_statement_line(
         if "not found" in msg.lower():
             raise HTTPException(404, msg) from exc
         raise HTTPException(422, msg) from exc
+
+    return JSONResponse(_dump(line), status_code=200)
+
+
+# ---------------------------------------------------------------------------
+# Split-match (ETSY-4 — net-of-fee Stripe payouts)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{line_id}/split_match", response_model=BankStatementLineOut)
+async def split_match_bank_statement_line(
+    request: Request,
+    line_id: UUID,
+    payload: BankStatementLineSplitMatchRequest,
+    bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> Any:
+    """Match a bank statement line via a new split journal entry.
+
+    Creates a balanced journal entry whose bank-account side equals the BSL
+    amount and whose allocation side is provided by the caller, then posts the
+    entry and marks the BSL as MATCHED.
+
+    The allocations list must satisfy:
+      sum(credit) - sum(debit) == bank_line.amount
+
+    Example — $970 Stripe net payout:
+      allocations = [
+        {"account_id": "<AR>",           "credit": 1000, "debit": 0},
+        {"account_id": "<StripeFees>",   "debit": 30,    "credit": 0}
+      ]
+    """
+    tenant_id = resolve_tenant_id(request)
+    if await svc.api_get(session, line_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Bank statement line not found")
+
+    alloc_dicts = [
+        {
+            "account_id": a.account_id,
+            "debit": a.debit,
+            "credit": a.credit,
+            "description": a.description,
+            "tax_code_id": a.tax_code_id,
+        }
+        for a in payload.allocations
+    ]
+
+    try:
+        line = await recon_svc.split_match_line(
+            session,
+            line_id,
+            company_id=company_id,
+            allocations=alloc_dicts,
+            entry_date=payload.entry_date,
+            description=payload.description,
+            posted_by=f"api:{bearer[:8]}…",
+            tenant_id=tenant_id,
+        )
+    except ValueError as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
+    except Exception as exc:
+        raise HTTPException(422, str(exc)) from exc
 
     return JSONResponse(_dump(line), status_code=200)
