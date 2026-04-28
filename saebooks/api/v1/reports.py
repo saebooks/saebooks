@@ -81,6 +81,8 @@ from saebooks.api.v1.schemas import (
     PLSegmentRow,
     PLSegmentSection,
     PnLReport,
+    RevenueByCustomerReport,
+    RevenueByCustomerRow,
     TrialBalanceLine,
     TrialBalanceReport,
     YTDTurnoverReport,
@@ -91,7 +93,7 @@ from saebooks.models.budget import Budget
 from saebooks.models.contact import Contact
 from saebooks.models.depreciation_model import DepreciationModel
 from saebooks.models.fixed_asset import FixedAsset
-from saebooks.models.invoice import Invoice, InvoiceStatus
+from saebooks.models.invoice import Invoice, InvoiceLine, InvoiceStatus
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import assets as assets_svc
@@ -182,18 +184,46 @@ def _build_report(
     as_of: date,
     bucket_days: list[int],
     bucket_labels: list[str],
+    retention_amounts: dict[UUID, Decimal] | None = None,
 ) -> AgedReport:
-    """Assemble an AgedReport from DB rows."""
+    """Assemble an AgedReport from DB rows.
+
+    When ``retention_amounts`` is supplied (AR only), each invoice's
+    outstanding balance is split: the retention portion (up to the invoice's
+    retention_amount) lands in ``retentions_receivable`` buckets, and only
+    the trade-debtor remainder appears in the per-contact rows and ``totals``.
+    Payments are assumed to reduce the trade-debtor portion first, so
+    retentions are the last to be cleared.
+    """
     zero = Decimal("0")
 
     # contact_id → {"contact_id": ..., "contact_name": ..., <bucket>: ...}
     groups: dict[UUID, dict[str, Any]] = {}
 
+    # retentions_receivable totals by bucket label (AR only)
+    ret_buckets: dict[str, Decimal] = {lbl: zero for lbl in bucket_labels}
+    ret_total = zero
+
     for doc, contact_name in rows:
         contact_id: UUID = doc.contact_id
-        balance: Decimal = doc.total - doc.amount_paid
+        outstanding: Decimal = doc.total - doc.amount_paid
         days_overdue: int = (as_of - doc.due_date).days
         label = _days_to_bucket(days_overdue, bucket_days)
+
+        # Split outstanding into trade-debtor and retention portions.
+        if retention_amounts is not None:
+            ret_amt = retention_amounts.get(doc.id, zero)
+            # Payments reduce Trade Debtors first; retention is last to clear.
+            ret_outstanding = min(ret_amt, outstanding)
+            trade_balance = outstanding - ret_outstanding
+        else:
+            ret_outstanding = zero
+            trade_balance = outstanding
+
+        # Accumulate retention bucket totals
+        if ret_outstanding > zero:
+            ret_buckets[label] = ret_buckets[label] + ret_outstanding
+            ret_total += ret_outstanding
 
         if contact_id not in groups:
             groups[contact_id] = {
@@ -203,15 +233,17 @@ def _build_report(
                 "total": zero,
             }
 
-        groups[contact_id][label] = groups[contact_id][label] + balance
-        groups[contact_id]["total"] = groups[contact_id]["total"] + balance
+        groups[contact_id][label] = groups[contact_id][label] + trade_balance
+        groups[contact_id]["total"] = groups[contact_id]["total"] + trade_balance
 
-    # Sort by total descending
+    # Filter out contacts whose trade-debtor balance is zero (full retention)
     sorted_groups = sorted(
-        groups.values(), key=lambda g: g["total"], reverse=True
+        [g for g in groups.values() if g["total"] > zero],
+        key=lambda g: g["total"],
+        reverse=True,
     )
 
-    # Grand totals
+    # Grand totals (trade debtors only)
     totals: dict[str, Any] = {lbl: zero for lbl in bucket_labels}
     totals["total"] = zero
     for g in sorted_groups:
@@ -226,11 +258,19 @@ def _build_report(
             for k, v in d.items()
         }
 
+    # Build retentions_receivable summary (only if AR report with retentions)
+    retentions_receivable: dict | None = None
+    if retention_amounts is not None and ret_total > zero:
+        rr: dict[str, Any] = dict(ret_buckets)
+        rr["total"] = ret_total
+        retentions_receivable = _floatify(rr)
+
     return AgedReport(
         as_of_date=as_of,
         buckets=bucket_labels,
         contacts=[_floatify(g) for g in sorted_groups],
         totals=_floatify(totals),
+        retentions_receivable=retentions_receivable,
     )
 
 
@@ -279,7 +319,29 @@ async def aged_receivables(
     )
     rows = (await session.execute(stmt)).all()
 
-    return _build_report(rows, as_of, bd, labels)
+    # Build per-invoice retention amounts from invoice_lines so the report
+    # can display Retentions Receivable as a separate line from Trade Debtors.
+    invoice_ids = [doc.id for doc, _ in rows]
+    retention_amounts: dict[UUID, Decimal] = {}
+    if invoice_ids:
+        ret_stmt = (
+            select(
+                InvoiceLine.invoice_id,
+                func.sum(
+                    InvoiceLine.line_subtotal * InvoiceLine.retention_pct / Decimal("100")
+                ).label("retention_amount"),
+            )
+            .where(
+                InvoiceLine.invoice_id.in_(invoice_ids),
+                InvoiceLine.retention_pct > Decimal("0"),
+            )
+            .group_by(InvoiceLine.invoice_id)
+        )
+        for inv_id, amt in (await session.execute(ret_stmt)).all():
+            if amt and amt > Decimal("0"):
+                retention_amounts[inv_id] = amt
+
+    return _build_report(rows, as_of, bd, labels, retention_amounts=retention_amounts)
 
 
 # ---------------------------------------------------------------------------
@@ -1550,6 +1612,58 @@ async def pl_by_segment(
 
 
 # ---------------------------------------------------------------------------
+# GET /api/v1/reports/revenue_by_customer — gap PSI-2
+# ---------------------------------------------------------------------------
+
+
+@router.get("/revenue_by_customer", response_model=RevenueByCustomerReport)
+async def revenue_by_customer(
+    request: Request,
+    from_date: date = Query(...),
+    to_date: date = Query(...),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> RevenueByCustomerReport:
+    """Revenue (ex-GST) broken down by customer for a date range.
+
+    Uses POSTED invoices (issue_date within the window).  Returns rows
+    sorted by revenue descending plus a concentration_warning flag that
+    fires when the top customer accounts for >= 80 % of total revenue
+    (the ATO 80/20 PSI rule threshold).
+    """
+    resolve_tenant_id(request)
+
+    result = await reports_svc.revenue_by_customer(
+        session,
+        company_id,
+        from_date=from_date,
+        to_date=to_date,
+    )
+
+    total = float(result.total_revenue)
+    rows = [
+        RevenueByCustomerRow(
+            contact_id=r.contact_id,
+            contact_name=r.contact_name,
+            revenue=float(r.revenue),
+            pct_of_total=float(r.revenue / result.total_revenue * 100)
+            if result.total_revenue > 0
+            else 0.0,
+        )
+        for r in result.rows
+    ]
+
+    return RevenueByCustomerReport(
+        from_date=from_date,
+        to_date=to_date,
+        rows=rows,
+        total_revenue=total,
+        top_customer_pct=result.top_customer_pct,
+        concentration_warning=result.concentration_warning,
+    )
+
+
+# ---------------------------------------------------------------------------
 # GET /api/v1/reports/ytd_turnover
 # ---------------------------------------------------------------------------
 
@@ -1598,10 +1712,12 @@ async def ytd_turnover(
     raw = result.scalar_one()
     ytd = max(Decimal(str(raw)), Decimal("0"))
 
+    _approaching_floor = _GST_THRESHOLD * Decimal("0.80")
     return YTDTurnoverReport(
         fy_start=fy_start,
         fy_end=fy_end,
         ytd_turnover=float(ytd),
         threshold=float(_GST_THRESHOLD),
         threshold_crossed=ytd >= _GST_THRESHOLD,
+        threshold_approaching=_approaching_floor <= ytd < _GST_THRESHOLD,
     )

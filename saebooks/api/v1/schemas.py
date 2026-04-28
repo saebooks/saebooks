@@ -36,6 +36,7 @@ class ContactBase(BaseModel):
     bank_bsb: str | None = None
     bank_account_number: str | None = None
     bank_account_title: str | None = None
+    currency_code: str | None = Field(default=None, max_length=3, description="ISO 4217 billing currency")
 
 
 class ContactCreate(ContactBase):
@@ -65,6 +66,7 @@ class ContactUpdate(BaseModel):
     notes: str | None = None
     default_account_id: uuid.UUID | None = None
     default_tax_code: str | None = None
+    currency_code: str | None = Field(default=None, max_length=3)
 
 
 class ContactOut(ContactBase):
@@ -186,6 +188,7 @@ class CompanyOut(BaseModel):
     audit_mode: str
     gst_registered: bool = False
     gst_effective_date: date | None = None
+    psi_status: str = "unsure"
     version: int
     created_at: datetime
     archived_at: datetime | None = None
@@ -211,12 +214,32 @@ class CompanyUpdate(BaseModel):
     audit_mode: str | None = None
     gst_registered: bool | None = None
     gst_effective_date: date | None = None
+    psi_status: str | None = None
+
+    @field_validator("psi_status")
+    @classmethod
+    def psi_status_valid(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        valid = {"yes", "no", "unsure"}
+        if v not in valid:
+            raise ValueError(f"psi_status must be one of: {sorted(valid)}")
+        return v
 
     @field_validator("gst_effective_date")
     @classmethod
     def effective_date_not_future(cls, v: date | None) -> date | None:
-        if v is not None and v > date.today():
+        if v is None:
+            return v
+        today = date.today()
+        if v > today:
             raise ValueError("gst_effective_date cannot be in the future")
+        # ATO allows backdating up to 4 years
+        earliest = today.replace(year=today.year - 4)
+        if v < earliest:
+            raise ValueError(
+                "gst_effective_date cannot be more than 4 years in the past (ATO limit)"
+            )
         return v
 
 
@@ -742,6 +765,7 @@ class BillLineOut(BaseModel):
     line_total: Decimal
     project_id: uuid.UUID | None = None
     item_id: uuid.UUID | None = None
+    tracking_vehicle_id: str | None = None
 
 
 class BillLineCreate(BaseModel):
@@ -755,6 +779,7 @@ class BillLineCreate(BaseModel):
     discount_pct: Decimal = Decimal("0")
     project_id: uuid.UUID | None = None
     item_id: uuid.UUID | None = None
+    tracking_vehicle_id: str | None = Field(default=None, max_length=64)
 
 
 class BillBase(BaseModel):
@@ -1724,14 +1749,19 @@ class AgedReport(BaseModel):
     ``buckets`` is the ordered list of bucket label strings.
     ``contacts`` is one row per contact (each row has keys matching
     ``buckets`` plus ``contact_id``, ``contact_name``, ``total``).
-    ``totals`` is the grand-total row with the same bucket keys plus
-    ``total``.
+    ``totals`` is the grand-total row (Trade Debtors only — excludes
+    retentions) with the same bucket keys plus ``total``.
+    ``retentions_receivable`` is present on AR reports only; it carries
+    the cumulative Retentions Receivable balance split by aging bucket,
+    matching the same bucket keys as ``totals``.  None when there are no
+    outstanding retentions (or for AP reports where retentions don't apply).
     """
 
     as_of_date: date
     buckets: list[str]
     contacts: list[dict]
     totals: dict
+    retentions_receivable: dict | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -2061,6 +2091,31 @@ class PLBySegmentReport(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Revenue by Customer — gap PSI-2
+# ---------------------------------------------------------------------------
+
+
+class RevenueByCustomerRow(BaseModel):
+    """One customer's invoiced revenue for the period."""
+
+    contact_id: uuid.UUID
+    contact_name: str
+    revenue: float
+    pct_of_total: float
+
+
+class RevenueByCustomerReport(BaseModel):
+    """Revenue breakdown by customer with PSI concentration metrics."""
+
+    from_date: date
+    to_date: date
+    rows: list[RevenueByCustomerRow]
+    total_revenue: float
+    top_customer_pct: float | None
+    concentration_warning: bool
+
+
+# ---------------------------------------------------------------------------
 # Journal Templates — cycle 40
 # ---------------------------------------------------------------------------
 
@@ -2295,7 +2350,8 @@ class YTDTurnoverReport(BaseModel):
     OTHER_INCOME journal credits (net of debits) for posted JEs in that
     window.  threshold is always 75000.00 (ATO GST registration limit
     for for-profit entities).  threshold_crossed is true when
-    ytd_turnover >= threshold.
+    ytd_turnover >= threshold.  threshold_approaching is true when
+    ytd_turnover >= 80% of threshold but < threshold (amber warning zone).
     """
 
     fy_start: date
@@ -2303,6 +2359,7 @@ class YTDTurnoverReport(BaseModel):
     ytd_turnover: float
     threshold: float
     threshold_crossed: bool
+    threshold_approaching: bool
 
 
 # ---------------------------------------------------------------------------

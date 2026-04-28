@@ -20,7 +20,7 @@ from saebooks.models.bill import Bill, BillStatus
 from saebooks.models.budget import Budget
 from saebooks.models.contact import Contact
 from saebooks.models.department import CostCentre, Department
-from saebooks.models.invoice import Invoice, InvoiceStatus
+from saebooks.models.invoice import Invoice, InvoiceLine, InvoiceStatus
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
 from saebooks.models.project import Project
 from saebooks.models.recurring_invoice import (
@@ -378,17 +378,29 @@ class AgedContactGroup:
 
 @dataclass
 class AgedReport:
-    """The full aged report — group per contact plus grand totals."""
+    """The full aged report — group per contact plus grand totals.
+
+    ``grand_totals`` reflects Trade Debtors only (excluding retentions).
+    ``retentions_grand_totals`` carries the Retentions Receivable balance
+    split by bucket; all zeros when the report has no retention lines.
+    """
 
     as_at: date
     groups: list[AgedContactGroup] = field(default_factory=list)
     grand_totals: dict[str, Decimal] = field(
         default_factory=lambda: {k: Decimal("0") for k in BUCKET_KEYS}
     )
+    retentions_grand_totals: dict[str, Decimal] = field(
+        default_factory=lambda: {k: Decimal("0") for k in BUCKET_KEYS}
+    )
 
     @property
     def grand_total(self) -> Decimal:
         return sum(self.grand_totals.values(), Decimal("0"))
+
+    @property
+    def retentions_grand_total(self) -> Decimal:
+        return sum(self.retentions_grand_totals.values(), Decimal("0"))
 
 
 async def aged_ar(
@@ -419,9 +431,39 @@ async def aged_ar(
     )
     rows = (await session.execute(stmt)).all()
 
+    # Fetch per-invoice retention amounts so Trade Debtors and
+    # Retentions Receivable can be reported as separate lines.
+    invoice_ids = [inv.id for inv, _ in rows]
+    retention_by_invoice: dict[uuid.UUID, Decimal] = {}
+    if invoice_ids:
+        ret_stmt = (
+            select(
+                InvoiceLine.invoice_id,
+                func.sum(
+                    InvoiceLine.line_subtotal * InvoiceLine.retention_pct / Decimal("100")
+                ).label("retention_amount"),
+            )
+            .where(
+                InvoiceLine.invoice_id.in_(invoice_ids),
+                InvoiceLine.retention_pct > Decimal("0"),
+            )
+            .group_by(InvoiceLine.invoice_id)
+        )
+        for inv_id, amt in (await session.execute(ret_stmt)).all():
+            if amt and amt > Decimal("0"):
+                retention_by_invoice[inv_id] = amt
+
     groups: dict[uuid.UUID, AgedContactGroup] = {}
+    report = AgedReport(as_at=cutoff)
+
     for inv, contact_name in rows:
         days_overdue = (cutoff - inv.due_date).days
+        outstanding = inv.total - inv.amount_paid
+        ret_amt = retention_by_invoice.get(inv.id, Decimal("0"))
+        # Payments reduce Trade Debtors first; retentions are last to clear.
+        ret_outstanding = min(ret_amt, outstanding)
+        trade_outstanding = outstanding - ret_outstanding
+
         row = AgedInvoiceRow(
             invoice_id=inv.id,
             number=inv.number or "(draft)",
@@ -439,9 +481,11 @@ async def aged_ar(
             )
             groups[inv.contact_id] = group
         group.invoices.append(row)
-        group.buckets[row.bucket] += row.balance_due
+        # Buckets show trade-debtor portion only; retentions go to grand totals.
+        group.buckets[row.bucket] += trade_outstanding
+        if ret_outstanding > Decimal("0"):
+            report.retentions_grand_totals[row.bucket] += ret_outstanding
 
-    report = AgedReport(as_at=cutoff)
     # Sort groups by descending total so the biggest debtors are on top.
     report.groups = sorted(
         groups.values(), key=lambda g: g.total, reverse=True
@@ -1172,4 +1216,87 @@ async def cashflow_forecast(
         opening_balance=opening,
         items=items,
         weeks=weeks,
+    )
+
+
+# ---------------------------------------------------------------------- #
+# Revenue by customer                                                     #
+# ---------------------------------------------------------------------- #
+
+
+@dataclass
+class CustomerRevenueRow:
+    """One customer's total invoiced revenue (ex-GST) for a date range."""
+
+    contact_id: uuid.UUID
+    contact_name: str
+    revenue: Decimal  # sum of invoice subtotals (net of GST)
+
+
+@dataclass
+class RevenueByCustomerResult:
+    """Revenue breakdown by customer, with concentration metrics."""
+
+    from_date: date
+    to_date: date
+    rows: list[CustomerRevenueRow]      # sorted by revenue desc
+    total_revenue: Decimal
+    top_customer_pct: float | None       # None when total_revenue == 0
+    concentration_warning: bool          # True when top customer >= 80 %
+
+
+async def revenue_by_customer(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    *,
+    from_date: date,
+    to_date: date,
+) -> RevenueByCustomerResult:
+    """Sum invoiced revenue (subtotal, ex-GST) per customer for a date range.
+
+    Uses POSTED invoices issued within [from_date, to_date].  Voided and
+    archived invoices are excluded.  Concentration warning fires when the
+    top customer accounts for >= 80 % of total revenue — the ATO's 80/20
+    PSI rule threshold.
+    """
+    from saebooks.models.invoice import Invoice, InvoiceStatus
+
+    stmt = (
+        select(
+            Invoice.contact_id,
+            Contact.name,
+            func.sum(Invoice.subtotal).label("revenue"),
+        )
+        .join(Contact, Invoice.contact_id == Contact.id)
+        .where(
+            Invoice.company_id == company_id,
+            Invoice.status == InvoiceStatus.POSTED,
+            Invoice.archived_at.is_(None),
+            Invoice.issue_date >= from_date,
+            Invoice.issue_date <= to_date,
+        )
+        .group_by(Invoice.contact_id, Contact.name)
+        .order_by(func.sum(Invoice.subtotal).desc())
+    )
+
+    result = await session.execute(stmt)
+    rows: list[CustomerRevenueRow] = [
+        CustomerRevenueRow(
+            contact_id=row.contact_id,
+            contact_name=row.name,
+            revenue=Decimal(str(row.revenue or "0")),
+        )
+        for row in result.all()
+    ]
+
+    total_revenue = sum((r.revenue for r in rows), Decimal("0"))
+    top_pct = float(rows[0].revenue / total_revenue * 100) if total_revenue > 0 and rows else None
+
+    return RevenueByCustomerResult(
+        from_date=from_date,
+        to_date=to_date,
+        rows=rows,
+        total_revenue=total_revenue,
+        top_customer_pct=top_pct,
+        concentration_warning=top_pct is not None and top_pct >= 80.0,
     )

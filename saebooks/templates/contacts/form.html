@@ -64,6 +64,11 @@
   </label>
   <label class="wide">Notes <textarea name="notes" rows="3" style="font:14px/1.4 inherit;width:100%;padding:0.3rem;border:1px solid var(--rule)">{{ contact.notes if contact and contact.notes else '' }}</textarea></label>
 
+  <label style="flex-direction:row;align-items:center;gap:0.5rem">
+    <input type="checkbox" name="is_tpar_supplier" value="on" {{ 'checked' if contact and contact.is_tpar_supplier }}>
+    TPAR sub-contractor <span class="dim">(include in Taxable Payments Annual Report)</span>
+  </label>
+
   {# Beneficiary-specific fields — shown/hidden by JS based on type selection #}
   <div id="beneficiary-fields" style="display:none;border-top:1px solid var(--rule);margin-top:1rem;padding-top:1rem">
     <p class="dim" style="margin:0 0 0.75rem">Beneficiary fields (section 97 statement data)</p>

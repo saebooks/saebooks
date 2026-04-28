@@ -81,6 +81,17 @@ _SUB_HEADERS: list[tuple[str, str, AccountType]] = [
     ("2-2000", "Non-Current Liabilities", AccountType.LIABILITY),
 ]
 
+# SAE-specific CoA additions not in the upstream Odoo CSV.
+# Codes are stored pre-hyphenated (no _hyphenate_code conversion needed).
+# (code, name, account_type)
+_EXTRA_ACCOUNTS: list[tuple[str, str, AccountType]] = [
+    # Splits generic 6-2420 Superannuation into two variants so tax attribution
+    # is possible: employer SG (BAS W2) vs contractor SMSF contributions
+    # (individual/SMSF tax return line). Both are expense-type accounts.
+    ("6-2420-SG", "Superannuation - Employer SG", AccountType.EXPENSE),
+    ("6-2420-SMSF", "Superannuation - Contractor Self-Managed (SMSF)", AccountType.EXPENSE),
+]
+
 
 async def _load_accounts(session: AsyncSession, company: Company) -> tuple[int, int]:
     csv_path = SEED_DIR / "account.account-au.csv"
@@ -140,6 +151,22 @@ async def _load_accounts(session: AsyncSession, company: Company) -> tuple[int, 
                 )
             )
             inserted += 1
+
+    # SAE-specific additions (pre-hyphenated codes, not in the Odoo CSV)
+    for code, name, acct_type in _EXTRA_ACCOUNTS:
+        if code in existing_codes:
+            skipped += 1
+            continue
+        session.add(
+            Account(
+                company_id=company.id,
+                code=code,
+                name=name,
+                account_type=acct_type,
+            )
+        )
+        existing_codes.add(code)
+        inserted += 1
 
     await session.commit()
     return inserted, skipped

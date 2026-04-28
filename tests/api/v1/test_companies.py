@@ -342,3 +342,62 @@ async def test_companies_change_log_on_update(api_client: AsyncClient) -> None:
         json={"trading_name": "SAE Engineering"},
         headers={"If-Match": str(new_version)},
     )
+
+
+# ---------------------------------------------------------------------------
+# HOBB-5 — GST backdating: 4-year limit + backdate-preview endpoint
+# ---------------------------------------------------------------------------
+
+
+async def test_gst_effective_date_too_far_past_rejected(api_client: AsyncClient) -> None:
+    """gst_effective_date more than 4 years in the past returns 422."""
+    company_id, version = await _get_seed_company()
+    from datetime import date
+
+    five_years_ago = (date.today().replace(year=date.today().year - 5)).isoformat()
+    r = await api_client.patch(
+        f"/api/v1/companies/{company_id}",
+        json={"gst_effective_date": five_years_ago},
+        headers={"If-Match": str(version)},
+    )
+    assert r.status_code == 422
+
+
+async def test_gst_backdate_preview_200(api_client: AsyncClient) -> None:
+    """GET /gst-backdate-preview returns 200 with invoice_count."""
+    company_id, _ = await _get_seed_company()
+    from datetime import date
+
+    one_year_ago = date.today().replace(year=date.today().year - 1).isoformat()
+    r = await api_client.get(
+        f"/api/v1/companies/{company_id}/gst-backdate-preview",
+        params={"effective_date": one_year_ago},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "invoice_count" in body
+    assert isinstance(body["invoice_count"], int)
+    assert body["effective_date"] == one_year_ago
+
+
+async def test_gst_backdate_preview_future_date_rejected(api_client: AsyncClient) -> None:
+    """GET /gst-backdate-preview with a future date returns 422."""
+    company_id, _ = await _get_seed_company()
+    r = await api_client.get(
+        f"/api/v1/companies/{company_id}/gst-backdate-preview",
+        params={"effective_date": "2099-01-01"},
+    )
+    assert r.status_code == 422
+
+
+async def test_gst_backdate_preview_too_far_past_rejected(api_client: AsyncClient) -> None:
+    """GET /gst-backdate-preview with date > 4 years ago returns 422."""
+    company_id, _ = await _get_seed_company()
+    from datetime import date
+
+    five_years_ago = date.today().replace(year=date.today().year - 5).isoformat()
+    r = await api_client.get(
+        f"/api/v1/companies/{company_id}/gst-backdate-preview",
+        params={"effective_date": five_years_ago},
+    )
+    assert r.status_code == 422

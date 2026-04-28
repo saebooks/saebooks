@@ -65,6 +65,7 @@ class _LineInput:
     project_id: uuid.UUID | None
     item_id: uuid.UUID | None
     retention_pct: Decimal = Decimal("0")
+    tracking_vehicle_id: str | None = None
 
 
 def _compute_line_totals(
@@ -188,6 +189,9 @@ async def _replace_lines(
                 f"retention_pct must be between 0 and 100 (got {retention_pct})"
             )
 
+        raw_vid = raw.get("tracking_vehicle_id")
+        tracking_vehicle_id = str(raw_vid).strip() if raw_vid else None
+
         line_input = _LineInput(
             description=str(raw["description"]),
             account_id=account_id,
@@ -198,6 +202,7 @@ async def _replace_lines(
             project_id=project_id if isinstance(project_id, uuid.UUID) else None,
             item_id=item_id if isinstance(item_id, uuid.UUID) else None,
             retention_pct=retention_pct,
+            tracking_vehicle_id=tracking_vehicle_id or None,
         )
         tax_rate = await _resolve_tax_rate(session, line_input.tax_code_id)
         subtotal, tax, total = _compute_line_totals(line_input, tax_rate)
@@ -217,6 +222,7 @@ async def _replace_lines(
                 project_id=line_input.project_id,
                 item_id=line_input.item_id,
                 retention_pct=line_input.retention_pct,
+                tracking_vehicle_id=line_input.tracking_vehicle_id,
             )
         )
     await session.flush()

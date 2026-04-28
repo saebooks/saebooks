@@ -207,5 +207,9 @@ class BillLine(Base):
     retention_pct: Mapped[Decimal] = mapped_column(
         Numeric(5, 2), nullable=False, default=Decimal("0")
     )
+    # Motor-dealer floorplan tracking (MOTR-4). Optional VIN or internal
+    # stock number that tags this cost line to a specific vehicle so that
+    # per-unit gross margin can be computed net of floorplan interest.
+    tracking_vehicle_id: Mapped[str | None] = mapped_column(String(64))
 
     bill: Mapped[Bill] = relationship(back_populates="lines")

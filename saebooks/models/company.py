@@ -45,6 +45,10 @@ class Company(Base):
     gst_registered: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     gst_effective_date: Mapped[date | None] = mapped_column(Date)
 
+    # PSI (Personal Services Income) classification — ATO requirement for contractors.
+    # "unsure" triggers a dashboard reminder to classify.
+    psi_status: Mapped[str] = mapped_column(String(16), nullable=False, default="unsure")
+
     # Optimistic-locking version — bumped on every write through the API.
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(

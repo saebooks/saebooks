@@ -19,8 +19,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision: str = "0072_audit_log"
-down_revision: str | None = "0071_trade_in"
+revision: str = "0076_audit_log"
+down_revision: str | None = "0075_tracking_vehicle_id"
 branch_labels = None
 depends_on = None
 

@@ -1,12 +1,13 @@
 """Tier-5 report tests — /api/v1/reports/aged_receivables + /aged_payables.
 
-9 tests total:
+10 tests total:
 * test_aged_receivables_empty
 * test_aged_receivables_current
 * test_aged_receivables_30_day_bucket
 * test_aged_receivables_90_plus
 * test_aged_receivables_as_of_date
 * test_aged_receivables_tenant_isolation
+* test_aged_receivables_retentions_row  (CIVL-7)
 * test_aged_payables_empty
 * test_aged_payables_overdue
 * test_aged_payables_tenant_isolation
@@ -25,6 +26,7 @@ from saebooks.api.v1.auth import current_token, DEFAULT_TENANT_ID
 from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.account import Account, AccountType
+from saebooks.models.company import Company
 from saebooks.models.contact import Contact
 
 
@@ -395,6 +397,102 @@ async def test_aged_receivables_tenant_isolation(
         assert invoice_deps["contact_id"] not in contact_ids, (
             "Tenant B should not see tenant A's AR"
         )
+
+
+async def test_aged_receivables_retentions_row(
+    api_client: AsyncClient, invoice_deps: dict[str, str]
+) -> None:
+    """Retentions Receivable appears as a separate row; Trade Debtors is net.
+
+    An invoice with 5% retention on a $1000 line (subtotal $1000, no GST
+    for simplicity) should produce:
+      - retentions_receivable total = $50 (5% of $1000)
+      - contact trade debtor balance = $950
+    This verifies CIVL-7: retentions are no longer buried in Trade Debtors.
+    """
+    today = date.today()
+    tomorrow = today + timedelta(days=1)
+
+    # Ensure the Retentions Receivable account (1-1220) exists for the company.
+    async with AsyncSessionLocal() as session:
+        company = (
+            await session.execute(
+                select(Company).where(Company.archived_at.is_(None)).limit(1)
+            )
+        ).scalars().first()
+        assert company is not None
+        existing = (
+            await session.execute(
+                select(Account).where(
+                    Account.company_id == company.id,
+                    Account.code == "1-1220",
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            session.add(Account(
+                company_id=company.id,
+                code="1-1220",
+                name="Retentions Receivable",
+                account_type=AccountType.ASSET,
+                reconcile=True,
+                is_header=False,
+            ))
+            await session.commit()
+
+    # Create + post an invoice with 5% retention on a $1,000 line.
+    payload = {
+        "contact_id": invoice_deps["contact_id"],
+        "issue_date": today.isoformat(),
+        "due_date": tomorrow.isoformat(),
+        "lines": [
+            {
+                "description": "Civil progress claim — retention test",
+                "account_id": invoice_deps["income_account_id"],
+                "quantity": "1",
+                "unit_price": "1000.00",
+                "discount_pct": "0",
+                "retention_pct": "5",
+            }
+        ],
+    }
+    r = await api_client.post("/api/v1/invoices", json=payload)
+    assert r.status_code == 201, r.text
+    inv_id = r.json()["id"]
+    version = r.json()["version"]
+
+    r2 = await api_client.post(
+        f"/api/v1/invoices/{inv_id}/post",
+        headers={"If-Match": str(version)},
+    )
+    assert r2.status_code == 200, r2.text
+
+    # Query AR aging report.
+    r3 = await api_client.get(
+        "/api/v1/reports/aged_receivables",
+        params={"as_of_date": today.isoformat()},
+    )
+    assert r3.status_code == 200, r3.text
+    body = r3.json()
+
+    # retentions_receivable should be present and carry the 5% ($50).
+    assert body["retentions_receivable"] is not None, (
+        "Expected retentions_receivable row in AR aging (CIVL-7)"
+    )
+    assert body["retentions_receivable"]["total"] == pytest.approx(50.0, abs=0.01), (
+        "Retentions Receivable total should be $50 (5% of $1000)"
+    )
+
+    # The contact's trade debtor balance should be $950 (not $1000).
+    contact_rows = [
+        c for c in body["contacts"]
+        if c["contact_id"] == invoice_deps["contact_id"]
+    ]
+    assert len(contact_rows) >= 1, "Contact row not found in AR report"
+    row = contact_rows[0]
+    assert row["current"] == pytest.approx(950.0, abs=0.01), (
+        "Trade Debtors should exclude the $50 retention (show $950)"
+    )
 
 
 # ---------------------------------------------------------------------------

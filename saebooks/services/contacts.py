@@ -66,6 +66,7 @@ _CONTACT_COLUMNS: tuple[str, ...] = (
     "notes",
     "default_account_id",
     "default_tax_code",
+    "currency_code",
     "bank_bsb",
     "bank_account_number",
     "bank_account_title",
@@ -181,9 +182,11 @@ async def create(
     notes: str | None = None,
     default_account_id: uuid.UUID | None = None,
     default_tax_code: str | None = None,
+    currency_code: str | None = None,
     tfn: str | None = None,
     share_percentage: object = None,
     default_income_classification: str | None = None,
+    is_tpar_supplier: bool = False,
 ) -> Contact:
     """Create a new contact. Validate ABN format if provided (11 digits)."""
     if abn is not None:
@@ -206,9 +209,11 @@ async def create(
         notes=notes,
         default_account_id=default_account_id,
         default_tax_code=default_tax_code,
+        currency_code=currency_code,
         tfn=tfn,
         share_percentage=share_percentage,
         default_income_classification=default_income_classification,
+        is_tpar_supplier=is_tpar_supplier,
         version=1,
     )
     session.add(contact)
@@ -265,7 +270,9 @@ async def update(
         "name", "contact_type", "email", "phone", "abn",
         "address_line1", "address_line2", "city", "state", "postcode",
         "country", "notes", "default_account_id", "default_tax_code",
+        "currency_code",
         "tfn", "share_percentage", "default_income_classification",
+        "is_tpar_supplier",
     }
 
     before = audit_svc.capture(contact)

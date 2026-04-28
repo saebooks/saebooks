@@ -40,6 +40,7 @@ async def test_au_coa_loaded() -> None:
             "4-5000": AccountType.OTHER_INCOME,    # Late Fees Collected
             "5-2000": AccountType.COST_OF_SALES,   # Wholesale Cost of Sales
             "6-2000": AccountType.EXPENSE,         # Late Fees Paid
+            "6-2510": AccountType.EXPENSE,         # Cash Short and Over
         }
         for code, expected_type in expected.items():
             row = (
@@ -54,6 +55,30 @@ async def test_au_coa_loaded() -> None:
             assert row.account_type == expected_type, (
                 f"Account {code!r}: expected type {expected_type}, got {row.account_type}"
             )
+
+
+async def test_smsf_super_accounts_present() -> None:
+    """6-2420-SG and 6-2420-SMSF must both exist as EXPENSE accounts.
+
+    Contractor self-directed super (SMSF) must be distinguishable from
+    employer SG in the GL for correct tax attribution.
+    """
+    company_id = await _seed_company_id()
+    async with AsyncSessionLocal() as session:
+        for code in ("6-2420-SG", "6-2420-SMSF"):
+            row = (
+                await session.execute(
+                    select(Account).where(
+                        Account.company_id == company_id,
+                        Account.code == code,
+                    )
+                )
+            ).scalar_one_or_none()
+            assert row is not None, f"SMSF super account {code!r} missing from seed"
+            assert row.account_type == AccountType.EXPENSE, (
+                f"Account {code!r}: expected EXPENSE, got {row.account_type}"
+            )
+            assert row.is_header is False, f"Account {code!r} must be postable (is_header=False)"
 
 
 async def test_au_coa_reconcile_flag_preserved() -> None:

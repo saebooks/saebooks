@@ -45,6 +45,7 @@ _COMPANY_COLUMNS: tuple[str, ...] = (
     "audit_mode",
     "gst_registered",
     "gst_effective_date",
+    "psi_status",
     "version",
     "created_at",
     "archived_at",
@@ -192,6 +193,7 @@ async def update(
     audit_mode: str | None = None,
     gst_registered: bool | None = None,
     gst_effective_date: date | None = None,
+    psi_status: str | None = None,
     expected_version: int | None = None,
     actor: str = "web",
 ) -> Company:
@@ -228,6 +230,11 @@ async def update(
         company.gst_registered = gst_registered
     if gst_effective_date is not None:
         company.gst_effective_date = gst_effective_date
+    if psi_status is not None:
+        valid = {"yes", "no", "unsure"}
+        if psi_status not in valid:
+            raise ValueError(f"psi_status must be one of: {sorted(valid)}")
+        company.psi_status = psi_status
 
     company.version = company.version + 1
 

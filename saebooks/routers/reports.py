@@ -16,6 +16,7 @@ from saebooks.services import bas as bas_svc
 from saebooks.services import gst as gst_svc
 from saebooks.services import period_close as period_close_svc
 from saebooks.services import reports as svc
+from saebooks.services import tpar as tpar_svc
 from saebooks.services import trust_reports as trust_svc
 from saebooks.services.fx import rates as fx_rates_svc
 from saebooks.services.fx import reval as fx_reval_svc
@@ -600,6 +601,31 @@ async def trust_balances_report(
             "company_name": company.name,
             "report": report,
             "as_of": as_of or "",
+        },
+    )
+
+
+@router.get("/tpar", response_class=HTMLResponse)
+async def tpar_report(
+    request: Request,
+    from_date: str | None = Query(None, alias="from"),
+    to_date: str | None = Query(None, alias="to"),
+) -> HTMLResponse:
+    """Taxable Payments Annual Report — sub-contractor payments for ATO lodgement."""
+    company = await _first_company()
+    fd = _parse_date(from_date)
+    td = _parse_date(to_date)
+    async with AsyncSessionLocal() as session:
+        report = await tpar_svc.tpar_report(session, company.id, from_date=fd, to_date=td)
+    return templates.TemplateResponse(
+        request,
+        "reports/tpar.html",
+        {
+            "edition": settings.edition,
+            "company_name": company.name,
+            "report": report,
+            "from_date": from_date or "",
+            "to_date": to_date or "",
         },
     )
 
