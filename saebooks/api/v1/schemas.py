@@ -2261,3 +2261,100 @@ class YTDTurnoverReport(BaseModel):
     ytd_turnover: float
     threshold: float
     threshold_crossed: bool
+
+
+# ---------------------------------------------------------------------------
+# Allocation rules
+# ---------------------------------------------------------------------------
+
+
+class AllocationTarget(BaseModel):
+    """One target entry in an allocation rule."""
+
+    account_id: uuid.UUID
+    label: str = Field(default="", max_length=200)
+    percentage: Decimal = Field(gt=Decimal("0"), le=Decimal("100"))
+
+
+class AllocationRuleCreate(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+    source_account_id: uuid.UUID
+    targets: list[AllocationTarget] = Field(min_length=1)
+    is_active: bool = True
+
+    @model_validator(mode="after")
+    def targets_sum_100(self) -> "AllocationRuleCreate":
+        total = sum(t.percentage for t in self.targets)
+        if abs(total - Decimal("100")) > Decimal("0.01"):
+            raise ValueError(
+                f"Target percentages must sum to 100 (got {total})"
+            )
+        return self
+
+
+class AllocationRuleUpdate(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = None
+    source_account_id: uuid.UUID | None = None
+    targets: list[AllocationTarget] | None = None
+    is_active: bool | None = None
+
+    @model_validator(mode="after")
+    def targets_sum_100(self) -> "AllocationRuleUpdate":
+        if self.targets is not None:
+            total = sum(t.percentage for t in self.targets)
+            if abs(total - Decimal("100")) > Decimal("0.01"):
+                raise ValueError(
+                    f"Target percentages must sum to 100 (got {total})"
+                )
+        return self
+
+
+class AllocationRuleOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    tenant_id: uuid.UUID
+    name: str
+    description: str | None
+    source_account_id: uuid.UUID
+    targets: list[dict]
+    is_active: bool
+    version: int
+    created_at: datetime
+    updated_at: datetime
+    archived_at: datetime | None
+
+
+class AllocationRuleListOut(BaseModel):
+    items: list[AllocationRuleOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class AllocationRuleConflictBody(BaseModel):
+    current: AllocationRuleOut
+    message: str = "Version conflict — record was modified by another request"
+
+
+class AllocationApplyIn(BaseModel):
+    """Request body for POST /api/v1/allocation_rules/{id}/apply."""
+
+    entry_date: date
+    amount: Decimal = Field(gt=Decimal("0"))
+    description: str | None = None
+
+
+class AllocationApplyOut(BaseModel):
+    """Response from apply — the generated journal entry id."""
+
+    journal_entry_id: uuid.UUID
+    lines_count: int
+    total_amount: Decimal

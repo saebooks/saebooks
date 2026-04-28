@@ -18,6 +18,7 @@ B/46: ``/api/v1/documents/extract`` (AI document extraction).
 """
 from fastapi import APIRouter
 
+from saebooks.api.v1.allocations import router as allocations_router
 from saebooks.api.v1.account_ranges import router as account_ranges_router
 from saebooks.api.v1.ai_extraction import router as ai_extraction_router
 from saebooks.api.v1.accounts import router as accounts_router
@@ -88,5 +89,7 @@ router.include_router(snapshot_router)
 # B/46: AI document extraction — feature-gated to Business+ via
 # FLAG_AI_EXTRACTION. Mounted last to stay after the auth/login routers.
 router.include_router(ai_extraction_router)
+# FITC-6: allocation rules engine — Business+ feature-gated
+router.include_router(allocations_router)
 
 __all__ = ["router"]

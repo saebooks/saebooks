@@ -9,6 +9,7 @@ from saebooks.models.bank_feed import (
 )
 from saebooks.models.bank_rule import BankRule, MatchType
 from saebooks.models.bank_statement import BankStatementLine, StatementLineStatus
+from saebooks.models.allocation_rule import AllocationRule
 from saebooks.models.budget import Budget
 from saebooks.models.change_log import ChangeLog
 from saebooks.models.distribution import (
@@ -35,6 +36,7 @@ from saebooks.models.user import User, UserRole
 __all__ = [
     "Account",
     "AccountRange",
+    "AllocationRule",
     "AccountType",
     "AtoSbrConfig",
     "BankFeedAccount",

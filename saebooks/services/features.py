@@ -94,6 +94,11 @@ FLAG_SCHEDULED_BACKUPS = "scheduled_backups"
 # it. Business+ only.
 FLAG_AI_EXTRACTION = "ai_extraction"
 
+# --- B/49 (overhead allocation rules — multi-company overhead split) ----- #
+# Useful for any entity with multiple companies / cost centres sharing
+# overhead. Gated at Business+ since multi-company is the primary driver.
+FLAG_ALLOCATION_RULES = "allocation_rules"
+
 ALL_FLAGS: tuple[str, ...] = (
     FLAG_BANK_FEEDS,
     FLAG_ABR_LOOKUP,
@@ -117,6 +122,7 @@ ALL_FLAGS: tuple[str, ...] = (
     FLAG_AUDIT_SNAPSHOTS,
     FLAG_SCHEDULED_BACKUPS,
     FLAG_AI_EXTRACTION,
+    FLAG_ALLOCATION_RULES,
 )
 
 _ALL_FLAGS_SET: frozenset[str] = frozenset(ALL_FLAGS)
@@ -150,6 +156,7 @@ _BUSINESS_FLAGS: frozenset[str] = _OFFLINE_FLAGS | frozenset({
     FLAG_STRIPE_INTEGRATION,
     FLAG_PAPERLESS_INTEGRATION,
     FLAG_AI_EXTRACTION,
+    FLAG_ALLOCATION_RULES,
 })
 
 _PRO_FLAGS: frozenset[str] = _BUSINESS_FLAGS | frozenset({
