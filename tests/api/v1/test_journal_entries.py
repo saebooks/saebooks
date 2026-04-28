@@ -751,3 +751,57 @@ async def test_create_je_rejects_cross_tenant_account(
     assert r2.status_code == 201, (
         f"Same-tenant JE should succeed, got {r2.status_code}: {r2.text}"
     )
+
+
+# ---------------------------------------------------------------------------
+# CAFE-1: reference field must be rejected when > 32 chars
+# ---------------------------------------------------------------------------
+
+
+async def test_create_je_reference_too_long_returns_422(
+    api_client: AsyncClient,
+    account_ids: dict[str, str],
+) -> None:
+    """CAFE-1: POST with reference > 32 chars must return 422, not 500.
+
+    Gap CAFE-1 (validation_ux), carousel run 20260427T210813Z.
+    """
+    payload = _entry_payload(account_ids, reference="X" * 33)
+    r = await api_client.post("/api/v1/journal_entries", json=payload)
+    assert r.status_code == 422, (
+        f"Expected 422 for reference > 32 chars, got {r.status_code}: {r.text}"
+    )
+
+
+async def test_patch_je_reference_too_long_returns_422(
+    api_client: AsyncClient,
+    account_ids: dict[str, str],
+) -> None:
+    """CAFE-1: PATCH with reference > 32 chars must return 422, not 500."""
+    r = await api_client.post("/api/v1/journal_entries", json=_entry_payload(account_ids))
+    assert r.status_code == 201
+    entry_id = r.json()["id"]
+    version = r.json()["version"]
+
+    r2 = await api_client.patch(
+        f"/api/v1/journal_entries/{entry_id}",
+        json={"reference": "Y" * 33},
+        headers={"If-Match": str(version)},
+    )
+    assert r2.status_code == 422, (
+        f"Expected 422 for reference > 32 chars on PATCH, got {r2.status_code}: {r2.text}"
+    )
+
+
+async def test_create_je_reference_at_max_length_accepted(
+    api_client: AsyncClient,
+    account_ids: dict[str, str],
+) -> None:
+    """CAFE-1 positive control: reference exactly 32 chars must be accepted."""
+    unique_ref = uuid.uuid4().hex  # exactly 32 chars, unique per run
+    payload = _entry_payload(account_ids, reference=unique_ref)
+    r = await api_client.post("/api/v1/journal_entries", json=payload)
+    assert r.status_code == 201, (
+        f"Expected 201 for reference == 32 chars, got {r.status_code}: {r.text}"
+    )
+    assert r.json()["ref"] == unique_ref

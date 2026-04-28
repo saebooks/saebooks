@@ -478,7 +478,7 @@ class JournalEntryBase(BaseModel):
 
     entry_date: date
     narration: str | None = None
-    reference: str | None = None
+    reference: str | None = Field(default=None, max_length=32)
 
 
 class JournalEntryCreate(JournalEntryBase):
@@ -508,7 +508,7 @@ class JournalEntryUpdate(BaseModel):
 
     entry_date: date | None = None
     narration: str | None = None
-    reference: str | None = None
+    reference: str | None = Field(default=None, max_length=32)
     status: str | None = None
     lines: list[JournalLineCreate] | None = None
 
