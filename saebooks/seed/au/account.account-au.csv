@@ -60,6 +60,7 @@
 "au_21760","21760","Unearned Income from System","liability_current","","False","","","","Revenue or income, excluding grants, received in advance that span more than the current financial year."
 "au_21780","21780","Landlord / Owner Trust Liability","liability_current","","False","","","","Funds collected on behalf of landlords and held in trust by the real estate agency pending disbursement to property owners. Rent receipts should credit this account, not agency revenue."
 "au_21800","21800","Deductions","liability_current","","True","","","","Miscellaneous deductions from employee wages payable to third parties, such as medical insurance."
+"au_21850","21850","Retentions Payable","liability_current","","False","","","","Amounts withheld from sub-contractor invoices as retention under construction contracts, payable upon practical completion and end of defects liability period."
 "au_22100","22100","Mortgages Payable","liability_non_current","","False","","","","Long-term component of mortgages payable by the organization, not due within 12 months."
 "au_22200","22200","Notes Payable","liability_non_current","","False","","","","Long-term component of loans or notes payable to banks or others, not due within 12 months."
 "au_22300","22300","Other Long Term Liabilities","liability_non_current","","False","","","","All other non-current liabilities not specifically listed, not expected to be actioned within 12 months."

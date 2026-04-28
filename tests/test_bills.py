@@ -30,7 +30,7 @@ from saebooks.models.bill import Bill, BillStatus
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
 from saebooks.models.document_counter import DocumentCounter
-from saebooks.models.journal import EntryStatus, JournalEntry
+from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import bills as svc
 
@@ -414,3 +414,185 @@ async def test_cannot_edit_posted_bill() -> None:
     with pytest.raises(svc.BillError, match="Cannot edit"):
         async with AsyncSessionLocal() as session:
             await svc.update_draft(session, bill.id, notes="nope")
+
+
+# ---------------------------------------------------------------------------
+# CIVL-3: retention_pct on bill lines
+# ---------------------------------------------------------------------------
+
+
+async def _ensure_retentions_payable(company_id: uuid.UUID) -> uuid.UUID:
+    """Create Retentions Payable (2-1850) if the seed hasn't added it yet."""
+    async with AsyncSessionLocal() as session:
+        from saebooks.models.account import AccountType as _AT
+        existing = (
+            await session.execute(
+                select(Account).where(
+                    Account.company_id == company_id,
+                    Account.code == "2-1850",
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            return existing.id
+        acct = Account(
+            company_id=company_id,
+            code="2-1850",
+            name="Retentions Payable",
+            account_type=_AT.LIABILITY,
+            is_header=False,
+        )
+        session.add(acct)
+        await session.commit()
+        await session.refresh(acct)
+        return acct.id
+
+
+@pytest.mark.asyncio
+async def test_retention_pct_stored_on_bill_line() -> None:
+    """retention_pct is persisted on bill lines; totals reflect the full invoice."""
+    cid, contact, acct, gst, _fre = await _ctx()
+    async with AsyncSessionLocal() as session:
+        bill = await svc.create_draft(
+            session,
+            company_id=cid,
+            contact_id=contact,
+            issue_date=date(2026, 5, 1),
+            due_date=date(2026, 6, 1),
+            lines=[
+                {
+                    "description": "Sub-contractor works",
+                    "account_id": acct,
+                    "tax_code_id": gst,
+                    "quantity": Decimal("1"),
+                    "unit_price": Decimal("66000"),
+                    "discount_pct": Decimal("0"),
+                    "retention_pct": Decimal("5"),
+                },
+            ],
+        )
+    # Totals reflect the full invoice; retention is a payment deferral,
+    # not a price reduction or GST reduction.
+    assert bill.subtotal == Decimal("66000.00")
+    assert bill.tax_total == Decimal("6600.00")
+    assert bill.total == Decimal("72600.00")
+    assert bill.lines[0].retention_pct == Decimal("5.00")
+
+
+@pytest.mark.asyncio
+async def test_retention_pct_splits_ap_on_post() -> None:
+    """Posting a bill with retention splits Cr AP into Trade Creditors + Retentions Payable.
+
+    Scenario: $66k sub-contractor bill, 5% retention, 10% GST.
+    Expected GL (base currency AUD):
+      Dr Expense               66,000   (full ex-GST cost recognised)
+      Dr GST Paid               6,600   (auto-posted: full GST input credit)
+        Cr Trade Creditors     69,300   (net payable: 62.7k + 6.6k GST)
+        Cr Retentions Payable   3,300   (5% of 66k, held until PC)
+    """
+    cid, contact, acct, gst, _fre = await _ctx()
+    await _ensure_retentions_payable(cid)
+
+    async with AsyncSessionLocal() as session:
+        bill = await svc.create_draft(
+            session,
+            company_id=cid,
+            contact_id=contact,
+            issue_date=date(2026, 5, 2),
+            due_date=date(2026, 6, 2),
+            lines=[
+                {
+                    "description": "Sub-contractor works",
+                    "account_id": acct,
+                    "tax_code_id": gst,
+                    "quantity": Decimal("1"),
+                    "unit_price": Decimal("66000"),
+                    "discount_pct": Decimal("0"),
+                    "retention_pct": Decimal("5"),
+                },
+            ],
+        )
+    async with AsyncSessionLocal() as session:
+        posted = await svc.post_bill(session, bill.id, posted_by="test")
+
+    assert posted.status == BillStatus.POSTED
+    assert posted.journal_entry_id is not None
+
+    async with AsyncSessionLocal() as session:
+        je = await session.get(JournalEntry, posted.journal_entry_id)
+        assert je is not None
+        lines_result = await session.execute(
+            select(JournalLine).where(JournalLine.entry_id == je.id)
+        )
+        jlines = lines_result.scalars().all()
+
+    # Collect totals by account code.
+    acct_credits: dict[str, Decimal] = {}
+    total_debit = Decimal("0")
+    for jl in jlines:
+        async with AsyncSessionLocal() as s2:
+            a = await s2.get(Account, jl.account_id)
+        assert a is not None
+        if jl.credit > Decimal("0"):
+            acct_credits[a.code] = acct_credits.get(a.code, Decimal("0")) + jl.credit
+        if jl.debit > Decimal("0"):
+            total_debit += jl.debit
+
+    # Expense Dr 66,000 + GST Paid Dr 6,600 = 72,600 total debit
+    assert total_debit == Decimal("72600.00")
+    # Trade Creditors Cr: 72,600 - 3,300 = 69,300
+    assert acct_credits.get("2-1200") == Decimal("69300.00")
+    # Retentions Payable Cr: 5% of 66,000 = 3,300
+    assert acct_credits.get("2-1850") == Decimal("3300.00")
+
+
+@pytest.mark.asyncio
+async def test_no_retention_uses_standard_ap_path() -> None:
+    """Positive control: zero retention_pct uses single Cr Trade Creditors (no regression)."""
+    cid, contact, acct, gst, _fre = await _ctx()
+    async with AsyncSessionLocal() as session:
+        bill = await svc.create_draft(
+            session,
+            company_id=cid,
+            contact_id=contact,
+            issue_date=date(2026, 5, 3),
+            due_date=date(2026, 6, 3),
+            lines=[
+                {
+                    "description": "Standard bill no retention",
+                    "account_id": acct,
+                    "tax_code_id": gst,
+                    "quantity": Decimal("1"),
+                    "unit_price": Decimal("50000"),
+                    "discount_pct": Decimal("0"),
+                    # retention_pct omitted — defaults to 0
+                },
+            ],
+        )
+    async with AsyncSessionLocal() as session:
+        posted = await svc.post_bill(session, bill.id, posted_by="test")
+
+    assert posted.status == BillStatus.POSTED
+
+    async with AsyncSessionLocal() as session:
+        je = await session.get(JournalEntry, posted.journal_entry_id)
+        assert je is not None
+        lines_result = await session.execute(
+            select(JournalLine).where(JournalLine.entry_id == je.id)
+        )
+        jlines = lines_result.scalars().all()
+
+    ap_credits = Decimal("0")
+    retention_credits = Decimal("0")
+    for jl in jlines:
+        async with AsyncSessionLocal() as s2:
+            a = await s2.get(Account, jl.account_id)
+        assert a is not None
+        if a.code == "2-1200":
+            ap_credits += jl.credit
+        if a.code == "2-1850":
+            retention_credits += jl.credit
+
+    # Standard path: full amount to Trade Creditors, nothing to Retentions Payable.
+    assert ap_credits == Decimal("55000.00")  # 50k + 5k GST
+    assert retention_credits == Decimal("0.00")

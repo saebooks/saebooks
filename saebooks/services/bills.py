@@ -64,6 +64,7 @@ class _LineInput:
     discount_pct: Decimal
     project_id: uuid.UUID | None
     item_id: uuid.UUID | None
+    retention_pct: Decimal = Decimal("0")
 
 
 def _compute_line_totals(
@@ -177,6 +178,16 @@ async def _replace_lines(
                 raise BillError(f"Unknown item {item_id}")
             account_id = item.inventory_account_id
 
+        raw_ret = raw.get("retention_pct")
+        retention_pct = (
+            Decimal(str(raw_ret)) if raw_ret not in (None, "", "0", 0)
+            else Decimal("0")
+        )
+        if not (Decimal("0") <= retention_pct <= Decimal("100")):
+            raise BillError(
+                f"retention_pct must be between 0 and 100 (got {retention_pct})"
+            )
+
         line_input = _LineInput(
             description=str(raw["description"]),
             account_id=account_id,
@@ -186,6 +197,7 @@ async def _replace_lines(
             discount_pct=Decimal(str(raw.get("discount_pct", 0))),
             project_id=project_id if isinstance(project_id, uuid.UUID) else None,
             item_id=item_id if isinstance(item_id, uuid.UUID) else None,
+            retention_pct=retention_pct,
         )
         tax_rate = await _resolve_tax_rate(session, line_input.tax_code_id)
         subtotal, tax, total = _compute_line_totals(line_input, tax_rate)
@@ -204,6 +216,7 @@ async def _replace_lines(
                 line_total=total,
                 project_id=line_input.project_id,
                 item_id=line_input.item_id,
+                retention_pct=line_input.retention_pct,
             )
         )
     await session.flush()
@@ -353,6 +366,24 @@ async def _get_ap_account(
     return acct
 
 
+async def _get_retentions_payable_account(
+    session: AsyncSession, company_id: uuid.UUID
+) -> Account:
+    result = await session.execute(
+        select(Account).where(
+            Account.company_id == company_id,
+            Account.code == "2-1850",
+        )
+    )
+    acct = result.scalar_one_or_none()
+    if acct is None:
+        raise BillError(
+            "Retentions Payable account 2-1850 is missing — "
+            "re-run the CoA seed or add account 2-1850 manually."
+        )
+    return acct
+
+
 async def post_bill(
     session: AsyncSession,
     bill_id: uuid.UUID,
@@ -384,6 +415,14 @@ async def post_bill(
     # Dr + GST are translated at the bill's rate.
     rate = Decimal(str(bill.fx_rate or Decimal("1")))
 
+    # Calculate total retention amount across all lines (in base currency).
+    # Retention is withheld from the ex-GST portion only — GST input tax
+    # credit is claimed on the full invoice value per ATO requirements.
+    total_retention_base = sum(
+        _q2(_q2(line.line_subtotal * Decimal(str(line.retention_pct))) / Decimal("100") * rate)
+        for line in bill.lines
+    )
+
     journal_lines: list[dict[str, object]] = []
     # One Dr line per expense/asset account per bill line; GST
     # auto-poster appends the matching Dr GST Paid. project_id rides
@@ -404,15 +443,38 @@ async def post_bill(
                 "project_id": line.project_id,
             }
         )
-    # Cr Trade Creditors for the base-currency total.
-    journal_lines.append(
-        {
-            "account_id": ap_account.id,
-            "description": f"Bill {bill.number} ({ref})",
-            "debit": Decimal("0"),
-            "credit": bill.base_total,
-        }
-    )
+    if total_retention_base > Decimal("0"):
+        # Split Cr AP: Trade Creditors receives only the net-payable
+        # portion; Retentions Payable receives the withheld amount.
+        # Expense and GST are recognised in full (Dr side unchanged).
+        retention_acct = await _get_retentions_payable_account(session, bill.company_id)
+        net_ap = _q2(bill.base_total - total_retention_base)
+        journal_lines.append(
+            {
+                "account_id": ap_account.id,
+                "description": f"Bill {bill.number} ({ref}) — net payable",
+                "debit": Decimal("0"),
+                "credit": net_ap,
+            }
+        )
+        journal_lines.append(
+            {
+                "account_id": retention_acct.id,
+                "description": f"Bill {bill.number}: retention held",
+                "debit": Decimal("0"),
+                "credit": total_retention_base,
+            }
+        )
+    else:
+        # Standard path — no retention, single Cr Trade Creditors line.
+        journal_lines.append(
+            {
+                "account_id": ap_account.id,
+                "description": f"Bill {bill.number} ({ref})",
+                "debit": Decimal("0"),
+                "credit": bill.base_total,
+            }
+        )
 
     entry = await journal_svc.create_draft(
         session,

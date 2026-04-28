@@ -200,5 +200,12 @@ class BillLine(Base):
         UUID(as_uuid=True),
         ForeignKey("items.id", ondelete="SET NULL"),
     )
+    # Civil construction retention hold (CIVL-3). Percentage of the
+    # ex-GST line amount withheld from the immediate payable; splits
+    # Cr Trade Creditors (net payable) + Cr Retentions Payable (held).
+    # Zero means standard full-payment posting (no split).
+    retention_pct: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), nullable=False, default=Decimal("0")
+    )
 
     bill: Mapped[Bill] = relationship(back_populates="lines")
