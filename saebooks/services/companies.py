@@ -194,6 +194,7 @@ async def update(
     gst_registered: bool | None = None,
     gst_effective_date: date | None = None,
     psi_status: str | None = None,
+    address: dict | None = None,
     expected_version: int | None = None,
     actor: str = "web",
 ) -> Company:
@@ -235,6 +236,8 @@ async def update(
         if psi_status not in valid:
             raise ValueError(f"psi_status must be one of: {sorted(valid)}")
         company.psi_status = psi_status
+    if address is not None:
+        company.address = address
 
     company.version = company.version + 1
 

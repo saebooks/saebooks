@@ -8,6 +8,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -189,6 +190,7 @@ class CompanyOut(BaseModel):
     gst_registered: bool = False
     gst_effective_date: date | None = None
     psi_status: str = "unsure"
+    address: dict[str, Any] | None = None
     version: int
     created_at: datetime
     archived_at: datetime | None = None
@@ -215,6 +217,7 @@ class CompanyUpdate(BaseModel):
     gst_registered: bool | None = None
     gst_effective_date: date | None = None
     psi_status: str | None = None
+    address: dict[str, Any] | None = None
 
     @field_validator("psi_status")
     @classmethod
