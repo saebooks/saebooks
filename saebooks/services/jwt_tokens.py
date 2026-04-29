@@ -7,6 +7,8 @@ in the project but we don't need its hazmat layer for symmetric signing.
 Public API
 ----------
 ``create_access_token(payload, expires_in_seconds)`` — returns a signed JWT string.
+``make_access_token(user, *, expires_in_seconds)`` — convenience wrapper that
+   stamps ``sub``, ``tenant_id``, ``role``, ``pwv`` from a User row.
 ``decode_access_token(token)`` — verifies + decodes; raises ``JWTError`` on any failure.
 ``hash_password(plaintext)`` — returns a PBKDF2-HMAC-SHA256 hash string.
 ``verify_password(plaintext, stored_hash)`` — constant-time comparison.
@@ -34,7 +36,10 @@ import os
 import secrets
 import time
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from saebooks.models.user import User
 
 logger = logging.getLogger("saebooks.jwt")
 
@@ -105,11 +110,13 @@ class JWTError(ValueError):
 
 _HEADER = _b64url_encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
 
+_DEFAULT_TTL = 8 * 3600  # 8 hours
+
 
 def create_access_token(
     payload: dict[str, Any],
     *,
-    expires_in_seconds: int = 28800,  # 8 hours
+    expires_in_seconds: int = _DEFAULT_TTL,
 ) -> str:
     """Return a signed HS256 JWT.
 
@@ -132,6 +139,28 @@ def create_access_token(
         hashlib.sha256,
     ).digest()
     return f"{signing_input}.{_b64url_encode(sig)}"
+
+
+def make_access_token(
+    user: User,
+    *,
+    expires_in_seconds: int = _DEFAULT_TTL,
+) -> str:
+    """Build a JWT for ``user`` with the standard saebooks claims.
+
+    Includes ``pwv`` (password_version) so a password reset
+    invalidates every previously-issued token globally — see
+    ``saebooks.api.v1.auth.require_bearer``.
+    """
+    return create_access_token(
+        {
+            "sub": str(user.id),
+            "tenant_id": str(user.tenant_id),
+            "role": user.role,
+            "pwv": int(user.password_version or 0),
+        },
+        expires_in_seconds=expires_in_seconds,
+    )
 
 
 def decode_access_token(token: str) -> dict[str, Any]:

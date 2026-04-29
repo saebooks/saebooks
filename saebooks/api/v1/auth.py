@@ -20,6 +20,16 @@ bound by the ``tenant_isolation`` RLS policy.
 (falling back to the static dev env var only when ``SAEBOOKS_ENV=dev``)
 so handlers that still need the raw tenant id for explicit filtering
 get the request's tenant — never the historical hard-coded default.
+
+Password-version invalidation (0077)
+------------------------------------
+JWTs minted by ``services.jwt_tokens.make_access_token`` carry a
+``pwv`` claim equal to ``user.password_version`` at mint time. When
+the user resets their password we bump the column, so every
+previously-issued token fails the ``pwv == user.password_version``
+check on the next request. Missing claim (legacy tokens or static
+dev bearer) is treated as ``pwv = 0``, which matches the column
+default — this keeps backward-compat on rolling deploys.
 """
 from __future__ import annotations
 
@@ -71,6 +81,10 @@ async def _stamp_user_from_sub(request: Request, claims: dict[str, object]) -> N
     ``request.state.role`` as None. The downstream admin gates already
     fall back to the X-Admin header in that case (used by the static
     dev-bearer path in tests/scripts).
+
+    Also enforces the ``pwv`` (password-version) claim — a JWT whose
+    pwv doesn't match the live user row is rejected with 401, so a
+    password reset invalidates every issued token globally.
     """
     sub = claims.get("sub")
     if not sub:
@@ -92,6 +106,25 @@ async def _stamp_user_from_sub(request: Request, claims: dict[str, object]) -> N
         return
     if user is None or user.archived_at is not None:
         return
+
+    # pwv enforcement — token's pwv must match the current row.
+    # Missing claim treated as 0; default column value is 0; both
+    # match for legacy tokens until the user resets their password.
+    token_pwv = int(claims.get("pwv", 0) or 0)
+    user_pwv = int(user.password_version or 0)
+    if token_pwv != user_pwv:
+        logger.info(
+            "require_bearer: pwv mismatch sub=%s token_pwv=%d user_pwv=%d",
+            sub,
+            token_pwv,
+            user_pwv,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token invalidated by password change — please sign in again",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     request.state.user = user
     request.state.role = user.role
 
@@ -215,3 +248,22 @@ async def require_bearer(
 
 
 BearerDep = Depends(require_bearer)
+
+
+async def require_email_verified(request: Request) -> None:
+    """Dep stacked on top of ``require_bearer`` for routes that must
+    only run for users who have proved control of their email.
+
+    Static dev-bearer (no ``sub`` claim) bypasses — that path is
+    used by tests and scripts where there is no real user.
+    """
+    user = getattr(request.state, "user", None)
+    if user is None:
+        # Static-bearer path or a /auth/me-style call before the user
+        # is hydrated. Don't gate; the JWT path will hydrate user.
+        return
+    if user.email_verified_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="email_not_verified",
+        )

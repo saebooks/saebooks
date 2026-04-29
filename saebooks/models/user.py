@@ -113,3 +113,33 @@ class User(Base):
     # cannot log in via the password endpoint.
     # Added by migration 0053_user_password_hash.
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # ----- 0077_user_auth_tokens — public-auth scaffolding ---------- #
+    email_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    email_verification_token_hash: Mapped[str | None] = mapped_column(
+        sa.CHAR(64), nullable=True
+    )
+    email_verification_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    password_reset_token_hash: Mapped[str | None] = mapped_column(
+        sa.CHAR(64), nullable=True
+    )
+    password_reset_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    magic_link_token_hash: Mapped[str | None] = mapped_column(
+        sa.CHAR(64), nullable=True
+    )
+    magic_link_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Bumped on every password rotation (reset, change-password). Old
+    # JWTs whose ``pwv`` claim doesn't match are rejected by
+    # ``require_bearer``, so a leaked token can be invalidated by the
+    # user clicking "reset password". Default 0; missing claim treated
+    # as 0 so JWTs minted before 0077 keep working until they expire.
+    password_version: Mapped[int] = mapped_column(
+        sa.Integer(), nullable=False, default=0, server_default="0"
+    )
