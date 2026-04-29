@@ -417,3 +417,112 @@ async def test_resend_verification_rate_limit(client: AsyncClient) -> None:
     assert statuses[0] == 200
     assert statuses[2] == 200
     assert statuses[3] == 429
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 — signup_plan persistence and verify-email clearing
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_signup_with_plan_stores_signup_plan(client: AsyncClient) -> None:
+    """signup with plan='business' stores the value on users.signup_plan."""
+    await _reset_rate_limits()
+    email = await _new_email()
+    await _purge_email(email)
+
+    resp = await client.post(
+        "/api/v1/auth/signup",
+        json={"email": email, "password": "letmein-2026", "plan": "business"},
+    )
+    assert resp.status_code == 201, resp.text
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            User.__table__.select().where(User.email == email)
+        )
+        row = result.first()
+        assert row is not None
+        assert row.signup_plan == "business"
+
+
+@pytest.mark.asyncio
+async def test_signup_without_plan_leaves_signup_plan_null(client: AsyncClient) -> None:
+    """signup with plan=None leaves signup_plan NULL."""
+    await _reset_rate_limits()
+    email = await _new_email()
+    await _purge_email(email)
+
+    resp = await client.post(
+        "/api/v1/auth/signup",
+        json={"email": email, "password": "letmein-2026"},
+    )
+    assert resp.status_code == 201, resp.text
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            User.__table__.select().where(User.email == email)
+        )
+        row = result.first()
+        assert row is not None
+        assert row.signup_plan is None
+
+
+@pytest.mark.asyncio
+async def test_signup_with_invalid_plan_returns_422(client: AsyncClient) -> None:
+    """signup with plan='invalid' raises 422."""
+    await _reset_rate_limits()
+    resp = await client.post(
+        "/api/v1/auth/signup",
+        json={"email": await _new_email(), "password": "letmein-2026", "plan": "invalid"},
+    )
+    assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.asyncio
+async def test_verify_clears_signup_plan(client: AsyncClient) -> None:
+    """After verify-email, signup_plan is cleared to NULL on the user row
+    and the response body includes the plan value."""
+    await _reset_rate_limits()
+    email = await _new_email()
+    await _purge_email(email)
+
+    # Signup with plan
+    resp = await client.post(
+        "/api/v1/auth/signup",
+        json={"email": email, "password": "letmein-2026", "plan": "pro"},
+    )
+    assert resp.status_code == 201, resp.text
+
+    # Inject a known verification token
+    raw = generate_token()
+    h = hash_token(raw)
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            User.__table__.select().where(User.email == email)
+        )
+        row = result.first()
+        await session.execute(
+            User.__table__.update()
+            .where(User.id == row.id)
+            .values(
+                email_verification_token_hash=h,
+                email_verification_expires_at=datetime.now(UTC) + timedelta(hours=24),
+            )
+        )
+        await session.commit()
+
+    # Verify
+    verify_resp = await client.post("/api/v1/auth/verify-email", json={"token": raw})
+    assert verify_resp.status_code == 200, verify_resp.text
+    body = verify_resp.json()
+    assert body["signup_plan"] == "pro"
+
+    # DB row should have signup_plan cleared
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            User.__table__.select().where(User.email == email)
+        )
+        row = result.first()
+        assert row.signup_plan is None
+        assert row.email_verified_at is not None

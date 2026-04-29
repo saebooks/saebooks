@@ -33,7 +33,7 @@ import re
 import secrets as py_secrets
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
@@ -83,6 +83,7 @@ class SignupRequest(BaseModel):
     email: str
     password: str = Field(min_length=1)
     company_name: str | None = None
+    plan: Literal["business", "pro", "enterprise"] | None = None
 
     @field_validator("email")
     @classmethod
@@ -116,6 +117,7 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int = 8 * 3600
+    signup_plan: str | None = None
 
 
 class MessageResponse(BaseModel):
@@ -315,6 +317,7 @@ async def signup(body: SignupRequest) -> MessageResponse:
             email_verification_expires_at=expires_at,
             password_version=0,
             version=1,
+            signup_plan=body.plan,
         )
         session.add(user)
         await session.commit()
@@ -381,11 +384,13 @@ async def verify_email(body: VerifyEmailRequest) -> TokenResponse:
         user.email_verified_at = now
         user.email_verification_token_hash = None
         user.email_verification_expires_at = None
+        pending_plan = user.signup_plan
+        user.signup_plan = None
         await session.commit()
         await session.refresh(user)
         token = make_access_token(user)
 
-    return TokenResponse(access_token=token)
+    return TokenResponse(access_token=token, signup_plan=pending_plan)
 
 
 # ---------------------------------------------------------------------------

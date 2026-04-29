@@ -143,3 +143,11 @@ class User(Base):
     password_version: Mapped[int] = mapped_column(
         sa.Integer(), nullable=False, default=0, server_default="0"
     )
+    # ----- 0079_user_signup_plan — persist plan selection from CTA ---- #
+    # Set at signup if the user arrived via a ?plan=business/pro/enterprise
+    # CTA link. Cleared to NULL after email verification, at which point
+    # the web layer redirects them to /billing/checkout?plan=<plan>.
+    # NULL means community (no paid plan selected).
+    signup_plan: Mapped[str | None] = mapped_column(
+        sa.String(16), nullable=True
+    )
