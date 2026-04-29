@@ -17,6 +17,7 @@ Phase 1 tier-5: ``/api/v1/reports/aged_receivables``,
 B/46: ``/api/v1/documents/extract`` (AI document extraction).
 0077: ``/api/v1/auth/signup``, verify-email, password-reset, magic-link.
 0078: ``/api/v1/billing/checkout-session``, ``/api/v1/billing/webhook``.
+0080: ``/api/v1/contact/submit`` — public contact form.
 """
 from fastapi import APIRouter
 
@@ -27,6 +28,7 @@ from saebooks.api.v1.accounts import router as accounts_router
 from saebooks.api.v1.bank_accounts import router as bank_accounts_router
 from saebooks.api.v1.bank_rules import router as bank_rules_router
 from saebooks.api.v1.billing import router as billing_router
+from saebooks.api.v1.contact_public import router as contact_public_router
 from saebooks.api.v1.depreciation_models import router as depreciation_models_router
 from saebooks.api.v1.bank_statement_lines import router as bank_statement_lines_router
 from saebooks.api.v1.bills import router as bills_router
@@ -71,6 +73,8 @@ router.include_router(signup_router)
 # explicit dependency; /billing/webhook is unauthenticated (Stripe
 # auth is by signature, not bearer). The router itself isn't gated.
 router.include_router(billing_router)
+# Public contact form — unauthenticated, rate-limited per IP/hour.
+router.include_router(contact_public_router)
 router.include_router(contacts_router)
 router.include_router(account_ranges_router)
 router.include_router(accounts_router)
