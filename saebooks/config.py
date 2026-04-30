@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO", alias="SAEBOOKS_LOG_LEVEL")
     bind_host: str = Field(default="127.0.0.1", alias="SAEBOOKS_BIND_HOST")
     bind_port: int = Field(default=8000, alias="SAEBOOKS_BIND_PORT")
+    debug: bool = Field(default=False, alias="SAEBOOKS_DEBUG")
 
     database_url: str = Field(
         default="postgresql+asyncpg://saebooks:change-me-local-only@db:5432/saebooks",
