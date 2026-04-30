@@ -234,7 +234,8 @@ async def fido2_register_begin(request: Request, db: AsyncSession = Depends(get_
         raise HTTPException(status_code=400, detail="user_id and email required")
     
     try:
-        challenge_data = await begin_registration(user_id)
+        import uuid as _uuid
+        challenge_data = await begin_registration(_uuid.UUID(user_id))
         return challenge_data
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Registration error: {str(e)}")

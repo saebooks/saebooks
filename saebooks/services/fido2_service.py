@@ -41,10 +41,12 @@ async def begin_registration(user_id: uuid.UUID) -> dict[str, Any]:
     """
     try:
         from webauthn import generate_registration_options
+        from webauthn import options_to_json
         from webauthn.helpers.structs import (
             AuthenticatorSelectionCriteria,
             UserVerificationRequirement,
         )
+        from webauthn.helpers.structs import AuthenticatorAttachment, ResidentKeyRequirement
     except ImportError:
         raise FIDO2Error("webauthn library not installed")
 
@@ -58,28 +60,35 @@ async def begin_registration(user_id: uuid.UUID) -> dict[str, Any]:
         registration_options = generate_registration_options(
             rp_id="saebooks.com.au",  # TODO: Make configurable
             rp_name="SAE Books",
-            user_id=str(user_id),
+            user_id=str(user_id).encode("utf-8"),
             user_name=user.username,
             user_display_name=user.display_name or user.email,
             authenticator_selection=AuthenticatorSelectionCriteria(
-                authenticator_attachment="cross-platform",  # External key (YubiKey, etc)
-                resident_key="preferred",
+                authenticator_attachment=AuthenticatorAttachment.CROSS_PLATFORM,
+                resident_key=ResidentKeyRequirement.PREFERRED,
                 user_verification=UserVerificationRequirement.PREFERRED,
             ),
         )
 
         # Store challenge for verification
-        challenge = registration_options.challenge
-        _challenge_store[challenge] = {
+        # Store challenge for verification (base64url-encoded for JSON safety)
+        import base64 as _b64
+        challenge_b64 = _b64.urlsafe_b64encode(registration_options.challenge).rstrip(b"=").decode("ascii")
+        _challenge_store[challenge_b64] = {
             "user_id": str(user_id),
             "type": "registration",
             "created_at": datetime.now(UTC),
-            "options": registration_options.model_dump(),
+        }
+        opts_dict = __import__("json").loads(options_to_json(registration_options))
+
+        return {
+            "challenge": challenge_b64,
+            "options": opts_dict,
         }
 
         return {
             "challenge": challenge,
-            "options": registration_options.model_dump(),
+            "options": __import__("json").loads(options_to_json(registration_options)),
         }
 
 
@@ -157,6 +166,7 @@ async def begin_authentication(email: str) -> dict[str, Any]:
     """
     try:
         from webauthn import generate_authentication_options
+        from webauthn import options_to_json
     except ImportError:
         raise FIDO2Error("webauthn library not installed")
 
@@ -176,17 +186,23 @@ async def begin_authentication(email: str) -> dict[str, Any]:
         )
 
         # Store challenge
-        challenge = authentication_options.challenge
-        _challenge_store[challenge] = {
-            "user_id": str(user.id),
-            "email": email,
+        import base64 as _b64
+        challenge_b64 = _b64.urlsafe_b64encode(authentication_options.challenge).rstrip(b"=").decode("ascii")
+        _challenge_store[challenge_b64] = {
+            "user_id": str(user_id),
             "type": "authentication",
             "created_at": datetime.now(UTC),
+        }
+        opts_dict = __import__("json").loads(options_to_json(authentication_options))
+
+        return {
+            "challenge": challenge_b64,
+            "options": opts_dict,
         }
 
         return {
             "challenge": challenge,
-            "options": authentication_options.model_dump(),
+            "options": __import__("json").loads(options_to_json(authentication_options)),
         }
 
 
