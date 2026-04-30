@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}New company — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>New company</h1>
+</div>
+
+<form method="post" action="/companies" class="classic-form" style="max-width:42rem">
+  <fieldset class="form-fieldset">
+    <legend>Identity</legend>
+    <label>Trading name <input name="name" required maxlength="120"
+      placeholder="Sauer Pty Ltd"
+      value="{{ company.name if company else '' }}" /></label>
+    <label>Legal name <input name="legal_name" maxlength="200"
+      placeholder="Sauer Pty Ltd ATF Saueesti Trust"
+      value="{{ company.legal_name or '' if company else '' }}" /></label>
+    <label>ABN <input name="abn" maxlength="20"
+      placeholder="11 digits, no spaces required"
+      value="{{ company.abn or '' if company else '' }}" /></label>
+  </fieldset>
+
+  <fieldset class="form-fieldset">
+    <legend>Accounting</legend>
+    <label>Base currency
+      <select name="base_currency">
+        {% set bc = (company.base_currency if company else 'AUD') %}
+        <option value="AUD" {{ 'selected' if bc == 'AUD' }}>AUD — Australian dollar</option>
+        <option value="USD" {{ 'selected' if bc == 'USD' }}>USD — US dollar</option>
+        <option value="GBP" {{ 'selected' if bc == 'GBP' }}>GBP — Pound sterling</option>
+        <option value="EUR" {{ 'selected' if bc == 'EUR' }}>EUR — Euro</option>
+        <option value="NZD" {{ 'selected' if bc == 'NZD' }}>NZD — New Zealand dollar</option>
+      </select>
+    </label>
+    <label>Financial-year start month
+      <select name="fin_year_start_month">
+        {% set fy = (company.fin_year_start_month if company else 7) %}
+        {% for m, label in [
+          (1,'January'),(2,'February'),(3,'March'),(4,'April'),
+          (5,'May'),(6,'June'),(7,'July (AU default)'),(8,'August'),
+          (9,'September'),(10,'October'),(11,'November'),(12,'December')
+        ] %}
+        <option value="{{ m }}" {{ 'selected' if fy == m }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      <input type="checkbox" name="gst_registered" value="true"
+        {{ 'checked' if company and company.gst_registered }} />
+      Registered for GST
+    </label>
+  </fieldset>
+
+  <div class="form-actions">
+    <button type="submit" class="btn btn-primary">Create company</button>
+    <a href="/companies" class="btn">Cancel</a>
+  </div>
+</form>
+{% endblock %}

@@ -27,6 +27,7 @@ dependencies = [
     "grpcio>=1.62",
     "grpcio-tools>=1.62",
     "openai>=1.0",
+    "webauthn>=2.0",
 ]
 
 [project.optional-dependencies]

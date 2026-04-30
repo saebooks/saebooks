@@ -17,6 +17,7 @@ from saebooks.middleware.auth import ForwardAuthMiddleware
 from saebooks.middleware.request_id import RequestIdMiddleware
 from saebooks.routers import (
     accounts,
+    auth,
     admin,
     assets,
     ato_sbr,
@@ -107,6 +108,7 @@ def create_app() -> FastAPI:
     app.include_router(admin.router)
     app.include_router(dashboard.router)
     app.include_router(accounts.router)
+    app.include_router(auth.router)
     app.include_router(journal.router)
     app.include_router(templates.router)
     app.include_router(tax_codes.router)

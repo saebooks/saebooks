@@ -246,4 +246,77 @@ class Settings(BaseSettings):
     )
 
 
+
+    # ---------------------------------------------------------------- #
+    # OAuth2 Customer Authentication (Phase 2)                         #
+    # ---------------------------------------------------------------- #
+    # Customer-facing OAuth2 providers (GitHub, Microsoft, Google).
+    # Keep Authentik internal-only for admin access.
+    # When any provider client_id is empty, that provider is disabled.
+    # SAEBOOKS_OAUTH_ENABLED gate allows gradual rollout.
+
+    oauth_enabled: bool = Field(default=False, alias="SAEBOOKS_OAUTH_ENABLED")
+
+    # GitHub OAuth2 — https://github.com/settings/developers
+    github_client_id: str = Field(default="", alias="GITHUB_CLIENT_ID")
+    github_client_secret: str = Field(default="", alias="GITHUB_CLIENT_SECRET")
+    github_authorize_url: str = Field(
+        default="https://github.com/login/oauth/authorize",
+        alias="GITHUB_AUTHORIZE_URL",
+    )
+    github_token_url: str = Field(
+        default="https://github.com/login/oauth/access_token",
+        alias="GITHUB_TOKEN_URL",
+    )
+    github_userinfo_url: str = Field(
+        default="https://api.github.com/user",
+        alias="GITHUB_USERINFO_URL",
+    )
+    github_scope: str = Field(default="user:email", alias="GITHUB_SCOPE")
+
+    # Microsoft OAuth2 — https://portal.azure.com (App Registration)
+    microsoft_client_id: str = Field(default="", alias="MICROSOFT_CLIENT_ID")
+    microsoft_client_secret: str = Field(default="", alias="MICROSOFT_CLIENT_SECRET")
+    microsoft_tenant: str = Field(
+        default="common", alias="MICROSOFT_TENANT"
+    )
+    microsoft_authorize_url: str = Field(
+        default="https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize",
+        alias="MICROSOFT_AUTHORIZE_URL",
+    )
+    microsoft_token_url: str = Field(
+        default="https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
+        alias="MICROSOFT_TOKEN_URL",
+    )
+    microsoft_userinfo_url: str = Field(
+        default="https://graph.microsoft.com/v1.0/me",
+        alias="MICROSOFT_USERINFO_URL",
+    )
+    microsoft_scope: str = Field(
+        default="openid profile email", alias="MICROSOFT_SCOPE"
+    )
+
+    # Google OAuth2 — https://console.cloud.google.com
+    google_client_id: str = Field(default="", alias="GOOGLE_CLIENT_ID")
+    google_client_secret: str = Field(default="", alias="GOOGLE_CLIENT_SECRET")
+    google_authorize_url: str = Field(
+        default="https://accounts.google.com/o/oauth2/v2/auth",
+        alias="GOOGLE_AUTHORIZE_URL",
+    )
+    google_token_url: str = Field(
+        default="https://oauth2.googleapis.com/token",
+        alias="GOOGLE_TOKEN_URL",
+    )
+    google_userinfo_url: str = Field(
+        default="https://openidconnect.googleapis.com/v1/userinfo",
+        alias="GOOGLE_USERINFO_URL",
+    )
+    google_scope: str = Field(
+        default="openid profile email", alias="GOOGLE_SCOPE"
+    )
+
+    oauth_redirect_uri_base: str = Field(default="", alias="SAEBOOKS_OAUTH_REDIRECT_URI_BASE")
+    oauth_state_store: str = Field(default="redis://redis:6379/1", alias="SAEBOOKS_OAUTH_STATE_STORE")
+    oauth_state_ttl_seconds: int = Field(default=300, alias="SAEBOOKS_OAUTH_STATE_TTL_SECONDS")
+
 settings = Settings()

@@ -151,3 +151,14 @@ class User(Base):
     signup_plan: Mapped[str | None] = mapped_column(
         sa.String(16), nullable=True
     )
+
+    # ----- 0080_oauth_and_fido2 — multi-factor authentication -------- #
+    # FIDO2/WebAuthn registration timestamp. NULL = user has no security keys.
+    fido2_registered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Count of FIDO2 credentials registered for this user.
+    # Used to determine if user can authenticate with a security key.
+    fido2_credential_count: Mapped[int] = mapped_column(
+        sa.Integer(), nullable=False, default=0, server_default="0"
+    )
