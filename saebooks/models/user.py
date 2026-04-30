@@ -3,7 +3,7 @@
 The row is auto-created on first request (middleware does an upsert on
 ``Remote-User``) and the role is assigned by an admin via
 ``/admin/users/{id}``. Until then, a newly-seen user sits at the
-default role (``readonly``) — no destructive actions possible.
+default role (``viewer``) — no destructive actions possible.
 """
 from __future__ import annotations
 
@@ -20,13 +20,17 @@ from saebooks.db import Base
 
 
 class UserRole(enum.StrEnum):
-    """All v1 roles. Ordered from most-privileged to least."""
+    """All v2 roles. Ordered from most-privileged to least.
+    
+    Migration 0058 renamed/collapsed: readonly -> viewer, client -> viewer.
+    New hierarchy: owner > admin > accountant > bookkeeper > viewer.
+    """
 
+    OWNER = "owner"
     ADMIN = "admin"
     ACCOUNTANT = "accountant"
     BOOKKEEPER = "bookkeeper"
-    READONLY = "readonly"
-    CLIENT = "client"
+    VIEWER = "viewer"
 
 
 # Lookup set for the middleware + authz dep to validate header values
@@ -38,11 +42,11 @@ VALID_ROLES: frozenset[str] = frozenset(r.value for r in UserRole)
 # ``require_role`` to allow a single admin decoration to also permit
 # accountants, etc.
 _ROLE_RANK: dict[str, int] = {
-    UserRole.CLIENT.value: 0,
-    UserRole.READONLY.value: 1,
-    UserRole.BOOKKEEPER.value: 2,
-    UserRole.ACCOUNTANT.value: 3,
-    UserRole.ADMIN.value: 4,
+    UserRole.VIEWER.value: 0,
+    UserRole.BOOKKEEPER.value: 1,
+    UserRole.ACCOUNTANT.value: 2,
+    UserRole.ADMIN.value: 3,
+    UserRole.OWNER.value: 4,
 }
 
 
@@ -82,8 +86,8 @@ class User(Base):
     role: Mapped[str] = mapped_column(
         String(16),
         nullable=False,
-        default=UserRole.READONLY.value,
-        server_default=UserRole.READONLY.value,
+        default=UserRole.VIEWER.value,
+        server_default=UserRole.VIEWER.value,
     )
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Per-user theme override (QQ). Null = inherit the server-wide

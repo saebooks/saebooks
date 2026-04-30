@@ -187,7 +187,7 @@ async def create_for_api(
     username: str,
     display_name: str | None = None,
     email: str | None = None,
-    role: str = UserRole.READONLY.value,
+    role: str = UserRole.VIEWER.value,
     preferred_theme: str | None = None,
     actor: str = "api",
     tenant_id: uuid.UUID = _DEFAULT_TENANT_ID,

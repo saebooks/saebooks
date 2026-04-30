@@ -331,7 +331,7 @@ class UserBase(BaseModel):
     username: str = Field(min_length=1, max_length=64)
     display_name: str | None = None
     email: str | None = None
-    role: str = Field(default="readonly", min_length=1, max_length=16)
+    role: str = Field(default="viewer", min_length=1, max_length=16)
     preferred_theme: str | None = None
 
 

@@ -85,7 +85,7 @@ async def verify_magic_link(token: str) -> User:
 
     Lookup order:
     1. Find user by email from token
-    2. Create user if doesn't exist (role=CLIENT, email auto-verified)
+    2. Create user if doesn't exist (role=VIEWER, email auto-verified)
     """
     if token not in _token_store:
         raise MagicLinkTokenInvalid("Token not found or already used")
@@ -125,7 +125,7 @@ async def verify_magic_link(token: str) -> User:
             tenant_id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
             username=email.split("@")[0],  # Initial username from email
             email=email,
-            role=UserRole.CLIENT.value,
+            role=UserRole.VIEWER.value,
             email_verified_at=datetime.now(UTC),  # Auto-verify via magic link
         )
         session.add(new_user)

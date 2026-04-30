@@ -301,7 +301,7 @@ async def find_or_create_user(
             username=email.split("@")[0],  # Initial username from email
             display_name=display_name,
             email=email,
-            role=UserRole.CLIENT.value,
+            role=UserRole.VIEWER.value,
             email_verified_at=datetime.now(UTC),  # Trust provider's email
         )
         session.add(new_user)

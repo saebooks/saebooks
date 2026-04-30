@@ -1,6 +1,7 @@
 """Authentication router for OAuth2, Magic Links, and FIDO2."""
 from typing import Optional
 import secrets
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Request, HTTPException, status, responses, Depends
@@ -29,6 +30,7 @@ from saebooks.services.fido2_service import (
     begin_authentication,
     complete_authentication,
 )
+from saebooks.services.jwt_tokens import create_access_token
 from saebooks.config import settings
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -36,6 +38,45 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 # Jinja2 setup for templates
 template_dir = "saebooks/templates"
 jinja_env = Environment(loader=FileSystemLoader(template_dir))
+
+# JWT token TTL: 7 days in seconds
+JWT_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60
+
+
+def _set_auth_cookie(response: responses.Response, token: str) -> None:
+    """Set HttpOnly, Secure authentication cookie."""
+    response.set_cookie(
+        key="auth_token",
+        value=token,
+        max_age=JWT_TOKEN_TTL_SECONDS,
+        expires=JWT_TOKEN_TTL_SECONDS,
+        path="/",
+        httponly=True,
+        secure=not settings.debug,  # Only secure in production
+        samesite="lax",
+    )
+
+
+def _auth_response(user: User, redirect_to: str = "/") -> RedirectResponse:
+    """Create authenticated response with JWT cookie."""
+    # Generate JWT token with user claims
+    token = create_access_token(
+        {
+            "sub": str(user.id),
+            "email": user.email,
+            "username": user.username,
+            "tenant_id": str(user.tenant_id),
+        },
+        expires_in_seconds=JWT_TOKEN_TTL_SECONDS,
+    )
+    
+    # Create redirect response
+    response = RedirectResponse(url=redirect_to, status_code=302)
+    
+    # Set authentication cookie
+    _set_auth_cookie(response, token)
+    
+    return response
 
 
 @router.get("/login", response_class=HTMLResponse)
@@ -53,7 +94,6 @@ async def login_page(db: AsyncSession = Depends(get_session)):
         github_enabled=github_enabled,
         microsoft_enabled=microsoft_enabled,
         google_enabled=google_enabled,
-        
     )
 
 
@@ -128,11 +168,8 @@ async def oauth_callback(
             provider_email=provider_email,
         )
         
-        # TODO: Generate JWT token
-        # TODO: Set authentication cookie
-        
-        # Redirect to app home
-        return RedirectResponse(url="/")
+        # Return authenticated response
+        return _auth_response(user, redirect_to="/")
         
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"OAuth callback error: {str(e)}")
@@ -168,11 +205,8 @@ async def verify_magic_link_endpoint(token: str, db: AsyncSession = Depends(get_
     try:
         user = await verify_magic_link(token)
         
-        # TODO: Generate JWT token
-        # TODO: Set authentication cookie
-        
-        # Redirect to app home
-        return RedirectResponse(url="/")
+        # Return authenticated response
+        return _auth_response(user, redirect_to="/")
         
     except MagicLinkTokenExpired:
         raise HTTPException(status_code=401, detail="Magic link has expired (15 minutes)")
@@ -282,9 +316,8 @@ async def fido2_authenticate_complete(request: Request, db: AsyncSession = Depen
             signature,
         )
         
-        # TODO: Generate JWT token
-        # TODO: Set authentication cookie
+        # Return authenticated response
+        return _auth_response(user, redirect_to="/")
         
-        return {"status": "success", "message": "Authenticated via security key"}
     except Exception as e:
         raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")

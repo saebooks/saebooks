@@ -156,7 +156,7 @@ async def _upsert_user(
                         username,
                     )
                 else:
-                    role = UserRole.READONLY.value
+                    role = UserRole.VIEWER.value
                 user = User(
                     tenant_id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
                     username=username,
