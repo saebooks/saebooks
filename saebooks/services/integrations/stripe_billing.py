@@ -288,11 +288,29 @@ async def retrieve_checkout_session(session_id: str) -> dict[str, Any]:
         return resp.json()
 
 
+async def create_portal_session(
+    stripe_customer_id: str,
+    return_url: str = "https://app.saebooks.com.au/admin/license",
+) -> dict[str, str]:
+    """Create a Stripe Billing Portal session, return ``{portal_url}``."""
+    async with _client() as client:
+        resp = await client.post(
+            "/billing_portal/sessions",
+            data=_encode_form({"customer": stripe_customer_id, "return_url": return_url}),
+        )
+        if resp.status_code >= 400:
+            raise StripeBillingError(
+                f"Stripe portal session failed: {resp.status_code} {resp.text}"
+            )
+    return {"portal_url": resp.json().get("url") or ""}
+
+
 __all__ = [
     "EDITIONS",
     "StripeBillingError",
     "StripeBillingNotConfigured",
     "create_checkout_session",
+    "create_portal_session",
     "ensure_products",
     "retrieve_checkout_session",
 ]

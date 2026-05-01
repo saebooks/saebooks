@@ -65,6 +65,7 @@ from saebooks.services.integrations.stripe_billing import (
     EDITIONS,
     StripeBillingError,
     create_checkout_session,
+    create_portal_session,
 )
 from saebooks.services.mailer import send_email
 
@@ -111,6 +112,43 @@ async def checkout_session(
             detail="Billing is not configured — contact support.",
         ) from exc
     return CheckoutResponse(checkout_url=result["checkout_url"])
+
+
+# ---------------------------------------------------------------------------
+# POST /billing/portal-session
+# ---------------------------------------------------------------------------
+
+
+class PortalResponse(BaseModel):
+    portal_url: str
+
+
+@router.post(
+    "/portal-session",
+    response_model=PortalResponse,
+    dependencies=[Depends(require_bearer), Depends(require_email_verified)],
+)
+async def portal_session(request: Request) -> PortalResponse:
+    """Mint a Stripe Customer Portal session for the authenticated tenant."""
+    user = getattr(request.state, "user", None)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    async with AsyncSessionLocal() as session:
+        tenant = await session.get(Tenant, user.tenant_id)
+    if tenant is None or not tenant.stripe_customer_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active subscription found for this account.",
+        )
+    try:
+        result = await create_portal_session(tenant.stripe_customer_id)
+    except StripeBillingError as exc:
+        logger.error("portal_session: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Billing portal is not available — contact support.",
+        ) from exc
+    return PortalResponse(portal_url=result["portal_url"])
 
 
 # ---------------------------------------------------------------------------
