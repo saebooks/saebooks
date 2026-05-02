@@ -17,6 +17,7 @@ from saebooks.services import contacts as svc
 from saebooks.services.abr import AbrError, AbrNotConfiguredError, lookup_abn
 from saebooks.services.features import FLAG_ABR_LOOKUP, is_enabled, require_feature
 from saebooks.web import templates
+from saebooks.services import active_company as active_svc
 
 router = APIRouter(prefix="/contacts")
 # Beneficiary register lives at /beneficiaries (no prefix) — separate router so
@@ -25,14 +26,7 @@ beneficiaries_router = APIRouter()
 
 
 async def _first_company() -> Company:
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Company).where(Company.archived_at.is_(None)).order_by(Company.created_at)
-        )
-        company = result.scalars().first()
-        if company is None:
-            raise HTTPException(500, "No active company")
-        return company
+    return await active_svc.first_company_compat()
 
 
 async def _form_dropdowns(session, company_id: uuid.UUID):

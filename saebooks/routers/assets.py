@@ -38,19 +38,13 @@ from saebooks.models.depreciation_model import DepreciationModel
 from saebooks.services import assets as svc
 from saebooks.services import assets_import as imp_svc
 from saebooks.web import templates
+from saebooks.services import active_company as active_svc
 
 router = APIRouter(prefix="/assets")
 
 
 async def _first_company() -> Company:
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Company).where(Company.archived_at.is_(None)).order_by(Company.created_at)
-        )
-        company = result.scalars().first()
-        if company is None:
-            raise HTTPException(500, "No active company")
-        return company
+    return await active_svc.first_company_compat()
 
 
 async def _form_dropdowns(

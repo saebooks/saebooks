@@ -18,6 +18,7 @@ from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import accounts as svc
 from saebooks.web import templates
+from saebooks.services import active_company as active_svc
 
 _CREDIT_NORMAL = {AccountType.LIABILITY, AccountType.EQUITY, AccountType.INCOME, AccountType.OTHER_INCOME}
 
@@ -28,14 +29,7 @@ ACCOUNT_TYPE_CHOICES = [(t.value, t.value.replace("_", " ").title()) for t in Ac
 
 
 async def _first_company() -> Company:
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Company).where(Company.archived_at.is_(None)).order_by(Company.created_at)
-        )
-        company = result.scalars().first()
-        if company is None:
-            raise HTTPException(500, "No active company")
-        return company
+    return await active_svc.first_company_compat()
 
 
 def _build_hierarchy(

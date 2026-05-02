@@ -37,6 +37,7 @@ from saebooks.services.ato_sbr.keystore import KeystoreError
 from saebooks.services.authz import require_role
 from saebooks.services.features import FLAG_ATO_SBR, require_feature
 from saebooks.web import templates
+from saebooks.services import active_company as active_svc
 
 router = APIRouter(
     prefix="/admin/ato-sbr",
@@ -48,16 +49,7 @@ router = APIRouter(
 
 
 async def _first_company() -> Company:
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Company)
-            .where(Company.archived_at.is_(None))
-            .order_by(Company.created_at)
-        )
-    row = result.scalars().first()
-    if row is None:
-        raise HTTPException(404, "No active company")
-    return row
+    return await active_svc.first_company_compat()
 
 
 async def _with_config(

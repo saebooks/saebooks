@@ -9,6 +9,7 @@ from saebooks.models.bank_feed import (
 )
 from saebooks.models.bank_rule import BankRule, MatchType
 from saebooks.models.bank_statement import BankStatementLine, StatementLineStatus
+from saebooks.models.bsl_match import BslMatch
 from saebooks.models.allocation_rule import AllocationRule
 from saebooks.models.budget import Budget
 from saebooks.models.change_log import ChangeLog
@@ -45,6 +46,7 @@ __all__ = [
     "BankFeedIssueStatus",
     "BankRule",
     "BankStatementLine",
+    "BslMatch",
     "BeneficiaryEntitlement",
     "Budget",
     "ChangeLog",

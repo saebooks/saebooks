@@ -33,6 +33,7 @@ id to filter by.
 """
 from __future__ import annotations
 
+import contextvars
 import uuid
 from typing import Sequence
 
@@ -41,10 +42,81 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import resolve_tenant_id
+from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 
 COOKIE_NAME = "active_company_id"
 COOKIE_MAX_AGE = 60 * 60 * 24 * 365  # one year — purely a UX preference
+
+# ContextVar bound by ``ActiveCompanyMiddleware`` for each HTML request.
+# Exists so the legacy ``_first_company()`` helper baked into every
+# router can become a thin delegate without changing its zero-argument
+# signature and forcing ~80 callsite edits across 26 routers (P0-5).
+#
+# Default ``None`` means "middleware did not bind it for this request" —
+# either the path was skipped (api/static/healthz) or tenant resolution
+# failed. In that case the compat shim falls back to the legacy
+# first-by-created-at lookup so tests / probes still work.
+_active_company_ctx: contextvars.ContextVar[Company | None] = (
+    contextvars.ContextVar("saebooks_active_company", default=None)
+)
+
+
+def current_active_company() -> Company | None:
+    """Return the contextvar-bound active company, or ``None``."""
+    return _active_company_ctx.get()
+
+
+def bind_active_company(company: Company | None) -> contextvars.Token:
+    """Set the contextvar; pair the returned token with ``reset_active_company``."""
+    return _active_company_ctx.set(company)
+
+
+def reset_active_company(token: contextvars.Token) -> None:
+    _active_company_ctx.reset(token)
+
+
+async def _first_by_created_fallback(*, allow_none: bool) -> Company | None:
+    """Legacy first-by-created-at lookup. Internal — used by ``first_company_compat``."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Company)
+            .where(Company.archived_at.is_(None))
+            .order_by(Company.created_at)
+        )
+        company = result.scalars().first()
+    if company is None and not allow_none:
+        raise HTTPException(500, "No active company")
+    return company
+
+
+async def first_company_compat() -> Company:
+    """Drop-in replacement for the legacy ``_first_company`` helper.
+
+    Reads the contextvar bound by ``ActiveCompanyMiddleware`` so the
+    user's actual cookie-selected company is honoured. Falls back to
+    first-by-created-at when middleware didn't bind it — preserving
+    the legacy single-company behaviour for tests and any non-HTML
+    request path that bypasses the middleware.
+    """
+    cur = current_active_company()
+    if cur is not None:
+        return cur
+    company = await _first_by_created_fallback(allow_none=False)
+    assert company is not None  # allow_none=False guarantees non-None
+    return company
+
+
+async def first_company_compat_or_none() -> Company | None:
+    """Like ``first_company_compat`` but returns ``None`` when empty.
+
+    Used by ``dashboard.py`` whose legacy helper returned ``Company | None``
+    rather than raising — the dashboard renders an empty state instead.
+    """
+    cur = current_active_company()
+    if cur is not None:
+        return cur
+    return await _first_by_created_fallback(allow_none=True)
 
 
 def _read_cookie_uuid(request: Request) -> uuid.UUID | None:

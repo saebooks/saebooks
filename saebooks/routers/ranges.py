@@ -13,6 +13,7 @@ from saebooks.models.user import UserRole
 from saebooks.services import accounts as svc
 from saebooks.services.authz import require_role
 from saebooks.web import templates
+from saebooks.services import active_company as active_svc
 
 router = APIRouter(
     prefix="/admin/ranges",
@@ -24,14 +25,7 @@ ACCOUNT_TYPE_CHOICES = [(t.value, t.value.replace("_", " ").title()) for t in Ac
 
 
 async def _first_company() -> Company:
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Company).where(Company.archived_at.is_(None)).order_by(Company.created_at)
-        )
-        company = result.scalars().first()
-        if company is None:
-            raise HTTPException(500, "No active company")
-        return company
+    return await active_svc.first_company_compat()
 
 
 @router.get("", response_class=HTMLResponse)

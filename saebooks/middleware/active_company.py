@@ -91,4 +91,14 @@ class ActiveCompanyMiddleware(BaseHTTPMiddleware):
                 request.state.active_company = active
                 request.state.companies_for_switcher = companies
 
+                # Bind the contextvar so the legacy ``_first_company()``
+                # helper baked into every router resolves to the same
+                # cookie-selected company without each callsite needing
+                # a request handle (see services/active_company.py).
+                token = active_svc.bind_active_company(active)
+                try:
+                    return await call_next(request)
+                finally:
+                    active_svc.reset_active_company(token)
+
         return await call_next(request)

@@ -21,6 +21,7 @@ from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.services import budgets as svc
 from saebooks.web import templates
+from saebooks.services import active_company as active_svc
 
 router = APIRouter(prefix="/budgets")
 
@@ -43,16 +44,7 @@ MONTH_LABELS = [
 
 
 async def _first_company() -> Company:
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Company)
-            .where(Company.archived_at.is_(None))
-            .order_by(Company.created_at)
-        )
-        company = result.scalars().first()
-        if company is None:
-            raise HTTPException(500, "No active company")
-        return company
+    return await active_svc.first_company_compat()
 
 
 async def _budgetable_accounts(company_id: uuid.UUID) -> list[Account]:

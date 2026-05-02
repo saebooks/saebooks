@@ -21,19 +21,13 @@ from saebooks.services import trust_reports as trust_svc
 from saebooks.services.fx import rates as fx_rates_svc
 from saebooks.services.fx import reval as fx_reval_svc
 from saebooks.web import templates
+from saebooks.services import active_company as active_svc
 
 router = APIRouter(prefix="/reports")
 
 
 async def _first_company() -> Company:
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Company).where(Company.archived_at.is_(None)).order_by(Company.created_at)
-        )
-        company = result.scalars().first()
-        if company is None:
-            raise HTTPException(500, "No active company")
-        return company
+    return await active_svc.first_company_compat()
 
 
 def _parse_date(raw: str | None) -> date | None:

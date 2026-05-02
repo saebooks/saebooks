@@ -19,18 +19,13 @@ from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 from saebooks.services import dashboard as svc
 from saebooks.web import templates
+from saebooks.services import active_company as active_svc
 
 router = APIRouter(prefix="/dashboard")
 
 
 async def _first_company() -> Company | None:
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Company)
-            .where(Company.archived_at.is_(None))
-            .order_by(Company.created_at)
-        )
-        return result.scalars().first()
+    return await active_svc.first_company_compat_or_none()
 
 
 @router.get("", response_class=HTMLResponse)

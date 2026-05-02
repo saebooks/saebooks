@@ -104,6 +104,11 @@ COPY --from=builder /opt/venv /opt/venv
 COPY --chown=saebooks:saebooks saebooks/ ./saebooks/
 # Bring in the generated gRPC stubs from the builder stage.
 COPY --from=builder --chown=saebooks:saebooks /build/saebooks/grpc_gen/ ./saebooks/grpc_gen/
+# pyproject.toml carries [tool.pytest.ini_options] (asyncio_mode = "auto").
+# Without it pytest-asyncio 1.3+ strict mode would refuse to collect async
+# tests that lack explicit @pytest.mark.asyncio decorators. Tiny file, no
+# meaningful image-bloat cost.
+COPY --chown=saebooks:saebooks pyproject.toml ./
 COPY --chown=saebooks:saebooks alembic.ini ./
 COPY --chown=saebooks:saebooks alembic/ ./alembic/
 COPY --chown=saebooks:saebooks entrypoint.sh ./entrypoint.sh
