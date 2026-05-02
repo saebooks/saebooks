@@ -28,6 +28,8 @@ from saebooks.api.v1.accounts import router as accounts_router
 from saebooks.api.v1.bank_accounts import router as bank_accounts_router
 from saebooks.api.v1.bank_rules import router as bank_rules_router
 from saebooks.api.v1.billing import router as billing_router
+from saebooks.api.v1.license import router as license_router
+from saebooks.api.v1.lodgement import router as lodgement_router
 from saebooks.api.v1.contact_public import router as contact_public_router
 from saebooks.api.v1.depreciation_models import router as depreciation_models_router
 from saebooks.api.v1.bank_statement_lines import router as bank_statement_lines_router
@@ -73,6 +75,9 @@ router.include_router(signup_router)
 # explicit dependency; /billing/webhook is unauthenticated (Stripe
 # auth is by signature, not bearer). The router itself isn't gated.
 router.include_router(billing_router)
+# saebooks-infrastructure §8 build #4 — licence snapshot/upload/refresh.
+router.include_router(license_router)
+router.include_router(lodgement_router)
 # Public contact form — unauthenticated, rate-limited per IP/hour.
 router.include_router(contact_public_router)
 router.include_router(contacts_router)

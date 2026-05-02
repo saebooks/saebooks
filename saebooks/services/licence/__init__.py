@@ -46,4 +46,11 @@ __all__ = [
     "check_employee_seat",
     "has_capacity_for_role_change",
     "resolve_licence",
+    "LicenseService",
+    "LicenseSnapshot",
 ]
+
+from saebooks.services.licence.service import (
+    LicenseService,
+    LicenseSnapshot,
+)

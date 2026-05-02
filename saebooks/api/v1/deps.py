@@ -178,3 +178,18 @@ async def get_active_company_id(
     if company is None:
         raise HTTPException(404, "No active company for tenant")
     return company.id
+
+
+async def get_lodgement():
+    """Return a ``LodgementService`` for the active licence.
+
+    Hot-resolves on each request so a ``LicenseService.reload()``
+    after an upload/refresh is picked up without restarting. The
+    factory is cheap (no I/O) so per-request cost is negligible.
+
+    Wired by ``saebooks.services.lodgement.factory.get_lodgement_service``
+    — see Build #8 of saebooks-infrastructure.md.
+    """
+    from saebooks.services.lodgement import get_lodgement_service
+
+    return get_lodgement_service()

@@ -9,6 +9,10 @@ from sqlalchemy.orm import Mapped, mapped_column
 from saebooks.db import Base
 from saebooks.models._scope import CompanyScoped
 
+# Default tenant uuid (migration 0040 seed); keeps single-tenant
+# constructors working. tenant_id + RLS added by migration 0083.
+_DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
 
 class JournalTemplate(CompanyScoped, Base):
     __tablename__ = "journal_templates"
@@ -18,6 +22,12 @@ class JournalTemplate(CompanyScoped, Base):
     )
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        default=lambda: _DEFAULT_TENANT_ID,
     )
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)

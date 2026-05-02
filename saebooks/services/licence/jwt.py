@@ -39,10 +39,13 @@ from saebooks.services.licence.models import LicenceSource, ResolvedLicence
 log = logging.getLogger(__name__)
 
 
-# Public key (Ed25519) used to verify portal-issued JWTs. Empty in
-# development builds; release builds bake in the real portal pubkey
-# via ``SAEBOOKS_PORTAL_PUBKEY``.
-PORTAL_PUBKEY_B64: str = ""
+# Public key (Ed25519) used to verify portal-issued JWTs. Read at
+# import time from the SAEBOOKS_PORTAL_PUBKEY env var. Empty ("")
+# means no portal pubkey is configured — the JWT driver returns None
+# in resolve(), so the resolver falls through to USB / community.
+# Set in production builds via the env (Compose passes it through).
+import os as _os
+PORTAL_PUBKEY_B64: str = _os.environ.get("SAEBOOKS_PORTAL_PUBKEY", "")
 
 # Maximum days past ``exp`` we'll still accept a JWT as "read-only".
 # CHARTER §6.6: day 31-60 = read-only; past 60, drop to community.
