@@ -12,25 +12,23 @@ This middleware does the lookup once per HTML request:
 * Skip non-HTML paths (``/static``, ``/api``, ``/healthz``,
   ``/metrics``, ``/webhooks``, ``/favicon.ico``) so the DB isn't hit
   for asset / probe traffic.
-* Skip the request entirely if tenant resolution fails — that means
-  the request is anonymous (e.g. a probe before auth has run); the
-  switcher just won't render. We don't want middleware blowing up
-  legitimate health checks.
-* Resolve the tenant via the same path API routes use
-  (``resolve_tenant_id``) so a request that lacks a JWT in production
-  doesn't get silently bound to ``DEFAULT_TENANT_ID`` — the resolver
-  will raise 401 in that case, which we catch and treat as "no active
-  company to stash".
+* Resolve the tenant: prefer ``resolve_tenant_id`` (in case an
+  earlier middleware already stamped ``request.state.jwt_claims``),
+  otherwise decode the bearer JWT inline. ``require_bearer`` runs as
+  a Depends, NOT a middleware, so by the time we run, jwt_claims is
+  not yet stamped — without an inline decode we'd never resolve the
+  tenant on the very first request after a fresh process start.
 * Cache the resolved tuple on ``request.state`` and continue.
 
-The middleware does NOT touch the contextvar in
-``saebooks.services.tenant``. That contextvar is reserved for the
-ORM-listener defence-in-depth; binding it here would change query
-behaviour in every code path and would need its own correctness pass.
+The middleware also binds the contextvar in
+``saebooks.services.active_company`` so every router's legacy
+``_first_company()`` helper resolves to the cookie-selected company
+without each callsite needing the request handle (P0-5).
 """
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Awaitable, Callable
 
 from fastapi import HTTPException
@@ -56,6 +54,37 @@ _SKIP_PREFIXES = (
 )
 
 
+def _tenant_from_bearer(request: Request) -> uuid.UUID | None:
+    """Decode the bearer JWT inline and return its tenant_id claim.
+
+    Returns ``None`` when there's no Authorization header, the header
+    isn't a Bearer, the token isn't a valid JWT, or the token is the
+    static dev/test token (which has no claims).
+    """
+    auth = request.headers.get("authorization") or ""
+    if not auth.lower().startswith("bearer "):
+        return None
+    raw = auth[7:].strip()
+    if not raw:
+        return None
+    # Local import — avoids circular import on app boot.
+    from saebooks.services.jwt_tokens import (  # noqa: PLC0415
+        JWTError,
+        decode_access_token,
+    )
+    try:
+        claims = decode_access_token(raw)
+    except JWTError:
+        return None
+    tenant_raw = claims.get("tenant_id")
+    if not tenant_raw:
+        return None
+    try:
+        return uuid.UUID(str(tenant_raw))
+    except (TypeError, ValueError):
+        return None
+
+
 class ActiveCompanyMiddleware(BaseHTTPMiddleware):
     """Stash ``request.state.active_company`` + ``companies_for_switcher``."""
 
@@ -65,40 +94,43 @@ class ActiveCompanyMiddleware(BaseHTTPMiddleware):
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
         path = request.url.path
-        if not any(path.startswith(p) for p in _SKIP_PREFIXES):
-            try:
-                tenant_id = resolve_tenant_id(request)
-            except HTTPException:
-                # Anonymous / no JWT in prod — no switcher to render.
-                tenant_id = None
+        if any(path.startswith(p) for p in _SKIP_PREFIXES):
+            return await call_next(request)
 
-            if tenant_id is not None:
-                try:
-                    async with AsyncSessionLocal() as session:
-                        active, companies = (
-                            await active_svc.resolve_active_with_options(
-                                session, request, tenant_id
-                            )
-                        )
-                except HTTPException:
-                    # No companies in tenant — let the route handle it.
-                    active, companies = None, []
-                except Exception as exc:  # pragma: no cover - safety net
-                    # Don't take the whole site down because the
-                    # switcher couldn't resolve. Log + fall through.
-                    _LOG.warning("active company lookup failed: %s", exc)
-                    active, companies = None, []
-                request.state.active_company = active
-                request.state.companies_for_switcher = companies
+        # Tenant resolution: try the ordinary path first (jwt_claims
+        # may already be stamped on later middleware in the chain),
+        # and fall back to decoding the bearer header inline.
+        tenant_id: uuid.UUID | None
+        try:
+            tenant_id = resolve_tenant_id(request)
+        except HTTPException:
+            tenant_id = _tenant_from_bearer(request)
 
-                # Bind the contextvar so the legacy ``_first_company()``
-                # helper baked into every router resolves to the same
-                # cookie-selected company without each callsite needing
-                # a request handle (see services/active_company.py).
-                token = active_svc.bind_active_company(active)
-                try:
-                    return await call_next(request)
-                finally:
-                    active_svc.reset_active_company(token)
+        if tenant_id is None:
+            return await call_next(request)
 
-        return await call_next(request)
+        try:
+            async with AsyncSessionLocal() as session:
+                active, companies = (
+                    await active_svc.resolve_active_with_options(
+                        session, request, tenant_id
+                    )
+                )
+        except HTTPException:
+            active, companies = None, []
+        except Exception as exc:  # pragma: no cover - safety net
+            _LOG.warning("active company lookup failed: %s", exc)
+            active, companies = None, []
+
+        request.state.active_company = active
+        request.state.companies_for_switcher = companies
+
+        # Bind the contextvar so the legacy ``_first_company()``
+        # helper baked into every router resolves to the same
+        # cookie-selected company without each callsite needing a
+        # request handle (see services/active_company.py).
+        token = active_svc.bind_active_company(active)
+        try:
+            return await call_next(request)
+        finally:
+            active_svc.reset_active_company(token)

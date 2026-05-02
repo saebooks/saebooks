@@ -13,6 +13,7 @@ from saebooks.api.errors import register_handlers
 from saebooks.api.v1 import router as api_v1_router
 from saebooks.config import settings
 from saebooks.grpc_server import serve as grpc_serve
+from saebooks.middleware.active_company import ActiveCompanyMiddleware
 from saebooks.middleware.auth import ForwardAuthMiddleware
 from saebooks.middleware.request_id import RequestIdMiddleware
 from saebooks.routers import (
@@ -99,6 +100,11 @@ def create_app() -> FastAPI:
     # uptime probes + webhooks work without SSO. Dev override via
     # SAEBOOKS_DEV_USER + SAEBOOKS_DEV_ROLE env vars.
     app.add_middleware(ForwardAuthMiddleware)
+    # ActiveCompanyMiddleware reads the active_company_id cookie and binds
+    # the chosen company on a contextvar so every router's
+    # _first_company() helper resolves to the cookie-selected company
+    # rather than the legacy first-by-created-at fallback (P0-5).
+    app.add_middleware(ActiveCompanyMiddleware)
 
     @app.get("/")
     async def root() -> RedirectResponse:
