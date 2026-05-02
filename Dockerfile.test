@@ -1,0 +1,16 @@
+# Test image — extends production image with dev deps so pytest can run.
+# Built one-off; not used by docker-compose.yml. Production image stays slim.
+FROM saebooks-api:latest
+USER root
+RUN pip install --no-cache-dir \
+        'pytest>=8.3' \
+        'pytest-asyncio>=0.24' \
+        'httpx>=0.27' \
+        'hypothesis>=6.112' \
+        'ruff>=0.7' \
+        'mypy>=1.13' \
+        'respx>=0.22'
+# Pick up the patched entrypoint.sh that supports one-shot args.
+COPY --chown=saebooks:saebooks entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
+USER saebooks
