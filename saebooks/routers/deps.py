@@ -91,6 +91,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from saebooks.api.v1.auth import resolve_tenant_id
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.user import User
+from saebooks.services import active_company as active_svc
 
 # Importing the v1 deps module has the side effect of registering the
 # ``after_begin`` listener on the synchronous Session class. Without
@@ -143,8 +144,11 @@ async def get_web_session(request: Request) -> AsyncIterator[AsyncSession]:
     """
     tenant_id = resolve_tenant_id(request)
     async with AsyncSessionLocal() as session:
-        # Storing as str — the listener interpolates verbatim into
-        # the SET LOCAL statement. ``resolve_tenant_id`` returned a
-        # ``uuid.UUID`` so the format is constrained and safe.
         session.info["tenant_id"] = str(tenant_id)
+        # Stamp company_id when ActiveCompanyMiddleware has already bound
+        # the contextvar (web requests only). The after_begin listener then
+        # issues SET LOCAL app.current_company_id on every transaction.
+        active = active_svc.current_active_company()
+        if active is not None:
+            session.info["company_id"] = str(active.id)
         yield session

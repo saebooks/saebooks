@@ -91,14 +91,15 @@ def _set_current_tenant_on_begin(
     ``session.commit()`` triggers a new BEGIN).
     """
     tid = session.info.get("tenant_id")
-    if tid is None:
-        return
-    # ``after_begin`` listeners receive the SQLAlchemy ``Connection``
-    # for the just-started transaction. The synchronous Connection
-    # offers ``execute(text(...))`` which we use directly.
-    connection.execute(  # type: ignore[attr-defined]
-        text(f"SET LOCAL app.current_tenant = '{tid}'")
-    )
+    if tid is not None:
+        connection.execute(  # type: ignore[attr-defined]
+            text(f"SET LOCAL app.current_tenant = '{tid}'")
+        )
+    cid = session.info.get("company_id")
+    if cid is not None:
+        connection.execute(  # type: ignore[attr-defined]
+            text(f"SET LOCAL app.current_company_id = '{cid}'")
+        )
 
 
 # Register once at import time. Targeting the ``Session`` class (the

@@ -224,6 +224,37 @@ async def _validate_accounts_tenant(
         )
 
 
+async def _validate_lines_company(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    lines: list[dict[str, Any]],
+) -> None:
+    """Raise JournalEntryError when any line account or tax_code belongs to a different company."""
+    from saebooks.models.tax_code import TaxCode  # local to avoid circular at module level
+
+    if not lines:
+        return
+    for ln in lines:
+        acct_id = uuid.UUID(str(ln["account_id"]))
+        result = await session.execute(
+            select(Account.id).where(
+                Account.id == acct_id, Account.company_id == company_id
+            )
+        )
+        if result.scalar_one_or_none() is None:
+            raise JournalEntryError(f"account {acct_id} not found")
+        tc_raw = ln.get("tax_code_id")
+        if tc_raw:
+            tc_id = uuid.UUID(str(tc_raw))
+            tc_result = await session.execute(
+                select(TaxCode.id).where(
+                    TaxCode.id == tc_id, TaxCode.company_id == company_id
+                )
+            )
+            if tc_result.scalar_one_or_none() is None:
+                raise JournalEntryError(f"tax_code {tc_id} not found")
+
+
 def _assert_lines_balanced(lines: list[dict[str, Any]], ref: str = "entry") -> None:
     """Raise JournalEntryError if the lines list is not debit-credit balanced.
 
@@ -261,6 +292,7 @@ async def create(
     if lines:
         _assert_lines_balanced(lines, reference or "(pending-ref)")
         await _validate_accounts_tenant(session, tenant_id, lines)
+        await _validate_lines_company(session, company_id, lines)
 
     ref = reference or await next_ref(session)
 

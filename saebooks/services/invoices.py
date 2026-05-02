@@ -100,13 +100,23 @@ def _compute_line_totals(
 
 
 async def _resolve_tax_code(
-    session: AsyncSession, tax_code_id: uuid.UUID | None
+    session: AsyncSession,
+    tax_code_id: uuid.UUID | None,
+    company_id: uuid.UUID | None = None,
 ) -> TaxCode | None:
     if tax_code_id is None:
         return None
-    tc = await session.get(TaxCode, tax_code_id)
+    if company_id is not None:
+        result = await session.execute(
+            select(TaxCode).where(
+                TaxCode.id == tax_code_id, TaxCode.company_id == company_id
+            )
+        )
+        tc = result.scalars().first()
+    else:
+        tc = await session.get(TaxCode, tax_code_id)
     if tc is None:
-        raise InvoiceError(f"Unknown tax code {tax_code_id}")
+        raise InvoiceError(f"tax_code {tax_code_id} not found")
     return tc
 
 
@@ -129,6 +139,13 @@ async def create_draft(
     fx_rate: Decimal | None = None,
     settlement_date: date | None = None,
 ) -> Invoice:
+    ct_chk = await session.execute(
+        select(Contact.id).where(
+            Contact.id == contact_id, Contact.company_id == company_id
+        )
+    )
+    if ct_chk.scalar_one_or_none() is None:
+        raise InvoiceError(f"contact {contact_id} not found")
     inv = Invoice(
         company_id=company_id,
         contact_id=contact_id,
@@ -145,7 +162,7 @@ async def create_draft(
     await session.flush()
 
     if lines:
-        await _replace_lines(session, inv, lines)
+        await _replace_lines(session, inv, lines, company_id=company_id)
 
     await _recalc(session, inv)
     await session.commit()
@@ -153,7 +170,11 @@ async def create_draft(
 
 
 async def _replace_lines(
-    session: AsyncSession, inv: Invoice, lines: list[dict[str, object]]
+    session: AsyncSession,
+    inv: Invoice,
+    lines: list[dict[str, object]],
+    *,
+    company_id: uuid.UUID | None = None,
 ) -> None:
     # Hard-delete all existing lines via SQL so the back-populated
     # collection doesn't hold stale rows in the identity map.
@@ -194,6 +215,14 @@ async def _replace_lines(
             if item is None:
                 raise InvoiceError(f"Unknown item {item_id}")
             account_id = item.income_account_id
+        elif company_id is not None:
+            acct_chk = await session.execute(
+                select(Account.id).where(
+                    Account.id == account_id, Account.company_id == company_id
+                )
+            )
+            if acct_chk.scalar_one_or_none() is None:
+                raise InvoiceError(f"account {account_id} not found")
 
         ssd = raw.get("service_start_date")
         sed = raw.get("service_end_date")
@@ -245,7 +274,7 @@ async def _replace_lines(
             retention_pct=retention_pct,
             is_trade_in=is_trade_in,
         )
-        tax_code = await _resolve_tax_code(session, line_input.tax_code_id)
+        tax_code = await _resolve_tax_code(session, line_input.tax_code_id, company_id)
         subtotal, tax, total = _compute_line_totals(line_input, tax_code)
         session.add(
             InvoiceLine(

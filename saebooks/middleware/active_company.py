@@ -39,6 +39,7 @@ from starlette.responses import Response
 from saebooks.api.v1.auth import resolve_tenant_id
 from saebooks.db import AsyncSessionLocal
 from saebooks.services import active_company as active_svc
+from saebooks.services import tenant as tenant_svc
 
 _LOG = logging.getLogger("saebooks.active_company_mw")
 
@@ -125,12 +126,15 @@ class ActiveCompanyMiddleware(BaseHTTPMiddleware):
         request.state.active_company = active
         request.state.companies_for_switcher = companies
 
-        # Bind the contextvar so the legacy ``_first_company()``
-        # helper baked into every router resolves to the same
-        # cookie-selected company without each callsite needing a
-        # request handle (see services/active_company.py).
+        # Bind the active-company contextvar (legacy _first_company compat)
+        # and the ORM scope guard contextvar (services/tenant.py). The
+        # scope guard injects WHERE company_id = :cid into CompanyScoped
+        # SELECTs, while get_web_session stamps session.info["company_id"]
+        # so the after_begin listener issues SET LOCAL app.current_company_id.
         token = active_svc.bind_active_company(active)
+        scope_token = tenant_svc.set_current_company(active.id if active else None)
         try:
             return await call_next(request)
         finally:
             active_svc.reset_active_company(token)
+            tenant_svc.reset_current_company(scope_token)

@@ -81,13 +81,23 @@ def _compute_line_totals(
 
 
 async def _resolve_tax_rate(
-    session: AsyncSession, tax_code_id: uuid.UUID | None
+    session: AsyncSession,
+    tax_code_id: uuid.UUID | None,
+    company_id: uuid.UUID | None = None,
 ) -> Decimal:
     if tax_code_id is None:
         return Decimal("0")
-    tc = await session.get(TaxCode, tax_code_id)
+    if company_id is not None:
+        result = await session.execute(
+            select(TaxCode).where(
+                TaxCode.id == tax_code_id, TaxCode.company_id == company_id
+            )
+        )
+        tc = result.scalars().first()
+    else:
+        tc = await session.get(TaxCode, tax_code_id)
     if tc is None:
-        raise BillError(f"Unknown tax code {tax_code_id}")
+        raise BillError(f"tax_code {tax_code_id} not found")
     return Decimal(str(tc.rate or 0))
 
 
@@ -130,7 +140,7 @@ async def create_draft(
     await session.flush()
 
     if lines:
-        await _replace_lines(session, bill, lines)
+        await _replace_lines(session, bill, lines, company_id=company_id)
 
     await _recalc(session, bill)
     await session.commit()
@@ -138,7 +148,11 @@ async def create_draft(
 
 
 async def _replace_lines(
-    session: AsyncSession, bill: Bill, lines: list[dict[str, object]]
+    session: AsyncSession,
+    bill: Bill,
+    lines: list[dict[str, object]],
+    *,
+    company_id: uuid.UUID | None = None,
 ) -> None:
     # Hard-delete existing lines via SQL so the identity map doesn't
     # carry stale rows — same pattern as invoices.
@@ -178,6 +192,14 @@ async def _replace_lines(
             if item is None:
                 raise BillError(f"Unknown item {item_id}")
             account_id = item.inventory_account_id
+        elif company_id is not None:
+            acct_chk = await session.execute(
+                select(Account.id).where(
+                    Account.id == account_id, Account.company_id == company_id
+                )
+            )
+            if acct_chk.scalar_one_or_none() is None:
+                raise BillError(f"account {account_id} not found")
 
         raw_ret = raw.get("retention_pct")
         retention_pct = (
@@ -204,7 +226,7 @@ async def _replace_lines(
             retention_pct=retention_pct,
             tracking_vehicle_id=tracking_vehicle_id or None,
         )
-        tax_rate = await _resolve_tax_rate(session, line_input.tax_code_id)
+        tax_rate = await _resolve_tax_rate(session, line_input.tax_code_id, company_id)
         subtotal, tax, total = _compute_line_totals(line_input, tax_rate)
         session.add(
             BillLine(

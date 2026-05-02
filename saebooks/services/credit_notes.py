@@ -73,13 +73,23 @@ def _compute_line_totals(
 
 
 async def _resolve_tax_rate(
-    session: AsyncSession, tax_code_id: uuid.UUID | None
+    session: AsyncSession,
+    tax_code_id: uuid.UUID | None,
+    company_id: uuid.UUID | None = None,
 ) -> Decimal:
     if tax_code_id is None:
         return Decimal("0")
-    tc = await session.get(TaxCode, tax_code_id)
+    if company_id is not None:
+        result = await session.execute(
+            select(TaxCode).where(
+                TaxCode.id == tax_code_id, TaxCode.company_id == company_id
+            )
+        )
+        tc = result.scalars().first()
+    else:
+        tc = await session.get(TaxCode, tax_code_id)
     if tc is None:
-        raise CreditNoteError(f"Unknown tax code {tax_code_id}")
+        raise CreditNoteError(f"tax_code {tax_code_id} not found")
     return Decimal(str(tc.rate or 0))
 
 
@@ -90,7 +100,11 @@ def _as_uuid(value: object) -> uuid.UUID:
 
 
 async def _replace_lines(
-    session: AsyncSession, cn: CreditNote, lines: list[dict[str, object]]
+    session: AsyncSession,
+    cn: CreditNote,
+    lines: list[dict[str, object]],
+    *,
+    company_id: uuid.UUID | None = None,
 ) -> None:
     from sqlalchemy import delete as sa_delete
     await session.execute(
@@ -114,7 +128,7 @@ async def _replace_lines(
             unit_price=Decimal(str(raw.get("unit_price", 0))),
             discount_pct=Decimal(str(raw.get("discount_pct", 0))),
         )
-        tax_rate = await _resolve_tax_rate(session, line_input.tax_code_id)
+        tax_rate = await _resolve_tax_rate(session, line_input.tax_code_id, company_id)
         subtotal, tax, total = _compute_line_totals(line_input, tax_rate)
         session.add(
             CreditNoteLine(
@@ -170,7 +184,7 @@ async def create_draft(
     session.add(cn)
     await session.flush()
     if lines:
-        await _replace_lines(session, cn, lines)
+        await _replace_lines(session, cn, lines, company_id=company_id)
     await _recalc(session, cn)
     await session.commit()
     return await get(session, cn.id)
