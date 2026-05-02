@@ -56,8 +56,12 @@ Request:
 }
 ```
 
+Notes:
+- `submitter_abn` — active-company ABN, sourced client-side from `CompanySettings`.
+- The body field name is per-envelope; idempotency is enforced on `(license_id, payevent_id)`.
+
 Behaviour:
-1. Verify licence token, edition ≥ pro, has `ato_sbr` flag.
+1. Verify licence token, edition >= pro, has `ato_sbr` flag.
 2. Verify `envelope_hash == sha256(b64decode(envelope_xml))`.
 3. Sign envelope with SAE Engineering's Machine Credential.
 4. POST ebMS3 to ATO SBR endpoint with SSID + ABN.
@@ -69,9 +73,10 @@ Behaviour:
      "status": "accepted",
      "ato_receipt_id": "<from ATO>",
      "ato_timestamp": "2026-05-02T12:00:00Z",
-     "warnings": []
+     "warnings": [{"code": "W001", "message": "Late lodgement"}]
    }
    ```
+   `warnings` is a list of `{code: str, message: str}` objects; empty list when none.
 
 Idempotency: if the same `payevent_id + license_id` is submitted again
 within 24h, return the cached prior receipt instead of double-lodging.
@@ -82,37 +87,116 @@ Status codes:
 - 400 — envelope hash mismatch / malformed envelope.
 - 401 — missing/invalid licence token.
 - 403 — edition does not include `ato_sbr`.
-- 422 — ATO rejected (validation error). Body includes ATO error
-  list verbatim for the client UI.
+- 422 — ATO rejected (validation error). Body:
+  ```json
+  {
+    "detail": "ATO rejected the lodgement",
+    "ato_errors": [
+      {"code": "CMN.ATO.GEN.XML05", "message": "Invalid ABN", "field": "Payer/ABN"}
+    ]
+  }
+  ```
+  `ato_errors` is `[{code: str, message: str, field?: str}]`; `field` is omitted
+  when the ATO error is not tied to a specific element.
 - 502 — ATO SBR endpoint unreachable / 5xx. Client should retry with
   backoff.
 
 ### `POST /api/v1/bas/lodge`
 
-Same shape as `/stp/lodge` but for BAS envelopes. `metadata` carries
-quarter / period.
+Same shape as `/stp/lodge` but for BAS envelopes. The idempotency field is
+`period_id` (not `payevent_id`); idempotency enforced on `(license_id, period_id)`.
+
+Request body differences:
+```json
+{
+  "period_id": "client-side UUID for idempotency",
+  "metadata": {
+    "bas_period": "2026-Q1",
+    "gst_payable_cents": 12000
+  }
+}
+```
 
 ### `POST /api/v1/tpar/lodge`
 
-Same shape for TPAR.
+Same shape for TPAR. The idempotency field is `year_id`; enforced on
+`(license_id, year_id)`.
+
+Request body differences:
+```json
+{
+  "year_id": "client-side UUID for idempotency",
+  "metadata": {
+    "financial_year": "2025-26",
+    "contractor_count": 4
+  }
+}
+```
 
 ### `POST /api/v1/superstream/send`
 
-Same shape for SuperStream contribution messages. Routed through
+Same shape for SuperStream contribution messages. The idempotency field is
+`message_id`; enforced on `(license_id, message_id)`. Routed through
 SAE Engineering's MessagingProvider relationship (TBD when SuperStream
 work begins).
+
+Request body differences:
+```json
+{
+  "message_id": "client-side UUID for idempotency",
+  "metadata": {
+    "contribution_period_end": "2026-03-31",
+    "member_count": 3
+  }
+}
+```
 
 ### `POST /api/v1/abr/lookup`
 
 Looks up ABR data using SAE Engineering's API quota.
 
 Request: `{"abn": "12345678901"}`
-Response: `{"abn":"...","entity_name":"...","gst_status":"...","status":"..."}` 
+
+Response (mirrors `AbrLookup` cache schema in `saebooks/services/abr/enrich.py`):
+```json
+{
+  "abn": "87 744 586 592",
+  "entity_name": "Sauer Pty Ltd ATF Saueesti Trust",
+  "entity_type": "Discretionary Investment Trust",
+  "gst_status": "Registered",
+  "gst_effective_from": "2024-02-15",
+  "abn_status": "Active",
+  "abn_status_effective_from": "2024-02-15",
+  "address_state": "QLD",
+  "address_postcode": "4350"
+}
+```
+
+`gst_status` is `"Registered"` when `gst_effective_from` is non-null, else `"Not registered"`.
+`entity_type` maps to `EntityTypeName` (human-readable) from the raw ABR envelope.
+`abn_status_effective_from` maps to `AbnStatusEffectiveFrom` from the raw ABR envelope.
 
 ### `GET /api/v1/audit/me`
 
 Returns the most recent 100 audit rows for the authenticated licence.
 Customer can use this to verify what's been lodged.
+
+Row schema:
+```json
+{
+  "id": 1234,
+  "route": "/api/v1/stp/lodge",
+  "payevent_id": "client-supplied UUID (field name matches the route's id field)",
+  "payload_hash": "sha256hex",
+  "ato_receipt_id": "<from ATO, or null if stub/pending>",
+  "ato_status": "accepted",
+  "ts": "2026-05-03T02:00:00Z"
+}
+```
+
+`payevent_id` here is the generic label for the per-route ID field
+(`payevent_id` / `period_id` / `year_id` / `message_id`). `raw_response_jsonb`
+is stored server-side only and is NOT returned to the client.
 
 ### `GET /healthz`
 
@@ -143,7 +227,9 @@ behind the existing route when the SBR onboarding completes.
   payload_hash, ato_receipt_id, ato_status, raw_response_jsonb,
   client_ip, ts)`
 - `idempotency` — `(license_id, payevent_id, ato_receipt_id, ts)`
-  with `(license_id, payevent_id)` unique.
+  with `(license_id, payevent_id)` unique. The `payevent_id` column
+  holds whichever per-route ID field was supplied (`payevent_id`,
+  `period_id`, `year_id`, or `message_id`).
 
 Retention: ATO requires 5-year retention for STP records. Bank-feed
 audit rows retained per SISS contract terms.
@@ -159,3 +245,8 @@ lodge.saebooks.com.au {
 Host port `18310` (free as of 2026-05-02).
 
 No Authentik. Licence-token auth is the only auth.
+
+## Changelog
+
+- **2026-05-03** — locked 6 ambiguities raised by Build #8 (payevent_id naming,
+  submitter_abn source, warnings/ato_errors shapes, abr lookup keys, audit row schema).
