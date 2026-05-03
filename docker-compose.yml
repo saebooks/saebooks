@@ -116,9 +116,9 @@ services:
 
 networks:
   # 'default' stays on the compose-managed bridge so app↔db keeps
-  # working; revproxy is the external shared network Caddy + Authentik
-  # use so books.sauer.com.au can forward-auth to authentik-server and
-  # reverse-proxy to this container by its compose name.
+  # working; revproxy is the external shared network Caddy uses so
+  # app.saebooks.com.au can reverse-proxy to this container by its
+  # compose name.
   default:
   revproxy:
     external: true

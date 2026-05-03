@@ -249,10 +249,9 @@ class Settings(BaseSettings):
 
 
     # ---------------------------------------------------------------- #
-    # OAuth2 Customer Authentication (Phase 2)                         #
+    # OAuth2 Customer Authentication                                   #
     # ---------------------------------------------------------------- #
     # Customer-facing OAuth2 providers (GitHub, Microsoft, Google).
-    # Keep Authentik internal-only for admin access.
     # When any provider client_id is empty, that provider is disabled.
     # SAEBOOKS_OAUTH_ENABLED gate allows gradual rollout.
 

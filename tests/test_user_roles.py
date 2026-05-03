@@ -382,57 +382,6 @@ async def test_bootstrap_admin_honours_removal_from_env(
         assert u2.role == "readonly"
 
 
-async def test_middleware_accepts_x_authentik_username_fallback(
-    client: AsyncClient, unique_username: str
-) -> None:
-    """Authentik outposts forward identity as ``X-authentik-username``
-    by default; ``Remote-User`` is only set when the proxy provider
-    has "Return the user as Remote-User header" enabled. Middleware
-    must accept either."""
-
-    r = await client.get(
-        "/admin/whoami",
-        headers={
-            "X-authentik-username": unique_username,
-            "X-authentik-email": "ak@example.com",
-            "X-authentik-name": "AK User",
-        },
-    )
-    assert r.status_code == 200
-    body = r.json()
-    assert body["username"] == unique_username
-    assert body["email"] == "ak@example.com"
-
-    async with AsyncSessionLocal() as session:
-        u = (
-            await session.execute(
-                select(User).where(User.username == unique_username)
-            )
-        ).scalar_one()
-        assert u.display_name == "AK User"
-
-
-async def test_middleware_prefers_remote_user_over_x_authentik(
-    client: AsyncClient, unique_username: str
-) -> None:
-    """When both header sets are present, Remote-User wins — it's the
-    explicit opt-in and matches what the admin configured."""
-
-    r = await client.get(
-        "/admin/whoami",
-        headers={
-            "Remote-User": unique_username,
-            "X-authentik-username": "someone-else",
-        },
-    )
-    assert r.status_code == 200
-    assert r.json()["username"] == unique_username
-
-    # The unique cleanup fixture will drop unique_username; if the
-    # wrong header won we'd have inserted 'someone-else' instead —
-    # leak it explicitly so teardown is robust.
-    await _cleanup_user("someone-else")
-
 
 async def test_bootstrap_admins_ignores_empty_and_whitespace(
     monkeypatch: pytest.MonkeyPatch,

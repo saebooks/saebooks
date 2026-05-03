@@ -149,7 +149,7 @@ async def login(body: LoginRequest) -> TokenResponse:
         raise _INVALID
 
     if user.password_hash is None:
-        # Account exists but has no local password (Authentik-only user).
+        # Account exists but has no local password (OAuth-only user).
         # Run a dummy check for timing safety.
         verify_password("dummy", "pbkdf2sha256$260000$0000$0000")
         raise _INVALID

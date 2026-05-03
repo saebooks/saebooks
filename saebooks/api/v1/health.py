@@ -17,7 +17,7 @@ Both routes are mounted WITHOUT the ``require_bearer`` dependency that
 every other v1 router uses — they are intentionally open.  They are
 still inside the ``/api/`` prefix which the ForwardAuthMiddleware
 treats as open (see ``saebooks/middleware/auth.py``
-``OPEN_PATH_PREFIXES``) so no Authentik user upsert is triggered.
+``OPEN_PATH_PREFIXES``) so no JWT decode is triggered for probes.
 
 Nothing sensitive is returned.  ``edition`` is derived from
 ``SAEBOOKS_EDITION`` (defaults to ``community``) and is already

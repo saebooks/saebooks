@@ -558,7 +558,7 @@ async def users_list(
     request: Request,
     _admin: User = Depends(require_role(UserRole.ADMIN)),  # noqa: B008
 ) -> HTMLResponse:
-    """List every Authentik-authenticated user that's hit the app."""
+    """List every user that's signed in to the app."""
     async with AsyncSessionLocal() as session:
         users = (
             await session.execute(

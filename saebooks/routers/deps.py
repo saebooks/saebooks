@@ -4,9 +4,9 @@ The two callables exported here:
 
 * ``get_current_user`` — long-standing helper used by ``auth_router``
   and a handful of other routes; resolves the User row that
-  ``ForwardAuthMiddleware`` (or the JWT bearer fallback) stamped onto
-  ``request.state``. Kept here so a single import path serves every
-  router.
+  ``ForwardAuthMiddleware`` stamped onto ``request.state`` after
+  decoding the session JWT. Kept here so a single import path serves
+  every router.
 
 * ``get_web_session`` — request-scoped ``AsyncSession`` that binds
   ``app.current_tenant`` for every transaction the handler executes.
@@ -20,11 +20,11 @@ Why a separate dep instead of reusing v1.deps.get_session
 The v1 dep is part of the JSON-API contract and depends on
 ``require_bearer`` (and the JSON 401-on-missing-tenant behaviour).
 HTML routes don't necessarily run ``require_bearer`` — they're gated
-by Authentik forward-auth via ``ForwardAuthMiddleware``, which stamps
-``request.state.jwt_claims = {"tenant_id": str(user.tenant_id)}`` for
-SSO users and via the JWT bearer fallback for the saebooks-web
-in-process client. Either way, ``resolve_tenant_id(request)`` already
-finds the tenant on every authenticated HTML request.
+by ``ForwardAuthMiddleware``, which decodes the session JWT and
+stamps ``request.state.jwt_claims = {"tenant_id": str(user.tenant_id)}``
+for the saebooks-web in-process client. Either way,
+``resolve_tenant_id(request)`` already finds the tenant on every
+authenticated HTML request.
 
 What this dep gets us
 ---------------------
@@ -49,7 +49,7 @@ Tenant resolution failure
 If ``resolve_tenant_id`` raises (no JWT claims and not in dev),
 the exception bubbles up from this dep as a 401 — consistent with
 the v1 behaviour and with the rule "no tenant ⇒ no query". Without
-this, a forward-auth misconfig would silently fall through to
+this, a session-JWT misconfig would silently fall through to
 "FORCE RLS returns zero rows" which looks like a benign empty
 state in the UI rather than the auth failure it actually is.
 
@@ -105,8 +105,8 @@ async def get_current_user(request: Request) -> User:
     """Return the authenticated user, or raise 401.
 
     Reads ``request.state.user`` populated by
-    ``saebooks.middleware.auth.ForwardAuthMiddleware`` — either from
-    Authentik forward-auth headers or from the JWT bearer fallback.
+    ``saebooks.middleware.auth.ForwardAuthMiddleware`` after the
+    session JWT was decoded.
     """
     user = getattr(request.state, "user", None)
     if user is None:

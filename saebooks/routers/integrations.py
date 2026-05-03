@@ -9,8 +9,8 @@ Three separate surfaces:
   module. Paths are under ``/contacts/...`` so they share the
   contact-form UX.
 * ``POST /webhooks/stripe`` — public Stripe webhook endpoint. No auth
-  gate beyond the HMAC signature verifier (auth via Authentik would
-  break the webhook since Stripe can't carry forward-auth cookies).
+  gate beyond the HMAC signature verifier — the webhook path is in
+  ``OPEN_PATH_PREFIXES`` so the JWT middleware doesn't intercept it.
 * ``GET /admin/integrations/`` — landing page linking to each flow +
   status badges.
 * ``POST /admin/integrations/ato-prefill`` — stub, returns 501 with a

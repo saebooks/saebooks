@@ -244,7 +244,7 @@ lodge.saebooks.com.au {
 
 Host port `18310` (free as of 2026-05-02).
 
-No Authentik. Licence-token auth is the only auth.
+Licence-token auth is the only auth.
 
 ## Changelog
 

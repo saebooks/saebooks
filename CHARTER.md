@@ -584,9 +584,9 @@ kind of app:
   React, no bundler in the critical path. The desktop-density UI is
   part of the product.
 - **Database:** Postgres 15+ (or SQLite 3.38+ for the tiny deployments).
-- **Auth:** Authentik OIDC / forward-auth via Caddy for our hosted
-  deployments. Self-hosted users can use any OIDC provider or local
-  username/password.
+- **Auth:** Email/password + magic link, plus OAuth (GitHub, Google,
+  Microsoft) for our hosted deployments. Self-hosted users can use
+  any OIDC provider or local username/password.
 - **PDF rendering:** reuse the Chromium renderer from lei-agent.
 - **Background jobs:** APScheduler or RQ, added only when a feature
   needs it. No Celery unless we're forced.

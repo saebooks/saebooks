@@ -22,7 +22,7 @@ The API-layer admin routes (/admin/audit, /admin/sql) use
 ``require_staff()`` from authz.py which reads ``request.state.user``
 populated by ForwardAuthMiddleware.  The simplest way to trigger the
 middleware path in tests is to send a ``Remote-User`` header (the
-Authentik forward-auth shape the middleware expects).
+test-only trusted-header shape the middleware expects).
 
 User setup
 ----------

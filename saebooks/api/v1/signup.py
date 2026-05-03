@@ -291,9 +291,8 @@ async def signup(body: SignupRequest) -> MessageResponse:
         await session.flush()
 
         # Username must be unique. Use the email as username — it's
-        # what login.py keys off, and matches how authentik-bridged
-        # users were named historically. If somebody else has the
-        # same username (case-mismatch), suffix it.
+        # what login.py keys off. If somebody else has the same
+        # username (case-mismatch), suffix it.
         username = body.email.lower()
         existing_username = await session.execute(
             select(User).where(User.username == username)

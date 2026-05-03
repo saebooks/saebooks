@@ -11,9 +11,9 @@ Phase 1 tier-2 entity. Follows the same pattern as accounts/tax_codes:
 
 Admin check:
   Phase 1 uses the ``X-Admin: true`` request header as a lightweight
-  privilege gate (same style as Authentik forward-auth in Phase 2).
-  The ``require_admin`` dependency returns 403 if the header is absent
-  or not "true".  Bearer auth is still required for ALL endpoints.
+  privilege gate. The ``require_admin`` dependency returns 403 if the
+  header is absent or not "true". Bearer auth is still required for
+  ALL endpoints.
 
 Tenant scoping:
   All handlers share a single ``Depends(get_session)`` session per

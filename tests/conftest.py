@@ -7,8 +7,15 @@ import os
 # code path keeps working.
 os.environ.setdefault("SAEBOOKS_ENV", "test")
 
+import os
+
 import pytest
 from httpx import ASGITransport, AsyncClient
+
+# Enable middleware's test-only Remote-User trusted-header path before
+# importing the app (env reads run on each request, so order doesn't
+# matter strictly, but setting it up here keeps it explicit).
+os.environ.setdefault("SAEBOOKS_TEST_TRUSTED_USER_HEADER", "1")
 
 from saebooks.main import app
 

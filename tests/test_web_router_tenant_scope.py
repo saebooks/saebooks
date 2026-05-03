@@ -368,7 +368,7 @@ async def test_rls_blocks_cross_tenant_when_role_lacks_bypass(
 async def test_dep_401s_when_no_tenant_on_request() -> None:
     """Test 4 (extension): pre-auth / mis-auth requests get 401, not silent empty.
 
-    A forward-auth misconfig that strips the ``X-authentik-username``
+    A forward-auth misconfig that strips the ``Remote-User``
     header would otherwise cause ``request.state.jwt_claims`` to be
     None; ``resolve_tenant_id`` raises 401 (in non-dev) or falls back
     to the default tenant (in dev). This test asserts the dep

@@ -1,39 +1,35 @@
-"""Forward-auth middleware — read user identity from Caddy/Authentik.
+"""JWT auth middleware — resolve user identity from a bearer token.
 
-SAE Books sits behind Caddy + Authentik forward-auth
-(``https://books.sauer.com.au``). Authentik's outpost forwards identity
-under two naming schemes:
-
-* ``Remote-User`` / ``Remote-Email`` / ``Remote-Name`` — only when the
-  proxy provider's "Return the user as Remote-User header" is enabled.
-* ``X-authentik-username`` / ``X-authentik-email`` / ``X-authentik-name``
-  — emitted unconditionally on every outpost response.
-
-We accept both. ``Remote-*`` wins when present (explicit opt-in);
-``X-authentik-*`` is the fallback. Mirrors the ``copy_headers`` list
-in the Caddy ``(authentik)`` snippet.
+SAE Books authenticates every browser session through a JWT bearer
+token. Tokens are issued by the OAuth login flow (GitHub / Google /
+Microsoft) or by the email + password / magic link endpoints under
+``/api/v1/auth/``. ``saebooks-web`` carries the session JWT as an
+``Authorization: Bearer <jwt>`` header on every internal call to the
+HTML routes here.
 
 This middleware:
 
-* reads either header set
-* upserts a row in ``users`` (keyed on username) so the admin UI can
-  see every human who's ever reached the app
-* stamps ``request.state.user`` (``User`` ORM row) and
-  ``request.state.role`` (str) for downstream FastAPI deps
+* reads ``Authorization: Bearer <jwt>``, decodes + verifies it
+* looks up the ``User`` row by ``sub`` claim
+* stamps ``request.state.user`` (User ORM row), ``request.state.role``,
+  ``request.state.username``, and ``request.state.jwt_claims`` for
+  downstream FastAPI deps
 
 Fail modes:
 
 * If the header is missing *and* the request is to a gated route, the
   ``require_role`` dep 403s — **not** the middleware. This keeps
   ``/healthz``, ``/metrics``, static files etc. open even when run
-  outside forward-auth (e.g. local dev, smoke tests).
-* If the DB upsert fails (e.g. migration hasn't run yet), the
-  middleware logs + serves the request anonymously — never 500s just
-  because the users table is missing.
+  without a session.
+* If the JWT is malformed / expired / unverifiable, the request is
+  served anonymously — the gate dep handles the actual rejection.
+* If the DB lookup fails (Postgres down, migration missing), the
+  middleware logs + serves the request anonymously rather than 500.
 
 Dev / test override: set ``SAEBOOKS_DEV_USER=<username>`` and
-``SAEBOOKS_DEV_ROLE=<role>`` to bypass the header read. Useful for
-pytest + local uvicorn without Authentik in front.
+``SAEBOOKS_DEV_ROLE=<role>`` to upsert a synthetic user and bypass the
+JWT decode step entirely. Useful for pytest + local uvicorn without
+going through an OAuth dance.
 """
 from __future__ import annotations
 
@@ -53,41 +49,24 @@ from saebooks.models.user import VALID_ROLES, User, UserRole
 
 logger = logging.getLogger("saebooks.auth")
 
-# Authentik outpost forwards user identity under TWO naming schemes
-# depending on configuration. The ``Remote-*`` headers are the
-# traditional forward-auth shape (what most docs assume) — Authentik
-# only emits those when the proxy provider is configured with
-# "Return the user as Remote-User header" turned on. The ``X-authentik-*``
-# variants are emitted unconditionally by every Authentik outpost.
-#
-# We accept both so the middleware Just Works whether the outpost is
-# in default mode or the Remote-User-returning mode. When both are
-# present (rare), Remote-User wins because it's the one the admin
-# explicitly opted into.
-REMOTE_USER_HEADER = "remote-user"
-REMOTE_EMAIL_HEADER = "remote-email"
-REMOTE_NAME_HEADER = "remote-name"
-AUTHENTIK_USERNAME_HEADER = "x-authentik-username"
-AUTHENTIK_EMAIL_HEADER = "x-authentik-email"
-AUTHENTIK_NAME_HEADER = "x-authentik-name"
-
 
 def _bootstrap_admins() -> frozenset[str]:
-    """Usernames that get auto-promoted to ``admin`` on upsert.
+    """Usernames that get auto-promoted to ``admin`` on dev-override upsert.
 
     Comma-separated list in ``SAEBOOKS_BOOTSTRAP_ADMINS``. Solves the
     chicken-and-egg of "first user on a fresh install needs to be admin
-    so they can promote others, but the middleware defaults everyone to
-    readonly". Once a bootstrap admin has been upserted, they keep
+    so they can promote others, but the dev override defaults everyone
+    to readonly". Once a bootstrap admin has been upserted, they keep
     admin across requests even if removed from the env var (the role is
     stored in the DB, not re-derived each hit).
 
-    The explicit /admin/users flow is still the long-term source of
-    truth — this env var is just a boot knob.
+    The explicit /admin/users flow is the long-term source of truth —
+    this env var is a boot knob for fresh dev databases only.
     """
 
     raw = os.environ.get("SAEBOOKS_BOOTSTRAP_ADMINS", "")
     return frozenset(name.strip() for name in raw.split(",") if name.strip())
+
 
 # Routes we deliberately serve unauthenticated — healthchecks, metrics,
 # static files, public webhooks. Anything else that wants to be
@@ -100,14 +79,27 @@ OPEN_PATH_PREFIXES: tuple[str, ...] = (
     "/webhooks/",
     "/favicon.ico",
     # JSON API — uses its own bearer-token auth dependency
-    # (``saebooks.api.v1.auth.require_bearer``); doesn't want the
-    # Authentik user upsert on every call.
+    # (``saebooks.api.v1.auth.require_bearer``); doesn't need this
+    # middleware to run on every JSON call.
     "/api/",
 )
 
 
 def _is_open_path(path: str) -> bool:
     return any(path.startswith(p) for p in OPEN_PATH_PREFIXES)
+
+
+# Test-only knob: when set, middleware accepts a ``Remote-User`` header
+# as the identity for the current request and upserts a synthetic user
+# (same shape as the SAEBOOKS_DEV_USER path). Lets the existing pytest
+# suite simulate "user X is signed in for this call" without minting
+# a real JWT for every fixture. Never set in production — the prod
+# path is JWT-bearer only.
+_TEST_HEADER_ENV = "SAEBOOKS_TEST_TRUSTED_USER_HEADER"
+
+
+def _test_trusted_header_enabled() -> bool:
+    return os.environ.get(_TEST_HEADER_ENV) == "1"
 
 
 def _dev_override() -> tuple[str | None, str | None]:
@@ -120,18 +112,17 @@ def _dev_override() -> tuple[str | None, str | None]:
     return u, r
 
 
-async def _upsert_user(
+async def _upsert_dev_user(
     username: str,
     *,
-    email: str | None,
-    display_name: str | None,
-    dev_role: str | None = None,
+    dev_role: str | None,
 ) -> User | None:
-    """Idempotent insert-or-update keyed on ``username``.
+    """Idempotent insert-or-update for the dev-override path only.
 
-    Returns the refreshed ORM row or ``None`` if the DB call failed
-    (table missing, Postgres down, …) — caller treats that as "serve
-    anonymously" rather than crash.
+    Production users are created through the OAuth + signup flows under
+    ``/api/v1/auth/``; this helper exists so ``SAEBOOKS_DEV_USER`` works
+    against a fresh database without the operator hand-rolling a row.
+    Returns the refreshed ORM row or ``None`` if the DB call failed.
     """
     bootstrap_admins = _bootstrap_admins()
     try:
@@ -144,9 +135,6 @@ async def _upsert_user(
 
             now = datetime.now(UTC)
             if existing is None:
-                # Bootstrap admins always start at admin; dev override
-                # wins over bootstrap (useful in tests); everyone else
-                # starts readonly and gets promoted via /admin/users.
                 if dev_role:
                     role = dev_role
                 elif username in bootstrap_admins:
@@ -160,8 +148,8 @@ async def _upsert_user(
                 user = User(
                     tenant_id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
                     username=username,
-                    display_name=display_name,
-                    email=email,
+                    display_name=username,
+                    email=None,
                     role=role,
                     last_seen_at=now,
                 )
@@ -170,23 +158,13 @@ async def _upsert_user(
                 await session.refresh(user)
                 return user
 
-            # Touch last_seen, refresh optional profile fields if the
-            # upstream now knows the email/name.
             existing.last_seen_at = now
-            if email and not existing.email:
-                existing.email = email
-            if display_name and not existing.display_name:
-                existing.display_name = display_name
-            # Dev override can escalate role on every request; production
-            # never touches role here — admin-only UI does it.
             if dev_role and dev_role != existing.role:
                 existing.role = dev_role
-            # Bootstrap admins get auto-repaired: if the env lists a
-            # username that somehow got demoted below admin (fresh DB
-            # seed, manual SQL, etc.), bump them back up on next hit.
-            # Once the env var is removed, this stops firing — the role
-            # stays wherever /admin/users set it.
-            elif username in bootstrap_admins and existing.role != UserRole.ADMIN.value:
+            elif (
+                username in bootstrap_admins
+                and existing.role != UserRole.ADMIN.value
+            ):
                 logger.info(
                     "Re-bootstrapping %r to admin (SAEBOOKS_BOOTSTRAP_ADMINS)",
                     username,
@@ -196,7 +174,7 @@ async def _upsert_user(
             await session.refresh(existing)
             return existing
     except Exception as exc:  # defensive — log + serve anonymously
-        logger.warning("User upsert failed for %s: %s", username, exc)
+        logger.warning("Dev-override user upsert failed for %s: %s", username, exc)
         return None
 
 
@@ -211,13 +189,6 @@ async def _user_from_jwt_bearer(
     use the claims (notably ``tenant_id``) even if the user lookup
     failed (the JSON-API tests, for instance, mint JWTs with random
     sub UUIDs).
-
-    Used by ForwardAuthMiddleware so internal calls from saebooks-web
-    (which carries a JWT, never Authentik headers) can reach the
-    HTML admin pages on ``/admin/*``. Without this, every admin gate
-    that depends on ``request.state.user`` 401's because the JWT was
-    parsed only by the JSON-API ``require_bearer`` dep — never the
-    middleware.
     """
     parts = authorization.split(None, 1)
     if len(parts) != 2 or parts[0].lower() != "bearer":
@@ -250,7 +221,12 @@ async def _user_from_jwt_bearer(
 
 
 class ForwardAuthMiddleware(BaseHTTPMiddleware):
-    """Attach the Authentik-authenticated user to ``request.state``."""
+    """Resolve the JWT-authenticated user and stamp ``request.state``.
+
+    Name is historical — the class now reads Authorization:
+    Bearer <jwt> only. Renaming it would churn every test that
+    imports it for no functional benefit.
+    """
 
     async def dispatch(
         self,
@@ -273,81 +249,65 @@ class ForwardAuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         dev_user, dev_role = _dev_override()
-        # Prefer Remote-User (explicit forward-auth opt-in), fall back
-        # to X-authentik-username (what Authentik outposts emit by
-        # default). Same fallback for email + name so the /admin/users
-        # list shows the display name even when only the X-authentik-*
-        # headers are coming through.
-        username = (
-            dev_user
-            or request.headers.get(REMOTE_USER_HEADER)
-            or request.headers.get(AUTHENTIK_USERNAME_HEADER)
-        )
-        email = (
-            request.headers.get(REMOTE_EMAIL_HEADER)
-            or request.headers.get(AUTHENTIK_EMAIL_HEADER)
-        )
-        display = (
-            request.headers.get(REMOTE_NAME_HEADER)
-            or request.headers.get(AUTHENTIK_NAME_HEADER)
-        )
-
-        if username:
-            user = await _upsert_user(
-                username,
-                email=email,
-                display_name=display,
-                dev_role=dev_role,
-            )
+        if dev_user:
+            user = await _upsert_dev_user(dev_user, dev_role=dev_role)
             if user is not None and user.archived_at is None:
                 request.state.user = user
                 request.state.role = user.role
                 request.state.username = user.username
-                # Stamp the user's tenant onto request.state.jwt_claims
-                # so HTML routers can apply belt-and-braces tenant
-                # filtering via ``resolve_tenant_id`` (forum#2).
                 request.state.jwt_claims = {"tenant_id": str(user.tenant_id)}
             elif user is not None and user.archived_at is not None:
-                # Archived users stay authenticated-but-powerless —
-                # username logged, but role is None so every gate
-                # 403s. Prevents an admin "removing" a user from
-                # racing with an in-flight request.
                 request.state.username = user.username
+            return await call_next(request)
+
+        # Test-only trusted-header path. Conftest sets the env var so
+        # individual tests can supply Remote-User: <username> rather
+        # than mint a JWT each time. NEVER reachable in prod.
+        if _test_trusted_header_enabled():
+            test_user_header = request.headers.get("remote-user")
+            if test_user_header:
+                user = await _upsert_dev_user(
+                    test_user_header, dev_role=None
+                )
+                if user is not None and user.archived_at is None:
+                    request.state.user = user
+                    request.state.role = user.role
+                    request.state.username = user.username
+                    request.state.jwt_claims = {
+                        "tenant_id": str(user.tenant_id)
+                    }
+                elif user is not None and user.archived_at is not None:
+                    request.state.username = user.username
+                return await call_next(request)
+
+        authz = request.headers.get("authorization")
+        jwt_user: User | None = None
+        jwt_claims: dict[str, object] | None = None
+        if authz:
+            jwt_user, jwt_claims = await _user_from_jwt_bearer(authz)
+
+        # Stamp claims on request.state regardless of user-lookup
+        # outcome — the JWT's tenant_id is still authoritative even if
+        # ``sub`` doesn't resolve to a User row (e.g. tests that mint
+        # synthetic JWTs with random sub UUIDs).
+        if jwt_claims is not None:
+            request.state.jwt_claims = jwt_claims
+
+        if jwt_user is not None and jwt_user.archived_at is None:
+            request.state.user = jwt_user
+            request.state.role = jwt_user.role
+            request.state.username = jwt_user.username
         else:
-            # No Authentik identity headers — try the JWT bearer fallback
-            # so saebooks-web can reach the HTML admin pages with the
-            # session JWT. (The JSON ``/api/`` paths are short-circuited
-            # by OPEN_PATH_PREFIXES above and never reach this branch.)
-            authz = request.headers.get("authorization")
-            jwt_user: User | None = None
-            jwt_claims: dict[str, object] | None = None
-            if authz:
-                jwt_user, jwt_claims = await _user_from_jwt_bearer(authz)
-
-            # Stamp claims on request.state regardless of user-lookup
-            # outcome — the JWT's tenant_id is still authoritative even
-            # if ``sub`` doesn't resolve to a User row (e.g. tests that
-            # mint synthetic JWTs with random sub UUIDs).
-            if jwt_claims is not None:
-                request.state.jwt_claims = jwt_claims
-
-            if jwt_user is not None and jwt_user.archived_at is None:
-                request.state.user = jwt_user
-                request.state.role = jwt_user.role
-                request.state.username = jwt_user.username
-            else:
-                # Genuinely anonymous — log on /admin/* so forward-auth
-                # misconfig is visible without flipping the global level.
-                level = (
-                    logging.INFO
-                    if request.url.path.startswith("/admin/")
-                    else logging.DEBUG
-                )
-                logger.log(
-                    level,
-                    "No user identity on %s; saw headers: %s",
-                    request.url.path,
-                    sorted(request.headers.keys()),
-                )
+            level = (
+                logging.INFO
+                if request.url.path.startswith("/admin/")
+                else logging.DEBUG
+            )
+            logger.log(
+                level,
+                "No user identity on %s; saw headers: %s",
+                request.url.path,
+                sorted(request.headers.keys()),
+            )
 
         return await call_next(request)

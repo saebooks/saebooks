@@ -21,7 +21,7 @@
   - `/api/v1/license/issue-trial` — unauthenticated; rate-limited per
     IP and per email; sends token to the verified email.
   - `/stripe/webhook` — Stripe signature verified.
-  - `/admin/*` (later) — Authentik forward-auth + admin group.
+  - `/admin/*` (later) — admin-group session JWT.
 
 ## Token shape (signed by license-server, verified by saebooks-api)
 
@@ -169,8 +169,9 @@ Host port `18309` (free as of 2026-05-02 — `18305`/`18306` are taken by
 headscale/paperless-gpt).
 
 Terminates TLS at OPNsense Caddy (post-migration) or r420 Caddy
-(today). No Authentik on `/api/v1/*` or `/stripe/webhook`. Authentik
-forward-auth on `/admin/*` only (later).
+(today). `/api/v1/*` and `/stripe/webhook` are unauthenticated
+(license-token / Stripe-signature verified). `/admin/*` (later) is
+gated by an admin-group session JWT.
 
 ## Versioning
 

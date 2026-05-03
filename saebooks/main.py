@@ -91,14 +91,14 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     # RequestIdMiddleware generates / propagates X-Request-Id on every
-    # request. Register before ForwardAuthMiddleware so the id is available
-    # to all downstream middleware and handlers.
+    # request. Register before ForwardAuthMiddleware so the id is
+    # available to all downstream middleware and handlers.
     app.add_middleware(RequestIdMiddleware)
-    # ForwardAuthMiddleware reads Authentik's Remote-User header (set by
-    # Caddy forward-auth) and stamps request.state.user / .role. It's a
-    # no-op on /healthz, /metrics, /static/, /webhooks/, /favicon.ico so
-    # uptime probes + webhooks work without SSO. Dev override via
-    # SAEBOOKS_DEV_USER + SAEBOOKS_DEV_ROLE env vars.
+    # ForwardAuthMiddleware decodes the session JWT from
+    # ``Authorization: Bearer <jwt>`` and stamps ``request.state.user``
+    # / ``.role``. It's a no-op on /healthz, /metrics, /static/,
+    # /webhooks/, /favicon.ico so uptime probes + webhooks work without
+    # a session. Dev override via SAEBOOKS_DEV_USER + SAEBOOKS_DEV_ROLE.
     app.add_middleware(ForwardAuthMiddleware)
     # ActiveCompanyMiddleware reads the active_company_id cookie and binds
     # the chosen company on a contextvar so every router's
@@ -157,7 +157,7 @@ def create_app() -> FastAPI:
     # Phase 0 JSON API surface. Mounted last so its /api/v1/* paths
     # can't clash with any future top-level Jinja route. Bearer-auth
     # gated per-router (see saebooks/api/v1/auth.py) — independent
-    # from the Authentik forward-auth middleware above.
+    # from the HTML JWT middleware above (different decode path).
     app.include_router(api_v1_router)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 

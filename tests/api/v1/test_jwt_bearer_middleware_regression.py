@@ -8,18 +8,18 @@ Why this file exists
 --------------------
 The third compounding bug in the admin-gate regression:
 ForwardAuthMiddleware only populated ``request.state.user`` from
-Authentik forward-auth headers (``Remote-User`` / ``X-authentik-username``).
+the test-only Remote-User trusted-header path.
 It never looked at the ``Authorization: Bearer <jwt>`` header that
 saebooks-web sends on its internal proxy calls.  Result: after the web
 layer cleared richard, the API still 401'd because ``request.state.user``
-was None when the request arrived with only a JWT, no Authentik headers.
+was None when the request arrived with only a JWT, no Remote-User header.
 
-Fix (73493bb) adds a JWT bearer fallback branch: when no Authentik header
+Fix (73493bb) adds a JWT bearer fallback branch: when no Remote-User header
 is present AND the request path is not in OPEN_PATH_PREFIXES, the middleware
 decodes the ``Authorization: Bearer <jwt>`` header and resolves the user.
 
 This test exercises that branch directly: a JWT minted for a real user is
-sent to an admin route WITHOUT any Authentik headers.  Before 73493bb this
+sent to an admin route WITHOUT any Remote-User header.  Before 73493bb this
 would return 401; after 73493bb it should return the gated response
 (200 for staff, 403 for non-staff).
 
@@ -103,7 +103,7 @@ async def jwt_users() -> AsyncIterator[dict[str, User]]:
             tenant_id=_DEFAULT_TENANT,
             username=_READONLY_USERNAME,
             email=f"{_READONLY_USERNAME}@test.invalid",
-            role="readonly",
+            role="viewer",
         )
         session.add_all([staff, readonly])
         await session.commit()
@@ -152,7 +152,7 @@ def _mint_for(user: User) -> str:
 async def test_forward_auth_middleware_accepts_jwt_bearer_for_staff(
     jwt_users: dict[str, User],
 ) -> None:
-    """JWT bearer (no Authentik headers) reaches /admin/audit → 200 for staff.
+    """JWT bearer (no Remote-User header) reaches /admin/audit → 200 for staff.
 
     This is the exact regression Taylor discovered: saebooks-web sends
     ``Authorization: Bearer <jwt>`` on its internal proxy call to
@@ -168,7 +168,7 @@ async def test_forward_auth_middleware_accepts_jwt_bearer_for_staff(
         ) as ac:
             r = await ac.get(
                 "/admin/audit",
-                # JWT bearer only — NO Remote-User or X-authentik-username header.
+                # JWT bearer only — NO Remote-User header.
                 headers={"Authorization": f"Bearer {token}"},
             )
 
@@ -250,7 +250,7 @@ async def test_forward_auth_middleware_invalid_jwt_bearer_is_anonymous() -> None
 
 
 async def test_forward_auth_middleware_no_bearer_no_headers_is_anonymous() -> None:
-    """No bearer and no Authentik headers → anonymous → 401 at admin route."""
+    """No bearer and no Remote-User header → anonymous → 401 at admin route."""
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as ac:

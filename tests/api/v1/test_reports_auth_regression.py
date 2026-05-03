@@ -15,7 +15,7 @@ Two concerns this test covers:
 1. HTML report routes (/reports/{balance-sheet,profit-loss,trial-balance})
    return 200 when a valid bearer token is supplied and 200 even without
    auth (the HTML routes have no require_user dep — they are public,
-   gated only at the Caddy/Authentik layer in production).
+   gated only at the Caddy / forward-auth edge in production).
 
 2. JSON API routes (/api/v1/reports/profit_loss, /api/v1/reports/balance_sheet,
    /api/v1/reports/trial_balance) return 200 with a valid bearer token.

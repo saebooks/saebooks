@@ -1,9 +1,9 @@
-"""User model — bound to the Authentik username on the forward-auth header.
+"""User model — keyed on a username derived from the verified email.
 
-The row is auto-created on first request (middleware does an upsert on
-``Remote-User``) and the role is assigned by an admin via
-``/admin/users/{id}``. Until then, a newly-seen user sits at the
-default role (``viewer``) — no destructive actions possible.
+Rows are created by the OAuth callback handler or the ``/api/v1/auth/signup``
+endpoint, and the role is assigned by an admin via ``/admin/users/{id}``.
+Until then, a newly-seen user sits at the default role (``viewer``) —
+no destructive actions possible.
 """
 from __future__ import annotations
 
@@ -113,8 +113,8 @@ class User(Base):
         server_default="1",
     )
     # Hashed password for the /auth/login endpoint (PBKDF2-HMAC-SHA256).
-    # NULL means the user is managed via Authentik forward-auth only and
-    # cannot log in via the password endpoint.
+    # NULL means the user only has an OAuth identity (GitHub / Google /
+    # Microsoft) and cannot log in via the password endpoint.
     # Added by migration 0053_user_password_hash.
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # ----- 0077_user_auth_tokens — public-auth scaffolding ---------- #
