@@ -1,23 +1,17 @@
-"""Authentication router for OAuth2, Magic Links, and FIDO2."""
+"""Authentication router — Magic Links and FIDO2.
+
+OAuth/Discourse SSO is handled in saebooks-web; this router only owns the
+self-service magic-link and FIDO2 flows that talk to the API directly.
+"""
 from typing import Optional
-import secrets
-import uuid
-from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Request, HTTPException, status, responses, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader
-import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.db import get_session
 from saebooks.models.user import User
-from saebooks.models.oauth import OAuthProviderLink
-from saebooks.services.oauth_service import (
-    get_authorize_url,
-    exchange_code as oauth_exchange_code,
-    find_or_create_user as oauth_find_or_create_user,
-)
 from saebooks.services.magic_link_service import (
     generate_magic_link,
     verify_magic_link,
@@ -81,98 +75,13 @@ def _auth_response(user: User, redirect_to: str = "/") -> RedirectResponse:
 
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(db: AsyncSession = Depends(get_session)):
-    """Return HTML login page with OAuth, Magic Link, and FIDO2 options."""
+    """Return HTML login page with Magic Link and FIDO2 options.
+
+    Discourse SSO is offered on the saebooks-web /login page (the public
+    entrypoint); this API-side template is only reached by old direct links.
+    """
     template = jinja_env.get_template("login.html")
-    
-    # Check which OAuth providers are enabled
-    oauth_enabled = getattr(settings, 'oauth_enabled', False)
-    github_enabled = getattr(settings, 'oauth_provider_github', False) and oauth_enabled
-    microsoft_enabled = getattr(settings, 'oauth_provider_microsoft', False) and oauth_enabled
-    google_enabled = getattr(settings, 'oauth_provider_google', False) and oauth_enabled
-    
-    return template.render(
-        github_enabled=github_enabled,
-        microsoft_enabled=microsoft_enabled,
-        google_enabled=google_enabled,
-    )
-
-
-@router.get("/oauth/{provider}/authorize")
-async def oauth_authorize(provider: str, db: AsyncSession = Depends(get_session)):
-    """Initiate OAuth authorization code flow.
-    
-    Redirects to the OAuth provider's authorization endpoint.
-    """
-    oauth_enabled = getattr(settings, 'oauth_enabled', False)
-    if not oauth_enabled:
-        raise HTTPException(status_code=403, detail="OAuth not enabled")
-    
-    provider = provider.lower()
-    if provider not in ['github', 'microsoft', 'google']:
-        raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
-    
-    # Check if provider is enabled
-    provider_setting = f'oauth_provider_{provider}'
-    if not getattr(settings, provider_setting, False):
-        raise HTTPException(status_code=403, detail=f"{provider} provider not enabled")
-    
-    # Generate CSRF state token
-    state = secrets.token_urlsafe(32)
-    
-    # Store state in Redis (for validation in callback)
-    # TODO: Store state in Redis with expiry
-    
-    # Get authorization URL
-    authorize_url = get_authorize_url(provider, state)
-    
-    return RedirectResponse(url=authorize_url)
-
-
-@router.get("/oauth/{provider}/callback")
-async def oauth_callback(
-    provider: str,
-    code: str,
-    state: str,
-    db: AsyncSession = Depends(get_session)
-):
-    """Handle OAuth provider callback.
-    
-    Exchanges authorization code for token, fetches user info,
-    and creates/updates user account.
-    """
-    oauth_enabled = getattr(settings, 'oauth_enabled', False)
-    if not oauth_enabled:
-        raise HTTPException(status_code=403, detail="OAuth not enabled")
-    
-    provider = provider.lower()
-    if provider not in ['github', 'microsoft', 'google']:
-        raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
-    
-    try:
-        # Exchange code for token
-        token_data = await oauth_exchange_code(provider, code)
-        
-        # Get user info from provider
-        user_info = token_data.get('user_info', {})
-        provider_user_id = user_info.get('id') or user_info.get('sub')
-        provider_email = user_info.get('email')
-        
-        if not provider_user_id or not provider_email:
-            raise HTTPException(status_code=400, detail="Invalid token response from provider")
-        
-        # Find or create user
-        user = await oauth_find_or_create_user(
-            db,
-            provider=provider,
-            provider_user_id=provider_user_id,
-            provider_email=provider_email,
-        )
-        
-        # Return authenticated response
-        return _auth_response(user, redirect_to="/")
-        
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"OAuth callback error: {str(e)}")
+    return template.render()
 
 
 @router.post("/magic-link/send")

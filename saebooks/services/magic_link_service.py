@@ -57,7 +57,7 @@ async def generate_magic_link(email: str) -> str:
     }
 
     # Build magic link URL
-    magic_link_url = f"{settings.oauth_redirect_uri_base}/auth/magic-link/verify/{token}"
+    magic_link_url = f"{settings.public_base_url}/auth/magic-link/verify/{token}"
 
     # Send email
     try:
