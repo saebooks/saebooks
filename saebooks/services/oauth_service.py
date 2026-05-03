@@ -284,14 +284,29 @@ async def find_or_create_user(
         existing_user = user_result.scalars().first()
 
         if existing_user and not existing_user.archived_at:
-            # Link this provider to the existing user
-            link = OAuthProviderLink(
-                user_id=existing_user.id,
-                provider=provider,
-                provider_user_id=provider_user_id,
-                provider_user_email=email,
+            # Link this provider to the existing user.
+            # uq_user_provider enforces one link per (user, provider), so if a
+            # link already exists for that pair, refresh the provider_user_id /
+            # email instead of inserting a duplicate (which would 500).
+            existing_link_q = await session.execute(
+                select(OAuthProviderLink).where(
+                    (OAuthProviderLink.user_id == existing_user.id)
+                    & (OAuthProviderLink.provider == provider)
+                )
             )
-            session.add(link)
+            user_link = existing_link_q.scalars().first()
+            if user_link is None:
+                session.add(
+                    OAuthProviderLink(
+                        user_id=existing_user.id,
+                        provider=provider,
+                        provider_user_id=provider_user_id,
+                        provider_user_email=email,
+                    )
+                )
+            else:
+                user_link.provider_user_id = provider_user_id
+                user_link.provider_user_email = email
             await session.commit()
             return existing_user
 

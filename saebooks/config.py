@@ -320,4 +320,14 @@ class Settings(BaseSettings):
     oauth_state_store: str = Field(default="redis://redis:6379/1", alias="SAEBOOKS_OAUTH_STATE_STORE")
     oauth_state_ttl_seconds: int = Field(default=300, alias="SAEBOOKS_OAUTH_STATE_TTL_SECONDS")
 
+    # Portal lockdown — app.saebooks.com.au is Richard's internal portal,
+    # NOT a public SaaS. Only emails in this CSV allowlist may complete
+    # OAuth login (handoff returns 403 otherwise). Empty = open (dev).
+    # Comma-separated; whitespace and case-insensitive.
+    oauth_allowed_emails: str = Field(default="", alias="SAEBOOKS_OAUTH_ALLOWED_EMAILS")
+
+    @property
+    def oauth_allowed_emails_set(self) -> set[str]:
+        return {e.strip().lower() for e in self.oauth_allowed_emails.split(",") if e.strip()}
+
 settings = Settings()

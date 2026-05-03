@@ -320,3 +320,64 @@ async def change_password(
         db_user = await session.get(type(user), user.id)
         db_user.password_hash = hash_password(body.new_password)
         await session.commit()
+
+
+# ---------------------------------------------------------------------------
+# POST /auth/oauth-handoff  (server-to-server only — saebooks-web → saebooks-api)
+# ---------------------------------------------------------------------------
+
+
+class OAuthHandoffRequest(BaseModel):
+    provider: str
+    provider_user_id: str
+    email: str
+    display_name: str | None = None
+
+
+@router.post("/oauth-handoff", response_model=TokenResponse)
+async def oauth_handoff(
+    body: OAuthHandoffRequest,
+    x_oauth_handoff_secret: str | None = Header(default=None, alias="X-OAuth-Handoff-Secret"),
+) -> TokenResponse:
+    """Internal endpoint — saebooks-web calls this after a successful OAuth
+    callback to create/lookup the user and mint a JWT. The shared
+    SAEBOOKS_OAUTH_HANDOFF_SECRET (in both containers' env) gates access.
+
+    Not exposed externally — Caddy routes /api/v1/* to saebooks-web, which
+    only relays calls users have authenticated for; this endpoint exists
+    solely for the OAuth callback in saebooks-web to invoke directly.
+    """
+    import os
+
+    expected = os.environ.get("SAEBOOKS_OAUTH_HANDOFF_SECRET", "")
+    if not expected or not x_oauth_handoff_secret or x_oauth_handoff_secret != expected:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
+
+    if body.provider.lower() not in {"github", "microsoft", "google"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="unknown provider")
+    if not body.email or "@" not in body.email:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid email")
+
+    # Portal lockdown — app.saebooks.com.au is Richard's internal portal,
+    # not a public SaaS. Only allow-listed emails may complete OAuth login.
+    # Empty allowlist = open (dev/community); production sets it.
+    from saebooks.config import settings as _settings
+    allowed = _settings.oauth_allowed_emails_set
+    if allowed and body.email.strip().lower() not in allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="this portal is private — your email is not authorised",
+        )
+
+    from saebooks.services.oauth_service import find_or_create_user
+
+    user = await find_or_create_user(
+        provider=body.provider.lower(),
+        provider_user_id=str(body.provider_user_id),
+        email=body.email.strip().lower(),
+        display_name=body.display_name,
+    )
+    if user.archived_at is not None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="account inactive")
+
+    return _make_token(user)
