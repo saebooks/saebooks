@@ -268,7 +268,11 @@ async def _seed_period_locks(session: AsyncSession, company: Company) -> int:
             PeriodLock.locked_through == q1_lock_date,
         )
     )
-    if existing.scalar_one_or_none() is not None:
+    # Use ``.first()`` rather than ``scalar_one_or_none()``: the table has
+    # no UNIQUE(company_id, locked_through) constraint, so historical drift
+    # could leave duplicate seed rows. Idempotent seeding only needs to know
+    # whether ANY row exists, not exactly one.
+    if existing.scalars().first() is not None:
         return 0
 
     session.add(
