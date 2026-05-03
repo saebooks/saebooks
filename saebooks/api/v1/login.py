@@ -353,7 +353,7 @@ async def oauth_handoff(
     if not expected or not x_oauth_handoff_secret or x_oauth_handoff_secret != expected:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
 
-    if body.provider.lower() not in {"github", "microsoft", "google"}:
+    if body.provider.lower() not in {"discourse"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="unknown provider")
     if not body.email or "@" not in body.email:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid email")

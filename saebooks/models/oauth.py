@@ -19,11 +19,14 @@ from saebooks.db import Base
 
 
 class OAuthProvider(enum.StrEnum):
-    """Supported OAuth2 providers."""
+    """Supported external identity providers.
 
-    GITHUB = "github"
-    MICROSOFT = "microsoft"
-    GOOGLE = "google"
+    DISCOURSE is not OAuth2 — it's DiscourseConnect (HMAC-signed nonce flow)
+    handled in saebooks-web. The link row uses this same table because the
+    semantics are identical: external_id + email → SAE Books user.
+    """
+
+    DISCOURSE = "discourse"
 
 
 class OAuthProviderLink(Base):
