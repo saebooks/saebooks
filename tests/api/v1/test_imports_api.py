@@ -37,11 +37,10 @@ from saebooks.models.company import Company
 
 
 @pytest.fixture
-async def client() -> AsyncClient:
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as ac:
-        yield ac
+async def client(admin_client: AsyncClient) -> AsyncClient:
+    """All ``/admin/imports/*`` routes are gated by ``require_role(ADMIN)``;
+    delegate the file-local ``client`` to the conftest ``admin_client``."""
+    return admin_client
 
 
 async def _first_company() -> Company:

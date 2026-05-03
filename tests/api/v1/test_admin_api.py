@@ -105,18 +105,25 @@ async def readonly_username() -> str:
     await _cleanup_user(name)
 
 
+@pytest.fixture
+async def authed_client(admin_client: AsyncClient) -> AsyncClient:
+    """Admin-authed client for routes gated by ``require_role(ADMIN)`` or
+    ``require_staff()``. Delegates to the conftest ``admin_client``."""
+    return admin_client
+
+
 # ---------------------------------------------------------------------------
 # Settings
 # ---------------------------------------------------------------------------
 
 
-async def test_admin_settings_get_200(client: AsyncClient) -> None:
-    r = await client.get("/admin/settings")
+async def test_admin_settings_get_200(authed_client: AsyncClient) -> None:
+    r = await authed_client.get("/admin/settings")
     assert r.status_code == 200
 
 
-async def test_admin_settings_post_200(client: AsyncClient) -> None:
-    r = await client.post(
+async def test_admin_settings_post_200(authed_client: AsyncClient) -> None:
+    r = await authed_client.post(
         "/admin/settings",
         data={
             "fin_year_start_month": "7",
@@ -143,18 +150,18 @@ async def test_admin_settings_post_200(client: AsyncClient) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_admin_audit_list_200(client: AsyncClient) -> None:
-    r = await client.get("/admin/audit")
+async def test_admin_audit_list_200(authed_client: AsyncClient) -> None:
+    r = await authed_client.get("/admin/audit")
     assert r.status_code == 200
 
 
-async def test_admin_audit_list_with_table_filter(client: AsyncClient) -> None:
-    r = await client.get("/admin/audit", params={"table_name": "invoice"})
+async def test_admin_audit_list_with_table_filter(authed_client: AsyncClient) -> None:
+    r = await authed_client.get("/admin/audit", params={"table_name": "invoice"})
     assert r.status_code == 200
 
 
-async def test_admin_audit_list_with_page(client: AsyncClient) -> None:
-    r = await client.get("/admin/audit", params={"page": 2})
+async def test_admin_audit_list_with_page(authed_client: AsyncClient) -> None:
+    r = await authed_client.get("/admin/audit", params={"page": 2})
     assert r.status_code == 200
 
 
@@ -173,13 +180,13 @@ async def test_admin_audit_export_csv_requires_accountant(
     assert r.status_code == 403
 
 
-async def test_admin_audit_export_csv_200_for_accountant(
-    client: AsyncClient, accountant_username: str
+async def test_admin_audit_export_csv_200_for_staff(
+    authed_client: AsyncClient,
 ) -> None:
-    r = await client.get(
-        "/admin/audit/export.csv",
-        headers={"Remote-User": accountant_username},
-    )
+    """``require_staff()`` checks ``SAE_STAFF_USERNAMES`` env, not user role.
+    The conftest ``admin_client`` fixture sets that env to ``pytest-admin``
+    and supplies the matching ``Remote-User`` header, so this passes."""
+    r = await authed_client.get("/admin/audit/export.csv")
     assert r.status_code == 200
     assert "text/csv" in r.headers["content-type"]
     cd = r.headers.get("content-disposition", "")
@@ -187,8 +194,8 @@ async def test_admin_audit_export_csv_200_for_accountant(
     assert "audit-" in cd
 
 
-async def test_admin_audit_detail_404_unknown_id(client: AsyncClient) -> None:
-    r = await client.get(f"/admin/audit/{uuid.uuid4()}")
+async def test_admin_audit_detail_404_unknown_id(authed_client: AsyncClient) -> None:
+    r = await authed_client.get(f"/admin/audit/{uuid.uuid4()}")
     assert r.status_code == 404
 
 
@@ -197,13 +204,13 @@ async def test_admin_audit_detail_404_unknown_id(client: AsyncClient) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_admin_sql_get_200(client: AsyncClient) -> None:
-    r = await client.get("/admin/sql")
+async def test_admin_sql_get_200(authed_client: AsyncClient) -> None:
+    r = await authed_client.get("/admin/sql")
     assert r.status_code == 200
 
 
-async def test_admin_sql_post_select_200(client: AsyncClient) -> None:
-    r = await client.post(
+async def test_admin_sql_post_select_200(authed_client: AsyncClient) -> None:
+    r = await authed_client.post(
         "/admin/sql",
         data={"sql": "SELECT 1 AS n"},
     )
@@ -211,9 +218,9 @@ async def test_admin_sql_post_select_200(client: AsyncClient) -> None:
     assert "1" in r.text
 
 
-async def test_admin_sql_post_dml_rejected(client: AsyncClient) -> None:
+async def test_admin_sql_post_dml_rejected(authed_client: AsyncClient) -> None:
     """DML (INSERT/UPDATE/DELETE) must be blocked by the read-only service."""
-    r = await client.post(
+    r = await authed_client.post(
         "/admin/sql",
         data={"sql": "DELETE FROM companies WHERE 1=0"},
     )
@@ -222,8 +229,8 @@ async def test_admin_sql_post_dml_rejected(client: AsyncClient) -> None:
     assert "error" in r.text.lower() or "not allowed" in r.text.lower() or "read" in r.text.lower()
 
 
-async def test_admin_sql_export_csv_200(client: AsyncClient) -> None:
-    r = await client.post(
+async def test_admin_sql_export_csv_200(authed_client: AsyncClient) -> None:
+    r = await authed_client.post(
         "/admin/sql/export",
         data={"sql": "SELECT 1 AS n"},
     )
@@ -234,8 +241,8 @@ async def test_admin_sql_export_csv_200(client: AsyncClient) -> None:
     assert "query.csv" in cd
 
 
-async def test_admin_sql_export_csv_400_on_dml(client: AsyncClient) -> None:
-    r = await client.post(
+async def test_admin_sql_export_csv_400_on_dml(authed_client: AsyncClient) -> None:
+    r = await authed_client.post(
         "/admin/sql/export",
         data={"sql": "DROP TABLE companies"},
     )
@@ -247,8 +254,8 @@ async def test_admin_sql_export_csv_400_on_dml(client: AsyncClient) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_admin_license_200(client: AsyncClient) -> None:
-    r = await client.get("/admin/license")
+async def test_admin_license_200(authed_client: AsyncClient) -> None:
+    r = await authed_client.get("/admin/license")
     assert r.status_code == 200
     assert "community" in r.text.lower() or "edition" in r.text.lower()
 

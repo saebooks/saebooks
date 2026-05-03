@@ -5,6 +5,13 @@ import pytest
 from httpx import AsyncClient
 
 
+@pytest.fixture
+async def client(admin_client: AsyncClient) -> AsyncClient:
+    """All ``/admin/imports/*`` routes are gated by ``require_role(ADMIN)``;
+    delegate the file-local ``client`` to the conftest ``admin_client``."""
+    return admin_client
+
+
 @pytest.mark.asyncio
 async def test_imports_index_renders(client: AsyncClient) -> None:
     r = await client.get("/admin/imports")

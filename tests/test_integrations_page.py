@@ -49,8 +49,8 @@ def stripe_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(app_settings, "stripe_webhook_secret", SECRET)
 
 
-async def test_integrations_index_renders(client: AsyncClient) -> None:
-    r = await client.get("/admin/integrations")
+async def test_integrations_index_renders(admin_client: AsyncClient) -> None:
+    r = await admin_client.get("/admin/integrations")
     assert r.status_code == 200
     body = r.text
     assert "Paperless" in body
@@ -60,13 +60,13 @@ async def test_integrations_index_renders(client: AsyncClient) -> None:
     assert "ATO" in body
 
 
-async def test_integrations_index_trailing_slash(client: AsyncClient) -> None:
-    r = await client.get("/admin/integrations/")
+async def test_integrations_index_trailing_slash(admin_client: AsyncClient) -> None:
+    r = await admin_client.get("/admin/integrations/")
     assert r.status_code == 200
 
 
-async def test_integrations_healthz_is_plain_text(client: AsyncClient) -> None:
-    r = await client.get("/admin/integrations/healthz")
+async def test_integrations_healthz_is_plain_text(admin_client: AsyncClient) -> None:
+    r = await admin_client.get("/admin/integrations/healthz")
     assert r.status_code == 200
     assert "text/plain" in r.headers["content-type"]
     # community default — lei off, stripe off, paperless off, ato off

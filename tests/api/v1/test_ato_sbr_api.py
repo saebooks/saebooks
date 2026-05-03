@@ -28,11 +28,12 @@ from saebooks.main import app
 
 
 @pytest.fixture
-async def client() -> AsyncClient:
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as ac:
-        yield ac
+async def client(admin_client: AsyncClient) -> AsyncClient:
+    """Pro-edition ``/admin/ato-sbr/*`` routes are gated by
+    ``require_role(ADMIN)`` (after feature gate). Delegate to the conftest
+    ``admin_client``. Community-edition tests still hit the feature gate
+    first, so they get 404 regardless of auth."""
+    return admin_client
 
 
 @pytest.fixture

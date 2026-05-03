@@ -52,3 +52,59 @@ async def client() -> AsyncClient:
         transport=ASGITransport(app=app), base_url="http://test"
     ) as ac:
         yield ac
+
+
+# Phase G — shared fixtures for routes gated by require_role(ADMIN) /
+# require_staff(). Tests that need staff or admin auth use ``admin_client``
+# directly, or override their file-local ``client`` fixture to delegate to it.
+import uuid as _uuid_mod  # noqa: E402
+
+_PYTEST_ADMIN = "pytest-admin"
+
+
+@pytest.fixture
+async def admin_user() -> str:
+    """Ensure the ``pytest-admin`` user exists and has the ADMIN role."""
+    from sqlalchemy import select
+
+    from saebooks.db import AsyncSessionLocal
+    from saebooks.models.user import User, UserRole
+
+    async with AsyncSessionLocal() as session:
+        existing = (
+            await session.execute(select(User).where(User.username == _PYTEST_ADMIN))
+        ).scalars().first()
+        if existing is None:
+            session.add(
+                User(
+                    tenant_id=_uuid_mod.UUID("00000000-0000-0000-0000-000000000001"),
+                    username=_PYTEST_ADMIN,
+                    role=UserRole.ADMIN.value,
+                )
+            )
+        else:
+            existing.role = UserRole.ADMIN.value
+            existing.archived_at = None
+        await session.commit()
+    return _PYTEST_ADMIN
+
+
+@pytest.fixture
+async def admin_client(admin_user: str) -> AsyncClient:
+    """Client pre-injected with ``Remote-User: pytest-admin`` and
+    ``SAE_STAFF_USERNAMES=pytest-admin``. Satisfies both
+    ``require_role(ADMIN)`` and ``require_staff()`` in one fixture."""
+    old = os.environ.get("SAE_STAFF_USERNAMES", "")
+    os.environ["SAE_STAFF_USERNAMES"] = _PYTEST_ADMIN
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+            headers={"Remote-User": admin_user},
+        ) as ac:
+            yield ac
+    finally:
+        if old:
+            os.environ["SAE_STAFF_USERNAMES"] = old
+        else:
+            os.environ.pop("SAE_STAFF_USERNAMES", None)
