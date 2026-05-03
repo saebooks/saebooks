@@ -100,7 +100,7 @@ async def accountant_username() -> str:
 @pytest.fixture
 async def readonly_username() -> str:
     name = f"ro-{uuid.uuid4().hex[:8]}"
-    await _make_user(name, "readonly")
+    await _make_user(name, "viewer")
     yield name
     await _cleanup_user(name)
 
@@ -331,7 +331,7 @@ async def test_admin_users_set_role_valid_redirects(
     assert r.status_code == 303
     assert "saved=1" in r.headers["location"]
     # Reset role
-    await _make_user(readonly_username, "readonly")
+    await _make_user(readonly_username, "viewer")
 
 
 # ---------------------------------------------------------------------------
@@ -343,7 +343,7 @@ async def test_admin_users_archive_redirects(
     client: AsyncClient, admin_username: str
 ) -> None:
     target_name = f"archiveme-{uuid.uuid4().hex[:6]}"
-    await _make_user(target_name, "readonly")
+    await _make_user(target_name, "viewer")
     try:
         async with AsyncSessionLocal() as session:
             target = (
@@ -365,7 +365,7 @@ async def test_admin_users_unarchive_redirects(
     client: AsyncClient, admin_username: str
 ) -> None:
     target_name = f"unarchiveme-{uuid.uuid4().hex[:6]}"
-    user = await _make_user(target_name, "readonly")
+    user = await _make_user(target_name, "viewer")
     # Archive in DB first
     async with AsyncSessionLocal() as session:
         u = await session.get(User, user.id)
