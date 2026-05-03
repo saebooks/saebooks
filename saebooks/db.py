@@ -35,6 +35,47 @@ AsyncSessionLocal = async_sessionmaker(
 )
 
 
+# ---------------------------------------------------------------------- #
+# CLI / cron app-role engine                                             #
+# ---------------------------------------------------------------------- #
+# ``AppSessionLocal`` is the *strict* RLS-enforced sessionmaker used by
+# ``python -m saebooks.cli sync-feeds`` (and any other cross-tenant
+# CLI walker). Unlike ``AsyncSessionLocal`` above, this one refuses to
+# fall back to ``DATABASE_URL`` — if ``SAEBOOKS_APP_DATABASE_URL`` is
+# unset, the factory returns ``None`` and the CLI raises at startup.
+#
+# Rationale: the CLI iterates every tenant, setting ``app.current_tenant``
+# per group. If the connection silently used the BYPASSRLS owner role,
+# the per-tenant ``SET LOCAL`` would be a no-op and the run would still
+# "work" — masking the misconfiguration. Forcing the strict role at
+# CLI boot makes the failure mode loud.
+#
+# The runtime web engine above (``engine`` / ``AsyncSessionLocal``) keeps
+# its fallback because dev environments commonly run a single role and
+# the FastAPI test suite seeds tenants directly. Once every web router
+# is audited (see ``audit-trail/06``-style guard in compose ``.env``)
+# the web engine should adopt the same strict pattern.
+
+_app_role_engine = (
+    create_async_engine(
+        settings.app_database_url,
+        echo=False,
+        future=True,
+        poolclass=NullPool,
+    )
+    if settings.app_database_url
+    else None
+)
+
+AppSessionLocal: async_sessionmaker[AsyncSession] | None = (
+    async_sessionmaker(
+        _app_role_engine, expire_on_commit=False, class_=AsyncSession
+    )
+    if _app_role_engine is not None
+    else None
+)
+
+
 class Base(DeclarativeBase):
     pass
 

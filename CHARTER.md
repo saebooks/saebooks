@@ -510,6 +510,30 @@ costs money.
 - **Future hosted SaaS** flips the same flag server-side to run
   multi-tenant across businesses. Same code, different deployment.
 
+### 7.1.1 Runtime tenancy enforcement (RLS)
+
+Tenancy is enforced at *two* layers — application service helpers
+(tenant_id filter on every query) AND Postgres RLS policies on
+every customer-data table (migrations 0055/0056). The runtime DB
+role for the FastAPI app and the cron CLIs is saebooks_app,
+which has rolbypassrls=f. Per-request / per-tenant scoping
+is applied with SET LOCAL app.current_tenant = <uuid> inside
+each transaction; the policy predicate
+(tenant_id = current_setting('app.current_tenant', true)::uuid)
+filters every read and write.
+
+The schema-owner role saebooks keeps BYPASSRLS for DDL +
+alembic migrations and as a deliberate emergency-rescue path. It
+must not be the runtime role — see audit-trail/02 for the leak
+diagnosis that produced this split.
+
+For cross-tenant cron walkers (python -m saebooks.cli sync-feeds,
+refresh-feed-issues) enumeration goes through SECURITY DEFINER
+helper functions that the saebooks_app role is granted EXECUTE
+on, so iterating all active feeds across all tenants is possible
+without temporarily downgrading to a BYPASSRLS connection. See
+docs/operations/rls-flip.md for the activation procedure.
+
 ### 7.2 Audit / immutability model
 
 Three modes exist in the codebase:

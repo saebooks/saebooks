@@ -3,6 +3,13 @@
 Only exercises argparse plumbing + happy paths. The sync/health logic
 is fully covered in tests/services/bank_feeds/. Here we just want to
 know the CLI wires them up correctly.
+
+The ``sync-feeds`` and ``refresh-feed-issues`` commands gained an
+RLS-role guard in feat/rls-cli-app-role: the unit tests below pass
+``--allow-bypass`` everywhere because the test DB connects via the
+schema-owner role. The cross-tenant contract under the strict
+``saebooks_app`` role is covered separately by
+``tests/services/bank_feeds/test_rls_cli.py``.
 """
 from __future__ import annotations
 
@@ -21,22 +28,16 @@ def test_cli_help_exits_two() -> None:
     assert exc.value.code == 2
 
 
+def _patch_enumerator(monkeypatch: pytest.MonkeyPatch, groups: dict) -> None:
+    """Stub _enumerate_active_groups so unit tests don't hit Postgres."""
+
+    async def fake_enum(session: Any, *, company_id: Any) -> dict:
+        return groups
+
+    monkeypatch.setattr(cli, "_enumerate_active_groups", fake_enum)
+
+
 def test_cli_sync_feeds_calls_sync_all_active(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, Any] = {}
-
-    async def fake_sync_all(session: Any, **kwargs: Any) -> list[Any]:
-        captured["kwargs"] = kwargs
-        return []
-
-    monkeypatch.setattr(onboarding, "sync_all_active", fake_sync_all)
-    rc = cli.main(["sync-feeds"])
-    assert rc == 0
-    assert captured["kwargs"]["company_id"] is None
-
-
-def test_cli_sync_feeds_passes_company_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import uuid
@@ -47,22 +48,64 @@ def test_cli_sync_feeds_passes_company_id(
         captured["kwargs"] = kwargs
         return []
 
+    cid = uuid.uuid4()
+    tid = uuid.uuid4()
+    aid = uuid.uuid4()
+    _patch_enumerator(monkeypatch, {(cid, tid): [aid]})
     monkeypatch.setattr(onboarding, "sync_all_active", fake_sync_all)
-    cid = str(uuid.uuid4())
-    rc = cli.main(["sync-feeds", "--company-id", cid])
+
+    rc = cli.main(["sync-feeds", "--allow-bypass"])
     assert rc == 0
-    assert str(captured["kwargs"]["company_id"]) == cid
+    # The CLI now passes the *enumerated* company_id per group (not None
+    # like the old code did when no filter was given).
+    assert captured["kwargs"]["company_id"] == cid
+
+
+def test_cli_sync_feeds_passes_company_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import uuid
+
+    captured: dict[str, Any] = {}
+    cid = uuid.uuid4()
+    tid = uuid.uuid4()
+
+    async def fake_sync_all(session: Any, **kwargs: Any) -> list[Any]:
+        captured["kwargs"] = kwargs
+        return []
+
+    _patch_enumerator(monkeypatch, {(cid, tid): [uuid.uuid4()]})
+    monkeypatch.setattr(onboarding, "sync_all_active", fake_sync_all)
+
+    rc = cli.main(["sync-feeds", "--company-id", str(cid), "--allow-bypass"])
+    assert rc == 0
+    assert captured["kwargs"]["company_id"] == cid
 
 
 def test_cli_sync_feeds_returns_1_when_unconfigured(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import uuid
+
+    cid = uuid.uuid4()
+    tid = uuid.uuid4()
+    _patch_enumerator(monkeypatch, {(cid, tid): [uuid.uuid4()]})
+
     async def fake_sync_all(session: Any, **kwargs: Any) -> list[Any]:
         raise onboarding.SissNotConfiguredError("no creds")
 
     monkeypatch.setattr(onboarding, "sync_all_active", fake_sync_all)
-    rc = cli.main(["sync-feeds"])
+    rc = cli.main(["sync-feeds", "--allow-bypass"])
     assert rc == 1
+
+
+def test_cli_sync_feeds_zero_active_returns_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Empty enumeration is success, not failure."""
+    _patch_enumerator(monkeypatch, {})
+    rc = cli.main(["sync-feeds", "--allow-bypass"])
+    assert rc == 0
 
 
 def test_cli_refresh_feed_issues_calls_refresh(
@@ -77,7 +120,7 @@ def test_cli_refresh_feed_issues_calls_refresh(
         return health.RefreshOutcome(fetched=0, cached=0, as_of=datetime.now())
 
     monkeypatch.setattr(health, "refresh_feed_issues", fake_refresh)
-    rc = cli.main(["refresh-feed-issues"])
+    rc = cli.main(["refresh-feed-issues", "--allow-bypass"])
     assert rc == 0
     assert called["n"] == 1
 
@@ -89,7 +132,7 @@ def test_cli_refresh_returns_1_when_unconfigured(
         raise onboarding.SissNotConfiguredError("no creds")
 
     monkeypatch.setattr(health, "refresh_feed_issues", fake_refresh)
-    rc = cli.main(["refresh-feed-issues"])
+    rc = cli.main(["refresh-feed-issues", "--allow-bypass"])
     assert rc == 1
 
 
