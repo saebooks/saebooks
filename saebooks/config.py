@@ -47,6 +47,16 @@ class Settings(BaseSettings):
     # rotate the password without rebuilding the URL string.
     app_db_password: str = Field(default="", alias="SAEBOOKS_APP_DB_PASSWORD")
 
+    # ---------------------------------------------------------------- #
+    # SQL tool — sandboxed read-only role (Cat-C admin)                #
+    # ---------------------------------------------------------------- #
+    # ``saebooks_sql_ro`` is created by migration 0087 with
+    # ``pg_read_all_data`` and explicit REVOKEs on dangerous functions
+    # (pg_read_server_files, lo_export, etc). The /api/v1/admin/sql
+    # endpoint connects as this role for every plain SELECT. Empty
+    # default — the migration refuses to run without it.
+    sql_ro_password: str = Field(default="", alias="SAEBOOKS_SQL_RO_PASSWORD")
+
     seed_company_name: str = Field(default="", alias="SEED_COMPANY_NAME")
     seed_company_legal_name: str = Field(default="", alias="SEED_COMPANY_LEGAL_NAME")
     seed_company_trading_name: str = Field(default="", alias="SEED_COMPANY_TRADING_NAME")
