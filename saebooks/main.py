@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from saebooks.api.errors import register_handlers
 from saebooks.api.v1 import router as api_v1_router
+from saebooks.api.webhooks.stripe import router as _stripe_webhook_router
 from saebooks.config import settings
 from saebooks.grpc_server import serve as grpc_serve
 from saebooks.middleware.active_company import ActiveCompanyMiddleware
@@ -154,6 +155,11 @@ def create_app() -> FastAPI:
     # /help/shortcuts at the top level so the Cmd-K palette fetch call
     # can stay short.
     app.include_router(search.router)
+    # Cat-C (W6): stable Stripe webhook at /webhooks/stripe. Not under /api/v1/
+    # because Stripe webhook URLs are registered in the Dashboard once and must
+    # not change on API version bumps. Auth is HMAC-only. Legacy handler in
+    # routers/integrations.py is left intact — rollup removes it.
+    app.include_router(_stripe_webhook_router)
     # Phase 0 JSON API surface. Mounted last so its /api/v1/* paths
     # can't clash with any future top-level Jinja route. Bearer-auth
     # gated per-router (see saebooks/api/v1/auth.py) — independent
