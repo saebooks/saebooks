@@ -178,7 +178,8 @@ class Wizard:
         # First fetch to check existence and expiry.
         row = await session.execute(
             text(
-                "SELECT state, expires_at FROM wizard_state WHERE id = :wid"
+                "SELECT state, expires_at FROM wizard_state "
+                "WHERE id = CAST(:wid AS uuid)"
             ).bindparams(wid=str(wizard_id))
         )
         existing = row.first()
@@ -198,7 +199,7 @@ class Wizard:
                 UPDATE wizard_state
                    SET state = state || CAST(:patch AS jsonb),
                        updated_at = now()
-                 WHERE id = :wid
+                 WHERE id = CAST(:wid AS uuid)
                    AND expires_at > now()
                 RETURNING state
                 """
@@ -230,7 +231,7 @@ class Wizard:
                 """
                 SELECT state, expires_at
                   FROM wizard_state
-                 WHERE id = :wid
+                 WHERE id = CAST(:wid AS uuid)
                    AND expires_at > now()
                 """
             ).bindparams(wid=str(wizard_id))

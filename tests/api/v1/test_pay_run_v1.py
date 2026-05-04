@@ -468,7 +468,7 @@ async def test_export_aba_journal_lines(api_client: AsyncClient) -> None:
         assert entry is not None
         lines = (
             await session.execute(
-                select(JournalLine).where(JournalLine.journal_entry_id == journal_id)
+                select(JournalLine).where(JournalLine.entry_id == journal_id)
             )
         ).scalars().all()
 
