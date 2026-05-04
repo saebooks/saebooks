@@ -92,7 +92,7 @@ async def me_user() -> AsyncIterator[User]:
             tenant_id=_DEFAULT_TENANT,
             username=_TEST_USERNAME,
             email=_TEST_EMAIL,
-            role="readonly",
+            role="viewer",
             password_hash=hash_password(_TEST_PASSWORD),
         )
         session.add(u)
@@ -212,7 +212,7 @@ async def test_auth_me_other_fields_still_present(
 
     assert body["id"] == str(me_user.id)
     assert body["email"] == _TEST_EMAIL
-    assert body["role"] == "readonly"
+    assert body["role"] == "viewer"
     assert body["tenant_id"] == str(_DEFAULT_TENANT)
 
 
