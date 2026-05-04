@@ -17,6 +17,12 @@ from httpx import ASGITransport, AsyncClient
 # matter strictly, but setting it up here keeps it explicit).
 os.environ.setdefault("SAEBOOKS_TEST_TRUSTED_USER_HEADER", "1")
 
+# Redirect the dev mail outbox to /tmp — /app is root-owned in the dev
+# container, so the default /app/mail-outbox is unwriteable for the
+# saebooks UID and any signup/verify path that calls send_email() blows
+# up with EmailError → 500 in tests. /tmp is world-writable.
+os.environ.setdefault("SAEBOOKS_MAIL_OUTBOX_DIR", "/tmp/saebooks-mail-outbox")
+
 from saebooks.main import app
 
 

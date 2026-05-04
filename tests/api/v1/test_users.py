@@ -102,7 +102,7 @@ async def test_users_list_requires_admin(api_client: AsyncClient) -> None:
 async def test_users_create_requires_admin(api_client: AsyncClient) -> None:
     r = await api_client.post(
         "/api/v1/users",
-        json={"username": _rand_username(), "role": "readonly"},
+        json={"username": _rand_username(), "role": "viewer"},
     )
     assert r.status_code == 403
 
@@ -112,7 +112,7 @@ async def test_users_delete_requires_admin(
 ) -> None:
     uname = _rand_username()
     cr = await admin_client.post(
-        "/api/v1/users", json={"username": uname, "role": "readonly"}
+        "/api/v1/users", json={"username": uname, "role": "viewer"}
     )
     assert cr.status_code == 201
     uid = cr.json()["id"]
@@ -164,7 +164,7 @@ async def test_users_get_404(api_client: AsyncClient) -> None:
 async def test_users_get_200(admin_client: AsyncClient, api_client: AsyncClient) -> None:
     uname = _rand_username()
     cr = await admin_client.post(
-        "/api/v1/users", json={"username": uname, "role": "readonly"}
+        "/api/v1/users", json={"username": uname, "role": "viewer"}
     )
     assert cr.status_code == 201
     uid = cr.json()["id"]
@@ -209,11 +209,11 @@ async def test_users_create_201(admin_client: AsyncClient) -> None:
 async def test_users_create_duplicate_username_409(admin_client: AsyncClient) -> None:
     uname = _rand_username()
     r1 = await admin_client.post(
-        "/api/v1/users", json={"username": uname, "role": "readonly"}
+        "/api/v1/users", json={"username": uname, "role": "viewer"}
     )
     assert r1.status_code == 201
     r2 = await admin_client.post(
-        "/api/v1/users", json={"username": uname, "role": "readonly"}
+        "/api/v1/users", json={"username": uname, "role": "viewer"}
     )
     assert r2.status_code == 409
 
@@ -234,7 +234,7 @@ async def test_users_create_change_log(admin_client: AsyncClient) -> None:
 
     uname = _rand_username()
     r = await admin_client.post(
-        "/api/v1/users", json={"username": uname, "role": "readonly"}
+        "/api/v1/users", json={"username": uname, "role": "viewer"}
     )
     assert r.status_code == 201
     uid = r.json()["id"]
@@ -271,7 +271,7 @@ async def test_users_update_bumps_version(
 ) -> None:
     uname = _rand_username()
     cr = await admin_client.post(
-        "/api/v1/users", json={"username": uname, "role": "readonly"}
+        "/api/v1/users", json={"username": uname, "role": "viewer"}
     )
     assert cr.status_code == 201
     uid = cr.json()["id"]
@@ -298,7 +298,7 @@ async def test_users_update_requires_if_match(
 ) -> None:
     uname = _rand_username()
     cr = await admin_client.post(
-        "/api/v1/users", json={"username": uname, "role": "readonly"}
+        "/api/v1/users", json={"username": uname, "role": "viewer"}
     )
     assert cr.status_code == 201
     uid = cr.json()["id"]
@@ -317,7 +317,7 @@ async def test_users_stale_if_match_returns_409(
 ) -> None:
     uname = _rand_username()
     cr = await admin_client.post(
-        "/api/v1/users", json={"username": uname, "role": "readonly"}
+        "/api/v1/users", json={"username": uname, "role": "viewer"}
     )
     assert cr.status_code == 201
     uid = cr.json()["id"]
@@ -344,7 +344,7 @@ async def test_non_admin_cannot_change_role(
 ) -> None:
     uname = _rand_username()
     cr = await admin_client.post(
-        "/api/v1/users", json={"username": uname, "role": "readonly"}
+        "/api/v1/users", json={"username": uname, "role": "viewer"}
     )
     assert cr.status_code == 201
     uid = cr.json()["id"]
@@ -366,7 +366,7 @@ async def test_non_admin_cannot_change_role(
 async def test_users_soft_delete_204(admin_client: AsyncClient) -> None:
     uname = _rand_username()
     cr = await admin_client.post(
-        "/api/v1/users", json={"username": uname, "role": "readonly"}
+        "/api/v1/users", json={"username": uname, "role": "viewer"}
     )
     assert cr.status_code == 201
     uid = cr.json()["id"]
@@ -387,7 +387,7 @@ async def test_users_soft_delete_204(admin_client: AsyncClient) -> None:
 async def test_users_delete_stale_if_match_409(admin_client: AsyncClient) -> None:
     uname = _rand_username()
     cr = await admin_client.post(
-        "/api/v1/users", json={"username": uname, "role": "readonly"}
+        "/api/v1/users", json={"username": uname, "role": "viewer"}
     )
     assert cr.status_code == 201
     uid = cr.json()["id"]
@@ -402,7 +402,7 @@ async def test_users_delete_stale_if_match_409(admin_client: AsyncClient) -> Non
 async def test_users_delete_requires_if_match(admin_client: AsyncClient) -> None:
     uname = _rand_username()
     cr = await admin_client.post(
-        "/api/v1/users", json={"username": uname, "role": "readonly"}
+        "/api/v1/users", json={"username": uname, "role": "viewer"}
     )
     assert cr.status_code == 201
     uid = cr.json()["id"]
@@ -426,7 +426,7 @@ async def test_users_change_log_on_writes(
 
     uname = _rand_username()
     cr = await admin_client.post(
-        "/api/v1/users", json={"username": uname, "role": "readonly"}
+        "/api/v1/users", json={"username": uname, "role": "viewer"}
     )
     assert cr.status_code == 201
     uid = cr.json()["id"]
@@ -495,7 +495,7 @@ async def test_user_permissions_get_200(
 ) -> None:
     uname = _rand_username()
     cr = await admin_client.post(
-        "/api/v1/users", json={"username": uname, "role": "readonly"}
+        "/api/v1/users", json={"username": uname, "role": "viewer"}
     )
     assert cr.status_code == 201
     uid = cr.json()["id"]
@@ -517,7 +517,7 @@ async def test_user_permissions_put_requires_admin(
 ) -> None:
     uname = _rand_username()
     cr = await admin_client.post(
-        "/api/v1/users", json={"username": uname, "role": "readonly"}
+        "/api/v1/users", json={"username": uname, "role": "viewer"}
     )
     assert cr.status_code == 201
     uid = cr.json()["id"]
@@ -534,7 +534,7 @@ async def test_user_permissions_put_unknown_code_422(
 ) -> None:
     uname = _rand_username()
     cr = await admin_client.post(
-        "/api/v1/users", json={"username": uname, "role": "readonly"}
+        "/api/v1/users", json={"username": uname, "role": "viewer"}
     )
     assert cr.status_code == 201
     uid = cr.json()["id"]
@@ -552,7 +552,7 @@ async def test_user_permissions_put_overlap_422(
     """A code cannot be in both grants and revokes."""
     uname = _rand_username()
     cr = await admin_client.post(
-        "/api/v1/users", json={"username": uname, "role": "readonly"}
+        "/api/v1/users", json={"username": uname, "role": "viewer"}
     )
     assert cr.status_code == 201
     uid = cr.json()["id"]
