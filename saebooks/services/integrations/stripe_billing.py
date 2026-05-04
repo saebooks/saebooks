@@ -34,6 +34,7 @@ from __future__ import annotations
 import logging
 import os
 from typing import Any, Literal
+from urllib.parse import urlencode as _urlencode
 
 import httpx
 
@@ -157,7 +158,19 @@ async def _list(client: httpx.AsyncClient, resource: str, **params: Any) -> list
 
 
 async def _post(client: httpx.AsyncClient, path: str, payload: dict[str, Any]) -> dict[str, Any]:
-    resp = await client.post(path, data=_encode_form(payload))
+    # NOTE: pass body as pre-encoded bytes via content= rather than
+    # data=. httpx 0.28.x has a regression where data= form bodies
+    # combined with HTTPBasic auth on certain endpoints (incl. all
+    # Stripe POSTs) yield RuntimeError: Attempted to send an sync
+    # request with an AsyncClient instance. Pre-encoding sidesteps
+    # the buggy form-stream path. See:
+    # https://github.com/encode/httpx/issues/3079 (similar)
+    body = _urlencode(_encode_form(payload)).encode("utf-8")
+    resp = await client.post(
+        path,
+        content=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
     if resp.status_code >= 400:
         logger.error("stripe_billing: POST %s failed: %s", path, resp.text)
         resp.raise_for_status()
@@ -378,9 +391,12 @@ async def create_portal_session(
 ) -> dict[str, str]:
     """Create a Stripe Billing Portal session, return ``{portal_url}``."""
     async with _client() as client:
+        # See _post note: httpx 0.28 + tuple-auth + data= breaks; use content=.
+        _body = _urlencode(_encode_form({"customer": stripe_customer_id, "return_url": return_url})).encode("utf-8")
         resp = await client.post(
             "/billing_portal/sessions",
-            data=_encode_form({"customer": stripe_customer_id, "return_url": return_url}),
+            content=_body,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
         if resp.status_code >= 400:
             raise StripeBillingError(

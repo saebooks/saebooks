@@ -132,8 +132,24 @@ class _FakeStripeClient:
             )
         return _FakeResponse({"data": []})
 
-    async def post(self, path: str, data: list[tuple[str, str]] | None = None) -> _FakeResponse:
-        self.post_calls.append((path, list(data or [])))
+    async def post(
+        self,
+        path: str,
+        *,
+        content: bytes | None = None,
+        data: list[tuple[str, str]] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> _FakeResponse:
+        # _post in stripe_billing now sends bodies as urlencoded bytes
+        # via content= (httpx 0.28 + tuple-auth + data= bug
+        # workaround). Decode them back into key/value pairs so tests
+        # can assert on form fields the same way.
+        if content is not None:
+            from urllib.parse import parse_qsl
+            pairs = parse_qsl(content.decode("utf-8"), keep_blank_values=True)
+        else:
+            pairs = list(data or [])
+        self.post_calls.append((path, pairs))
         if path == "/checkout/sessions":
             return _FakeResponse(
                 {"id": self._session_id, "url": self._session_url}
