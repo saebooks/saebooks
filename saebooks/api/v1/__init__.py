@@ -21,6 +21,7 @@ B/46: ``/api/v1/documents/extract`` (AI document extraction).
 """
 from fastapi import APIRouter
 
+from saebooks.api.v1.admin import router as admin_router
 from saebooks.api.v1.allocations import router as allocations_router
 from saebooks.api.v1.account_ranges import router as account_ranges_router
 from saebooks.api.v1.ai_extraction import router as ai_extraction_router
@@ -55,6 +56,7 @@ from saebooks.api.v1.payments import router as payments_router
 from saebooks.api.v1.projects import router as projects_router
 from saebooks.api.v1.snapshot import router as snapshot_router
 from saebooks.api.v1.tax_codes import router as tax_codes_router
+from saebooks.api.v1.integrations import router as integrations_router
 from saebooks.api.v1.users import permissions_router, router as users_router
 
 # One umbrella router — main.py mounts this at /api/v1.
@@ -112,5 +114,9 @@ router.include_router(snapshot_router)
 router.include_router(ai_extraction_router)
 # FITC-6: allocation rules engine — Business+ feature-gated
 router.include_router(allocations_router)
+# Cat-C (W5): admin audit-log + SQL tool (FLAG_SQL_TOOL Pro+).
+router.include_router(admin_router)
+# Cat-C (W6): integrations -- Stripe Connect, Paperless, LEI, CH, ATO.
+router.include_router(integrations_router)
 
 __all__ = ["router"]
