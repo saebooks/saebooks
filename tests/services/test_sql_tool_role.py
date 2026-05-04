@@ -85,9 +85,9 @@ async def _expect_denied(sql: str, *, engine, contains: list[str] | None = None)
 async def test_ro_role_cannot_insert_contacts() -> None:
     await _expect_denied(
         "INSERT INTO contacts (id, company_id, tenant_id, name, contact_type, "
-        " currency_code, email, phone, address, version, created_at, updated_at) "
+        " currency_code, email, phone, version, created_at, updated_at) "
         " VALUES (gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), "
-        "        'evil', 'customer', 'AUD', NULL, NULL, NULL, 1, now(), now())",
+        "        'evil', 'customer', 'AUD', NULL, NULL, 1, now(), now())",
         engine=_ro_engine(),
     )
 
