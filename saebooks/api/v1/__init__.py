@@ -22,6 +22,7 @@ B/46: ``/api/v1/documents/extract`` (AI document extraction).
 from fastapi import APIRouter
 
 from saebooks.api.v1.allocations import router as allocations_router
+from saebooks.api.v1.imports import router as imports_router
 from saebooks.api.v1.account_ranges import router as account_ranges_router
 from saebooks.api.v1.ai_extraction import router as ai_extraction_router
 from saebooks.api.v1.accounts import router as accounts_router
@@ -112,5 +113,7 @@ router.include_router(snapshot_router)
 router.include_router(ai_extraction_router)
 # FITC-6: allocation rules engine — Business+ feature-gated
 router.include_router(allocations_router)
+# Cat-C: multi-step import wizard (bank CSV/OFX community; QBO Pro+)
+router.include_router(imports_router)
 
 __all__ = ["router"]
