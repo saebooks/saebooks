@@ -32,7 +32,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
-from saebooks.api.v1.auth import current_token
+from saebooks.api.v1.auth import DEFAULT_TENANT_ID, current_token
 from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.account import Account, AccountType
@@ -52,6 +52,7 @@ async def _deps() -> dict[str, str]:
                 select(Account).where(
                     Account.archived_at.is_(None),
                     Account.account_type == AccountType.EXPENSE,
+                    Account.tenant_id == DEFAULT_TENANT_ID,
                 ).limit(1)
             )
         ).scalars().first()

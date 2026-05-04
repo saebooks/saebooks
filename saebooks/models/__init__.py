@@ -7,6 +7,10 @@ from saebooks.models.bank_feed import (
     BankFeedIssue,
     BankFeedIssueStatus,
 )
+from saebooks.models.bank_feed_external import (
+    BankFeedExternalCred,
+    BankFeedExternalCredStatus,
+)
 from saebooks.models.bank_rule import BankRule, MatchType
 from saebooks.models.bank_statement import BankStatementLine, StatementLineStatus
 from saebooks.models.bsl_match import BslMatch
@@ -27,6 +31,7 @@ from saebooks.models.idempotency_key import IdempotencyKey, IdempotencyRecord
 from saebooks.models.item import CostMethod, Item
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine, PeriodLock
 from saebooks.models.journal_template import JournalTemplate
+from saebooks.models.pay_run import PayRun, PayRunLine, PayRunStatus
 from saebooks.models.project import Project, ProjectStatus
 from saebooks.models.settings import Setting
 from saebooks.models.sql_query import SqlQuery
@@ -42,6 +47,8 @@ __all__ = [
     "AtoSbrConfig",
     "BankFeedAccount",
     "BankFeedClient",
+    "BankFeedExternalCred",
+    "BankFeedExternalCredStatus",
     "BankFeedIssue",
     "BankFeedIssueStatus",
     "BankRule",
@@ -68,6 +75,9 @@ __all__ = [
     "JournalLine",
     "JournalTemplate",
     "MatchType",
+    "PayRun",
+    "PayRunLine",
+    "PayRunStatus",
     "PeriodLock",
     "Project",
     "ProjectStatus",

@@ -21,12 +21,16 @@ async def _active_company() -> Company:
         return company
 
 
-async def test_seed_codes_present(client: AsyncClient) -> None:
-    r = await client.get("/admin/tax-codes")
-    assert r.status_code == 200
-    body = r.text
+async def test_seed_codes_present() -> None:
+    """Seed AU tax codes are in the DB after migrations."""
+    company = await _active_company()
+    async with AsyncSessionLocal() as session:
+        codes = {
+            row.code
+            for row in await svc.list_active(session, company.id)
+        }
     for code in ("GST", "FRE", "INP", "EXP", "N-T", "CAP"):
-        assert code in body
+        assert code in codes
 
 
 async def test_create_update_archive_round_trip() -> None:

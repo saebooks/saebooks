@@ -40,6 +40,7 @@ async def bill_ids() -> dict[str, str]:
                 select(Account).where(
                     Account.archived_at.is_(None),
                     Account.account_type == AccountType.EXPENSE,
+                    Account.tenant_id == DEFAULT_TENANT_ID,
                 ).limit(1)
             )
         ).scalars().first()

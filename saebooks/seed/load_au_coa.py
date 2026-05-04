@@ -90,6 +90,9 @@ _EXTRA_ACCOUNTS: list[tuple[str, str, AccountType]] = [
     # (individual/SMSF tax return line). Both are expense-type accounts.
     ("6-2420-SG", "Superannuation - Employer SG", AccountType.EXPENSE),
     ("6-2420-SMSF", "Superannuation - Contractor Self-Managed (SMSF)", AccountType.EXPENSE),
+    # Payroll clearing account — Cr side of pay-run ABA journal; cleared when
+    # payment hits the bank feed and is matched to the ABA disbursement.
+    ("2-1150", "Payments — Pending", AccountType.LIABILITY),
 ]
 
 

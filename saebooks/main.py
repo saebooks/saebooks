@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from saebooks.api.errors import register_handlers
 from saebooks.api.v1 import router as api_v1_router
+from saebooks.api.webhooks.stripe import router as _stripe_webhook_router
 from saebooks.config import settings
 from saebooks.grpc_server import serve as grpc_serve
 from saebooks.middleware.active_company import ActiveCompanyMiddleware
@@ -19,10 +20,7 @@ from saebooks.middleware.request_id import RequestIdMiddleware
 from saebooks.routers import (
     accounts,
     auth,
-    admin,
     assets,
-    ato_sbr,
-    bank_feeds,
     bank_rules,
     bills,
     budgets,
@@ -31,12 +29,9 @@ from saebooks.routers import (
     dashboard,
     distributions,
     health,
-    imports,
-    integrations,
     invoices,
     items,
     journal,
-    pay_run,
     payments,
     projects,
     ranges,
@@ -111,7 +106,6 @@ def create_app() -> FastAPI:
         return RedirectResponse("/dashboard", status_code=302)
 
     app.include_router(health.router)
-    app.include_router(admin.router)
     app.include_router(dashboard.router)
     app.include_router(accounts.router)
     app.include_router(auth.router)
@@ -121,14 +115,6 @@ def create_app() -> FastAPI:
     app.include_router(ranges.router)
     app.include_router(reports.router)
     app.include_router(reconciliation.router)
-    # Integrations (LEI/GLEIF lookup, Stripe webhook, Paperless attach,
-    # ATO prefill stub). No prefix — routes carry their own mount paths
-    # (/contacts/lei-*, /webhooks/stripe, /admin/integrations/*) so they
-    # integrate with the contact form + public webhook surface + admin
-    # landing. Registered BEFORE contacts.router so /contacts/lei-lookup
-    # beats the catch-all /contacts/{contact_id} path (same trick as
-    # /invoices/recurring vs /invoices/{invoice_id} below).
-    app.include_router(integrations.router)
     app.include_router(beneficiaries_router)
     app.include_router(contacts.router)
     # recurring_invoices mounts at /invoices/recurring — must register
@@ -140,20 +126,20 @@ def create_app() -> FastAPI:
     app.include_router(bills.router)
     app.include_router(credit_notes.router)
     app.include_router(payments.router)
-    app.include_router(pay_run.router)
     app.include_router(projects.router)
     app.include_router(budgets.router)
     app.include_router(distributions.router)
     app.include_router(items.router)
     app.include_router(assets.router)
-    app.include_router(bank_feeds.router)
     app.include_router(bank_rules.router)
-    app.include_router(ato_sbr.router)
-    app.include_router(imports.router)
     # Global search + /help/shortcuts. No prefix; exposes /search and
     # /help/shortcuts at the top level so the Cmd-K palette fetch call
     # can stay short.
     app.include_router(search.router)
+    # Cat-C (W6): stable Stripe webhook at /webhooks/stripe. Not under /api/v1/
+    # because Stripe webhook URLs are registered in the Dashboard once and must
+    # not change on API version bumps. Auth is HMAC-only.
+    app.include_router(_stripe_webhook_router)
     # Phase 0 JSON API surface. Mounted last so its /api/v1/* paths
     # can't clash with any future top-level Jinja route. Bearer-auth
     # gated per-router (see saebooks/api/v1/auth.py) — independent

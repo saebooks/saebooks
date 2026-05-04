@@ -134,7 +134,7 @@ def _problem(
     status: int,
     code: str | None = None,
     title: str | None = None,
-    detail: str | None = None,
+    detail: str | dict[str, Any] | None = None,
     type_uri: str | None = None,
     extra: dict[str, Any] | None = None,
 ) -> JSONResponse:
@@ -199,12 +199,24 @@ async def http_exception_handler(
     }
     entry = _STATUS_CODE_MAP.get(exc.status_code)
 
-    detail_str = str(exc.detail) if exc.detail is not None else None
+    # When the route raises ``HTTPException(detail={...})`` the structured
+    # dict carries machine-readable error codes (e.g.
+    # ``{"code": "period_locked", "locked_through": "..."}``). Stringifying
+    # that with ``str()`` would give consumers a Python repr instead of the
+    # dict, so we forward it as a structured ``detail`` and promote a
+    # nested ``code`` key to the top-level problem ``code``.
+    if isinstance(exc.detail, dict):
+        detail_value: str | dict[str, object] | None = dict(exc.detail)
+        nested_code = exc.detail.get("code")
+    else:
+        detail_value = str(exc.detail) if exc.detail is not None else None
+        nested_code = None
+
     resp = _problem(
         status=exc.status_code,
-        code=entry.code if entry else None,
+        code=nested_code or (entry.code if entry else None),
         title=entry.title if entry else None,
-        detail=detail_str,
+        detail=detail_value,
     )
     if exc.headers:
         resp.headers.update(exc.headers)

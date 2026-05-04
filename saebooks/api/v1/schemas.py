@@ -2460,3 +2460,77 @@ class AllocationApplyOut(BaseModel):
     journal_entry_id: uuid.UUID
     lines_count: int
     total_amount: Decimal
+
+
+# ---------------------------------------------------------------------------
+# Pay Runs
+# ---------------------------------------------------------------------------
+
+
+class PayRunLineCreate(BaseModel):
+    employee_id: uuid.UUID
+    gross: Decimal = Field(gt=Decimal("0"))
+    tax: Decimal = Field(ge=Decimal("0"))
+    super_amount: Decimal = Field(ge=Decimal("0"))
+    net: Decimal = Field(gt=Decimal("0"))
+
+
+class PayRunLineOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    pay_run_id: uuid.UUID
+    employee_id: uuid.UUID
+    gross: Decimal
+    tax: Decimal
+    super_amount: Decimal
+    net: Decimal
+    created_at: datetime
+
+
+class PayRunCreate(BaseModel):
+    period_start: date
+    period_end: date
+    payment_date: date
+    description: str | None = None
+
+    @model_validator(mode="after")
+    def period_end_after_start(self) -> "PayRunCreate":
+        if self.period_end < self.period_start:
+            raise ValueError("period_end must be >= period_start")
+        return self
+
+
+class PayRunOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    tenant_id: uuid.UUID
+    period_start: date
+    period_end: date
+    payment_date: date
+    description: str | None
+    status: str
+    journal_id: uuid.UUID | None
+    version: int
+    created_at: datetime
+    updated_at: datetime
+    lines: list[PayRunLineOut] = []
+
+
+class PayRunListOut(BaseModel):
+    items: list[PayRunOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class PayRunConflictBody(BaseModel):
+    detail: str
+    current: PayRunOut
+
+
+class ExportAbaOut(BaseModel):
+    aba_file_b64: str
+    journal_id: uuid.UUID
