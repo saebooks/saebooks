@@ -35,6 +35,19 @@ from saebooks.services.bank_feeds.errors import (
     SissScopeError,
     SissValidationError,
 )
+from saebooks.services.bank_feeds.exceptions import (
+    FeedsAuthError,
+    FeedsEditionError,
+    FeedsError,
+    FeedsIdempotencyConflict,
+    FeedsNotFoundError,
+    FeedsStubError,
+    FeedsUnsupportedEdition,
+    FeedsUpstreamError,
+    FeedsUpstreamUnavailable,
+    FeedsValidationError,
+)
+from saebooks.services.bank_feeds.remote import RemoteBankFeedsService
 from saebooks.services.bank_feeds.repo import (
     get_or_create_client,
     insert_statement_lines,
@@ -45,6 +58,17 @@ from saebooks.services.bank_feeds.repo import (
 from saebooks.services.bank_feeds.token import TokenCache
 
 __all__ = [
+    "FeedsAuthError",
+    "FeedsEditionError",
+    "FeedsError",
+    "FeedsIdempotencyConflict",
+    "FeedsNotFoundError",
+    "FeedsStubError",
+    "FeedsUnsupportedEdition",
+    "FeedsUpstreamError",
+    "FeedsUpstreamUnavailable",
+    "FeedsValidationError",
+    "RemoteBankFeedsService",
     "SissAuthError",
     "SissClient",
     "SissError",

@@ -7,6 +7,10 @@ from saebooks.models.bank_feed import (
     BankFeedIssue,
     BankFeedIssueStatus,
 )
+from saebooks.models.bank_feed_external import (
+    BankFeedExternalCred,
+    BankFeedExternalCredStatus,
+)
 from saebooks.models.bank_rule import BankRule, MatchType
 from saebooks.models.bank_statement import BankStatementLine, StatementLineStatus
 from saebooks.models.bsl_match import BslMatch
@@ -42,6 +46,8 @@ __all__ = [
     "AtoSbrConfig",
     "BankFeedAccount",
     "BankFeedClient",
+    "BankFeedExternalCred",
+    "BankFeedExternalCredStatus",
     "BankFeedIssue",
     "BankFeedIssueStatus",
     "BankRule",
