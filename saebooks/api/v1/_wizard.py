@@ -135,7 +135,7 @@ class Wizard:
                     :wid,
                     current_setting('app.current_tenant')::uuid,
                     :kind,
-                    :state::jsonb,
+                    CAST(:state AS jsonb),
                     :expires_at
                 )
                 """
@@ -196,7 +196,7 @@ class Wizard:
             text(
                 """
                 UPDATE wizard_state
-                   SET state = state || :patch::jsonb,
+                   SET state = state || CAST(:patch AS jsonb),
                        updated_at = now()
                  WHERE id = :wid
                    AND expires_at > now()
