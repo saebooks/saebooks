@@ -3,7 +3,10 @@
 Two endpoints:
 
 * ``POST /billing/checkout-session`` — auth + email-verified.
-  Body: ``{edition: 'business'|'pro'}``. Response: ``{checkout_url}``.
+  Body: ``{edition: 'business'|'pro', period?: 'month'|'year'}``.
+  ``period`` defaults to ``'month'`` for backwards compatibility with
+  any callers that pre-date yearly pricing.
+  Response: ``{checkout_url}``.
   The web frontend redirects the browser to that URL.
 
 * ``POST /billing/webhook`` — public, signature-verified.
@@ -81,6 +84,10 @@ router = APIRouter(prefix="/billing", tags=["billing"])
 
 class CheckoutRequest(BaseModel):
     edition: Literal["business", "pro"]
+    # ``period`` is orthogonal to ``edition`` — same edition, different
+    # billing cadence. Default = month preserves backwards compat with
+    # any existing callers (and the web layer's own default).
+    period: Literal["month", "year"] = "month"
 
 
 class CheckoutResponse(BaseModel):
@@ -104,7 +111,9 @@ async def checkout_session(
             detail="Authenticated user has no email on file",
         )
     try:
-        result = await create_checkout_session(body.edition, user.email)
+        result = await create_checkout_session(
+            body.edition, user.email, period=body.period
+        )
     except StripeBillingError as exc:
         logger.error("checkout_session: %s", exc)
         raise HTTPException(
@@ -167,6 +176,10 @@ def _edition_from_event(event: dict[str, Any]) -> str | None:
     For subscription events: object is the subscription, metadata is
     set there directly (we set it via ``subscription_data.metadata``
     when creating the checkout session).
+
+    Period (``sae_period``) is intentionally NOT consumed here — it's
+    informational at this stage; tenant.edition state doesn't depend
+    on month-vs-year.
     """
     obj = (event.get("data") or {}).get("object") or {}
     md = obj.get("metadata") or {}
