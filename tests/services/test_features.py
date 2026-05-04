@@ -7,7 +7,6 @@ Covers:
 * the tier accessor (``tier_flags``)
 * the superset invariant across the five editions
 * the FastAPI dependency (``require_feature``)
-* the rendered ``/admin/license`` page for every edition
 
 Edition switching is done by constructing a throwaway ``Settings``
 instance for the pure tests, and by monkey-patching the module-level
@@ -300,58 +299,5 @@ async def test_require_feature_allows_business_and_above(
     assert resp.json() == {"ok": "true"}
 
 
-# ---------------------------------------------------------------------- #
-# /admin/license (integration through the real app)                      #
-# ---------------------------------------------------------------------- #
-
-
-async def test_admin_license_page_community(
-    client: AsyncClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from saebooks.config import settings as module_settings
-    monkeypatch.setattr(module_settings, "edition", "community")
-    resp = await client.get("/admin/license")
-    assert resp.status_code == 200
-    body = resp.text
-    assert "<strong>community</strong>" in body
-    for flag in ALL_FLAGS:
-        assert flag in body
-    assert "disabled" in body
-    assert "enabled" not in body
-
-
-async def test_admin_license_page_enterprise(
-    client: AsyncClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from saebooks.config import settings as module_settings
-    monkeypatch.setattr(module_settings, "edition", "enterprise")
-    resp = await client.get("/admin/license")
-    assert resp.status_code == 200
-    body = resp.text
-    assert "<strong>enterprise</strong>" in body
-    for flag in ALL_FLAGS:
-        assert flag in body
-    assert "enabled" in body
-
-
-@pytest.mark.parametrize("edition", ["offline", "business", "pro"])
-async def test_admin_license_page_mid_tiers(
-    edition: str,
-    client: AsyncClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Mid-tier pages render, show the edition name, and list every flag."""
-    from saebooks.config import settings as module_settings
-    monkeypatch.setattr(module_settings, "edition", edition)
-    resp = await client.get("/admin/license")
-    assert resp.status_code == 200
-    body = resp.text
-    # The template copy mentions every edition name, so look for the
-    # dynamic ``{{ edition }}`` slot in the <strong> block specifically.
-    assert f"<strong>{edition}</strong>" in body
-    for flag in ALL_FLAGS:
-        assert flag in body
-    assert "enabled" in body
-    assert "disabled" in body
+# NOTE: /admin/license HTML page tests removed in Cat-C rollup; replace with
+# tests against /api/v1/admin/license when that endpoint lands.

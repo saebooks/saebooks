@@ -1,4 +1,9 @@
-"""Tests for services.exports.company.build_company_export + routes."""
+"""Tests for services.exports.company.build_company_export.
+
+Cat-C rollup dropped the legacy /admin/company/export HTML form router; the
+service-level tests below remain as the contract for the export builder.
+The replacement v1 surface is /api/v1/companies (export not yet ported).
+"""
 from __future__ import annotations
 
 import io
@@ -7,12 +12,10 @@ import uuid
 import zipfile
 
 import pytest
-from httpx import AsyncClient
-from sqlalchemy import delete, select
+from sqlalchemy import select
 
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
-from saebooks.models.user import User
 from saebooks.services.exports.company import build_company_export
 
 
@@ -27,21 +30,6 @@ async def _seed_company_id() -> uuid.UUID:
         ).scalars().first()
         assert company is not None
         return company.id
-
-
-async def _cleanup_user(username: str) -> None:
-    async with AsyncSessionLocal() as session:
-        await session.execute(delete(User).where(User.username == username))
-        await session.commit()
-
-
-@pytest.fixture
-async def unique_username() -> str:
-    name = f"export-{uuid.uuid4().hex[:8]}"
-    try:
-        yield name
-    finally:
-        await _cleanup_user(name)
 
 
 # ----- service -----
@@ -141,67 +129,6 @@ async def test_build_company_export_readme_lists_counts() -> None:
     assert "accounts" in text
 
 
-# ----- router -----
-
-
-async def test_company_export_form_requires_accountant(
-    client: AsyncClient, unique_username: str
-) -> None:
-    """readonly default role gets 403."""
-    r = await client.get(
-        "/admin/company/export",
-        headers={"Remote-User": unique_username},
-    )
-    assert r.status_code == 403
-
-
-async def test_company_export_form_renders_for_accountant(
-    client: AsyncClient, unique_username: str
-) -> None:
-    await client.get(
-        "/admin/whoami", headers={"Remote-User": unique_username}
-    )
-    async with AsyncSessionLocal() as session:
-        u = (
-            await session.execute(
-                select(User).where(User.username == unique_username)
-            )
-        ).scalar_one()
-        u.role = "accountant"
-        await session.commit()
-
-    r = await client.get(
-        "/admin/company/export",
-        headers={"Remote-User": unique_username},
-    )
-    assert r.status_code == 200
-    assert "Download ZIP" in r.text
-
-
-async def test_company_export_post_returns_zip(
-    client: AsyncClient, unique_username: str
-) -> None:
-    await client.get(
-        "/admin/whoami", headers={"Remote-User": unique_username}
-    )
-    async with AsyncSessionLocal() as session:
-        u = (
-            await session.execute(
-                select(User).where(User.username == unique_username)
-            )
-        ).scalar_one()
-        u.role = "accountant"
-        await session.commit()
-
-    company_id = await _seed_company_id()
-    r = await client.post(
-        "/admin/company/export",
-        data={"company_id": str(company_id), "include_audit": "off"},
-        headers={"Remote-User": unique_username},
-    )
-    assert r.status_code == 200
-    assert r.headers["content-type"] == "application/zip"
-    assert "attachment" in r.headers.get("content-disposition", "")
-    # Round-trip the zip
-    zf = zipfile.ZipFile(io.BytesIO(r.content))
-    assert any(n.endswith("company.json") for n in zf.namelist())
+# NOTE: HTML form router tests for /admin/company/export deleted with the
+# Cat-C rollup. Re-add HTTP-level tests against /api/v1/companies/{id}/export
+# when that endpoint lands.

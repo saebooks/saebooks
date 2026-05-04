@@ -21,8 +21,5 @@ async def test_accounts_list_has_create_form(client: AsyncClient) -> None:
     assert 'name="code"' in r.text
 
 
-async def test_admin_settings_page(client: AsyncClient) -> None:
-    r = await client.get("/admin/settings")
-    assert r.status_code == 200
-    assert "Settings" in r.text
-    assert "base_currency" in r.text or "AUD" in r.text
+# NOTE: legacy /admin/settings HTML page removed in Cat-C rollup; re-add a
+# /api/v1/admin/settings test when that endpoint is added.

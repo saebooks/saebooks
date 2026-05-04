@@ -1,4 +1,9 @@
-"""Tests for audit.export_csv + /admin/audit/export.csv."""
+"""Tests for audit.export_csv (service layer).
+
+The legacy /admin/audit/export.csv HTML route was dropped in the Cat-C
+rollup; an /api/v1 audit-log endpoint exists at /api/v1/admin/audit-log
+but does not yet expose CSV export.
+"""
 from __future__ import annotations
 
 import csv
@@ -7,28 +12,11 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from httpx import AsyncClient
-from sqlalchemy import delete, select
+from sqlalchemy import delete
 
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.audit_snapshot import AuditSnapshot
-from saebooks.models.user import User
 from saebooks.services import audit as audit_svc
-
-
-async def _cleanup_user(username: str) -> None:
-    async with AsyncSessionLocal() as session:
-        await session.execute(delete(User).where(User.username == username))
-        await session.commit()
-
-
-@pytest.fixture
-async def unique_username() -> str:
-    name = f"audit-{uuid.uuid4().hex[:8]}"
-    try:
-        yield name
-    finally:
-        await _cleanup_user(name)
 
 
 @pytest.fixture
@@ -127,46 +115,5 @@ async def test_count_snapshots_matches_export(
     assert count == len(rows) - 1  # header excluded from count
 
 
-async def test_audit_export_route_requires_accountant(
-    client: AsyncClient, unique_username: str
-) -> None:
-    """readonly default role gets 403."""
-    r = await client.get(
-        "/admin/audit/export.csv",
-        headers={"Remote-User": unique_username},
-    )
-    assert r.status_code == 403
-
-
-async def test_audit_export_route_returns_csv(
-    client: AsyncClient,
-    unique_username: str,
-    scratch_snapshots: list[uuid.UUID],
-) -> None:
-    # Promote to accountant
-    await client.get(
-        "/admin/whoami", headers={"Remote-User": unique_username}
-    )
-    async with AsyncSessionLocal() as session:
-        u = (
-            await session.execute(
-                select(User).where(User.username == unique_username)
-            )
-        ).scalar_one()
-        u.role = "accountant"
-        await session.commit()
-
-        tag_snap = await session.get(AuditSnapshot, scratch_snapshots[0])
-        assert tag_snap is not None
-        tbl = tag_snap.table_name
-
-    r = await client.get(
-        f"/admin/audit/export.csv?table_name={tbl}",
-        headers={"Remote-User": unique_username},
-    )
-    assert r.status_code == 200
-    assert "text/csv" in r.headers["content-type"]
-    assert "attachment" in r.headers.get("content-disposition", "")
-    rows = list(csv.reader(io.StringIO(r.text)))
-    assert rows[0] == list(audit_svc.EXPORT_COLUMNS)
-    assert len(rows) == 1 + 3
+# NOTE: HTML route tests for /admin/audit/export.csv removed; replace with
+# tests against /api/v1/admin/audit-log when CSV export is ported.
