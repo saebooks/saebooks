@@ -9,10 +9,13 @@ verification in ``services/integrations/stripe.py`` is also stdlib-only.
 Two responsibilities:
 
 1. ``ensure_products()`` — idempotently creates the Business and Pro
-   recurring prices in Stripe. Searches by metadata sentinel
-   ``sae_edition`` so re-running the script doesn't double-up.
-2. ``create_checkout_session(edition, customer_email)`` — builds a
-   Stripe Checkout Session and returns the hosted-checkout URL.
+   recurring prices in Stripe, one price per (edition, billing period).
+   Searches by metadata sentinel ``sae_edition`` for the product, and
+   matches on ``sae_edition`` + ``sae_period`` for the price, so
+   re-running the script doesn't double-up.
+2. ``create_checkout_session(edition, customer_email, *, period)`` —
+   builds a Stripe Checkout Session for the requested
+   (edition, period) tuple and returns the hosted-checkout URL.
 
 Live/test guard
 ---------------
@@ -22,7 +25,9 @@ a live key.
 
 Pricing
 -------
-AUD; cents in ``EDITIONS``. Display strings match the marketing site.
+AUD; cents in ``EDITIONS[edition]["prices"][period]``. Display strings
+match the marketing site ($49/mo, $490/yr, $99/mo, $990/yr — yearly is
+exactly 10x monthly, "save 2 months").
 """
 from __future__ import annotations
 
@@ -37,21 +42,29 @@ from saebooks.config import settings
 logger = logging.getLogger("saebooks.stripe_billing")
 
 Edition = Literal["business", "pro"]
+Period = Literal["month", "year"]
 
+# Per-edition spec. ``prices`` maps the Stripe ``recurring.interval`` value
+# to ``unit_amount`` (cents in the edition's ``currency``). Yearly is
+# exactly 10x monthly — honest "save 2 months" framing on the site.
 EDITIONS: dict[str, dict[str, Any]] = {
     "business": {
         "name": "SAE Books Business",
-        "amount_cents": 4900,
-        "interval": "month",
-        "currency": "aud",
         "description": "Business edition (single company, up to 3 users).",
+        "currency": "aud",
+        "prices": {
+            "month": 4900,    # $49/mo
+            "year": 49000,    # $490/yr
+        },
     },
     "pro": {
         "name": "SAE Books Pro",
-        "amount_cents": 9900,
-        "interval": "month",
-        "currency": "aud",
         "description": "Pro edition (unlimited users, multi-company, STP, FX).",
+        "currency": "aud",
+        "prices": {
+            "month": 9900,    # $99/mo
+            "year": 99000,    # $990/yr
+        },
     },
 }
 
@@ -151,16 +164,23 @@ async def _post(client: httpx.AsyncClient, path: str, payload: dict[str, Any]) -
     return resp.json()
 
 
-async def ensure_products() -> dict[str, str]:
+async def ensure_products() -> dict[str, dict[str, str]]:
     """Idempotently create products + recurring prices for each
-    edition. Returns ``{edition: price_id}``.
+    edition × billing period. Returns ``{edition: {period: price_id}}``.
 
-    Search uses metadata field ``sae_edition`` which we set on every
-    create — re-runs read them back instead of creating duplicates.
+    Search uses metadata ``sae_edition`` (product) and
+    ``sae_edition`` + ``sae_period`` (price). Re-runs read existing
+    rows back instead of creating duplicates.
+
+    Existing live monthly prices that pre-date the ``sae_period``
+    metadata field are matched by amount/currency/interval and
+    backfilled with ``metadata.sae_period`` so subsequent runs find
+    them via the metadata search path.
     """
-    out: dict[str, str] = {}
+    out: dict[str, dict[str, str]] = {}
     async with _client() as client:
         for edition, spec in EDITIONS.items():
+            # ----- product (one per edition) -----
             existing = await _search(
                 client,
                 "products",
@@ -189,37 +209,76 @@ async def ensure_products() -> dict[str, str]:
                     product["id"],
                 )
 
-            prices = await _list(
+            # ----- prices (one per period) -----
+            edition_prices: dict[str, str] = {}
+            existing_prices = await _list(
                 client, "prices", product=product["id"], active="true", limit=100
             )
-            match: dict[str, Any] | None = None
-            for p in prices:
-                recurring = p.get("recurring") or {}
-                if (
-                    p.get("unit_amount") == spec["amount_cents"]
-                    and (p.get("currency") or "").lower() == spec["currency"]
-                    and recurring.get("interval") == spec["interval"]
-                ):
-                    match = p
-                    break
-            if match is None:
-                match = await _post(
-                    client,
-                    "/prices",
-                    {
-                        "product": product["id"],
-                        "currency": spec["currency"],
-                        "unit_amount": spec["amount_cents"],
-                        "recurring": {"interval": spec["interval"]},
-                        "metadata": {"sae_edition": edition},
-                    },
-                )
-                logger.info(
-                    "stripe_billing: created price %s (id=%s)",
-                    edition,
-                    match["id"],
-                )
-            out[edition] = match["id"]
+
+            for period, amount_cents in spec["prices"].items():
+                match: dict[str, Any] | None = None
+                for p in existing_prices:
+                    recurring = p.get("recurring") or {}
+                    md = p.get("metadata") or {}
+                    same_money = (
+                        p.get("unit_amount") == amount_cents
+                        and (p.get("currency") or "").lower() == spec["currency"]
+                        and recurring.get("interval") == period
+                    )
+                    md_period = md.get("sae_period")
+                    md_edition = md.get("sae_edition")
+                    # Two acceptance modes:
+                    #   1. Metadata matches outright (post-period prices).
+                    #   2. Money matches and metadata is missing/legacy
+                    #      (pre-period live monthly prices). We backfill
+                    #      metadata so future runs find them by metadata.
+                    if md_period == period and md_edition in (edition, None):
+                        if same_money:
+                            match = p
+                            break
+                    elif md_period is None and same_money:
+                        # Legacy match — backfill metadata.
+                        logger.info(
+                            "stripe_billing: backfilling sae_period=%s on legacy price %s",
+                            period,
+                            p["id"],
+                        )
+                        await _post(
+                            client,
+                            f"/prices/{p['id']}",
+                            {
+                                "metadata": {
+                                    "sae_edition": edition,
+                                    "sae_period": period,
+                                },
+                            },
+                        )
+                        match = p
+                        break
+
+                if match is None:
+                    match = await _post(
+                        client,
+                        "/prices",
+                        {
+                            "product": product["id"],
+                            "currency": spec["currency"],
+                            "unit_amount": amount_cents,
+                            "recurring": {"interval": period},
+                            "metadata": {
+                                "sae_edition": edition,
+                                "sae_period": period,
+                            },
+                        },
+                    )
+                    logger.info(
+                        "stripe_billing: created price %s/%s (id=%s)",
+                        edition,
+                        period,
+                        match["id"],
+                    )
+                edition_prices[period] = match["id"]
+            out[edition] = edition_prices
     return out
 
 
@@ -232,28 +291,51 @@ async def create_checkout_session(
     edition: Edition,
     customer_email: str,
     *,
+    period: Period = "month",
     success_url: str = "https://app.saebooks.com.au/billing/checkout-success?session_id={CHECKOUT_SESSION_ID}",
     cancel_url: str = "https://saebooks.com.au/#editions",
 ) -> dict[str, str]:
-    """Create a Stripe Checkout Session, return ``{checkout_url, session_id}``."""
+    """Create a Stripe Checkout Session for ``(edition, period)``.
+
+    Returns ``{checkout_url, session_id}``. Stamps both
+    ``sae_edition`` and ``sae_period`` on the session metadata and
+    on subscription_data so the webhook (or any downstream consumer)
+    can tell month from year — currently only ``sae_edition`` drives
+    tenant.edition state, but future per-period logic (e.g. billing
+    portal copy, license expiry hints) can read ``sae_period``.
+    """
     if edition not in EDITIONS:
         raise StripeBillingError(f"Unknown edition: {edition!r}")
+    if period not in ("month", "year"):
+        raise StripeBillingError(f"Unknown period: {period!r}")
 
     async with _client() as client:
         prices = await _search(
             client,
             "prices",
-            f"metadata['sae_edition']:'{edition}' AND active:'true'",
+            (
+                f"metadata['sae_edition']:'{edition}' "
+                f"AND metadata['sae_period']:'{period}' "
+                f"AND active:'true'"
+            ),
         )
         if not prices:
-            await client.aclose()
+            # Materialise products/prices and retry once. ensure_products()
+            # also backfills sae_period on legacy live prices.
             await ensure_products()
-            return await create_checkout_session(
-                edition,
-                customer_email,
-                success_url=success_url,
-                cancel_url=cancel_url,
+            prices = await _search(
+                client,
+                "prices",
+                (
+                    f"metadata['sae_edition']:'{edition}' "
+                    f"AND metadata['sae_period']:'{period}' "
+                    f"AND active:'true'"
+                ),
             )
+            if not prices:
+                raise StripeBillingError(
+                    f"No active Stripe price for {edition}/{period} after ensure_products()"
+                )
         price = prices[0]
 
         session = await _post(
@@ -265,8 +347,10 @@ async def create_checkout_session(
                 "customer_email": customer_email,
                 "success_url": success_url,
                 "cancel_url": cancel_url,
-                "metadata": {"sae_edition": edition},
-                "subscription_data": {"metadata": {"sae_edition": edition}},
+                "metadata": {"sae_edition": edition, "sae_period": period},
+                "subscription_data": {
+                    "metadata": {"sae_edition": edition, "sae_period": period},
+                },
                 "allow_promotion_codes": True,
             },
         )
@@ -307,6 +391,8 @@ async def create_portal_session(
 
 __all__ = [
     "EDITIONS",
+    "Edition",
+    "Period",
     "StripeBillingError",
     "StripeBillingNotConfigured",
     "create_checkout_session",

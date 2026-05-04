@@ -225,3 +225,184 @@ async def test_checkout_completed_unknown_email_mints_tenant(client: AsyncClient
         tenant = await session.get(Tenant, user.tenant_id)
         assert tenant.edition == "pro"
         assert tenant.stripe_subscription_id == sub_id
+
+
+# ---------------------------------------------------------------------------
+# POST /billing/checkout-session — period passthrough (yearly support)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_checkout_session_passes_period_year(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The checkout-session route must forward ``period`` from the
+    request body into ``create_checkout_session(..., period=...)``.
+
+    We don't hit Stripe — patch the underlying helper and assert it
+    was called with ``period='year'``. Default-month covered by the
+    next test.
+    """
+    from saebooks.services.jwt_tokens import make_access_token  # noqa: PLC0415
+
+    email = f"yearly-{uuid.uuid4().hex[:8]}@example.test"
+    tenant_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    async with AsyncSessionLocal() as session:
+        session.add(
+            Tenant(
+                id=tenant_id,
+                name=email.split("@", 1)[0],
+                slug=f"yearly-{uuid.uuid4().hex[:6]}",
+                edition="community",
+            )
+        )
+        await session.flush()
+        user = User(
+            id=user_id,
+            tenant_id=tenant_id,
+            username=email,
+            email=email,
+            role="owner",
+            password_hash=hash_password("test-pass-123"),
+            email_verified_at=datetime.now(UTC),
+            version=1,
+            password_version=0,
+        )
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+        token = make_access_token(user)
+
+    seen: dict[str, Any] = {}
+
+    async def _fake_create(edition: str, customer_email: str, *, period: str = "month", **kw: Any) -> dict[str, str]:
+        seen["edition"] = edition
+        seen["email"] = customer_email
+        seen["period"] = period
+        return {
+            "checkout_url": "https://checkout.stripe.com/c/pay/cs_test_year",
+            "session_id": "cs_test_year",
+        }
+
+    monkeypatch.setattr(
+        "saebooks.api.v1.billing.create_checkout_session", _fake_create
+    )
+
+    resp = await client.post(
+        "/api/v1/billing/checkout-session",
+        json={"edition": "business", "period": "year"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert seen["edition"] == "business"
+    assert seen["email"] == email
+    assert seen["period"] == "year"
+    assert resp.json()["checkout_url"].startswith("https://checkout.stripe.com/")
+
+
+@pytest.mark.asyncio
+async def test_checkout_session_period_defaults_to_month(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Body without an explicit ``period`` defaults to month — keeps
+    pre-yearly callers working."""
+    from saebooks.services.jwt_tokens import make_access_token  # noqa: PLC0415
+
+    email = f"monthly-{uuid.uuid4().hex[:8]}@example.test"
+    tenant_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    async with AsyncSessionLocal() as session:
+        session.add(
+            Tenant(
+                id=tenant_id,
+                name=email.split("@", 1)[0],
+                slug=f"monthly-{uuid.uuid4().hex[:6]}",
+                edition="community",
+            )
+        )
+        await session.flush()
+        user = User(
+            id=user_id,
+            tenant_id=tenant_id,
+            username=email,
+            email=email,
+            role="owner",
+            password_hash=hash_password("test-pass-123"),
+            email_verified_at=datetime.now(UTC),
+            version=1,
+            password_version=0,
+        )
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+        token = make_access_token(user)
+
+    seen: dict[str, Any] = {}
+
+    async def _fake_create(edition: str, customer_email: str, *, period: str = "month", **kw: Any) -> dict[str, str]:
+        seen["period"] = period
+        return {
+            "checkout_url": "https://checkout.stripe.com/c/pay/cs_test_month",
+            "session_id": "cs_test_month",
+        }
+
+    monkeypatch.setattr(
+        "saebooks.api.v1.billing.create_checkout_session", _fake_create
+    )
+
+    resp = await client.post(
+        "/api/v1/billing/checkout-session",
+        json={"edition": "business"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert seen["period"] == "month"
+
+
+@pytest.mark.asyncio
+async def test_checkout_session_rejects_unknown_period(
+    client: AsyncClient,
+) -> None:
+    """Pydantic Literal validation kicks bad period values back as 422."""
+    # No DB / JWT needed — validation happens before deps.
+    # But we still need a bearer to get past require_bearer.
+    from saebooks.services.jwt_tokens import make_access_token  # noqa: PLC0415
+
+    email = f"bad-period-{uuid.uuid4().hex[:8]}@example.test"
+    tenant_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    async with AsyncSessionLocal() as session:
+        session.add(
+            Tenant(
+                id=tenant_id,
+                name=email.split("@", 1)[0],
+                slug=f"badperiod-{uuid.uuid4().hex[:6]}",
+                edition="community",
+            )
+        )
+        await session.flush()
+        user = User(
+            id=user_id,
+            tenant_id=tenant_id,
+            username=email,
+            email=email,
+            role="owner",
+            password_hash=hash_password("test-pass-123"),
+            email_verified_at=datetime.now(UTC),
+            version=1,
+            password_version=0,
+        )
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+        token = make_access_token(user)
+
+    resp = await client.post(
+        "/api/v1/billing/checkout-session",
+        json={"edition": "business", "period": "weekly"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 422
