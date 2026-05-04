@@ -132,7 +132,7 @@ class Wizard:
                 """
                 INSERT INTO wizard_state (id, tenant_id, kind, state, expires_at)
                 VALUES (
-                    :wid,
+                    CAST(:wid AS uuid),
                     current_setting('app.current_tenant')::uuid,
                     :kind,
                     CAST(:state AS jsonb),
