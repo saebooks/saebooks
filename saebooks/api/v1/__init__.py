@@ -54,6 +54,7 @@ from saebooks.api.v1.journal_templates import router as journal_templates_router
 from saebooks.api.v1.items import router as items_router
 from saebooks.api.v1.journal_entries import router as journal_entries_router
 from saebooks.api.v1.payments import router as payments_router
+from saebooks.api.v1.pay_run import router as pay_runs_router
 from saebooks.api.v1.projects import router as projects_router
 from saebooks.api.v1.snapshot import router as snapshot_router
 from saebooks.api.v1.tax_codes import router as tax_codes_router
@@ -116,5 +117,7 @@ router.include_router(ai_extraction_router)
 router.include_router(allocations_router)
 # Cat-C: multi-step import wizard (bank CSV/OFX community; QBO Pro+)
 router.include_router(imports_router)
+# Cat-C: pay runs — community-tier, no feature gate
+router.include_router(pay_runs_router)
 
 __all__ = ["router"]
