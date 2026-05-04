@@ -17,7 +17,8 @@ Phase 1 tier-5: ``/api/v1/reports/aged_receivables``,
 B/46: ``/api/v1/documents/extract`` (AI document extraction).
 0077: ``/api/v1/auth/signup``, verify-email, password-reset, magic-link.
 0078: ``/api/v1/billing/checkout-session``, ``/api/v1/billing/webhook``.
-0080: ``/api/v1/contact/submit`` — public contact form.
+0080: ``/api/v1/contact/submit`` -- public contact form.
+Cat-C: ``/api/v1/imports/wizards`` -- multi-step import wizard.
 """
 from fastapi import APIRouter
 
@@ -41,6 +42,7 @@ from saebooks.api.v1.contacts import router as contacts_router
 from saebooks.api.v1.credit_notes import router as credit_notes_router
 from saebooks.api.v1.fixed_assets import router as fixed_assets_router
 from saebooks.api.v1.health import router as health_router
+from saebooks.api.v1.imports import router as imports_router
 from saebooks.api.v1.login import router as login_router
 from saebooks.api.v1.reconciliation import router as reconciliation_router
 from saebooks.api.v1.recurring_invoices import router as recurring_invoices_router
@@ -57,28 +59,28 @@ from saebooks.api.v1.snapshot import router as snapshot_router
 from saebooks.api.v1.tax_codes import router as tax_codes_router
 from saebooks.api.v1.users import permissions_router, router as users_router
 
-# One umbrella router — main.py mounts this at /api/v1.
+# One umbrella router -- main.py mounts this at /api/v1.
 router = APIRouter(prefix="/api/v1")
-# health first — /api/v1/healthz + /api/v1/version are deliberately
+# health first -- /api/v1/healthz + /api/v1/version are deliberately
 # unauthenticated (no require_bearer), so they must mount before any
 # router with a router-level dependency.
 router.include_router(health_router)
-# JWT login endpoints — unauthenticated entry points; must come before
+# JWT login endpoints -- unauthenticated entry points; must come before
 # any router with a router-level bearer dependency so /auth/login etc.
 # are never gated by require_bearer.
 router.include_router(login_router)
-# Public signup / verify / reset / magic-link — also unauthenticated.
+# Public signup / verify / reset / magic-link -- also unauthenticated.
 # Mounted right after login so /auth/signup, /auth/verify-email etc.
 # share the same gate-free prefix.
 router.include_router(signup_router)
-# Stripe billing — /billing/checkout-session is auth-gated by its own
+# Stripe billing -- /billing/checkout-session is auth-gated by its own
 # explicit dependency; /billing/webhook is unauthenticated (Stripe
 # auth is by signature, not bearer). The router itself isn't gated.
 router.include_router(billing_router)
-# saebooks-infrastructure §8 build #4 — licence snapshot/upload/refresh.
+# saebooks-infrastructure SS8 build #4 -- licence snapshot/upload/refresh.
 router.include_router(license_router)
 router.include_router(lodgement_router)
-# Public contact form — unauthenticated, rate-limited per IP/hour.
+# Public contact form -- unauthenticated, rate-limited per IP/hour.
 router.include_router(contact_public_router)
 router.include_router(contacts_router)
 router.include_router(account_ranges_router)
@@ -107,10 +109,12 @@ router.include_router(reports_router)
 router.include_router(search_router)
 router.include_router(changes_router)
 router.include_router(snapshot_router)
-# B/46: AI document extraction — feature-gated to Business+ via
+# B/46: AI document extraction -- feature-gated to Business+ via
 # FLAG_AI_EXTRACTION. Mounted last to stay after the auth/login routers.
 router.include_router(ai_extraction_router)
-# FITC-6: allocation rules engine — Business+ feature-gated
+# FITC-6: allocation rules engine -- Business+ feature-gated
 router.include_router(allocations_router)
+# Cat-C: multi-step import wizard (bank CSV/OFX community; QBO Pro+)
+router.include_router(imports_router)
 
 __all__ = ["router"]
