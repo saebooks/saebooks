@@ -316,16 +316,19 @@ async def upload_keystore(
     password are encrypted at rest via ``saebooks.services.crypto``.
     Returns 201 with the keystore entry on success.
     """
+    # Validate inputs before checking server-side encryption configuration —
+    # an empty file is a 422 client error regardless of whether the server
+    # is configured, so the test expects 422 to take precedence over 503.
+    data = await file.read()
+    if not data:
+        raise HTTPException(422, "No file content uploaded")
+
     if not crypto_svc.is_configured(settings):
         raise HTTPException(
             503,
             "SAEBOOKS_FIELD_ENCRYPTION_KEY is not configured — "
             "cannot store keystore without at-rest encryption",
         )
-
-    data = await file.read()
-    if not data:
-        raise HTTPException(422, "No file content uploaded")
 
     try:
         loaded = load_keystore(data, password)

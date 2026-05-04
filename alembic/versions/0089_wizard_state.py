@@ -33,6 +33,7 @@ def upgrade() -> None:
         "CREATE INDEX wizard_state_expires_idx ON wizard_state(expires_at)"
     )
     op.execute("ALTER TABLE wizard_state ENABLE ROW LEVEL SECURITY")
+    op.execute("ALTER TABLE wizard_state FORCE ROW LEVEL SECURITY")
     op.execute("""
         CREATE POLICY wizard_state_tenant_isolation ON wizard_state
             USING (tenant_id = current_setting('app.current_tenant')::uuid)

@@ -127,6 +127,14 @@ class Wizard:
         expires_at = datetime.now(UTC) + timedelta(seconds=ttl_seconds)
         wizard_id = uuid.uuid4()
 
+        # Mirror `kind` into the state JSON so callers that read state via
+        # ``Wizard.get`` (which returns only the state column) can dispatch
+        # without a second query for the kind column. The kind column is
+        # still authoritative for indexing and the helper does not let
+        # callers overwrite it via ``patch_state`` because ``step`` merges
+        # but never re-writes the column.
+        merged_initial = {**initial_state, "kind": kind}
+
         await session.execute(
             text(
                 """
@@ -142,7 +150,7 @@ class Wizard:
             ).bindparams(
                 wid=str(wizard_id),
                 kind=kind,
-                state=_json.dumps(initial_state),
+                state=_json.dumps(merged_initial),
                 expires_at=expires_at,
             )
         )

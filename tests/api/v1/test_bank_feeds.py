@@ -460,8 +460,13 @@ async def test_sync_blocked_when_period_is_locked(
         detail = body.get("detail", body)
         assert detail.get("code") == "period_locked"
     finally:
+        # Delete only the lock we added — wiping all PeriodLock rows would
+        # destroy the seed-fixture's Q1 2026 lock that other test files
+        # (e.g. test_pay_run_v1) rely on.
         async with AsyncSessionLocal() as session:
-            await session.execute(delete(PeriodLock))
+            await session.execute(
+                delete(PeriodLock).where(PeriodLock.reason == "test lock")
+            )
             await session.commit()
 
 
@@ -495,5 +500,7 @@ async def test_sync_override_reason_bypasses_period_lock(
         assert r.status_code == 200, r.text
     finally:
         async with AsyncSessionLocal() as session:
-            await session.execute(delete(PeriodLock))
+            await session.execute(
+                delete(PeriodLock).where(PeriodLock.reason == "test lock")
+            )
             await session.commit()
