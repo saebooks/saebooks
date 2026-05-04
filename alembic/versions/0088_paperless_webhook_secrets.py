@@ -38,7 +38,7 @@ revision: str = "0088_paperless_webhook_secrets"
 # NOTE: rollup must wire the correct down_revision once the full Cat-C
 # migration chain is assembled. Set to the current prod head 0085 so
 # this branch is independently testable on a clean DB.
-down_revision: str | None = "0085_close_remaining_rls_gaps"
+down_revision: str | None = "0087_saebooks_sql_ro_role"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

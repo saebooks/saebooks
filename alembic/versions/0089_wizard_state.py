@@ -9,7 +9,7 @@ from __future__ import annotations
 from alembic import op
 
 revision = "0089"
-down_revision = "0085_rls_remaining_gaps"
+down_revision = "0088_paperless_webhook_secrets"
 branch_labels = None
 depends_on = None
 

@@ -51,6 +51,7 @@ from saebooks.api.v1.journal_templates import router as journal_templates_router
 from saebooks.api.v1.license import router as license_router
 from saebooks.api.v1.lodgement import router as lodgement_router
 from saebooks.api.v1.login import router as login_router
+from saebooks.api.v1.pay_run import router as pay_run_router
 from saebooks.api.v1.payments import router as payments_router
 from saebooks.api.v1.projects import router as projects_router
 from saebooks.api.v1.reconciliation import router as reconciliation_router
@@ -126,5 +127,7 @@ router.include_router(admin_router)
 router.include_router(imports_router)
 # Cat-C (W6): integrations -- Stripe Connect, Paperless, LEI, CH, ATO.
 router.include_router(integrations_router)
+# Cat-C (W1): pay-run / payroll v1 endpoints.
+router.include_router(pay_run_router)
 
 __all__ = ["router"]

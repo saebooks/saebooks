@@ -69,7 +69,7 @@ revision: str = "0087_saebooks_sql_ro_role"
 # Sit on top of 0085 (the last migration in main at branch creation).
 # If a sibling worker lands a 0086 that this migration logically follows,
 # rebase the down_revision to that on merge.
-down_revision: str | None = "0085_close_remaining_rls_gaps"
+down_revision: str | None = "0086_bank_feed_external_creds"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
