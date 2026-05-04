@@ -212,7 +212,7 @@ async def test_expired_wizard_step_rejected(api_client: AsyncClient) -> None:
     async with AsyncSessionLocal() as session:
         await session.execute(
             text(
-                "UPDATE wizard_state SET expires_at = now() - INTERVAL '1 second' WHERE id = :wid"
+                "UPDATE wizard_state SET expires_at = now() - INTERVAL '1 second' WHERE id = CAST(:wid AS uuid)"
             ).bindparams(wid=wizard_id)
         )
         await session.commit()
@@ -235,7 +235,7 @@ async def test_expired_wizard_commit_rejected(api_client: AsyncClient) -> None:
     async with AsyncSessionLocal() as session:
         await session.execute(
             text(
-                "UPDATE wizard_state SET expires_at = now() - INTERVAL '1 second' WHERE id = :wid"
+                "UPDATE wizard_state SET expires_at = now() - INTERVAL '1 second' WHERE id = CAST(:wid AS uuid)"
             ).bindparams(wid=wizard_id)
         )
         await session.commit()
@@ -271,13 +271,13 @@ async def test_tenant_isolation_wizard_invisible_to_other_tenant(
         await session.execute(
             text(
                 "INSERT INTO wizard_state (id, tenant_id, kind, state, expires_at) "
-                "VALUES (:wid, :tid, 'bank_csv', '{}'::jsonb, now() + INTERVAL '1 hour')"
+                "VALUES (CAST(:wid AS uuid), CAST(:tid AS uuid), 'bank_csv', '{}'::jsonb, now() + INTERVAL '1 hour')"
             ).bindparams(wid=str(uuid.uuid4()), tid=str(tenant_a_id))
         )
         # Retrieve the id we just inserted.
         row = await session.execute(
             text(
-                "SELECT id FROM wizard_state WHERE tenant_id = :tid LIMIT 1"
+                "SELECT id FROM wizard_state WHERE tenant_id = CAST(:tid AS uuid) LIMIT 1"
             ).bindparams(tid=str(tenant_a_id))
         )
         wizard_id_a = str(row.scalar_one())

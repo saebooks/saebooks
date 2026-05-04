@@ -43,7 +43,10 @@ from saebooks.api.v1.depreciation_models import router as depreciation_models_ro
 from saebooks.api.v1.fixed_assets import router as fixed_assets_router
 from saebooks.api.v1.health import router as health_router
 from saebooks.api.v1.imports import router as imports_router
-from saebooks.api.v1.integrations import router as integrations_router
+from saebooks.api.v1.integrations import (
+    public_router as integrations_public_router,
+    router as integrations_router,
+)
 from saebooks.api.v1.invoices import router as invoices_router
 from saebooks.api.v1.items import router as items_router
 from saebooks.api.v1.journal_entries import router as journal_entries_router
@@ -127,6 +130,8 @@ router.include_router(admin_router)
 router.include_router(imports_router)
 # Cat-C (W6): integrations -- Stripe Connect, Paperless, LEI, CH, ATO.
 router.include_router(integrations_router)
+# Public webhook routes (HMAC-authenticated, no JWT required).
+router.include_router(integrations_public_router)
 # Cat-C (W1): pay-run / payroll v1 endpoints.
 router.include_router(pay_run_router)
 

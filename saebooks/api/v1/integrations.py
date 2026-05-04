@@ -104,6 +104,13 @@ router = APIRouter(
     dependencies=[Depends(require_bearer)],
 )
 
+# Public sub-router for webhook routes that authenticate via their own HMAC.
+# Mounted alongside `router` in saebooks/api/v1/__init__.py.
+public_router = APIRouter(
+    prefix="/integrations",
+    tags=["integrations"],
+)
+
 
 # ---------------------------------------------------------------------------
 # Pydantic schemas
@@ -242,7 +249,7 @@ async def stripe_customer_status(
 # ---------------------------------------------------------------------------
 
 
-@router.post(
+@public_router.post(
     "/paperless/webhook",
     summary="Inbound Paperless-ngx webhook (HMAC-validated)",
     dependencies=[Depends(require_feature(FLAG_PAPERLESS_INTEGRATION))],

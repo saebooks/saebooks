@@ -77,7 +77,7 @@ async def test_wizard_get_returns_none_for_expired() -> None:
         # Manually expire the row by setting expires_at to the past.
         await session.execute(
             text(
-                "UPDATE wizard_state SET expires_at = now() - INTERVAL '1 second' WHERE id = :wid"
+                "UPDATE wizard_state SET expires_at = now() - INTERVAL '1 second' WHERE id = CAST(:wid AS uuid)"
             ).bindparams(wid=str(wid))
         )
         await session.flush()
@@ -124,7 +124,7 @@ async def test_wizard_step_raises_on_expired() -> None:
         await session.flush()
         await session.execute(
             text(
-                "UPDATE wizard_state SET expires_at = now() - INTERVAL '1 second' WHERE id = :wid"
+                "UPDATE wizard_state SET expires_at = now() - INTERVAL '1 second' WHERE id = CAST(:wid AS uuid)"
             ).bindparams(wid=str(wid))
         )
         await session.flush()
@@ -160,7 +160,7 @@ async def test_wizard_expire_old_deletes_expired() -> None:
         await session.flush()
         await session.execute(
             text(
-                "UPDATE wizard_state SET expires_at = now() - INTERVAL '1 second' WHERE id = :wid"
+                "UPDATE wizard_state SET expires_at = now() - INTERVAL '1 second' WHERE id = CAST(:wid AS uuid)"
             ).bindparams(wid=str(wid))
         )
         await session.flush()
