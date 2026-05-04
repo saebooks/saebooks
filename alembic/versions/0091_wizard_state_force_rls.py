@@ -14,8 +14,8 @@ from __future__ import annotations
 
 from alembic import op
 
-revision = "0091"
-down_revision = "0090"
+revision = "0091_wizard_state_force_rls"
+down_revision = "0090_pay_run_tables"
 branch_labels = None
 depends_on = None
 
