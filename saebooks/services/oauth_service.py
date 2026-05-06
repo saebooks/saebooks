@@ -41,7 +41,26 @@ async def find_or_create_user(
     2. Existing User with matching email → upsert link → user
     3. Create new User (role=VIEWER) + link → user
     """
+    # NB: this is the only writer that creates rows in tenants other
+    # than the implicit "current request tenant". When called from the
+    # oauth-handoff path there is no request-scoped JWT yet, so we
+    # bind app.current_tenant ourselves. ``SAEBOOKS_DEFAULT_TENANT_ID``
+    # lets a private deploy point first-logins at its non-seed tenant
+    # (e.g. books.sauer routes them to the Sauer Pty Ltd tenant rather
+    # than the seed); fallback to the legacy default keeps the public
+    # / community single-tenant build working.
+    import os
+    DEFAULT_TENANT_ID = os.environ.get(
+        "SAEBOOKS_DEFAULT_TENANT_ID",
+        "00000000-0000-0000-0000-000000000001",
+    )
     async with AsyncSessionLocal() as session:
+        # Stamp the tenant onto session.info BEFORE the first transaction
+        # begins so the after_begin listener (registered in api/v1/deps.py)
+        # issues SET LOCAL app.current_tenant on every BEGIN. Without this
+        # any INSERT into FORCE-RLS tables (users, oauth_provider_links)
+        # raises InsufficientPrivilegeError.
+        session.info["tenant_id"] = DEFAULT_TENANT_ID
         link = await session.execute(
             select(OAuthProviderLink).where(
                 (OAuthProviderLink.provider == provider)
@@ -86,7 +105,7 @@ async def find_or_create_user(
             return existing_user
 
         new_user = User(
-            tenant_id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
+            tenant_id=uuid.UUID(DEFAULT_TENANT_ID),
             username=email.split("@")[0],
             display_name=display_name,
             email=email,

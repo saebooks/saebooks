@@ -94,12 +94,28 @@ async def _user_by_email(email: str) -> User | None:
         return result.scalars().first()
 
 
-async def _user_by_id(user_id: str) -> User | None:
+async def _user_by_id(
+    user_id: str, tenant_id: str | None = None
+) -> User | None:
+    """Look up a user by primary key under the given tenant.
+
+    The default ``AsyncSessionLocal`` connects as the FORCE-RLS
+    ``saebooks_app`` role (cf. ``saebooks/db.py``) and the
+    ``users`` table has a tenant-isolation policy of
+    ``tenant_id = current_setting('app.current_tenant')``. Without
+    binding the GUC the SELECT silently returns zero rows and the
+    caller looks like an invalid token. We stamp the JWT's
+    ``tenant_id`` claim onto ``session.info`` so the
+    ``after_begin`` listener in ``api/v1/deps.py`` issues
+    ``SET LOCAL app.current_tenant`` on the transaction.
+    """
     try:
         uid = uuid.UUID(user_id)
     except ValueError:
         return None
     async with AsyncSessionLocal() as session:
+        if tenant_id:
+            session.info["tenant_id"] = tenant_id
         return await session.get(User, uid)
 
 
@@ -202,7 +218,7 @@ async def refresh_token(
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
 
-    user = await _user_by_id(claims.get("sub", ""))
+    user = await _user_by_id(claims.get("sub", ""), claims.get("tenant_id"))
     if user is None or user.archived_at is not None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -244,7 +260,7 @@ async def me(
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
 
-    user = await _user_by_id(claims.get("sub", ""))
+    user = await _user_by_id(claims.get("sub", ""), claims.get("tenant_id"))
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -306,7 +322,7 @@ async def change_password(
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
 
-    user = await _user_by_id(claims.get("sub", ""))
+    user = await _user_by_id(claims.get("sub", ""), claims.get("tenant_id"))
     if user is None or user.archived_at is not None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
 
@@ -317,6 +333,9 @@ async def change_password(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Password must be at least 8 characters")
 
     async with AsyncSessionLocal() as session:
+        tid = claims.get("tenant_id")
+        if tid:
+            session.info["tenant_id"] = tid
         db_user = await session.get(type(user), user.id)
         db_user.password_hash = hash_password(body.new_password)
         await session.commit()
@@ -353,7 +372,7 @@ async def oauth_handoff(
     if not expected or not x_oauth_handoff_secret or x_oauth_handoff_secret != expected:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
 
-    if body.provider.lower() not in {"discourse"}:
+    if body.provider.lower() not in {"discourse", "authentik"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="unknown provider")
     if not body.email or "@" not in body.email:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid email")
