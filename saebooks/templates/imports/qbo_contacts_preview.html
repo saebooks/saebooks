@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}QBO contacts preview — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>QBO contacts preview</h1>
+  <p class="muted">{{ rows|length }} row(s) parsed. Kind: {{ kind }}. Duplicates (same name) are skipped at apply time.</p>
+</div>
+
+{% if rows %}
+<table class="report-table">
+  <thead>
+    <tr><th>Name</th><th>Type</th><th>Email</th><th>Phone</th><th>ABN</th><th>City</th><th>State</th></tr>
+  </thead>
+  <tbody>
+  {% for r in rows[:300] %}
+    <tr>
+      <td>{{ r.name }}</td>
+      <td>{{ r.contact_type.value }}</td>
+      <td>{{ r.email or "" }}</td>
+      <td>{{ r.phone or "" }}</td>
+      <td>{{ r.abn or "" }}</td>
+      <td>{{ r.city or "" }}</td>
+      <td>{{ r.state or "" }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% if rows|length > 300 %}
+  <p class="muted">Only the first 300 rows shown; all {{ rows|length }} will be imported.</p>
+{% endif %}
+
+<form method="post" action="/admin/imports/qbo/contacts/apply" class="stacked-form">
+  <textarea name="raw" hidden>{{ raw }}</textarea>
+  <input type="hidden" name="kind" value="{{ kind }}">
+  <div class="form-actions">
+    <a class="btn-secondary" href="/admin/imports/qbo">Cancel</a>
+    <button type="submit" class="btn-primary">Confirm import</button>
+  </div>
+</form>
+{% else %}
+  <p>No rows parsed.</p>
+  <a class="btn-secondary" href="/admin/imports/qbo">Back</a>
+{% endif %}
+{% endblock %}

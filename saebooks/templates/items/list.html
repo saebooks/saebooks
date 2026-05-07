@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Items — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Items</h1>
+  <div class="meta">{{ total }} item{{ '' if total == 1 else 's' }} · {{ company_name }}</div>
+  <a href="/items/new" class="btn" data-new-action="/items/new">+ New</a>
+</div>
+
+<div class="contact-filter">
+  <form method="get" action="/items" style="display:inline">
+    <input type="text" name="q" value="{{ search_q }}" placeholder="Search SKU or name..." style="font:14px/1.2 inherit;padding:0.3rem 0.4rem;border:1px solid var(--rule);width:16rem">
+    {% if include_archived %}<input type="hidden" name="archived" value="1">{% endif %}
+    <button type="submit" class="btn-secondary">Search</button>
+  </form>
+  <a href="/items{% if not include_archived %}?archived=1{% endif %}" class="dim" style="margin-left:1rem">{{ 'Hide archived' if include_archived else 'Show archived' }}</a>
+</div>
+
+{% if items %}
+<table class="acct-table">
+  <thead>
+    <tr>
+      <th>SKU</th>
+      <th>Name</th>
+      <th style="text-align:right">On hand</th>
+      <th style="text-align:right">WAC</th>
+      <th style="text-align:right">Sale price</th>
+      <th class="actions"></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for item in items %}
+    <tr>
+      <td><a href="/items/{{ item.id }}"><code>{{ item.sku }}</code></a></td>
+      <td>{{ item.name }}</td>
+      <td style="text-align:right">{{ '%.4f'|format(item.on_hand_qty) }}</td>
+      <td style="text-align:right">{{ '%.4f'|format(item.wac_cost) }}</td>
+      <td style="text-align:right">{{ '%.4f'|format(item.default_sale_price) }}</td>
+      <td class="actions"><a href="/items/{{ item.id }}/edit">edit</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="dim">No items. <a href="/items/new">Create your first item</a> to start tracking stock on invoices and bills.</p>
+{% endif %}
+{% endblock %}

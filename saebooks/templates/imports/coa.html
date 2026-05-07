@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Chart of accounts export / import — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Chart of accounts</h1>
+</div>
+
+{% if error %}<div class="error">{{ error }}</div>{% endif %}
+{% if request.query_params.get('new') or request.query_params.get('changed') or request.query_params.get('archived') %}
+<div class="notice">
+  Applied — new: {{ request.query_params.get('new', 0) }},
+  changed: {{ request.query_params.get('changed', 0) }},
+  archived: {{ request.query_params.get('archived', 0) }}.
+</div>
+{% endif %}
+
+<h2>Export</h2>
+<p>
+  <a class="btn-primary" href="/admin/imports/coa/export?download=1">Download current CoA as CSV</a>
+</p>
+
+<h2>Import</h2>
+<p class="muted">
+  Columns (header required): <code>code, name, account_type, parent_code, tax_code_default, reconcile</code>.
+  Supported <code>account_type</code> values: ASSET, LIABILITY, EQUITY, INCOME, OTHER_INCOME, EXPENSE, COST_OF_SALES, OTHER_EXPENSE.
+</p>
+<form method="post" action="/admin/imports/coa/preview" enctype="multipart/form-data" class="stacked-form">
+  <label>CSV file
+    <input type="file" name="file" accept=".csv" required>
+  </label>
+  <button type="submit" class="btn-primary">Preview diff</button>
+</form>
+{% endblock %}

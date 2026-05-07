@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Theme — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Theme</h1>
+  <div class="meta">{{ edition }}</div>
+</div>
+
+{% if saved %}<div class="alert alert-ok">Theme saved. <strong>Restart the app</strong> for the template tree to swap (CSS bundle switches immediately for users without a per-user override).</div>{% endif %}
+{% if err == "bad_theme" %}<div class="alert alert-error">Unknown theme — not in the active set.</div>{% endif %}
+
+<p>
+  The active theme controls which Jinja template tree the server loads.
+  <code>default</code> is the stock flat layout; every other theme lives
+  under <code>saebooks/templates/themes/&lt;name&gt;/</code> and can
+  override any page (e.g. <code>dashboard/index.html</code>) while
+  un-overridden pages fall back to the default automatically.
+</p>
+
+<p class="dim">
+  Currently active: <code>{{ active }}</code>
+  {% if env_override %}(pinned by <code>SAEBOOKS_FRONTEND</code> env var — DB setting ignored){% endif %}.
+  Per-user preference overrides the CSS bundle only; the template tree is
+  a single process-wide choice (restart to swap).
+</p>
+
+<form method="post" action="/admin/theme" style="max-width:38rem">
+  <fieldset class="form-fieldset" style="border:1px dashed var(--rule);padding:0.6rem 0.8rem">
+    <legend class="dim" style="padding:0 0.3rem">Theme</legend>
+    {% for t in themes %}
+    <label style="display:block;padding:0.2rem 0">
+      <input type="radio" name="theme" value="{{ t }}" {{ 'checked' if active == t }}>
+      <code>{{ t }}</code>
+      {% if t == "default" %}<span class="dim"> — stock flat layout (fallback)</span>
+      {% elif t == "classic" %}<span class="dim"> — MYOB Classic / AccountRight-style (sidebar + dense grids)</span>
+      {% endif %}
+    </label>
+    {% endfor %}
+  </fieldset>
+  <div class="form-actions" style="margin-top:0.8rem">
+    <button type="submit" class="btn">Save theme</button>
+    <a href="/admin/license">Back</a>
+  </div>
+</form>
+{% endblock %}

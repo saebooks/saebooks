@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Account ranges — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Account ranges</h1>
+  <div class="meta">{{ company_name }}</div>
+</div>
+
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
+<div class="alert alert-info" style="margin-bottom:1rem">
+  <strong>Mode: {{ prefix_mode|title }}</strong>
+  {% if prefix_mode == 'classic' %}
+  — Single-digit prefixes (1-9), MYOB-compatible.
+  <a href="/admin/settings">Change to extended in Settings</a> to unlock multi-digit prefixes.
+  {% else %}
+  — Multi-digit prefixes (1, 10, 200, etc.) for advanced chart structures.
+  {% endif %}
+</div>
+<p class="dim" style="margin-bottom:1rem">
+  Ranges define the top-level prefixes for your chart of accounts.
+  After the prefix, accounts get up to 5 child digits, plus an optional letter suffix for one more level.
+</p>
+
+{% if ranges %}
+<table class="acct-table" style="max-width:50rem">
+  <thead>
+    <tr>
+      <th class="code">Prefix</th>
+      <th>Label</th>
+      <th>Account types</th>
+      <th style="width:4rem" class="num">Order</th>
+      <th class="actions"></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in ranges %}
+    <tr>
+      <td class="code">{{ r.prefix }}</td>
+      <td>{{ r.label }}</td>
+      <td style="font-size:11px;color:var(--fg-dim)">{{ r.account_types|join(', ')|replace('_',' ')|lower }}</td>
+      <td class="num">{{ r.sort_order }}</td>
+      <td class="actions">
+        <form method="post" action="/admin/ranges/{{ r.id }}/delete" style="display:inline"
+              onsubmit="return confirm('Delete range {{ r.prefix }} ({{ r.label }})? Accounts using this prefix will become unranged.')">
+          <button type="submit" class="linkish">delete</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="dim">No ranges defined. Add your first range below.</p>
+{% endif %}
+
+<section class="new-form" style="margin-top:1.5rem">
+  <h2>+ New range</h2>
+  <form method="post" action="/admin/ranges" class="tc-form">
+    <label>Prefix <input name="prefix" required maxlength="16" pattern="[0-9]+"
+      title="Digits only" placeholder="e.g. 7"></label>
+    <label>Label <input name="label" required placeholder="e.g. Trustee"></label>
+    <label>Sort order <input name="sort_order" type="number" value="0" style="width:4rem"></label>
+    <label class="wide">Allowed account types
+      <div style="display:flex;flex-wrap:wrap;gap:0.5rem;margin-top:0.25rem">
+        {% for v, l in account_types %}
+        <label style="display:flex;align-items:center;gap:0.25rem;font-size:12px;text-transform:none;letter-spacing:0">
+          <input type="checkbox" name="type_{{ v }}" value="1"> {{ l }}
+        </label>
+        {% endfor %}
+      </div>
+    </label>
+    <button type="submit">Create range</button>
+  </form>
+</section>
+{% endblock %}

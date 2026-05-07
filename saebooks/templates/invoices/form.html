@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if invoice else 'New' }} invoice — SAE Books{% endblock %}
+{% block content %}
+<h1>{{ 'Edit invoice ' + (invoice.number or '(draft)') if invoice else 'New invoice' }}</h1>
+<p>{{ company_name }}</p>
+
+{% if error %}<div class="error">{{ error }}</div>{% endif %}
+
+<form method="post" action="{{ '/invoices/' + invoice.id|string if invoice else '/invoices' }}">
+  <fieldset>
+    <legend>Header</legend>
+    <label>Customer
+      <select name="contact_id" required>
+        <option value="">—</option>
+        {% for c in contacts %}
+        <option value="{{ c.id }}" {{ 'selected' if invoice and invoice.contact_id == c.id }}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Issue date <input type="date" name="issue_date" required
+      value="{{ invoice.issue_date if invoice else today }}" /></label>
+    <label>Due date <input type="date" name="due_date" required
+      value="{{ invoice.due_date if invoice else default_due }}" /></label>
+    <label>Settlement / exchange date
+      <input type="date" name="settlement_date"
+        value="{{ invoice.settlement_date if invoice and invoice.settlement_date else '' }}" />
+      <span class="hint">Optional. Real estate: date of unconditional exchange or settlement. Used for BAS period attribution.</span>
+    </label>
+    <p class="dim">Next number: <code>{{ preview_number }}</code> (allocated on post)</p>
+  </fieldset>
+
+  <fieldset>
+    <legend>Lines</legend>
+    <table class="lines">
+      <thead><tr>
+        <th>Description</th><th>Account</th><th>Tax</th>
+        <th>Qty</th><th>Unit price</th><th>Disc %</th><th>Project</th>
+      </tr></thead>
+      <tbody>
+        {% set existing_lines = invoice.lines if invoice else [] %}
+        {% set line_count = (existing_lines|length) + 5 %}
+        {% for i in range(line_count) %}
+        {% set ln = existing_lines[i] if i < existing_lines|length else None %}
+        <tr>
+          <td><input name="line_{{ i }}_description" value="{{ ln.description if ln else '' }}" /></td>
+          <td><select name="line_{{ i }}_account_id">
+            <option value=""></option>
+            {% for a in income_accounts %}
+            <option value="{{ a.id }}" {{ 'selected' if ln and ln.account_id == a.id }}>{{ a.code }} {{ a.name }}</option>
+            {% endfor %}
+          </select></td>
+          <td><select name="line_{{ i }}_tax_code_id">
+            <option value="">—</option>
+            {% for t in tax_codes %}
+            <option value="{{ t.id }}" {{ 'selected' if ln and ln.tax_code_id == t.id }}>{{ t.code }}</option>
+            {% endfor %}
+          </select></td>
+          <td><input name="line_{{ i }}_quantity" size="4"
+            value="{{ ln.quantity if ln else '1' }}" /></td>
+          <td><input name="line_{{ i }}_unit_price" size="8"
+            value="{{ ln.unit_price if ln else '0.00' }}" /></td>
+          <td><input name="line_{{ i }}_discount_pct" size="4"
+            value="{{ ln.discount_pct if ln else '0' }}" /></td>
+          <td><select name="line_{{ i }}_project_id">
+            <option value="">—</option>
+            {% for p in projects %}
+            <option value="{{ p.id }}" {{ 'selected' if ln and ln.project_id == p.id }}>{{ p.code }} {{ p.name }}</option>
+            {% endfor %}
+          </select></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </fieldset>
+
+  <fieldset>
+    <legend>Notes</legend>
+    <label>Payment terms <input name="payment_terms" value="{{ invoice.payment_terms or '' if invoice else 'Net 28 days' }}" /></label>
+    <label>Notes <textarea name="notes" rows="3">{{ invoice.notes or '' if invoice else '' }}</textarea></label>
+  </fieldset>
+
+  <div class="toolbar">
+    <button type="submit" class="btn btn-primary">Save draft</button>
+    <a href="/invoices" class="btn">Cancel</a>
+  </div>
+</form>
+{% endblock %}

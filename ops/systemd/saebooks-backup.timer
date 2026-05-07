@@ -1,0 +1,14 @@
+[Unit]
+Description=SAE Books nightly pg_dump (02:15 daily)
+Documentation=file:///opt/saebooks/scripts/backup.sh
+
+[Timer]
+# 02:15 local time every day. Randomised +/- 5 min so a fleet of machines
+# doesn't hammer a shared NFS at exactly the same second.
+OnCalendar=*-*-* 02:15:00
+RandomizedDelaySec=5min
+Persistent=true
+Unit=saebooks-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,15 @@
+{% if q and not hits %}
+<div class="empty-state">No matches for “{{ q }}”.</div>
+{% elif hits %}
+<ul class="search-hits">
+  {% for hit in hits %}
+  <li class="search-hit search-hit-{{ hit.kind }}">
+    <a href="{{ hit.url }}">
+      <span class="hit-kind">{{ hit.kind }}</span>
+      <span class="hit-title">{{ hit.title }}</span>
+      {% if hit.subtitle %}<span class="hit-subtitle">{{ hit.subtitle }}</span>{% endif %}
+    </a>
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}

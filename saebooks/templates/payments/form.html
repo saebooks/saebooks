@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if payment else 'New' }} payment — SAE Books{% endblock %}
+{% block content %}
+<h1>{{ 'Edit' if payment else 'New' }} payment</h1>
+<p>{{ company_name }} — next number will be <strong>{{ preview_number }}</strong></p>
+
+{% if error %}<div class="error">{{ error }}</div>{% endif %}
+
+<form method="post" action="{{ '/payments/' + payment.id|string if payment else '/payments' }}">
+  <div class="grid-2">
+    <label>Direction
+      <select name="direction">
+        {% for d in directions %}
+          <option value="{{ d.value }}"
+            {{ 'selected' if payment and payment.direction == d else ('selected' if not payment and d.value == 'INCOMING' else '') }}>
+            {{ d.value }}
+          </option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Method
+      <select name="method">
+        {% for m in methods %}
+          <option value="{{ m.value }}"
+            {{ 'selected' if payment and payment.method == m else ('selected' if not payment and m.value == 'eft' else '') }}>
+            {{ m.value }}
+          </option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label>Contact
+      <select name="contact_id" required>
+        <option value="">— select —</option>
+        {% for c in contacts %}
+          <option value="{{ c.id }}"
+            {{ 'selected' if payment and payment.contact_id == c.id else '' }}>
+            {{ c.name }}
+          </option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label>Bank account
+      <select name="bank_account_id" required>
+        <option value="">— select —</option>
+        {% for a in bank_accounts %}
+          <option value="{{ a.id }}"
+            {{ 'selected' if payment and payment.bank_account_id == a.id else '' }}>
+            {{ a.code }} — {{ a.name }}
+          </option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label>Payment date
+      <input type="date" name="payment_date"
+             value="{{ payment.payment_date if payment else today }}" required />
+    </label>
+
+    <label>Amount
+      <input type="number" name="amount" step="0.01" min="0"
+             value="{{ payment.amount if payment else '' }}" required />
+    </label>
+
+    <label>Reference
+      <input type="text" name="reference"
+             value="{{ payment.reference or '' }}"
+             placeholder="cheque number, receipt id, etc." />
+    </label>
+
+    <label style="grid-column: span 2">Notes
+      <textarea name="notes" rows="2">{{ payment.notes or '' }}</textarea>
+    </label>
+  </div>
+
+  <div class="toolbar">
+    <button type="submit" class="btn btn-primary">Save</button>
+    <a class="btn" href="/payments">Cancel</a>
+  </div>
+</form>
+{% endblock %}

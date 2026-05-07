@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Budget vs actual — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Budget vs actual</h1>
+  <div class="meta">{{ company_name }} — {{ year }}</div>
+</div>
+
+<form class="report-filter" method="get">
+  <label>Year
+    <select name="year" onchange="this.form.submit()">
+      {% for y in years %}
+      <option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button type="submit" class="btn-secondary">Run</button>
+  <a href="/budgets?year={{ year }}" class="btn-secondary">Edit budgets</a>
+</form>
+
+{% if not report.rows %}
+<p class="empty-state">No budgets or actuals recorded for {{ year }} yet.</p>
+{% else %}
+<table class="report-table dense">
+  <thead>
+    <tr>
+      <th>Code</th>
+      <th>Account</th>
+      {% for m in month_labels %}<th class="num">{{ m }}</th>{% endfor %}
+      <th class="num">Budget YTD</th>
+      <th class="num">Actual YTD</th>
+      <th class="num">Variance</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in report.rows %}
+    <tr class="budget-row">
+      <td class="code">{{ row.account_code }}</td>
+      <td>{{ row.account_name }}</td>
+      {% for i in range(12) %}
+      <td class="num">
+        <div>{{ "%.0f"|format(row.budget_monthly[i]) }}</div>
+        <div class="actual">{{ "%.0f"|format(row.actual_monthly[i]) }}</div>
+      </td>
+      {% endfor %}
+      <td class="num">{{ "%.2f"|format(row.budget_ytd) }}</td>
+      <td class="num">{{ "%.2f"|format(row.actual_ytd) }}</td>
+      <td class="num {% if row.variance_ytd < 0 %}neg{% endif %}">
+        {{ "%.2f"|format(row.variance_ytd) }}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr class="grand-total">
+      <td></td>
+      <td><strong>Total</strong></td>
+      {% for i in range(12) %}
+      <td class="num">
+        <div>{{ "%.0f"|format(report.budget_totals[i]) }}</div>
+        <div class="actual">{{ "%.0f"|format(report.actual_totals[i]) }}</div>
+      </td>
+      {% endfor %}
+      <td class="num"><strong>{{ "%.2f"|format(report.budget_totals|sum) }}</strong></td>
+      <td class="num"><strong>{{ "%.2f"|format(report.actual_totals|sum) }}</strong></td>
+      <td class="num"><strong>{{ "%.2f"|format(report.variance_totals|sum) }}</strong></td>
+    </tr>
+  </tfoot>
+</table>
+<p class="caption">Each cell shows budget on top, actual below.</p>
+{% endif %}
+{% endblock %}

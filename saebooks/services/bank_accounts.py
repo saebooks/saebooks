@@ -1,0 +1,316 @@
+"""Bank-account service — view over ``accounts`` where ``bsb IS NOT NULL``.
+
+Design (a): bank accounts are not a separate table.  They are ``Account``
+rows with ``account_type=ASSET`` and a non-null ``bsb`` field.  This
+service provides API-oriented CRUD that delegates most logic to
+``saebooks.services.accounts`` while enforcing the bank-account
+invariant (bsb must be present on create, and the account_type is
+fixed to ASSET).
+
+Optimistic locking, change_log, and tenant scoping follow the same
+conventions as every other API-tier service.
+"""
+from __future__ import annotations
+
+import uuid
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Any
+
+from sqlalchemy import func as sa_func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from saebooks.models.account import Account, AccountType
+from saebooks.services import change_log as change_log_svc
+
+_DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+# Columns written to change_log.payload for bank-account operations.
+_BA_COLUMNS: tuple[str, ...] = (
+    "id",
+    "company_id",
+    "tenant_id",
+    "code",
+    "name",
+    "account_type",
+    "bsb",
+    "bank_account_number",
+    "bank_account_title",
+    "apca_user_id",
+    "bank_abbreviation",
+    "is_trust_account",
+    "version",
+    "created_at",
+    "archived_at",
+)
+
+
+# ---------------------------------------------------------------------------
+# Exceptions
+# ---------------------------------------------------------------------------
+
+
+class BankAccountError(ValueError):
+    """Raised on bank-account validation or state-transition failure."""
+
+
+class VersionConflict(Exception):
+    """Raised when expected_version does not match the stored value."""
+
+    def __init__(self, current: Account) -> None:
+        super().__init__(
+            f"BankAccount {current.id} is at version {current.version}, "
+            "not the expected version"
+        )
+        self.current = current
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _is_bank_account(account: Account) -> bool:
+    """True if this account has been configured as a bank account."""
+    return account.bsb is not None
+
+
+def _serialise(account: Account) -> dict[str, Any]:
+    """Row → JSON-safe dict for change_log.payload."""
+    data: dict[str, Any] = {}
+    for key in _BA_COLUMNS:
+        val = getattr(account, key, None)
+        if isinstance(val, uuid.UUID):
+            val = str(val)
+        elif isinstance(val, datetime):
+            val = val.isoformat()
+        elif hasattr(val, "value"):  # StrEnum
+            val = val.value
+        data[key] = val
+    return data
+
+
+def _bank_account_filter(company_id: uuid.UUID):
+    """WHERE clause that selects bank-account rows."""
+    return [
+        Account.company_id == company_id,
+        Account.archived_at.is_(None),
+        Account.bsb.isnot(None),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Read operations
+# ---------------------------------------------------------------------------
+
+
+async def list_active(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    *,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[Account], int]:
+    """Return (bank_accounts, total_count) — active (non-archived) only."""
+    where = _bank_account_filter(company_id)
+
+    count_stmt = select(sa_func.count()).select_from(Account).where(*where)
+    total = (await session.execute(count_stmt)).scalar_one()
+
+    stmt = (
+        select(Account)
+        .where(*where)
+        .order_by(Account.code)
+        .limit(limit)
+        .offset(offset)
+    )
+    items = list((await session.execute(stmt)).scalars().all())
+    return items, total
+
+
+async def api_get(
+    session: AsyncSession,
+    bank_account_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
+) -> Account | None:
+    """Fetch a single bank account. Returns None if not found or not a bank acct.
+
+    When ``tenant_id`` is supplied the lookup is filtered by tenant —
+    a foreign-tenant id returns ``None`` even if the row exists.
+    """
+    if tenant_id is not None:
+        result = await session.execute(
+            select(Account).where(
+                Account.id == bank_account_id,
+                Account.tenant_id == tenant_id,
+            )
+        )
+        account = result.scalars().first()
+    else:
+        account = await session.get(Account, bank_account_id)
+    if account is None or not _is_bank_account(account):
+        return None
+    return account
+
+
+# ---------------------------------------------------------------------------
+# Write operations
+# ---------------------------------------------------------------------------
+
+
+async def api_create(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    actor: str,
+    *,
+    code: str,
+    name: str,
+    bsb: str,
+    bank_account_number: str | None = None,
+    bank_account_title: str | None = None,
+    apca_user_id: str | None = None,
+    bank_abbreviation: str | None = None,
+    is_trust_account: bool = False,
+) -> Account:
+    """Create a new bank-account row (account_type=ASSET, bsb required)."""
+    # Import here to avoid circular imports at module level
+    from saebooks.services import accounts as accounts_svc
+
+    account = await accounts_svc.create(
+        session,
+        company_id,
+        code=code,
+        name=name,
+        account_type=AccountType.ASSET,
+        reconcile=True,
+        is_trust_account=is_trust_account,
+        tenant_id=tenant_id,
+        actor=actor,
+        skip_validation=True,
+    )
+    # Patch the bank-specific fields the accounts.create() doesn't expose
+    account.bsb = bsb
+    account.bank_account_number = bank_account_number
+    account.bank_account_title = bank_account_title
+    account.apca_user_id = apca_user_id
+    account.bank_abbreviation = bank_abbreviation
+    # accounts.create already committed; open a new flush for the extra fields
+    await session.flush()
+    await session.refresh(account)
+
+    # Overwrite the "create" change_log row written by accounts.create()
+    # with one branded as bank_account so queries against entity='bank_account' work.
+    await change_log_svc.append(
+        session,
+        entity="bank_account",
+        entity_id=account.id,
+        op="created",
+        actor=actor,
+        payload=_serialise(account),
+        version=account.version,
+    )
+    await session.commit()
+    await session.refresh(account)
+    return account
+
+
+async def api_update(
+    session: AsyncSession,
+    bank_account_id: uuid.UUID,
+    actor: str,
+    expected_version: int,
+    *,
+    code: str | None = None,
+    name: str | None = None,
+    bsb: str | None = None,
+    bank_account_number: str | None = None,
+    bank_account_title: str | None = None,
+    apca_user_id: str | None = None,
+    bank_abbreviation: str | None = None,
+    is_trust_account: bool | None = None,
+) -> Account:
+    """Update bank-account fields with optimistic locking + change_log."""
+    account = await session.get(Account, bank_account_id)
+    if account is None or not _is_bank_account(account):
+        raise BankAccountError(f"BankAccount {bank_account_id} not found")
+    if account.version != expected_version:
+        raise VersionConflict(account)
+
+    if code is not None:
+        account.code = code.strip()
+    if name is not None:
+        account.name = name.strip()
+    if bsb is not None:
+        account.bsb = bsb
+    if bank_account_number is not None:
+        account.bank_account_number = bank_account_number
+    if bank_account_title is not None:
+        account.bank_account_title = bank_account_title
+    if apca_user_id is not None:
+        account.apca_user_id = apca_user_id
+    if bank_abbreviation is not None:
+        account.bank_abbreviation = bank_abbreviation
+    if is_trust_account is not None:
+        account.is_trust_account = is_trust_account
+
+    account.version = account.version + 1
+    await session.flush()
+    await session.refresh(account)
+
+    await change_log_svc.append(
+        session,
+        entity="bank_account",
+        entity_id=account.id,
+        op="updated",
+        actor=actor,
+        payload=_serialise(account),
+        version=account.version,
+    )
+    await session.commit()
+    await session.refresh(account)
+    return account
+
+
+async def api_delete(
+    session: AsyncSession,
+    bank_account_id: uuid.UUID,
+    actor: str,
+    expected_version: int,
+) -> Account:
+    """Soft-archive a bank account with optimistic locking + change_log."""
+    account = await session.get(Account, bank_account_id)
+    if account is None or not _is_bank_account(account):
+        raise BankAccountError(f"BankAccount {bank_account_id} not found")
+    if account.version != expected_version:
+        raise VersionConflict(account)
+
+    account.archived_at = datetime.now(UTC)
+    account.version = account.version + 1
+    await session.flush()
+    await session.refresh(account)
+
+    await change_log_svc.append(
+        session,
+        entity="bank_account",
+        entity_id=account.id,
+        op="deleted",
+        actor=actor,
+        payload=_serialise(account),
+        version=account.version,
+    )
+    await session.commit()
+    return account
+
+
+__all__ = [
+    "BankAccountError",
+    "VersionConflict",
+    "api_create",
+    "api_delete",
+    "api_get",
+    "api_update",
+    "list_active",
+]

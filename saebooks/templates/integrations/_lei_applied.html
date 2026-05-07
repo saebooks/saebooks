@@ -1,0 +1,11 @@
+<div class="lei-applied" id="lei-panel" style="border:1px solid #34d399; padding:0.75rem; margin-top:0.75rem; background:#ecfdf5">
+  <h3 style="margin:0 0 0.5rem 0; font-size:1rem">LEI applied to contact</h3>
+  <p style="margin:0 0 0.5rem 0">
+    Matched <strong>{{ result.legal_name or result.lei }}</strong> ({{ result.lei }}).
+  </p>
+  {% if changed %}
+  <p style="margin:0">Fields updated: <strong>{{ changed|join(', ') }}</strong>.</p>
+  {% else %}
+  <p style="margin:0; color:var(--muted)">No fields changed — existing values kept (pass <code>overwrite=on</code> to replace).</p>
+  {% endif %}
+</div>

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if project else 'New' }} project — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{{ 'Edit project ' + project.code if project else 'New project' }}</h1>
+  <div class="meta">{{ company_name }}</div>
+</div>
+
+{% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+
+<form method="post" action="{{ '/projects/' + project.id|string if project else '/projects' }}" class="tc-form" style="max-width:40rem">
+  <label>Code <input name="code" required maxlength="32" value="{{ project.code if project else '' }}" placeholder="J-001"></label>
+  <label>Name <input name="name" required maxlength="128" value="{{ project.name if project else '' }}"></label>
+  <label>Status
+    <select name="status">
+      {% for s in statuses %}
+      <option value="{{ s }}" {{ 'selected' if project and project.status.value == s else ('selected' if not project and s == 'ACTIVE') }}>{{ s|title }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Start date <input type="date" name="start_date" value="{{ project.start_date if project and project.start_date else '' }}"></label>
+  <label>End date <input type="date" name="end_date" value="{{ project.end_date if project and project.end_date else '' }}"></label>
+  <label class="wide">Notes <textarea name="notes" rows="3" style="font:14px/1.4 inherit;width:100%;padding:0.3rem;border:1px solid var(--rule)">{{ project.notes if project and project.notes else '' }}</textarea></label>
+  <div class="form-actions">
+    <button type="submit" class="btn">{{ 'Save' if project else 'Create' }}</button>
+    <a href="{{ '/projects/' + project.id|string if project else '/projects' }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

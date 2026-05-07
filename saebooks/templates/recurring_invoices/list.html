@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Recurring invoices — SAE Books{% endblock %}
+{% block content %}
+<h1>Recurring invoices</h1>
+<p>{{ company_name }} — {{ total }} schedule{{ '' if total == 1 else 's' }}</p>
+
+<div class="toolbar">
+  <a class="btn btn-primary" href="/invoices/recurring/new">+ New schedule</a>
+  <a class="btn" href="/invoices">Back to invoices</a>
+  <form method="get" action="/invoices/recurring" class="inline">
+    <label>Status
+      <select name="status" onchange="this.form.submit()">
+        <option value="all"      {{ 'selected' if status_filter == 'all'    }}>All</option>
+        <option value="ACTIVE"   {{ 'selected' if status_filter == 'ACTIVE' }}>Active</option>
+        <option value="PAUSED"   {{ 'selected' if status_filter == 'PAUSED' }}>Paused</option>
+        <option value="ENDED"    {{ 'selected' if status_filter == 'ENDED'  }}>Ended</option>
+        <option value="archived" {{ 'selected' if status_filter == 'archived' }}>Archived</option>
+      </select>
+    </label>
+  </form>
+</div>
+
+<table class="data">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Customer</th>
+      <th>Cadence</th>
+      <th>Next run</th>
+      <th>End</th>
+      <th>Status</th>
+      <th class="right">Generated</th>
+      <th>Auto-post</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for t in templates %}
+    <tr>
+      <td><a href="/invoices/recurring/{{ t.id }}">{{ t.name }}</a></td>
+      <td>{{ contact_map.get(t.contact_id, '—') }}</td>
+      <td>{{ t.frequency.value|lower }}</td>
+      <td>
+        {{ t.next_run }}
+        {% if t.status == 'ACTIVE' and t.next_run <= today %}
+          <span class="badge badge-warn">due</span>
+        {% endif %}
+      </td>
+      <td>{{ t.end_date or '—' }}</td>
+      <td><span class="badge badge-{{ t.status|lower }}">{{ t.status }}</span></td>
+      <td class="right">{{ t.invoices_generated }}</td>
+      <td>{{ 'yes' if t.auto_post else 'no' }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="8" class="dim center">No recurring schedules yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

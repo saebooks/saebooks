@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Your SAE Books Login Link</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f5f5f5;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            max-width: 600px;
+            margin: 20px auto;
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #194291 0%, #133372 100%);
+            color: white;
+            padding: 40px 20px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 700;
+            letter-spacing: -0.025em;
+        }
+        .content {
+            padding: 40px 20px;
+        }
+        .content p {
+            margin: 0 0 20px 0;
+        }
+        .cta-button {
+            display: inline-block;
+            background-color: #cc0000;
+            color: white;
+            text-decoration: none;
+            padding: 12px 32px;
+            border-radius: 4px;
+            font-weight: 600;
+            margin: 20px 0;
+        }
+        .cta-button:hover {
+            background-color: #a30000;
+        }
+        .button-link {
+            word-break: break-all;
+            font-size: 12px;
+            color: #666;
+            margin-top: 10px;
+        }
+        .footer {
+            background-color: #f9f9f9;
+            border-top: 1px solid #eee;
+            padding: 20px;
+            text-align: center;
+            font-size: 12px;
+            color: #999;
+        }
+        .warning {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 12px;
+            margin: 20px 0;
+            border-radius: 4px;
+            font-size: 14px;
+            color: #856404;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>SAE Books</h1>
+        </div>
+        <div class="content">
+            <p>Hello,</p>
+            <p>Click the button below to securely log in to your SAE Books account. This link expires in <strong>{{ expires_minutes }} minutes</strong>.</p>
+            
+            <center>
+                <a href="{{ magic_link }}" class="cta-button">Log In to SAE Books</a>
+            </center>
+            
+            <p class="button-link">Or copy and paste this link in your browser:<br>{{ magic_link }}</p>
+            
+            <div class="warning">
+                <strong>Security note:</strong> This link is for your eyes only. Don't share it with anyone. If you didn't request this login link, you can safely ignore this email.
+            </div>
+            
+            <p>For questions or support, reply to this email.</p>
+        </div>
+        <div class="footer">
+            <p>&copy; 2026 SAE Engineering. All rights reserved.</p>
+            <p><a href="https://saebooks.com.au" style="color: #194291; text-decoration: none;">Visit SAE Books</a></p>
+        </div>
+    </div>
+</body>
+</html>

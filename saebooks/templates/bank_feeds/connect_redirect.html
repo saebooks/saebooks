@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Consent initiated — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Consent initiated</h1>
+  <div class="meta">{{ company_name }}</div>
+</div>
+
+<p>
+  SISS has issued consent <code>{{ initiation.consent_id }}</code>
+  for institution <code>{{ institution_id }}</code> (variant
+  <code>{{ variant }}</code>).
+</p>
+
+<p>
+  <strong>Complete the flow by visiting this URL:</strong>
+</p>
+
+<pre class="redirect-url"><a href="{{ initiation.redirect_url }}" target="_blank" rel="noopener">{{ initiation.redirect_url }}</a></pre>
+
+<p class="dim">
+  The bank will redirect you back here once consent is granted —
+  no further action needed on this page. If you closed the tab by
+  accident, SISS's redirect will still complete the onboarding.
+</p>
+
+<div class="form-actions">
+  <a href="/admin/bank-feeds" class="btn-secondary">Back to bank feeds</a>
+</div>
+{% endblock %}

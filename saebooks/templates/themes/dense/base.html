@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en" class="theme-dense">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}SAE Books{% endblock %}</title>
+  <script>
+    // Dense theme is dark-mode-first. If the user hasn't picked a
+    // theme, we default to dark regardless of OS prefs — this is
+    // the Linear / Stripe developer aesthetic. "Auto" still tracks
+    // OS once the user opts in.
+    (function () {
+      try {
+        var mode = localStorage.getItem("saebooks-theme") || "dark";
+        var eff = mode;
+        if (mode === "auto") {
+          eff = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark" : "light";
+        }
+        document.documentElement.dataset.theme = eff;
+        document.documentElement.dataset.themeMode = mode;
+      } catch (e) { /* localStorage unavailable — default dark */ }
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/app.css?v={{ static_version }}">
+  <link rel="stylesheet" href="/static/themes/dense/app.css?v={{ static_version }}">
+  {% block theme_assets %}{% endblock %}
+  <script src="https://unpkg.com/htmx.org@2.0.3" defer></script>
+</head>
+<body>
+  {#
+    Dense theme — Linear / Stripe. The entire UI is keyboard-first:
+    a thin top bar with the Command Menu button, breadcrumb, and the
+    username; no left sidebar. Navigation is through the command
+    menu (Ctrl+K), g-sequence shortcuts, and clickable breadcrumbs.
+    Content is edge-to-edge dense; lists are the default. Dashboard
+    is a sparse KPI strip — the point is to get to a list.
+  #}
+  <div class="dn-shell">
+    <header class="dn-topbar" aria-label="topbar">
+      <a href="/dashboard" class="dn-brand" aria-label="SAE Books">
+        <span class="dn-brand-square"></span>
+        <span class="dn-brand-name">SAE Books</span>
+      </a>
+
+      <nav class="dn-crumb" aria-label="breadcrumb">
+        {% block breadcrumb %}
+          <a href="/dashboard">~</a>
+          {% set _crumbs = request.url.path.strip('/').split('/') %}
+          {% set _acc = "" %}
+          {% for seg in _crumbs %}
+            {% if seg %}
+              {% set _acc = _acc ~ "/" ~ seg %}
+              <span class="dn-sep">/</span>
+              {% if loop.last %}
+                <span class="dn-current">{{ seg|replace('-', ' ') }}</span>
+              {% else %}
+                <a href="{{ _acc }}">{{ seg|replace('-', ' ') }}</a>
+              {% endif %}
+            {% endif %}
+          {% endfor %}
+        {% endblock %}
+      </nav>
+
+      <div class="dn-topbar-right">
+        <button type="button" class="dn-cmd" id="open-palette"
+                title="Command menu (Ctrl+K)">
+          <span class="dn-cmd-glyph">⌕</span>
+          <span class="dn-cmd-label">Command</span>
+          <span class="dn-cmd-kbd"><kbd>Ctrl</kbd><kbd>K</kbd></span>
+        </button>
+        {% if request.state.username is defined and request.state.username %}
+          <span class="dn-user" title="{{ request.state.username }}">
+            {{ request.state.username[0]|upper }}
+          </span>
+        {% endif %}
+        <button type="button" class="dn-iconbtn theme-toggle" id="theme-toggle"
+                title="Theme: dark (click to cycle)" aria-label="Cycle theme">◐</button>
+      </div>
+    </header>
+
+    <main class="dn-main">
+      {% block content %}{% endblock %}
+    </main>
+
+    <footer class="dn-footer" aria-label="status">
+      <span class="dn-kbd-hint"><kbd>⌘K</kbd> command</span>
+      <span class="dn-kbd-hint"><kbd>g</kbd> <kbd>d</kbd> dashboard</span>
+      <span class="dn-kbd-hint"><kbd>g</kbd> <kbd>i</kbd> invoices</span>
+      <span class="dn-kbd-hint"><kbd>j</kbd>/<kbd>k</kbd> row</span>
+      <span class="dn-spacer"></span>
+      <span class="dn-edition dn-edition-{{ edition or "community" }}">{{ edition or "community" }}</span>
+      <span class="dn-org">{{ company_name or "SAE Books" }}</span>
+    </footer>
+  </div>
+
+  <dialog id="search-palette" class="dn-palette">
+    <form method="dialog" class="dn-palette-form">
+      <span class="dn-palette-glyph" aria-hidden="true">⌕</span>
+      <input
+        type="search"
+        id="palette-input"
+        name="q"
+        placeholder="Search or run a command…"
+        autocomplete="off"
+        hx-get="/search"
+        hx-trigger="keyup changed delay:150ms"
+        hx-target="#palette-results"
+        hx-swap="innerHTML"
+      >
+      <button type="submit" class="dn-palette-close" aria-label="Close"><kbd>Esc</kbd></button>
+    </form>
+    <div id="palette-results" class="palette-results"></div>
+    <div class="dn-palette-hints">
+      <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
+      <span><kbd>↵</kbd> open</span>
+      <span><kbd>Esc</kbd> close</span>
+    </div>
+  </dialog>
+
+  <dialog id="classic-modal" class="dn-modal">
+    <div id="classic-modal-content"></div>
+  </dialog>
+
+  <script>
+    // Dense keyboard driver — Linear-style. Same repertoire as
+    // classic, but extended with vim-ish multi-key sequences for
+    // list filtering (g-nav, s-tatus), and a themed command-menu
+    // button that opens the palette.
+    (function () {
+      const palette = document.getElementById("search-palette");
+      const paletteInput = document.getElementById("palette-input");
+      const paletteResults = document.getElementById("palette-results");
+      const openBtn = document.getElementById("open-palette");
+      const modal = document.getElementById("classic-modal");
+
+      const themeToggle = document.getElementById("theme-toggle");
+      function iconFor(mode) { return mode === "auto" ? "◐" : mode === "dark" ? "☾" : "☀"; }
+      function applyMode(mode) {
+        var eff = mode;
+        if (mode === "auto") {
+          eff = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark" : "light";
+        }
+        document.documentElement.dataset.theme = eff;
+        document.documentElement.dataset.themeMode = mode;
+        if (themeToggle) {
+          themeToggle.textContent = iconFor(mode);
+          themeToggle.title = "Theme: " + mode + " (click to cycle)";
+        }
+      }
+      if (themeToggle) {
+        var cur0 = localStorage.getItem("saebooks-theme") || "dark";
+        themeToggle.textContent = iconFor(cur0);
+        themeToggle.title = "Theme: " + cur0 + " (click to cycle)";
+        themeToggle.addEventListener("click", function (e) {
+          e.preventDefault();
+          var cur = localStorage.getItem("saebooks-theme") || "dark";
+          var next = cur === "dark" ? "light" : cur === "light" ? "auto" : "dark";
+          try { localStorage.setItem("saebooks-theme", next); } catch (_) {}
+          applyMode(next);
+        });
+      }
+      if (window.matchMedia) {
+        var mq = window.matchMedia("(prefers-color-scheme: dark)");
+        if (mq.addEventListener) {
+          mq.addEventListener("change", function (ev) {
+            if ((localStorage.getItem("saebooks-theme") || "dark") === "auto") {
+              document.documentElement.dataset.theme = ev.matches ? "dark" : "light";
+            }
+          });
+        }
+      }
+
+      function openPalette() {
+        if (!palette) return;
+        if (!palette.open) palette.showModal();
+        paletteInput.value = "";
+        paletteResults.innerHTML = "";
+        setTimeout(() => paletteInput.focus(), 0);
+      }
+      function closePalette() {
+        if (palette && palette.open) palette.close();
+      }
+      if (openBtn) {
+        openBtn.addEventListener("click", (e) => { e.preventDefault(); openPalette(); });
+      }
+
+      document.body.addEventListener("htmx:afterSwap", (evt) => {
+        if (modal && evt.detail && evt.detail.target && evt.detail.target.id === "classic-modal") {
+          if (!modal.open) modal.showModal();
+        }
+      });
+
+      function isTypingTarget(el) {
+        if (!el) return false;
+        const tag = el.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+        if (el.isContentEditable) return true;
+        return false;
+      }
+
+      function activeGrid() {
+        return document.querySelector("table.dn-grid, table.classic-grid, table.data");
+      }
+      function selectedRow(grid) { return grid.querySelector("tbody tr[aria-selected='true']"); }
+      function rowsOf(grid) {
+        return Array.from(grid.querySelectorAll("tbody tr")).filter(r => r.querySelector("td"));
+      }
+      function selectRow(grid, idx) {
+        const rows = rowsOf(grid);
+        if (!rows.length) return;
+        idx = Math.max(0, Math.min(rows.length - 1, idx));
+        rows.forEach(r => r.removeAttribute("aria-selected"));
+        rows[idx].setAttribute("aria-selected", "true");
+        rows[idx].scrollIntoView({ block: "nearest" });
+      }
+      function moveSelection(delta) {
+        const grid = activeGrid();
+        if (!grid) return false;
+        const rows = rowsOf(grid);
+        if (!rows.length) return false;
+        const cur = selectedRow(grid);
+        const idx = cur ? rows.indexOf(cur) : -1;
+        selectRow(grid, idx + delta);
+        return true;
+      }
+      function openSelection() {
+        const grid = activeGrid();
+        if (!grid) return false;
+        const row = selectedRow(grid);
+        if (!row) return false;
+        const link = row.querySelector("a[href]");
+        if (!link) return false;
+        window.location.assign(link.getAttribute("href"));
+        return true;
+      }
+
+      let gTimer = null, gArmed = false;
+      const gMap = {
+        d: "/dashboard", j: "/journal", i: "/invoices", b: "/bills",
+        c: "/contacts", a: "/accounts", r: "/reports", p: "/payments",
+      };
+
+      document.addEventListener("keydown", function (evt) {
+        if (evt.key === "Escape") {
+          if (palette && palette.open) { closePalette(); return; }
+          if (modal && modal.open) { modal.close(); return; }
+        }
+        if (evt.key === "F1") { evt.preventDefault(); window.location.assign("/help/shortcuts"); return; }
+        if (evt.key === "F3") { evt.preventDefault(); openPalette(); return; }
+        if (evt.key === "F2") {
+          evt.preventDefault();
+          const preferred = document.querySelector("[data-new-action]");
+          if (preferred) { window.location.assign(preferred.getAttribute("data-new-action")); return; }
+          const candidate = Array.from(document.querySelectorAll("a"))
+            .find(a => (a.getAttribute("href") || "").endsWith("/new"));
+          if (candidate) window.location.assign(candidate.getAttribute("href"));
+          return;
+        }
+        if (evt.key === "F9") {
+          const form = document.querySelector("form#post-action") || document.querySelector("form[data-post-action]");
+          if (form) { evt.preventDefault(); form.submit(); }
+          return;
+        }
+        if (evt.key === "F12") {
+          const form = document.querySelector("form#save-draft") || document.querySelector("form[data-save-draft]");
+          if (form) { evt.preventDefault(); form.submit(); }
+          return;
+        }
+        if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === "k") {
+          evt.preventDefault(); openPalette(); return;
+        }
+        if (isTypingTarget(document.activeElement)) return;
+        if (evt.key === "/") { evt.preventDefault(); openPalette(); return; }
+        if (evt.key === "j") { if (moveSelection(1)) { evt.preventDefault(); return; } }
+        if (evt.key === "k") { if (moveSelection(-1)) { evt.preventDefault(); return; } }
+        if (evt.key === "Enter") { if (openSelection()) { evt.preventDefault(); return; } }
+        if (evt.key === "g") {
+          gArmed = true; clearTimeout(gTimer);
+          gTimer = setTimeout(() => { gArmed = false; }, 1200);
+          return;
+        }
+        if (gArmed && gMap[evt.key]) {
+          gArmed = false; clearTimeout(gTimer);
+          window.location.assign(gMap[evt.key]); return;
+        }
+        if (evt.key === "n") {
+          const preferred = document.querySelector("[data-new-action]");
+          if (preferred) { evt.preventDefault(); window.location.assign(preferred.getAttribute("data-new-action")); return; }
+          const candidate = Array.from(document.querySelectorAll("a"))
+            .find(a => (a.getAttribute("href") || "").endsWith("/new"));
+          if (candidate) { evt.preventDefault(); window.location.assign(candidate.getAttribute("href")); }
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

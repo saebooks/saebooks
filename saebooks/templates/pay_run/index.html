@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Pay run — SAE Books{% endblock %}
+{% block content %}
+<h1>Pay run</h1>
+<p class="dim">
+  Select unpaid supplier bills, pick a bank account + a processing
+  date, and download an ABA (Direct Entry) file to upload to your
+  bank. Export does <strong>not</strong> post a payment — after the
+  bank confirms settlement, come back and record the payment via
+  <code>Payments → + New</code>.
+</p>
+
+{% if not candidates %}
+  <p class="empty">No POSTED supplier bills with a balance due.
+    Create and post a bill first.</p>
+{% elif not bank_accounts %}
+  <p class="empty">
+    No bank account has ABA Direct Entry fields populated yet. Open a
+    bank account under <a href="/accounts">Accounts</a> and fill in
+    its BSB, account number, account title, APCA User ID and 3-letter
+    bank abbreviation (e.g. <code>CBA</code>).
+  </p>
+{% else %}
+<form method="post" action="/pay-run/export">
+  <fieldset>
+    <legend>Remittance details</legend>
+
+    <label>Bank account
+      <select name="bank_account_id" required>
+        {% for acct in bank_accounts %}
+        <option value="{{ acct.id }}">
+          {{ acct.code }} — {{ acct.name }}
+          ({{ acct.bank_abbreviation }} {{ acct.bsb }} {{ acct.bank_account_number }})
+        </option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label>Process date
+      <input type="date" name="process_date"
+             value="{{ today.isoformat() }}" required />
+    </label>
+
+    <label>Description
+      <input name="description" value="CREDITORS" maxlength="12" required />
+    </label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Bills to pay</legend>
+    <table class="data">
+      <thead>
+        <tr>
+          <th></th>
+          <th>Due</th>
+          <th>Number</th>
+          <th>Supplier</th>
+          <th class="right">Balance due</th>
+          <th class="right">Amount to pay</th>
+          <th>BSB/Account</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in candidates %}
+        {% set payable = c.contact.bank_bsb and c.contact.bank_account_number and c.contact.bank_account_title %}
+        <tr>
+          <td>
+            {% if payable %}
+            <input type="checkbox" name="select_{{ c.bill.id }}" />
+            {% else %}
+            <span class="dim" title="Contact missing BSB / account / title">—</span>
+            {% endif %}
+          </td>
+          <td>{{ c.bill.due_date }}</td>
+          <td><a href="/bills/{{ c.bill.id }}">{{ c.bill.number }}</a></td>
+          <td>{{ c.contact.name }}</td>
+          <td class="right">${{ '{:,.2f}'.format(c.balance_due) }}</td>
+          <td class="right">
+            {% if payable %}
+            <input type="text" name="amount_{{ c.bill.id }}"
+                   value="{{ '{:.2f}'.format(c.balance_due) }}"
+                   size="10" />
+            {% else %}
+            <span class="dim">bank details missing</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if payable %}
+              <code>{{ c.contact.bank_bsb }} {{ c.contact.bank_account_number }}</code>
+            {% else %}
+            <a href="/contacts/{{ c.contact.id }}">Add details</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </fieldset>
+
+  <div class="toolbar">
+    <button type="submit" class="btn btn-primary">Export ABA file</button>
+  </div>
+</form>
+{% endif %}
+{% endblock %}

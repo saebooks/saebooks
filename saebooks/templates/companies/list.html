@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Companies — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Companies</h1>
+  <div class="meta">
+    {{ companies|length }} active
+    {% if not can_create %}
+      · single-company edition
+    {% endif %}
+  </div>
+  {% if can_create %}
+  <a href="/companies/new" class="btn">+ New company</a>
+  {% endif %}
+</div>
+
+{% if not can_create %}
+<p class="dim">
+  This edition is licensed for a single company. Upgrade to Business or
+  higher to create additional companies in the same tenant.
+</p>
+{% endif %}
+
+{% if companies %}
+<table class="acct-table">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Legal name</th>
+      <th>ABN</th>
+      <th>Currency</th>
+      <th>FY start</th>
+      <th>GST</th>
+      <th class="actions"></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for c in companies %}
+    <tr>
+      <td>
+        {{ c.name }}
+        {% if active_company and c.id == active_company.id %}
+        <span class="badge badge-active" style="margin-left:0.4rem;font-size:11px">ACTIVE</span>
+        {% endif %}
+      </td>
+      <td class="dim">{{ c.legal_name or '' }}</td>
+      <td class="dim">{{ c.abn or '' }}</td>
+      <td class="dim">{{ c.base_currency }}</td>
+      <td class="dim">{{ c.fin_year_start_month }}</td>
+      <td class="dim">{{ 'Yes' if c.gst_registered else 'No' }}</td>
+      <td class="actions">
+        {% if not active_company or c.id != active_company.id %}
+        <form method="post" action="/companies/switch/{{ c.id }}" style="display:inline">
+          <button type="submit" class="btn-secondary">Switch</button>
+        </form>
+        {% endif %}
+        {% if companies|length > 1 %}
+        <form method="post" action="/companies/{{ c.id }}/archive" style="display:inline"
+              onsubmit="return confirm('Archive {{ c.name|e }}? Existing transactions remain but the company is hidden from the switcher.');">
+          <button type="submit" class="btn-secondary">Archive</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="dim">No companies. (This shouldn't happen — contact support.)</p>
+{% endif %}
+{% endblock %}

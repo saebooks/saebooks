@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Depreciation schedule — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Depreciation schedule</h1>
+  <div class="meta">{{ company_name }} — as at {{ schedule.as_at }}</div>
+</div>
+
+<form class="report-filter" method="get">
+  <label>As at <input name="as_at" type="date" value="{{ as_at }}"></label>
+  <label>
+    <input name="include_disposed" type="checkbox" value="true"
+      {% if include_disposed %}checked{% endif %}>
+    Include disposed
+  </label>
+  <button type="submit" class="btn-secondary">Run</button>
+  <a class="btn"
+    href="/reports/depreciation-schedule?as_at={{ as_at }}{% if include_disposed %}&amp;include_disposed=true{% endif %}&amp;format=csv">
+    Download CSV
+  </a>
+</form>
+
+{% if schedule.rows %}
+<table class="report-table">
+  <thead>
+    <tr>
+      <th>Code</th>
+      <th>Name</th>
+      <th>Status</th>
+      <th class="num">Cost</th>
+      <th>Book model</th>
+      <th class="num">Book accum. dep.</th>
+      <th class="num">Book NBV</th>
+      <th>Tax model</th>
+      <th class="num">Tax accum. dep.</th>
+      <th class="num">Temp. diff.</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in schedule.rows %}
+    <tr>
+      <td><a href="/assets/{{ r.asset_id }}">{{ r.code }}</a></td>
+      <td>{{ r.name }}</td>
+      <td>{{ r.status }}</td>
+      <td class="num">{{ "%.2f"|format(r.cost) }}</td>
+      <td class="dim">{{ r.book_model_id }}</td>
+      <td class="num">{{ "%.2f"|format(r.book_cumulative) }}</td>
+      <td class="num">{{ "%.2f"|format(r.book_nbv) }}</td>
+      <td class="dim">
+        {% if r.tax_model_id %}{{ r.tax_model_id }}{% else %}<span class="dim">(same as book)</span>{% endif %}
+      </td>
+      <td class="num">{{ "%.2f"|format(r.tax_cumulative) }}</td>
+      <td class="num">{{ "%.2f"|format(r.temporary_difference) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr class="grand-total">
+      <td colspan="3"><strong>Totals</strong></td>
+      <td class="num"><strong>{{ "%.2f"|format(schedule.total_cost) }}</strong></td>
+      <td></td>
+      <td class="num"><strong>{{ "%.2f"|format(schedule.total_book_cumulative) }}</strong></td>
+      <td class="num"></td>
+      <td></td>
+      <td class="num"><strong>{{ "%.2f"|format(schedule.total_tax_cumulative) }}</strong></td>
+      <td class="num"><strong>{{ "%.2f"|format(schedule.total_temporary_difference) }}</strong></td>
+    </tr>
+  </tfoot>
+</table>
+<p class="dim">
+  Positive "Temp. diff." = book NBV higher than tax WDV
+  → <strong>deferred tax liability</strong> (tax has written the asset down faster).
+  Negative = deferred tax asset.
+  Assets with a blank tax model use the book schedule and always show zero difference.
+</p>
+{% else %}
+<p class="dim">No {% if not include_disposed %}active {% endif %}assets as at {{ schedule.as_at }}.</p>
+{% endif %}
+{% endblock %}

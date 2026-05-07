@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Import preview — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Bank statement preview</h1>
+  <p class="muted">{{ fmt_label }} — {{ lines|length }} line(s) parsed.</p>
+</div>
+
+{% if lines %}
+<table class="report-table">
+  <thead>
+    <tr><th>Date</th><th>Description</th><th>Amount</th><th>Reference</th></tr>
+  </thead>
+  <tbody>
+    {% for l in lines[:500] %}
+      <tr>
+        <td>{{ l.txn_date }}</td>
+        <td>{{ l.description }}</td>
+        <td class="amount">{{ '%.2f'|format(l.amount) }}</td>
+        <td>{{ l.reference or "" }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% if lines|length > 500 %}
+  <p class="muted">Only the first 500 rows shown; all {{ lines|length }} will be imported.</p>
+{% endif %}
+
+<form method="post" action="/admin/imports/bank/apply" class="stacked-form">
+  <input type="hidden" name="account_id" value="{{ account_id }}">
+  <textarea name="raw" hidden>{{ raw }}</textarea>
+  <div class="form-actions">
+    <a class="btn-secondary" href="/admin/imports/bank">Cancel</a>
+    <button type="submit" class="btn-primary">Confirm import</button>
+  </div>
+</form>
+{% else %}
+  <p class="muted">No transaction rows recognised. Try a different format.</p>
+  <a class="btn-secondary" href="/admin/imports/bank">Back</a>
+{% endif %}
+{% endblock %}

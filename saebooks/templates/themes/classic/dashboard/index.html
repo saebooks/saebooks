@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block title %}Command Centre — SAE Books{% endblock %}
+
+{#
+  Command Centre — the MYOB-AccountRight landing screen. Seven hubs
+  shown as flowchart tiles; each tile diagrams the document flow
+  within that hub and every box is a link into the underlying list.
+  The five original dashboard KPI partials still show as a compact
+  strip above the hubs so the page isn't pure chrome.
+#}
+{% block content %}
+<div class="cc-page-header">
+  <h1>Command Centre</h1>
+  <div class="meta">{{ company_name }} · {{ today.isoformat() }}</div>
+</div>
+
+<section class="cc-kpis" aria-label="today">
+  {% include "dashboard/_bank_balances.html" %}
+  {% include "dashboard/_aged_ar.html" %}
+  {% include "dashboard/_unmatched.html" %}
+  {% include "dashboard/_cashflow.html" %}
+  {% include "dashboard/_upcoming_recurring.html" %}
+</section>
+
+<section class="cc-hubs" aria-label="hubs">
+  {# Sales hub — quote → invoice → payment, credit notes loop back. #}
+  <article class="cc-hub-card" id="sales">
+    <header class="cc-hub-title"><span class="cc-hub-icon">❖</span> Sales</header>
+    <div class="cc-flow">
+      <a class="cc-node" href="/invoices?status=draft">
+        <span class="cc-node-label">Draft invoices</span>
+      </a>
+      <span class="cc-edge" aria-hidden="true">→</span>
+      <a class="cc-node" href="/invoices?status=open">
+        <span class="cc-node-label">Send &amp; track</span>
+      </a>
+      <span class="cc-edge" aria-hidden="true">→</span>
+      <a class="cc-node" href="/payments">
+        <span class="cc-node-label">Receive payments</span>
+      </a>
+    </div>
+    <div class="cc-flow cc-flow-aux">
+      <a class="cc-node cc-node-aux" href="/invoices/recurring">Recurring</a>
+      <a class="cc-node cc-node-aux" href="/credit-notes">Credit notes</a>
+    </div>
+  </article>
+
+  {# Purchases hub — bill → approve → pay, pay-run aggregates. #}
+  <article class="cc-hub-card" id="purchases">
+    <header class="cc-hub-title"><span class="cc-hub-icon">⬒</span> Purchases</header>
+    <div class="cc-flow">
+      <a class="cc-node" href="/bills?status=draft">
+        <span class="cc-node-label">Enter bills</span>
+      </a>
+      <span class="cc-edge" aria-hidden="true">→</span>
+      <a class="cc-node" href="/bills?status=open">
+        <span class="cc-node-label">Open bills</span>
+      </a>
+      <span class="cc-edge" aria-hidden="true">→</span>
+      <a class="cc-node" href="/pay-run">
+        <span class="cc-node-label">Pay run</span>
+      </a>
+    </div>
+  </article>
+
+  {# Banking hub — import → rules → match → reconcile. #}
+  <article class="cc-hub-card" id="banking">
+    <header class="cc-hub-title"><span class="cc-hub-icon">⛁</span> Banking</header>
+    <div class="cc-flow">
+      <a class="cc-node" href="/admin/bank-feeds">
+        <span class="cc-node-label">Feeds</span>
+      </a>
+      <span class="cc-edge" aria-hidden="true">→</span>
+      <a class="cc-node" href="/bank-rules">
+        <span class="cc-node-label">Rules</span>
+      </a>
+      <span class="cc-edge" aria-hidden="true">→</span>
+      <a class="cc-node" href="/reconciliation">
+        <span class="cc-node-label">Reconcile</span>
+      </a>
+    </div>
+  </article>
+
+  {# Accounts hub — chart → templates → post → report. #}
+  <article class="cc-hub-card" id="accounts">
+    <header class="cc-hub-title"><span class="cc-hub-icon">₳</span> Accounts</header>
+    <div class="cc-flow">
+      <a class="cc-node" href="/accounts">
+        <span class="cc-node-label">Chart</span>
+      </a>
+      <span class="cc-edge" aria-hidden="true">→</span>
+      <a class="cc-node" href="/templates">
+        <span class="cc-node-label">Templates</span>
+      </a>
+      <span class="cc-edge" aria-hidden="true">→</span>
+      <a class="cc-node" href="/journal">
+        <span class="cc-node-label">Journal</span>
+      </a>
+      <span class="cc-edge" aria-hidden="true">→</span>
+      <a class="cc-node" href="/reports">
+        <span class="cc-node-label">Reports</span>
+      </a>
+    </div>
+    <div class="cc-flow cc-flow-aux">
+      <a class="cc-node cc-node-aux" href="/admin/tax-codes">Tax codes</a>
+    </div>
+  </article>
+
+  {# Projects hub — budget → spend → compare. #}
+  <article class="cc-hub-card" id="projects">
+    <header class="cc-hub-title"><span class="cc-hub-icon">⎔</span> Projects</header>
+    <div class="cc-flow">
+      <a class="cc-node" href="/projects">
+        <span class="cc-node-label">Projects</span>
+      </a>
+      <span class="cc-edge" aria-hidden="true">→</span>
+      <a class="cc-node" href="/budgets">
+        <span class="cc-node-label">Budgets</span>
+      </a>
+      <span class="cc-edge" aria-hidden="true">→</span>
+      <a class="cc-node" href="/reports?kind=project-variance">
+        <span class="cc-node-label">Variance</span>
+      </a>
+    </div>
+  </article>
+
+  {# Inventory hub — items + assets. #}
+  <article class="cc-hub-card" id="inventory">
+    <header class="cc-hub-title"><span class="cc-hub-icon">▤</span> Inventory</header>
+    <div class="cc-flow">
+      <a class="cc-node" href="/items">
+        <span class="cc-node-label">Items</span>
+      </a>
+      <span class="cc-edge" aria-hidden="true">→</span>
+      <a class="cc-node" href="/assets">
+        <span class="cc-node-label">Fixed assets</span>
+      </a>
+    </div>
+  </article>
+
+  {# Card File hub — one node today, but the visual keeps hub parity. #}
+  <article class="cc-hub-card" id="cardfile">
+    <header class="cc-hub-title"><span class="cc-hub-icon">☰</span> Card File</header>
+    <div class="cc-flow">
+      <a class="cc-node" href="/contacts">
+        <span class="cc-node-label">Contacts</span>
+      </a>
+    </div>
+  </article>
+</section>
+{% endblock %}
+
+{#
+  Dashboard has its own bottom-bar set — "New invoice / New bill /
+  Receive payment / Pay run" mirrors the AccountRight hub shortcuts.
+  The per-page overrides keep F-key muscle memory intact on list
+  pages, but the Command Centre's primary flows deserve first-class
+  buttons.
+#}
+{% block action_bar %}
+  <a href="/invoices/new" class="cc-action" title="New invoice"><kbd>F2</kbd> Invoice</a>
+  <a href="/bills/new" class="cc-action" title="New bill">Bill</a>
+  <a href="/payments/new" class="cc-action" title="Receive payment">Payment</a>
+  <a href="/pay-run" class="cc-action" title="Pay run">Pay run</a>
+  <a href="/reconciliation" class="cc-action" title="Reconcile bank">Reconcile</a>
+  <button type="button" class="cc-action" data-action="search" title="Search (F3)"><kbd>F3</kbd> Search</button>
+{% endblock %}

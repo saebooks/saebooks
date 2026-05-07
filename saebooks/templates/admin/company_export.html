@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Export company data — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Export company data</h1>
+  <div class="meta">{{ edition }}</div>
+</div>
+
+<p>
+  Downloads a ZIP containing the entire ledger — contacts, chart of
+  accounts, journal, invoices, bills, credit notes, payments, fixed
+  assets, bank feeds, and the 5-year audit trail — for one company.
+  Intended for <strong>data-portability</strong> and
+  <strong>CDR / GDPR</strong> requests.
+</p>
+
+<form method="post" action="/admin/company/export">
+  <div class="form-row">
+    <label for="company_id">Company</label>
+    <select name="company_id" id="company_id" required>
+      {% for c in companies %}
+      <option value="{{ c.id }}">{{ c.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="form-row">
+    <label>
+      <input type="checkbox" name="include_audit" value="on" checked>
+      Include audit trail (audit.csv)
+    </label>
+  </div>
+  <div class="form-row">
+    <button type="submit">Download ZIP</button>
+  </div>
+</form>
+{% endblock %}

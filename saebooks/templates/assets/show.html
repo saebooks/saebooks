@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}{{ asset.code }} {{ asset.name }} — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{{ asset.code }} · {{ asset.name }}</h1>
+  <div class="meta">{{ asset.status|title }} · {{ company_name }}</div>
+  {% if asset.status == 'active' %}
+  <a href="/assets/{{ asset.id }}/edit" class="btn-secondary">Edit</a>
+  {% endif %}
+</div>
+
+{% if asset.description %}
+<p>{{ asset.description }}</p>
+{% endif %}
+
+<section>
+  <h3>Money</h3>
+  <table class="acct-table" style="max-width:32rem">
+    <tr><td>Cost</td><td>{{ '%.2f'|format(asset.cost) }}</td></tr>
+    <tr><td>Residual value</td><td>{{ '%.2f'|format(asset.residual_value) }}</td></tr>
+    <tr><td>Accumulated depreciation (through {{ today.isoformat() }})</td><td>{{ '%.2f'|format(cumulative_today) }}</td></tr>
+    <tr><td><strong>Net book value</strong></td><td><strong>{{ '%.2f'|format(nbv) }}</strong></td></tr>
+    <tr><td class="dim">Last depreciation posted through</td><td class="dim">{{ asset.last_depreciation_posted_through.isoformat() if asset.last_depreciation_posted_through else '— (never) —' }}</td></tr>
+  </table>
+</section>
+
+<section>
+  <h3>GL coordinates</h3>
+  <table class="acct-table" style="max-width:32rem">
+    <tr><td>Cost account</td><td>{{ cost_acct.code }} {{ cost_acct.name }}</td></tr>
+    <tr><td>Accum dep account</td><td>{{ accum_acct.code }} {{ accum_acct.name }}</td></tr>
+    <tr><td>Dep expense account</td><td>{{ dep_acct.code }} {{ dep_acct.name }}</td></tr>
+    <tr><td>Depreciation model (book)</td><td>{{ model.id }} — {{ model.method }}{% if model.method == 'linear' %}, {{ model.method_number }} years{% endif %}</td></tr>
+    <tr><td>Tax model</td><td class="dim">{{ asset.tax_model_id if asset.tax_model_id else '(same as book)' }}</td></tr>
+  </table>
+</section>
+
+<section>
+  <h3>Physical</h3>
+  <table class="acct-table" style="max-width:32rem">
+    <tr><td>Purchase date</td><td>{{ asset.purchase_date.isoformat() }}</td></tr>
+    <tr><td>In-service date</td><td>{{ asset.in_service_date.isoformat() }}</td></tr>
+    <tr><td>Serial number</td><td class="dim">{{ asset.serial_number or '—' }}</td></tr>
+    <tr><td>Manufacturer / model</td><td class="dim">{{ asset.manufacturer or '—' }} / {{ asset.model_number or '—' }}</td></tr>
+    <tr><td>Location</td><td class="dim">{{ asset.location or '—' }}</td></tr>
+    <tr><td>Custody</td><td class="dim">{{ asset.custody_person or '—' }}</td></tr>
+    <tr><td>Warranty end</td><td class="dim">{{ asset.warranty_end.isoformat() if asset.warranty_end else '—' }}</td></tr>
+  </table>
+</section>
+
+{% if asset.parent_asset_id %}
+<section>
+  <h3>Partial-disposal child</h3>
+  <p class="dim">
+    This row is the disposed-fraction child of
+    <a href="/assets/{{ asset.parent_asset_id }}">the parent asset</a>.
+  </p>
+</section>
+{% endif %}
+
+{% if asset.status == 'disposed' %}
+<section>
+  <h3>Disposal</h3>
+  <table class="acct-table" style="max-width:32rem">
+    <tr><td>Disposal date</td><td>{{ asset.disposal_date.isoformat() }}</td></tr>
+    <tr><td>Proceeds</td><td>{{ '%.2f'|format(asset.disposal_proceeds) }}</td></tr>
+    {% if asset.disposal_journal_id %}
+    <tr><td>Disposal journal</td><td><a href="/journal/{{ asset.disposal_journal_id }}">view entry</a></td></tr>
+    {% endif %}
+  </table>
+</section>
+{% endif %}
+
+{% if asset.status == 'active' %}
+<section>
+  <h3>Actions</h3>
+  <form method="post" action="/assets/{{ asset.id }}/depreciate" style="display:inline-block;margin-right:1rem">
+    <label style="display:inline">Post depreciation through
+      <input name="through_date" type="date" required value="{{ today.isoformat() }}">
+    </label>
+    <button type="submit" class="btn-secondary">Post</button>
+  </form>
+
+  <a href="/assets/{{ asset.id }}/dispose" class="btn-secondary">Dispose…</a>
+
+  <a href="/assets/{{ asset.id }}/dispose-partial" class="btn-secondary">Partial dispose…</a>
+
+  <a href="/assets/{{ asset.id }}/convert" class="btn-secondary">Convert to Inventory…</a>
+
+  <form method="post" action="/assets/{{ asset.id }}/archive" style="display:inline-block;margin-left:1rem" onsubmit="return confirm('Archive this asset?')">
+    <button type="submit" class="btn-secondary">Archive</button>
+  </form>
+</section>
+{% endif %}
+{% endblock %}

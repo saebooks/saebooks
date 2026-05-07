@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Credit notes — SAE Books{% endblock %}
+{% block content %}
+<h1>Credit notes</h1>
+<p>{{ company_name }} — {{ total }} credit note{{ '' if total == 1 else 's' }}</p>
+
+<div class="toolbar">
+  <a class="btn btn-primary" href="/credit-notes/new">+ New credit note</a>
+  <form method="get" action="/credit-notes" class="inline">
+    <label>Status
+      <select name="status" onchange="this.form.submit()">
+        <option value="all"      {{ 'selected' if status_filter == 'all'    }}>All</option>
+        <option value="DRAFT"    {{ 'selected' if status_filter == 'DRAFT'  }}>Draft</option>
+        <option value="POSTED"   {{ 'selected' if status_filter == 'POSTED' }}>Posted</option>
+        <option value="VOIDED"   {{ 'selected' if status_filter == 'VOIDED' }}>Voided</option>
+        <option value="archived" {{ 'selected' if status_filter == 'archived' }}>Archived</option>
+      </select>
+    </label>
+  </form>
+</div>
+
+<table class="data">
+  <thead>
+    <tr>
+      <th>Number</th>
+      <th>Customer</th>
+      <th>Issued</th>
+      <th>Status</th>
+      <th class="right">Total</th>
+      <th class="right">Allocated</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for cn in credit_notes %}
+    <tr>
+      <td><a href="/credit-notes/{{ cn.id }}">{{ cn.number or '(draft)' }}</a></td>
+      <td>{{ contact_map.get(cn.contact_id, '—') }}</td>
+      <td>{{ cn.issue_date }}</td>
+      <td><span class="badge badge-{{ cn.status|lower }}">{{ cn.status }}</span></td>
+      <td class="right">${{ '{:,.2f}'.format(cn.total) }}</td>
+      <td class="right">${{ '{:,.2f}'.format(cn.amount_allocated) }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="6" class="dim center">No credit notes match the filter.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

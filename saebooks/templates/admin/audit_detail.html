@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}Audit snapshot — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Audit snapshot</h1>
+  <div class="meta"><a href="/admin/audit">← Back to audit log</a></div>
+</div>
+
+{% if reverted %}
+<div class="alert alert-info">
+  Revert applied. The row's before-state has been written back and a new
+  snapshot was created documenting the revert.
+</div>
+{% endif %}
+{% if revert_error %}
+<div class="alert alert-error">
+  Revert failed: {{ revert_error }}
+</div>
+{% endif %}
+
+<table class="kv-table">
+  <tr><th>When</th><td>{{ snap.created_at.strftime('%Y-%m-%d %H:%M:%S %Z') }}</td></tr>
+  <tr><th>Table</th><td><code>{{ snap.table_name }}</code></td></tr>
+  <tr><th>Row ID</th><td class="code">{{ snap.row_id }}</td></tr>
+  <tr><th>Action</th><td>
+    {% if snap.action == 'update' %}<span class="audit-action audit-update">update</span>
+    {% elif snap.action == 'delete' %}<span class="audit-action audit-delete">delete</span>
+    {% elif snap.action == 'migrate' %}<span class="audit-action audit-migrate">migrate</span>
+    {% else %}{{ snap.action }}{% endif %}
+  </td></tr>
+  <tr><th>Actor</th><td>{{ snap.performed_by or '—' }}</td></tr>
+  <tr><th>Reason</th><td>{{ snap.reason or '—' }}</td></tr>
+</table>
+
+<h2>Changes</h2>
+{% if revertable %}
+<form method="post" action="/admin/audit/{{ snap.id }}/revert" class="revert-form"
+      onsubmit="return confirm('Revert this row to the before-state shown below? A new audit snapshot will be created so this action is also reversible.');">
+  <button type="submit" class="btn-warn">↶ Revert this change</button>
+  <span class="dim">Applies the before-state fields back to the live row.</span>
+</form>
+{% elif snap.before_data and snap.action not in ['update', 'archive'] %}
+<p class="dim">
+  Revert isn't supported for <code>{{ snap.action }}</code> actions.
+  {% if snap.action == 'delete' %}The row was deleted; restoring it with intact foreign keys requires a backup restore.{% endif %}
+  {% if snap.action == 'migrate' %}References were moved to another row; unwinding is ambiguous.{% endif %}
+  {% if snap.action == 'reverse' %}The reversal entry would need to be deleted, which risks breaking later reporting.{% endif %}
+</p>
+{% endif %}
+
+{% if diff %}
+<table class="acct-table diff-table">
+  <thead>
+    <tr>
+      <th>Field</th>
+      <th>Before</th>
+      <th>After</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for field, before, after in diff %}
+    <tr>
+      <td class="code">{{ field }}</td>
+      <td class="diff-before">{{ before if before is not none else '∅' }}</td>
+      <td class="diff-after">{{ after if after is not none else '∅' }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="dim">No field-level changes recorded (snapshot may have been a no-op).</p>
+{% endif %}
+
+{% if history|length > 1 %}
+<h2>Timeline for this row</h2>
+<table class="acct-table">
+  <thead>
+    <tr>
+      <th>When</th>
+      <th>Action</th>
+      <th>Actor</th>
+      <th>Reason</th>
+      <th class="actions"></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for h in history %}
+    <tr{% if h.id == snap.id %} class="highlight"{% endif %}>
+      <td>{{ h.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+      <td>{{ h.action }}</td>
+      <td class="dim">{{ h.performed_by or '' }}</td>
+      <td class="dim">{{ h.reason or '' }}</td>
+      <td class="actions">
+        {% if h.id == snap.id %}
+          <span class="dim">(current)</span>
+        {% else %}
+          <a href="/admin/audit/{{ h.id }}">View</a>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<details>
+  <summary class="dim">Raw before/after data (JSON)</summary>
+  <div class="json-dump">
+    <div>
+      <h3>before_data</h3>
+      <pre>{{ snap.before_data | tojson(indent=2) }}</pre>
+    </div>
+    <div>
+      <h3>after_data</h3>
+      <pre>{% if snap.after_data %}{{ snap.after_data | tojson(indent=2) }}{% else %}null (row was deleted){% endif %}</pre>
+    </div>
+  </div>
+</details>
+{% endblock %}

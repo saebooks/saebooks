@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Aged debtors — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Aged debtors (AR)</h1>
+  <div class="meta">{{ company_name }} — as at {{ report.as_at }}</div>
+</div>
+
+<form class="report-filter" method="get">
+  <label>As at <input name="as_at" type="date" value="{{ as_at }}"></label>
+  <button type="submit" class="btn-secondary">Run</button>
+  <a class="btn" href="/reports/aged-ar?as_at={{ as_at }}&amp;format=csv">Download CSV</a>
+</form>
+
+{% if report.groups %}
+<table class="report-table">
+  <thead>
+    <tr>
+      <th>Customer</th>
+      {% for k in bucket_keys %}
+      <th class="num">{{ bucket_labels[k] }}</th>
+      {% endfor %}
+      <th class="num">Total</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for g in report.groups %}
+    <tr class="section-header">
+      <td><strong>{{ g.contact_name }}</strong></td>
+      {% for k in bucket_keys %}
+      <td class="num">{{ "%.2f"|format(g.buckets[k]) if g.buckets[k] else "" }}</td>
+      {% endfor %}
+      <td class="num"><strong>{{ "%.2f"|format(g.total) }}</strong></td>
+    </tr>
+    {% for inv in g.invoices %}
+    <tr>
+      <td class="indent">
+        <a href="/invoices/{{ inv.invoice_id }}">{{ inv.number }}</a>
+        <span class="dim">issued {{ inv.issue_date }}, due {{ inv.due_date }}</span>
+        {% if inv.amount_paid > 0 %}<span class="dim">(${{ "%.2f"|format(inv.amount_paid) }} paid)</span>{% endif %}
+      </td>
+      {% for k in bucket_keys %}
+      {% if inv.bucket == k %}
+      <td class="num">{{ "%.2f"|format(inv.balance_due) }}</td>
+      {% else %}
+      <td class="num"></td>
+      {% endif %}
+      {% endfor %}
+      <td class="num">{{ "%.2f"|format(inv.balance_due) }}</td>
+    </tr>
+    {% endfor %}
+    {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr class="grand-total">
+      <td><strong>Grand total</strong></td>
+      {% for k in bucket_keys %}
+      <td class="num"><strong>{{ "%.2f"|format(report.grand_totals[k]) }}</strong></td>
+      {% endfor %}
+      <td class="num"><strong>{{ "%.2f"|format(report.grand_total) }}</strong></td>
+    </tr>
+  </tfoot>
+</table>
+{% else %}
+<p class="dim">No outstanding customer invoices as at {{ report.as_at }}.</p>
+{% endif %}
+{% endblock %}

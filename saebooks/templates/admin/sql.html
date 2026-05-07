@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}SQL browser — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>SQL browser</h1>
+  <div class="meta">
+    Read-only psql in the browser. Queries run inside a <code>READ ONLY</code>
+    transaction — any write attempt is rejected by Postgres.
+    Results capped at {{ result_limit }} rows; use CSV export for larger sets.
+  </div>
+</div>
+
+<div class="sql-layout">
+  <div class="sql-main">
+    <form method="post" action="/admin/sql" class="sql-form">
+      <label>
+        <span class="label-text">Query</span>
+        <textarea name="sql" rows="7" spellcheck="false"
+                  placeholder="SELECT code, name FROM accounts WHERE archived_at IS NULL ORDER BY code LIMIT 50;"
+                  autofocus>{{ sql }}</textarea>
+      </label>
+      <div class="sql-buttons">
+        <button type="submit" class="btn">Run query</button>
+        <button type="submit" formaction="/admin/sql/export" class="btn-secondary">Export CSV</button>
+        <a href="/admin/sql" class="btn-secondary" style="text-decoration:none">Clear</a>
+      </div>
+    </form>
+
+    {% if error %}
+    <div class="alert alert-error sql-error">
+      <strong>Error:</strong> <pre style="white-space:pre-wrap;margin:0">{{ error }}</pre>
+    </div>
+    {% endif %}
+
+    {% if result %}
+    <div class="sql-result-meta">
+      {{ result.row_count }} row{% if result.row_count != 1 %}s{% endif %}
+      in {{ result.duration_ms }} ms
+      {% if result.truncated %}
+      <span class="status-error">(truncated at {{ result_limit }} rows — refine the query or export to CSV)</span>
+      {% endif %}
+    </div>
+
+    {% if result.columns %}
+    <div class="sql-result-wrap">
+      <table class="acct-table sql-result">
+        <thead>
+          <tr>
+            {% for col in result.columns %}
+            <th>{{ col }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in result.rows %}
+          <tr>
+            {% for val in row %}
+            <td>{% if val is none %}<em class="dim">NULL</em>{% else %}{{ val }}{% endif %}</td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="dim">Query ran, no columns returned.</p>
+    {% endif %}
+    {% endif %}
+
+    <h2>Recent queries</h2>
+    {% if history %}
+    <table class="acct-table sql-history">
+      <thead>
+        <tr>
+          <th>When</th>
+          <th>SQL</th>
+          <th>Rows</th>
+          <th>ms</th>
+          <th>Actor</th>
+          <th class="actions"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for h in history %}
+        <tr{% if h.error %} class="row-error"{% endif %}>
+          <td>{{ h.executed_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+          <td><code class="sql-history-sql">{{ h.sql if h.sql|length < 120 else h.sql[:120] ~ '…' }}</code></td>
+          <td>{{ h.row_count }}</td>
+          <td>{{ h.duration_ms }}</td>
+          <td class="dim">{{ h.performed_by or '' }}</td>
+          <td class="actions">
+            <a href="/admin/sql?rerun={{ h.id }}">Edit</a>
+            {% if h.error %}<span class="status-error" title="{{ h.error }}">⚠ error</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="dim">No queries run yet.</p>
+    {% endif %}
+  </div>
+
+  <aside class="sql-schema">
+    <h2>Schema</h2>
+    {% for t in tables %}
+    <details class="sql-schema-table">
+      <summary><code>{{ t.name }}</code> <span class="dim">({{ t.columns|length }})</span></summary>
+      <table class="sql-schema-cols">
+        {% for col, dtype in t.columns %}
+        <tr><td class="code">{{ col }}</td><td class="dim">{{ dtype }}</td></tr>
+        {% endfor %}
+      </table>
+    </details>
+    {% endfor %}
+  </aside>
+</div>
+{% endblock %}

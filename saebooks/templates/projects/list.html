@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Projects — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Projects</h1>
+  <div class="meta">{{ total }} project{{ '' if total == 1 else 's' }} · {{ company_name }}</div>
+  <a href="/projects/new" class="btn" data-new-action="/projects/new">+ New</a>
+</div>
+
+<div class="contact-filter">
+  <div class="status-filter">
+    <a href="/projects" class="{{ 'active' if status_filter == 'all' }}">All</a>
+    <a href="/projects?status=ACTIVE" class="{{ 'active' if status_filter == 'ACTIVE' }}">Active</a>
+    <a href="/projects?status=COMPLETED" class="{{ 'active' if status_filter == 'COMPLETED' }}">Completed</a>
+    <a href="/projects?status=ARCHIVED&amp;archived=1" class="{{ 'active' if status_filter == 'ARCHIVED' }}">Archived</a>
+  </div>
+  <form method="get" action="/projects" style="display:inline">
+    {% if status_filter and status_filter != 'all' %}<input type="hidden" name="status" value="{{ status_filter }}">{% endif %}
+    <input type="text" name="q" value="{{ search_q }}" placeholder="Search code or name..." style="font:14px/1.2 inherit;padding:0.3rem 0.4rem;border:1px solid var(--rule);width:16rem">
+    <button type="submit" class="btn-secondary">Search</button>
+  </form>
+</div>
+
+{% if projects %}
+<table class="acct-table">
+  <thead>
+    <tr>
+      <th>Code</th>
+      <th>Name</th>
+      <th>Status</th>
+      <th>Start</th>
+      <th>End</th>
+      <th class="actions"></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for p in projects %}
+    <tr>
+      <td><a href="/projects/{{ p.id }}"><code>{{ p.code }}</code></a></td>
+      <td>{{ p.name }}</td>
+      <td><span class="contact-type {{ p.status.value|lower }}">{{ p.status.value|lower|title }}</span></td>
+      <td class="dim">{{ p.start_date or '' }}</td>
+      <td class="dim">{{ p.end_date or '' }}</td>
+      <td class="actions"><a href="/projects/{{ p.id }}/edit">edit</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="dim">No projects. <a href="/projects/new">Create your first project</a> to start tagging journal, invoice, or bill lines for job-costing reports.</p>
+{% endif %}
+{% endblock %}

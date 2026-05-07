@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Beneficiary Register — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Beneficiary Register</h1>
+  <div class="meta">{{ beneficiaries|length }} beneficiar{{ 'y' if beneficiaries|length == 1 else 'ies' }} · {{ company_name }}</div>
+  <a href="/contacts/new" class="btn" data-new-action="/contacts/new">+ New beneficiary</a>
+</div>
+
+<p class="dim" style="margin-bottom:1rem">
+  Beneficiaries are contacts of type <strong>Beneficiary</strong>. TFN and share-percentage
+  are stored here for section&nbsp;97 statement generation.
+  <a href="/contacts?type=BENEFICIARY">View in contacts list</a> ·
+  <a href="/distributions">Trust distributions</a>
+</p>
+
+{% if beneficiaries %}
+<table class="acct-table">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>TFN</th>
+      <th>Share %</th>
+      <th>Income classification</th>
+      <th>Email</th>
+      <th class="actions"></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for b in beneficiaries %}
+    <tr>
+      <td><a href="/contacts/{{ b.id }}">{{ b.name }}</a></td>
+      <td class="dim">
+        {% if b.tfn %}
+          {# Mask all but last 3 digits for display #}
+          ***-***-{{ b.tfn[-3:] }}
+        {% else %}
+          <span class="dim">—</span>
+        {% endif %}
+      </td>
+      <td>{{ "%.4f"|format(b.share_percentage|float) ~ " %" if b.share_percentage else "—" }}</td>
+      <td class="dim">{{ b.default_income_classification or "—" }}</td>
+      <td class="dim">{{ b.email or "" }}</td>
+      <td class="actions">
+        <a href="/contacts/{{ b.id }}/edit">edit</a>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="dim">No beneficiaries recorded. <a href="/contacts/new">Add one now.</a></p>
+{% endif %}
+{% endblock %}

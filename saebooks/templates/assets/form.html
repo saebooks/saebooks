@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if asset else 'New' }} Asset — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{{ 'Edit' if asset else 'New' }} fixed asset</h1>
+</div>
+
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
+<form method="post" action="{{ '/assets/' + asset.id|string if asset else '/assets' }}" class="tc-form" style="max-width:50rem">
+
+  <h3>Identity</h3>
+  <label>Code <input name="code" value="{{ asset.code if asset else '' }}" placeholder="auto (FA-NNNN)"></label>
+  <label>Name <input name="name" required value="{{ asset.name if asset else '' }}"></label>
+  <label class="wide">Description <textarea name="description" rows="2" style="font:14px/1.4 inherit;width:100%;padding:0.3rem;border:1px solid var(--rule)">{{ asset.description if asset and asset.description else '' }}</textarea></label>
+
+  <h3>GL accounts</h3>
+  <label>Cost account
+    <select name="cost_account_id" required>
+      {% for a in asset_accounts %}
+      <option value="{{ a.id }}" {{ 'selected' if asset and asset.cost_account_id == a.id }}>{{ a.code }} {{ a.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Accumulated-depreciation account
+    <select name="accum_dep_account_id" required>
+      {% for a in asset_accounts %}
+      <option value="{{ a.id }}" {{ 'selected' if asset and asset.accum_dep_account_id == a.id }}>{{ a.code }} {{ a.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Depreciation expense account
+    <select name="dep_expense_account_id" required>
+      {% for a in expense_accounts %}
+      <option value="{{ a.id }}" {{ 'selected' if asset and asset.dep_expense_account_id == a.id else ('selected' if not asset and a.code == '6-1500') }}>{{ a.code }} {{ a.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Depreciation model (book)
+    <select name="depreciation_model_id" required>
+      {% for m in models %}
+      <option value="{{ m.id }}" {{ 'selected' if asset and asset.depreciation_model_id == m.id }}>{{ m.id }} ({{ m.method }}{% if m.method == 'linear' %} · {{ m.method_number }}yr{% endif %})</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Tax model
+    <select name="tax_model_id">
+      <option value="">— same as book —</option>
+      {% for m in models %}
+      <option value="{{ m.id }}" {{ 'selected' if asset and asset.tax_model_id == m.id }}>{{ m.id }} ({{ m.method }}{% if m.method == 'linear' %} · {{ m.method_number }}yr{% endif %})</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <h3>Cost & dates</h3>
+  <label>Purchase date <input name="purchase_date" type="date" required value="{{ asset.purchase_date.isoformat() if asset else '' }}"></label>
+  <label>In-service date <input name="in_service_date" type="date" value="{{ asset.in_service_date.isoformat() if asset else '' }}" placeholder="defaults to purchase date"></label>
+  <label>Cost <input name="cost" type="number" step="0.01" min="0" required value="{{ '%.2f'|format(asset.cost) if asset else '' }}"></label>
+  <label>Residual value <input name="residual_value" type="number" step="0.01" min="0" value="{{ '%.2f'|format(asset.residual_value) if asset else '0.00' }}"></label>
+
+  <h3>Physical tracking</h3>
+  <label>Serial number <input name="serial_number" value="{{ asset.serial_number if asset and asset.serial_number else '' }}"></label>
+  <label>Manufacturer <input name="manufacturer" value="{{ asset.manufacturer if asset and asset.manufacturer else '' }}"></label>
+  <label>Model number <input name="model_number" value="{{ asset.model_number if asset and asset.model_number else '' }}"></label>
+  <label>Location <input name="location" value="{{ asset.location if asset and asset.location else '' }}"></label>
+  <label>Custody <input name="custody_person" value="{{ asset.custody_person if asset and asset.custody_person else '' }}"></label>
+  <label>Warranty end <input name="warranty_end" type="date" value="{{ asset.warranty_end.isoformat() if asset and asset.warranty_end else '' }}"></label>
+  <label>Purchased from
+    <select name="purchase_contact_id">
+      <option value="">— none —</option>
+      {% for c in contacts %}
+      <option value="{{ c.id }}" {{ 'selected' if asset and asset.purchase_contact_id == c.id }}>{{ c.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <div class="form-actions">
+    <button type="submit" class="btn">{{ 'Save' if asset else 'Create' }}</button>
+    <a href="{{ '/assets/' + asset.id|string if asset else '/assets' }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

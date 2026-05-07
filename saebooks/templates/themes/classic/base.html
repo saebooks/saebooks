@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en" class="theme-classic">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}SAE Books{% endblock %}</title>
+  <script>
+    // Inline dark-mode bootstrap — see default base.html for the same
+    // pattern. Runs before first paint so there's no flash on reload.
+    (function () {
+      try {
+        var mode = localStorage.getItem("saebooks-theme") || "auto";
+        var eff = mode;
+        if (mode === "auto") {
+          eff = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark" : "light";
+        }
+        document.documentElement.dataset.theme = eff;
+        document.documentElement.dataset.themeMode = mode;
+      } catch (e) { /* localStorage unavailable — default light */ }
+    })();
+  </script>
+  {# Default bundle first so non-overridden pages (e.g. /accounts with
+     .acct-table) still get baseline typography/colour; classic.css
+     follows to override every shared selector with the Command Centre
+     chrome. The shared {% block theme_assets %} slot stays intact so
+     a per-user preferred_theme downgrade still works consistently. #}
+  <link rel="stylesheet" href="/static/app.css?v={{ static_version }}">
+  <link rel="stylesheet" href="/static/themes/classic/app.css?v={{ static_version }}">
+  {% block theme_assets %}{% endblock %}
+  <script src="https://unpkg.com/htmx.org@2.0.3" defer></script>
+</head>
+<body>
+  {#
+    Hub map — the 7 AccountRight Command Centres. Each entry's
+    ``match`` is a list of URL-path prefixes that make this hub the
+    active one, and ``href`` is where the ribbon icon links to. The
+    dashboard has its own anchor-based deep-links so clicking "Sales"
+    from anywhere goes to /dashboard#sales when you're already on
+    the dashboard, and to the sales list otherwise.
+  #}
+  {% set _path = request.url.path %}
+  {% set _hubs = [
+    {"key": "accounts",  "label": "Accounts",   "icon": "₳", "href": "/accounts",
+     "match": ["/accounts", "/journal", "/reports", "/templates", "/admin/tax-codes"]},
+    {"key": "banking",   "label": "Banking",    "icon": "⛁", "href": "/reconciliation",
+     "match": ["/admin/bank-feeds", "/reconciliation", "/bank-rules"]},
+    {"key": "sales",     "label": "Sales",      "icon": "❖", "href": "/invoices",
+     "match": ["/invoices", "/credit-notes", "/payments"]},
+    {"key": "projects",  "label": "Projects",   "icon": "⎔", "href": "/projects",
+     "match": ["/projects", "/budgets"]},
+    {"key": "purchases", "label": "Purchases",  "icon": "⬒", "href": "/bills",
+     "match": ["/bills", "/pay-run"]},
+    {"key": "inventory", "label": "Inventory",  "icon": "▤", "href": "/items",
+     "match": ["/items", "/assets"]},
+    {"key": "cardfile",  "label": "Card File",  "icon": "☰", "href": "/contacts",
+     "match": ["/contacts"]}
+  ] %}
+  {% set _active_hub = "dashboard" %}
+  {% for h in _hubs %}
+    {% for p in h.match %}
+      {% if _path == p or _path.startswith(p + "/") %}
+        {% set _active_hub = h.key %}{# jinja "last wins" — fine #}
+      {% endif %}
+    {% endfor %}
+  {% endfor %}
+
+  <div class="cc-layout">
+    <header class="cc-titlebar" aria-label="titlebar">
+      <div class="cc-brand">
+        <a href="/dashboard" aria-label="Command Centre">
+          <span class="cc-brand-mark">SAE</span>
+          <span class="cc-brand-name">Books</span>
+        </a>
+      </div>
+      <nav class="cc-ribbon" aria-label="command centre">
+        <a href="/dashboard"
+           class="cc-hub{% if _active_hub == 'dashboard' %} active{% endif %}"
+           title="Command Centre">
+          <span class="cc-hub-icon">⌂</span>
+          <span class="cc-hub-label">Command Centre</span>
+        </a>
+        {% for h in _hubs %}
+          <a href="{{ h.href }}"
+             class="cc-hub{% if _active_hub == h.key %} active{% endif %}"
+             title="{{ h.label }}">
+            <span class="cc-hub-icon">{{ h.icon }}</span>
+            <span class="cc-hub-label">{{ h.label }}</span>
+          </a>
+        {% endfor %}
+      </nav>
+      <div class="cc-titlebar-actions">
+        <a href="#" id="open-palette" class="cc-chip" title="Search (Ctrl+K, /, or F3)">⌕ Search</a>
+        <a href="/admin/settings" class="cc-chip" title="Settings">⚙</a>
+        <a href="/help/shortcuts" class="cc-chip" title="Keyboard shortcuts (F1)">?</a>
+        <button type="button" class="cc-chip theme-toggle" id="theme-toggle"
+                title="Theme: auto (click to cycle)" aria-label="Cycle theme">◐</button>
+      </div>
+    </header>
+
+    <nav class="cc-breadcrumb" aria-label="breadcrumb">
+      {% block breadcrumb %}
+        <a href="/dashboard">Home</a>
+        {% set _crumbs = request.url.path.strip('/').split('/') %}
+        {% if _crumbs and _crumbs[0] %}
+          <span class="sep">›</span>
+          <span class="current">{{ _crumbs[0]|replace('-', ' ')|title }}</span>
+        {% endif %}
+      {% endblock %}
+    </nav>
+
+    <main class="cc-main">
+      {% block content %}{% endblock %}
+    </main>
+
+    {# Bottom action bar — MYOB's perennial F-key footer, reworked
+       as a horizontal strip of labelled buttons + the status readout
+       on the right. Pages opt in with {% block action_bar %} to show
+       their own actions; the defaults below cover list-style pages. #}
+    <footer class="cc-actionbar" aria-label="actions">
+      <div class="cc-actions">
+        {% block action_bar %}
+          <button type="button" class="cc-action" data-action="new"
+                  title="New (F2)"><kbd>F2</kbd> New</button>
+          <button type="button" class="cc-action" data-action="search"
+                  title="Search (F3)"><kbd>F3</kbd> Search</button>
+          <button type="button" class="cc-action" data-action="post"
+                  title="Post (F9)"><kbd>F9</kbd> Post</button>
+          <button type="button" class="cc-action" data-action="save-draft"
+                  title="Save draft (F12)"><kbd>F12</kbd> Draft</button>
+        {% endblock %}
+      </div>
+      <div class="cc-status">
+        <span>{{ company_name or "SAE Books" }}</span>
+        <span class="sep">|</span>
+        <span class="cc-edition cc-edition-{{ edition or "community" }}">{{ edition or "community" }}</span>
+        {% if request.state.username is defined and request.state.username %}
+          <span class="sep">|</span>
+          <span>{{ request.state.username }}</span>
+        {% endif %}
+      </div>
+    </footer>
+  </div>
+
+  <dialog id="search-palette" class="search-palette">
+    <form method="dialog" class="search-palette-form">
+      <input
+        type="search"
+        id="palette-input"
+        name="q"
+        placeholder="Search contacts, invoices, bills, accounts…"
+        autocomplete="off"
+        hx-get="/search"
+        hx-trigger="keyup changed delay:150ms"
+        hx-target="#palette-results"
+        hx-swap="innerHTML"
+      >
+      <button type="submit" class="palette-close">Esc</button>
+    </form>
+    <div id="palette-results" class="palette-results"></div>
+  </dialog>
+
+  {# HTMX modal slot — list pages that use hx-target="#classic-modal"
+     get modal editing "for free". See invoices/list.html (RR2). #}
+  <dialog id="classic-modal" class="classic-modal">
+    <div id="classic-modal-content"></div>
+  </dialog>
+
+  <script>
+    // Classic theme keyboard driver — unchanged from RR2; the F-key
+    // bindings and grid navigation still drive the page. The only
+    // thing that moved is the chrome around it.
+    (function () {
+      const palette = document.getElementById("search-palette");
+      const paletteInput = document.getElementById("palette-input");
+      const paletteResults = document.getElementById("palette-results");
+      const openBtn = document.getElementById("open-palette");
+      const modal = document.getElementById("classic-modal");
+
+      const themeToggle = document.getElementById("theme-toggle");
+      function iconFor(mode) { return mode === "auto" ? "◐" : mode === "dark" ? "☾" : "☀"; }
+      function applyMode(mode) {
+        var eff = mode;
+        if (mode === "auto") {
+          eff = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark" : "light";
+        }
+        document.documentElement.dataset.theme = eff;
+        document.documentElement.dataset.themeMode = mode;
+        if (themeToggle) {
+          themeToggle.textContent = iconFor(mode);
+          themeToggle.title = "Theme: " + mode + " (click to cycle)";
+        }
+      }
+      if (themeToggle) {
+        var cur0 = localStorage.getItem("saebooks-theme") || "auto";
+        themeToggle.textContent = iconFor(cur0);
+        themeToggle.title = "Theme: " + cur0 + " (click to cycle)";
+        themeToggle.addEventListener("click", function (e) {
+          e.preventDefault();
+          var cur = localStorage.getItem("saebooks-theme") || "auto";
+          var next = cur === "auto" ? "light" : cur === "light" ? "dark" : "auto";
+          try { localStorage.setItem("saebooks-theme", next); } catch (_) {}
+          applyMode(next);
+        });
+      }
+      if (window.matchMedia) {
+        var mq = window.matchMedia("(prefers-color-scheme: dark)");
+        if (mq.addEventListener) {
+          mq.addEventListener("change", function (ev) {
+            if ((localStorage.getItem("saebooks-theme") || "auto") === "auto") {
+              document.documentElement.dataset.theme = ev.matches ? "dark" : "light";
+            }
+          });
+        }
+      }
+
+      function openPalette() {
+        if (!palette) return;
+        if (!palette.open) palette.showModal();
+        paletteInput.value = "";
+        paletteResults.innerHTML = "";
+        setTimeout(() => paletteInput.focus(), 0);
+      }
+      function closePalette() {
+        if (palette && palette.open) palette.close();
+      }
+      if (openBtn) {
+        openBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          openPalette();
+        });
+      }
+
+      document.body.addEventListener("htmx:afterSwap", (evt) => {
+        if (modal && evt.detail && evt.detail.target && evt.detail.target.id === "classic-modal") {
+          if (!modal.open) modal.showModal();
+        }
+      });
+
+      function isTypingTarget(el) {
+        if (!el) return false;
+        const tag = el.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+        if (el.isContentEditable) return true;
+        return false;
+      }
+
+      function activeGrid() {
+        return document.querySelector("table.classic-grid, table.data");
+      }
+      function selectedRow(grid) {
+        return grid.querySelector("tbody tr[aria-selected='true']");
+      }
+      function rowsOf(grid) {
+        return Array.from(grid.querySelectorAll("tbody tr"))
+          .filter(r => r.querySelector("td"));
+      }
+      function selectRow(grid, idx) {
+        const rows = rowsOf(grid);
+        if (!rows.length) return;
+        idx = Math.max(0, Math.min(rows.length - 1, idx));
+        rows.forEach(r => r.removeAttribute("aria-selected"));
+        rows[idx].setAttribute("aria-selected", "true");
+        rows[idx].scrollIntoView({ block: "nearest" });
+      }
+      function moveSelection(delta) {
+        const grid = activeGrid();
+        if (!grid) return false;
+        const rows = rowsOf(grid);
+        if (!rows.length) return false;
+        const cur = selectedRow(grid);
+        const idx = cur ? rows.indexOf(cur) : -1;
+        selectRow(grid, idx + delta);
+        return true;
+      }
+      function openSelection() {
+        const grid = activeGrid();
+        if (!grid) return false;
+        const row = selectedRow(grid);
+        if (!row) return false;
+        const link = row.querySelector("a[href]");
+        if (!link) return false;
+        window.location.assign(link.getAttribute("href"));
+        return true;
+      }
+
+      // Action-bar buttons — dispatch to the existing F-key handlers
+      // by firing synthetic keyboard events. Keeps one place to own
+      // the behaviour.
+      function fireKey(key) {
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: key, bubbles: true }));
+      }
+      document.querySelectorAll(".cc-action").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.preventDefault();
+          const a = btn.dataset.action;
+          if (a === "new") return fireKey("F2");
+          if (a === "search") return fireKey("F3");
+          if (a === "post") return fireKey("F9");
+          if (a === "save-draft") return fireKey("F12");
+        });
+      });
+
+      let gTimer = null;
+      let gArmed = false;
+      const gMap = {
+        d: "/dashboard",
+        j: "/journal",
+        i: "/invoices",
+        b: "/bills",
+        c: "/contacts",
+        a: "/accounts",
+        r: "/reports",
+        p: "/payments",
+      };
+
+      document.addEventListener("keydown", function (evt) {
+        if (evt.key === "Escape") {
+          if (palette && palette.open) { closePalette(); return; }
+          if (modal && modal.open) { modal.close(); return; }
+        }
+
+        if (evt.key === "F1") {
+          evt.preventDefault();
+          window.location.assign("/help/shortcuts");
+          return;
+        }
+        if (evt.key === "F3") {
+          evt.preventDefault();
+          openPalette();
+          return;
+        }
+        if (evt.key === "F5") { return; }
+        if (evt.key === "F2") {
+          evt.preventDefault();
+          const preferred = document.querySelector("[data-new-action]");
+          if (preferred) {
+            window.location.assign(preferred.getAttribute("data-new-action"));
+            return;
+          }
+          const candidate = Array.from(document.querySelectorAll("a"))
+            .find(a => (a.getAttribute("href") || "").endsWith("/new"));
+          if (candidate) window.location.assign(candidate.getAttribute("href"));
+          return;
+        }
+        if (evt.key === "F9") {
+          const form = document.querySelector("form#post-action")
+            || document.querySelector("form[data-post-action]");
+          if (form) { evt.preventDefault(); form.submit(); }
+          return;
+        }
+        if (evt.key === "F12") {
+          const form = document.querySelector("form#save-draft")
+            || document.querySelector("form[data-save-draft]");
+          if (form) { evt.preventDefault(); form.submit(); }
+          return;
+        }
+
+        if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === "k") {
+          evt.preventDefault();
+          openPalette();
+          return;
+        }
+
+        if (isTypingTarget(document.activeElement)) return;
+
+        if (evt.key === "/") {
+          evt.preventDefault();
+          openPalette();
+          return;
+        }
+
+        if (evt.key === "j") { if (moveSelection(1)) { evt.preventDefault(); return; } }
+        if (evt.key === "k") { if (moveSelection(-1)) { evt.preventDefault(); return; } }
+        if (evt.key === "Enter") { if (openSelection()) { evt.preventDefault(); return; } }
+
+        if (evt.key === "g") {
+          gArmed = true;
+          clearTimeout(gTimer);
+          gTimer = setTimeout(() => { gArmed = false; }, 1200);
+          return;
+        }
+        if (gArmed && gMap[evt.key]) {
+          gArmed = false;
+          clearTimeout(gTimer);
+          window.location.assign(gMap[evt.key]);
+          return;
+        }
+
+        if (evt.key === "n") {
+          const preferred = document.querySelector("[data-new-action]");
+          if (preferred) {
+            evt.preventDefault();
+            window.location.assign(preferred.getAttribute("data-new-action"));
+            return;
+          }
+          const candidate = Array.from(document.querySelectorAll("a"))
+            .find(a => (a.getAttribute("href") || "").endsWith("/new"));
+          if (candidate) {
+            evt.preventDefault();
+            window.location.assign(candidate.getAttribute("href"));
+          }
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

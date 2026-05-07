@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}Audit log — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Audit log</h1>
+  <div class="meta">Row-level before/after snapshots for risky edits</div>
+</div>
+
+<form method="get" action="/admin/audit" class="audit-filters">
+  <label>
+    <span class="label-text">Table</span>
+    <select name="table_name">
+      <option value="">All tables</option>
+      {% for t in tables %}
+      <option value="{{ t }}" {% if filters.table_name == t %}selected{% endif %}>{{ t }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <label>
+    <span class="label-text">Action</span>
+    <select name="action">
+      <option value="">All actions</option>
+      {% for a in ['update', 'delete', 'migrate'] %}
+      <option value="{{ a }}" {% if filters.action == a %}selected{% endif %}>{{ a }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <label>
+    <span class="label-text">Actor</span>
+    <select name="performed_by">
+      <option value="">Anyone</option>
+      {% for a in actors %}
+      <option value="{{ a }}" {% if filters.performed_by == a %}selected{% endif %}>{{ a }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <label>
+    <span class="label-text">Row ID</span>
+    <input name="row_id" value="{{ filters.row_id }}" placeholder="UUID" style="min-width:22rem">
+  </label>
+
+  <button type="submit" class="btn">Filter</button>
+  <a href="/admin/audit" class="btn-secondary" style="text-decoration:none">Clear</a>
+</form>
+
+{% if snapshots %}
+<table class="acct-table">
+  <thead>
+    <tr>
+      <th>When</th>
+      <th>Table</th>
+      <th>Row</th>
+      <th>Action</th>
+      <th>Actor</th>
+      <th>Reason</th>
+      <th class="actions"></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for s in snapshots %}
+    <tr>
+      <td>{{ s.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+      <td><code>{{ s.table_name }}</code></td>
+      <td class="code" title="{{ s.row_id }}">{{ s.row_id[:8] }}…</td>
+      <td>
+        {% if s.action == 'update' %}<span class="audit-action audit-update">update</span>
+        {% elif s.action == 'delete' %}<span class="audit-action audit-delete">delete</span>
+        {% elif s.action == 'migrate' %}<span class="audit-action audit-migrate">migrate</span>
+        {% else %}{{ s.action }}{% endif %}
+      </td>
+      <td class="dim">{{ s.performed_by or '' }}</td>
+      <td class="dim">{{ s.reason or '' }}</td>
+      <td class="actions">
+        <a href="/admin/audit/{{ s.id }}">View</a>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<div class="pager">
+  {% set qs = [] %}
+  {% if filters.table_name %}{% set _ = qs.append('table_name=' ~ filters.table_name) %}{% endif %}
+  {% if filters.action %}{% set _ = qs.append('action=' ~ filters.action) %}{% endif %}
+  {% if filters.performed_by %}{% set _ = qs.append('performed_by=' ~ filters.performed_by) %}{% endif %}
+  {% if filters.row_id %}{% set _ = qs.append('row_id=' ~ filters.row_id) %}{% endif %}
+  {% set qstr = '&'.join(qs) %}
+  {% if page > 1 %}
+    <a href="/admin/audit?page={{ page - 1 }}{% if qstr %}&{{ qstr }}{% endif %}">← Prev</a>
+  {% endif %}
+  <span class="dim">Page {{ page }}</span>
+  {% if has_next %}
+    <a href="/admin/audit?page={{ page + 1 }}{% if qstr %}&{{ qstr }}{% endif %}">Next →</a>
+  {% endif %}
+</div>
+{% else %}
+<p class="dim">
+  No audit snapshots match the current filters.
+  {% if not filters.table_name and not filters.row_id and not filters.action and not filters.performed_by %}
+  Snapshots are captured automatically for protected/system account edits and
+  certain other risky operations.
+  {% endif %}
+</p>
+{% endif %}
+{% endblock %}

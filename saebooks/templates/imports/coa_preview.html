@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}CoA diff preview — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>CoA diff preview</h1>
+  <p class="muted">
+    {{ diff.new|length }} new,
+    {{ diff.changed|length }} changed,
+    {{ diff.removed|length }} removed,
+    {{ diff.unchanged|length }} unchanged.
+  </p>
+</div>
+
+{% if diff.new %}
+<h2>New accounts</h2>
+<table class="report-table">
+  <thead><tr><th>Code</th><th>Name</th><th>Type</th><th>Parent</th><th>Tax</th><th>Reconcile</th></tr></thead>
+  <tbody>
+  {% for r in diff.new %}
+    <tr><td>{{ r.code }}</td><td>{{ r.name }}</td><td>{{ r.account_type.value }}</td><td>{{ r.parent_code or "" }}</td><td>{{ r.tax_code_default or "" }}</td><td>{{ r.reconcile }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if diff.changed %}
+<h2>Changed accounts</h2>
+<table class="report-table">
+  <thead><tr><th>Code</th><th>Before</th><th>After</th></tr></thead>
+  <tbody>
+  {% for before, after in diff.changed %}
+    <tr>
+      <td>{{ before.code }}</td>
+      <td>{{ before.name }} / {{ before.account_type.value }} / recon={{ before.reconcile }}</td>
+      <td>{{ after.name }} / {{ after.account_type.value }} / recon={{ after.reconcile }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if diff.removed %}
+<h2>Missing from CSV (won't be archived unless box is ticked)</h2>
+<ul>
+{% for r in diff.removed %}
+  <li>{{ r.code }} — {{ r.name }}</li>
+{% endfor %}
+</ul>
+{% endif %}
+
+<form method="post" action="/admin/imports/coa/apply" class="stacked-form">
+  <textarea name="raw" hidden>{{ raw }}</textarea>
+  <label class="checkbox">
+    <input type="checkbox" name="archive_removed" value="1">
+    Archive accounts missing from the CSV
+  </label>
+  <div class="form-actions">
+    <a class="btn-secondary" href="/admin/imports/coa">Cancel</a>
+    <button type="submit" class="btn-primary"
+            onclick="return confirm('Apply this diff to the chart of accounts?');">
+      Apply
+    </button>
+  </div>
+</form>
+{% endblock %}

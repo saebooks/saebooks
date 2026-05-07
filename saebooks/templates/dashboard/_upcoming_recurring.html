@@ -1,0 +1,28 @@
+{# Upcoming recurring invoices — next 5 by next_run. #}
+<section class="widget widget-upcoming">
+  <header>
+    <h2>Upcoming recurring</h2>
+    <a href="/invoices/recurring" class="subtle">All schedules &rarr;</a>
+  </header>
+  {% if dashboard.upcoming %}
+  <table class="widget-table">
+    <thead>
+      <tr><th>Name</th><th>Runs</th><th>Frequency</th></tr>
+    </thead>
+    <tbody>
+      {% for u in dashboard.upcoming %}
+      <tr>
+        <td><a href="/invoices/recurring/{{ u.template_id }}">{{ u.name }}</a></td>
+        <td>{{ u.next_run.isoformat() }}</td>
+        <td><span class="pill">{{ u.frequency }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty-state">
+    No active recurring schedules.
+    <a href="/invoices/recurring/new">Create one</a>.
+  </p>
+  {% endif %}
+</section>

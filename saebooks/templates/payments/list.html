@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Payments — SAE Books{% endblock %}
+{% block content %}
+<h1>Payments</h1>
+<p>{{ company_name }} — {{ total }} payment{{ '' if total == 1 else 's' }}</p>
+
+<div class="toolbar">
+  <a class="btn btn-primary" href="/payments/new">+ New payment</a>
+  <form method="get" action="/payments" class="inline">
+    <label>Status
+      <select name="status" onchange="this.form.submit()">
+        <option value="all"      {{ 'selected' if status_filter == 'all'    }}>All</option>
+        <option value="DRAFT"    {{ 'selected' if status_filter == 'DRAFT'  }}>Draft</option>
+        <option value="POSTED"   {{ 'selected' if status_filter == 'POSTED' }}>Posted</option>
+        <option value="VOIDED"   {{ 'selected' if status_filter == 'VOIDED' }}>Voided</option>
+        <option value="archived" {{ 'selected' if status_filter == 'archived' }}>Archived</option>
+      </select>
+    </label>
+    <label>Direction
+      <select name="direction" onchange="this.form.submit()">
+        <option value="all"      {{ 'selected' if direction_filter == 'all'      }}>All</option>
+        <option value="INCOMING" {{ 'selected' if direction_filter == 'INCOMING' }}>Incoming</option>
+        <option value="OUTGOING" {{ 'selected' if direction_filter == 'OUTGOING' }}>Outgoing</option>
+      </select>
+    </label>
+  </form>
+</div>
+
+<table class="data">
+  <thead>
+    <tr>
+      <th>Number</th>
+      <th>Date</th>
+      <th>Direction</th>
+      <th>Contact</th>
+      <th>Method</th>
+      <th>Status</th>
+      <th class="right">Amount</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for p in payments %}
+    <tr>
+      <td><a href="/payments/{{ p.id }}">{{ p.number or '(draft)' }}</a></td>
+      <td>{{ p.payment_date }}</td>
+      <td>{{ p.direction.value }}</td>
+      <td>{{ contact_map.get(p.contact_id, '—') }}</td>
+      <td>{{ p.method.value }}</td>
+      <td><span class="badge badge-{{ p.status|lower }}">{{ p.status }}</span></td>
+      <td class="right">${{ '{:,.2f}'.format(p.amount) }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7" class="dim center">No payments match the filter.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

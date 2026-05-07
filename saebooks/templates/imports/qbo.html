@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}QBO migration — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>QuickBooks Online migration</h1>
+  <p class="muted">Upload QBO CSV exports. Open invoices, open bills and historical journal entries are out of scope for v1.</p>
+</div>
+
+{% if error %}<div class="error">{{ error }}</div>{% endif %}
+{% if request.query_params.get('contacts_imported') %}
+  <div class="notice">{{ request.query_params.get('contacts_imported') }} contact(s) imported.</div>
+{% endif %}
+
+<h2>Contacts</h2>
+<form method="post" action="/admin/imports/qbo/contacts/preview" enctype="multipart/form-data" class="stacked-form">
+  <label>Kind
+    <select name="kind">
+      <option value="auto" selected>Auto-detect from header</option>
+      <option value="customer">Customers</option>
+      <option value="vendor">Vendors / Suppliers</option>
+    </select>
+  </label>
+  <label>CSV file
+    <input type="file" name="file" accept=".csv" required>
+  </label>
+  <button type="submit" class="btn-primary">Preview contacts</button>
+</form>
+
+<h2>Chart of accounts</h2>
+<form method="post" action="/admin/imports/qbo/accounts/preview" enctype="multipart/form-data" class="stacked-form">
+  <label>CSV file
+    <input type="file" name="file" accept=".csv" required>
+  </label>
+  <button type="submit" class="btn-primary">Preview account diff</button>
+</form>
+{% endblock %}

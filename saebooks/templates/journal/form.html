@@ -1,0 +1,316 @@
+{% extends "base.html" %}
+{% block title %}{% if entry %}{{ entry.ref }}{% else %}New journal entry{% endif %} — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{% if entry %}{{ entry.ref }}{% elif template_name is defined and template_name %}From template: {{ template_name }}{% else %}New journal entry{% endif %}</h1>
+  <div class="meta">{{ company_name }}</div>
+</div>
+
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
+{% set readonly = entry and entry.status != 'DRAFT' %}
+
+<form method="post" action="/journal/save" id="je-form">
+  {% if entry %}
+  <input type="hidden" name="entry_id" value="{{ entry.id }}">
+  {% endif %}
+
+  <div class="je-header">
+    <label>Ref
+      <input name="ref" value="{{ entry.ref if entry else ref }}" maxlength="32"
+             {% if readonly %}readonly{% endif %}>
+    </label>
+    <label>Date
+      <input name="entry_date" type="date"
+             value="{{ entry.entry_date if entry else '' }}"
+             {% if readonly %}readonly{% endif %} required>
+    </label>
+    <label class="wide">Description
+      <input name="description" value="{{ entry.description or '' if entry else '' }}"
+             {% if readonly %}readonly{% endif %}>
+    </label>
+  </div>
+
+  <table class="je-grid" id="je-grid">
+    <thead>
+      <tr>
+        <th class="ln">#</th>
+        <th class="acct">Account</th>
+        <th>Line description</th>
+        <th class="num">Debit</th>
+        <th class="num">Credit</th>
+        <th class="tc">Tax code</th>
+        <th class="num">GST</th>
+        <th class="proj">Project</th>
+        {% if not readonly %}<th class="rm"></th>{% endif %}
+      </tr>
+    </thead>
+    <tbody id="je-lines">
+      {% if entry and entry.lines %}
+        {% for line in entry.lines %}
+        <tr class="je-line" data-idx="{{ loop.index0 }}">
+          <td class="ln">{{ loop.index }}</td>
+          <td class="acct">
+            <select name="line_{{ loop.index0 }}_account_id" {% if readonly %}disabled{% endif %}>
+              <option value="">—</option>
+              {% for a in accounts %}
+              <option value="{{ a.id }}" {% if a.id == line.account_id %}selected{% endif %}>
+                {{ a.code }} {{ a.name }}
+              </option>
+              {% endfor %}
+            </select>
+          </td>
+          <td><input name="line_{{ loop.index0 }}_description" value="{{ line.description or '' }}"
+                     {% if readonly %}readonly{% endif %}></td>
+          <td class="num"><input name="line_{{ loop.index0 }}_debit" type="number" step="0.01"
+                                 value="{{ line.debit }}" class="debit-input"
+                                 {% if readonly %}readonly{% endif %}></td>
+          <td class="num"><input name="line_{{ loop.index0 }}_credit" type="number" step="0.01"
+                                 value="{{ line.credit }}" class="credit-input"
+                                 {% if readonly %}readonly{% endif %}></td>
+          <td class="tc">
+            <select name="line_{{ loop.index0 }}_tax_code_id" class="tc-select"
+                    {% if readonly %}disabled{% endif %}>
+              <option value="">—</option>
+              {% for tc in tax_codes %}
+              <option value="{{ tc.id }}" data-rate="{{ tc.rate }}"
+                      {% if tc.id == line.tax_code_id %}selected{% endif %}>
+                {{ tc.code }}
+              </option>
+              {% endfor %}
+            </select>
+          </td>
+          <td class="num"><input name="line_{{ loop.index0 }}_gst_amount" type="number" step="0.01"
+                                 value="{{ line.gst_amount if line.gst_amount is not none else '' }}"
+                                 class="gst-input"
+                                 {% if readonly %}readonly{% endif %}></td>
+          <td class="proj">
+            <select name="line_{{ loop.index0 }}_project_id" class="proj-select"
+                    {% if readonly %}disabled{% endif %}>
+              <option value="">—</option>
+              {% for p in projects %}
+              <option value="{{ p.id }}" {% if p.id == line.project_id %}selected{% endif %}>{{ p.code }} {{ p.name }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          {% if not readonly %}
+          <td class="rm"><button type="button" class="linkish rm-line" title="Remove">✕</button></td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      {% else %}
+        {% set tlines = template_lines if template_lines is defined and template_lines else [] %}
+        {% set line_count = tlines|length if tlines else 3 %}
+        {% for i in range(line_count) %}
+        {% set tl = tlines[i] if tlines and i < tlines|length else {} %}
+        <tr class="je-line" data-idx="{{ i }}">
+          <td class="ln">{{ i + 1 }}</td>
+          <td class="acct">
+            <select name="line_{{ i }}_account_id">
+              <option value="">—</option>
+              {% for a in accounts %}
+              <option value="{{ a.id }}"
+                {% if tl.get('account_id') == a.id|string %}selected{% endif %}>
+                {{ a.code }} {{ a.name }}
+              </option>
+              {% endfor %}
+            </select>
+          </td>
+          <td><input name="line_{{ i }}_description" value="{{ tl.get('description', '') }}"></td>
+          <td class="num"><input name="line_{{ i }}_debit" type="number" step="0.01" value="{{ tl.get('debit', '0') }}" class="debit-input"></td>
+          <td class="num"><input name="line_{{ i }}_credit" type="number" step="0.01" value="{{ tl.get('credit', '0') }}" class="credit-input"></td>
+          <td class="tc">
+            <select name="line_{{ i }}_tax_code_id" class="tc-select">
+              <option value="">—</option>
+              {% for tc in tax_codes %}
+              <option value="{{ tc.id }}" data-rate="{{ tc.rate }}"
+                {% if tl.get('tax_code_id') == tc.id|string %}selected{% endif %}>
+                {{ tc.code }}
+              </option>
+              {% endfor %}
+            </select>
+          </td>
+          <td class="num"><input name="line_{{ i }}_gst_amount" type="number" step="0.01" class="gst-input"></td>
+          <td class="proj">
+            <select name="line_{{ i }}_project_id" class="proj-select">
+              <option value="">—</option>
+              {% for p in projects %}
+              <option value="{{ p.id }}"
+                {% if tl.get('project_id') == p.id|string %}selected{% endif %}>{{ p.code }} {{ p.name }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td class="rm"><button type="button" class="linkish rm-line" title="Remove">✕</button></td>
+        </tr>
+        {% endfor %}
+      {% endif %}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td></td><td></td><td class="dim" style="text-align:right">Totals</td>
+        <td class="num" id="total-debit">0.00</td>
+        <td class="num" id="total-credit">0.00</td>
+        <td></td><td class="num" id="total-gst">0.00</td>
+        <td></td>
+        {% if not readonly %}<td></td>{% endif %}
+      </tr>
+      <tr id="balance-row">
+        <td></td><td></td><td class="dim" style="text-align:right">Difference</td>
+        <td colspan="2" id="balance-diff" class="num">0.00</td>
+        <td></td><td></td><td></td>
+        {% if not readonly %}<td></td>{% endif %}
+      </tr>
+    </tfoot>
+  </table>
+
+  {% if not readonly %}
+  <div class="je-actions">
+    <button type="button" id="add-line" class="btn-secondary">+ Add line</button>
+    {% if entry %}
+    <form method="post" action="/journal/{{ entry.id }}/delete" style="display:inline"
+          onsubmit="return confirm('Delete {{ entry.ref }}? This cannot be undone.')">
+      <button type="submit" class="btn-warn">Delete</button>
+    </form>
+    {% endif %}
+    <div class="spacer"></div>
+    <div class="override-group" id="override-group" style="display:none">
+      <label>Override reason <input name="override_reason" placeholder="e.g. BAS amendment"></label>
+    </div>
+    <button type="submit" name="action" value="draft" class="btn-secondary">Save draft</button>
+    <button type="submit" name="action" value="post" class="btn">Post</button>
+  </div>
+  {% else %}
+    <div class="je-actions">
+      {% if entry.status == 'POSTED' %}
+      <form method="post" action="/journal/{{ entry.id }}/reverse" style="display:inline"
+            onsubmit="return confirm('Create reversal of {{ entry.ref }}?')">
+        <button type="submit" class="btn-warn">Reverse</button>
+      </form>
+      {% endif %}
+      <form method="post" action="/journal/{{ entry.id }}/delete" style="display:inline"
+            onsubmit="return confirm('Delete {{ entry.ref }}? This cannot be undone.')">
+        <button type="submit" class="btn-warn">Delete</button>
+      </form>
+      <div class="spacer"></div>
+      <div class="save-template-inline" id="save-template-toggle">
+        <button type="button" class="btn-secondary" onclick="document.getElementById('save-template-form').style.display='flex'">Save as template</button>
+      </div>
+      <form method="post" action="/templates/from-entry/{{ entry.id }}" id="save-template-form"
+            style="display:none;gap:0.5rem;align-items:end">
+        <input name="name" required placeholder="Template name" style="padding:0.3rem;border:1px solid var(--rule)">
+        <input name="description" placeholder="Description (optional)" style="padding:0.3rem;border:1px solid var(--rule)">
+        <button type="submit" class="btn">Save</button>
+      </form>
+    </div>
+    {% if entry.status == 'REVERSED' %}
+    <div class="alert alert-info">This entry has been reversed.</div>
+    {% endif %}
+  {% endif %}
+</form>
+
+<script>
+(function(){
+  const taxCodeRates = {};
+  document.querySelectorAll('.tc-select option[data-rate]').forEach(opt => {
+    if (opt.value) taxCodeRates[opt.value] = parseFloat(opt.dataset.rate);
+  });
+
+  function getAccountOptions(){
+    const first = document.querySelector('[name="line_0_account_id"]');
+    return first ? first.innerHTML : '<option value="">—</option>';
+  }
+  function getTcOptions(){
+    const first = document.querySelector('[name="line_0_tax_code_id"]');
+    return first ? first.innerHTML : '<option value="">—</option>';
+  }
+  function getProjOptions(){
+    const first = document.querySelector('[name="line_0_project_id"]');
+    return first ? first.innerHTML : '<option value="">—</option>';
+  }
+
+  function reindex(){
+    const rows = document.querySelectorAll('#je-lines .je-line');
+    rows.forEach((tr, i) => {
+      tr.dataset.idx = i;
+      tr.querySelector('.ln').textContent = i+1;
+      tr.querySelectorAll('select, input').forEach(el => {
+        el.name = el.name.replace(/line_\d+_/, `line_${i}_`);
+      });
+    });
+    updateTotals();
+  }
+
+  function updateTotals(){
+    let dr=0, cr=0, gst=0;
+    document.querySelectorAll('.debit-input').forEach(el => dr += parseFloat(el.value||0));
+    document.querySelectorAll('.credit-input').forEach(el => cr += parseFloat(el.value||0));
+    document.querySelectorAll('.gst-input').forEach(el => gst += parseFloat(el.value||0));
+    document.getElementById('total-debit').textContent = dr.toFixed(2);
+    document.getElementById('total-credit').textContent = cr.toFixed(2);
+    document.getElementById('total-gst').textContent = gst.toFixed(2);
+    const diff = dr - cr;
+    const diffEl = document.getElementById('balance-diff');
+    diffEl.textContent = diff.toFixed(2);
+    diffEl.style.color = Math.abs(diff) < 0.005 ? 'var(--accent)' : '#c00';
+    document.getElementById('balance-row').style.display = Math.abs(diff)<0.005 ? 'none' : '';
+  }
+
+  function autoCalcGst(row){
+    const tcSel = row.querySelector('.tc-select');
+    const gstInput = row.querySelector('.gst-input');
+    if (!tcSel || !gstInput) return;
+    const rate = taxCodeRates[tcSel.value] || 0;
+    if (rate === 0) { gstInput.value = ''; return; }
+    const debit = parseFloat(row.querySelector('.debit-input').value || 0);
+    const credit = parseFloat(row.querySelector('.credit-input').value || 0);
+    const amount = debit || credit;
+    // GST = amount * rate / (100 + rate)  (tax-inclusive calc)
+    const gst = amount * rate / (100 + rate);
+    gstInput.value = gst.toFixed(2);
+    updateTotals();
+  }
+
+  document.getElementById('add-line')?.addEventListener('click', function(){
+    const tbody = document.getElementById('je-lines');
+    const idx = tbody.children.length;
+    const tr = document.createElement('tr');
+    tr.className = 'je-line';
+    tr.dataset.idx = idx;
+    tr.innerHTML = `
+      <td class="ln">${idx+1}</td>
+      <td class="acct"><select name="line_${idx}_account_id">${getAccountOptions()}</select></td>
+      <td><input name="line_${idx}_description"></td>
+      <td class="num"><input name="line_${idx}_debit" type="number" step="0.01" value="0" class="debit-input"></td>
+      <td class="num"><input name="line_${idx}_credit" type="number" step="0.01" value="0" class="credit-input"></td>
+      <td class="tc"><select name="line_${idx}_tax_code_id" class="tc-select">${getTcOptions()}</select></td>
+      <td class="num"><input name="line_${idx}_gst_amount" type="number" step="0.01" class="gst-input"></td>
+      <td class="proj"><select name="line_${idx}_project_id" class="proj-select">${getProjOptions()}</select></td>
+      <td class="rm"><button type="button" class="linkish rm-line" title="Remove">✕</button></td>
+    `;
+    tbody.appendChild(tr);
+    attachLineListeners(tr);
+    tr.querySelector('select').focus();
+  });
+
+  document.addEventListener('click', function(e){
+    if (e.target.classList.contains('rm-line')){
+      e.target.closest('.je-line').remove();
+      reindex();
+    }
+  });
+
+  function attachLineListeners(row){
+    row.querySelectorAll('.debit-input, .credit-input').forEach(el => {
+      el.addEventListener('input', function(){ autoCalcGst(row); updateTotals(); });
+    });
+    const tcSel = row.querySelector('.tc-select');
+    if (tcSel) tcSel.addEventListener('change', function(){ autoCalcGst(row); });
+  }
+
+  document.querySelectorAll('.je-line').forEach(attachLineListeners);
+  updateTotals();
+})();
+</script>
+{% endblock %}

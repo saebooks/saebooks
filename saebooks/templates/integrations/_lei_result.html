@@ -1,0 +1,37 @@
+<div class="lei-panel" id="lei-panel" style="border:1px solid var(--rule); padding:0.75rem; margin-top:0.75rem; background:#f8fafc">
+  <h3 style="margin:0 0 0.5rem 0; font-size:1rem">GLEIF match</h3>
+  <dl style="display:grid; grid-template-columns: max-content 1fr; gap:0.25rem 1rem; margin:0">
+    <dt>LEI</dt><dd>{{ result.lei }}</dd>
+    <dt>Legal name</dt><dd>{{ result.legal_name or '—' }}</dd>
+    {% if result.jurisdiction %}
+    <dt>Jurisdiction</dt><dd>{{ result.jurisdiction }}</dd>
+    {% endif %}
+    <dt>Entity status</dt><dd>{{ result.entity_status or '—' }}</dd>
+    <dt>Registration</dt><dd>{{ result.registration_status or '—' }}</dd>
+    {% if result.legal_form %}
+    <dt>Legal form</dt><dd>{{ result.legal_form }}</dd>
+    {% endif %}
+    {% if result.category %}
+    <dt>Category</dt><dd>{{ result.category }}</dd>
+    {% endif %}
+    {% if result.registered_as %}
+    <dt>Registered as</dt><dd>{{ result.registered_as }}</dd>
+    {% endif %}
+    {% if result.bic %}
+    <dt>BIC</dt><dd>{{ result.bic|join(', ') }}</dd>
+    {% endif %}
+    {% if result.address_lines %}
+    <dt>Address</dt><dd>{{ result.address_lines|join(', ') }}</dd>
+    {% endif %}
+    <dt>City / country</dt><dd>{{ result.address_city or '—' }}{% if result.address_country %}, {{ result.address_country }}{% endif %}</dd>
+    {% if result.address_postcode %}
+    <dt>Postcode</dt><dd>{{ result.address_postcode }}</dd>
+    {% endif %}
+    {% if result.next_renewal_date %}
+    <dt>Next renewal</dt><dd>{{ result.next_renewal_date[:10] }}</dd>
+    {% endif %}
+  </dl>
+  <div style="margin-top:0.75rem; color:var(--muted); font-size:0.9rem">
+    Save the contact to apply these values, or edit the fields above first.
+  </div>
+</div>

@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.hypothesis/
+
+# Local data
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Docker volumes
+volumes/
+
+# Logs
+*.log
+logs/
+
+# Node (for any front-end tooling we end up using)
+node_modules/
+
+# gRPC generated stubs (re-run protoc to regenerate)
+saebooks/grpc_gen/
+
+# Local agent / tooling state
+.claude/

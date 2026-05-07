@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Integrations — SAE Books{% endblock %}
+{% block content %}
+<header>
+  <h1>Integrations</h1>
+  <p class="muted">
+    Third-party hooks: document store, entity lookup, payment processor,
+    tax authority prefill. Each is independently configured and
+    status-gated below.
+  </p>
+</header>
+
+<section class="integrations-grid">
+  <article class="card">
+    <h2>Paperless-ngx</h2>
+    <p class="muted">Attach scanned receipts/bills from your document store to journal entries.</p>
+    <p>
+      Status:
+      {% if statuses.paperless %}
+        <strong class="ok">configured</strong>
+      {% else %}
+        <strong class="off">unconfigured</strong> &mdash; set <code>PAPERLESS_API_URL</code> and <code>PAPERLESS_API_TOKEN</code>.
+      {% endif %}
+    </p>
+  </article>
+
+  <article class="card">
+    <h2>LEI / GLEIF lookup</h2>
+    <p class="muted">Enrich Contact records with Legal Entity Identifier data.</p>
+    <p>
+      Status:
+      {% if statuses.lei %}
+        <strong class="ok">enabled (Enterprise)</strong>
+      {% else %}
+        <strong class="off">disabled</strong> &mdash; Enterprise edition only.
+      {% endif %}
+    </p>
+    {% if statuses.lei %}
+    <p><em>Look-up widget ships with the Contact form.</em></p>
+    {% endif %}
+  </article>
+
+  <article class="card">
+    <h2>Companies House lookup</h2>
+    <p class="muted">Enrich UK Contact records with Companies House register data.</p>
+    <p>
+      Status:
+      {% if statuses.companies_house %}
+        <strong class="ok">enabled (Enterprise)</strong>
+      {% elif companies_house_enabled %}
+        <strong class="off">unconfigured</strong> &mdash; set <code>CH_API_KEY</code> from <code>developer.company-information.service.gov.uk</code>.
+      {% else %}
+        <strong class="off">disabled</strong> &mdash; Enterprise edition only.
+      {% endif %}
+    </p>
+    {% if companies_house_enabled %}
+    <p><em>Look-up widget ships with the Contact form.</em></p>
+    {% endif %}
+  </article>
+
+  <article class="card">
+    <h2>Stripe webhook</h2>
+    <p class="muted">Accept <code>payment_intent.succeeded</code> events and create Payment rows.</p>
+    <p>
+      Status:
+      {% if statuses.stripe %}
+        <strong class="ok">signed</strong> &mdash; POST to <code>/webhooks/stripe</code>.
+      {% else %}
+        <strong class="off">unconfigured</strong> &mdash; set <code>STRIPE_WEBHOOK_SECRET</code>.
+      {% endif %}
+    </p>
+  </article>
+
+  <article class="card">
+    <h2>ATO BAS prefill</h2>
+    <p class="muted">Pull ATO-held PAYGW/GST data to pre-populate the BAS worksheet.</p>
+    <p>
+      Status: <strong class="off">stub (Batch KK)</strong> &mdash; requires AUSkey M2M cert.
+    </p>
+  </article>
+</section>
+{% endblock %}

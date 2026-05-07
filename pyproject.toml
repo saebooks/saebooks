@@ -1,0 +1,71 @@
+[project]
+name = "saebooks"
+version = "0.1.0"
+description = "Self-hosted double-entry accounting for small-to-medium businesses"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "AGPL-3.0-or-later" }
+authors = [{ name = "SAE Engineering", email = "security@saee.com.au" }]
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30",
+    "alembic>=1.14",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.12",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "httpx>=0.27",
+    "apscheduler>=3.10",
+    "reportlab>=4.2",
+    "aiosmtplib>=3.0",
+    "prometheus-client>=0.21",
+    "sentry-sdk[fastapi]>=2.18",
+    "python-json-logger>=2.0",
+    "cryptography>=43.0",
+    "grpcio>=1.62",
+    "grpcio-tools>=1.62",
+    "openai>=1.0",
+    "webauthn>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.27",
+    "hypothesis>=6.112",
+    "ruff>=0.7",
+    "mypy>=1.13",
+    "respx>=0.22",
+]
+
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["saebooks*"]
+
+[tool.setuptools.package-data]
+saebooks = ["templates/**/*.html", "static/**/*", "seed/au/*.csv"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = []
+exclude = ["alembic/versions/"]

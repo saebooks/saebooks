@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAE Books - Login</title>
+    <style>
+        :root {
+            --brand-navy: #194291;
+            --brand-navy-700: #133372;
+            --brand-navy-50: #eaf0fa;
+            --brand-red: #cc0000;
+            --brand-red-700: #a30000;
+            --brand-red-50: #fdecec;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, var(--brand-navy-50) 0%, #f5f7fa 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .login-container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.07), 0 10px 20px rgba(0, 0, 0, 0.1);
+            max-width: 450px;
+            width: 100%;
+            overflow: hidden;
+        }
+
+        .login-header {
+            background: var(--brand-navy);
+            color: white;
+            padding: 30px 20px;
+            text-align: center;
+        }
+
+        .login-header h1 {
+            font-size: 28px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .login-header p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid #e5e7eb;
+            padding: 0;
+            margin: 0;
+        }
+
+        .tab-button {
+            flex: 1;
+            padding: 16px 12px;
+            border: none;
+            background: #f9fafb;
+            color: #6b7280;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s ease;
+        }
+
+        .tab-button.active {
+            background: white;
+            color: var(--brand-navy);
+            border-bottom-color: var(--brand-navy);
+        }
+
+        .tab-button:hover:not(.active) {
+            background: #f3f4f6;
+        }
+
+        .tab-content {
+            display: none;
+            padding: 30px;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 14px;
+            font-weight: 500;
+            color: #111827;
+            margin-bottom: 6px;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s ease;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--brand-navy);
+            box-shadow: 0 0 0 3px rgba(25, 66, 145, 0.1);
+        }
+
+        .btn {
+            width: 100%;
+            padding: 12px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: var(--brand-navy);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--brand-navy-700);
+        }
+
+        .btn-oauth {
+            background: white;
+            color: #111827;
+            border: 1px solid #d1d5db;
+            margin-bottom: 12px;
+        }
+
+        .btn-oauth:hover {
+            background: #f9fafb;
+            border-color: #9ca3af;
+        }
+
+        .oauth-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 20px;
+        }
+
+        .oauth-btn-disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .oauth-btn-disabled:hover {
+            background: white;
+            border-color: #d1d5db;
+        }
+
+        .help-text {
+            font-size: 12px;
+            color: #6b7280;
+            margin-top: 12px;
+            line-height: 1.5;
+        }
+
+        .success-message {
+            padding: 12px;
+            background: #d1fae5;
+            border-left: 4px solid #10b981;
+            color: #065f46;
+            font-size: 13px;
+            border-radius: 4px;
+            margin-bottom: 16px;
+        }
+
+        @media (max-width: 480px) {
+            .login-container {
+                max-width: 100%;
+            }
+
+            .login-header {
+                padding: 20px 16px;
+            }
+
+            .login-header h1 {
+                font-size: 22px;
+            }
+
+            .tab-content {
+                padding: 20px;
+            }
+
+            .form-group input {
+                font-size: 16px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-header">
+            <h1>SAE Books</h1>
+            <p>Sign in to your account</p>
+        </div>
+
+        <div class="tabs">
+            <button class="tab-button active" onclick="switchTab(this, 'magic')">Email Link</button>
+            <button class="tab-button" onclick="switchTab(this, 'fido2')">Security Key</button>
+        </div>
+
+        <!-- Magic Link Tab -->
+        <div id="magic" class="tab-content active">
+            <form onsubmit="sendMagicLink(event)">
+                <div class="form-group">
+                    <label for="magic-email">Email Address</label>
+                    <input type="email" id="magic-email" name="email" required placeholder="you@example.com">
+                </div>
+                <button type="submit" class="btn btn-primary">Send Login Link</button>
+            </form>
+            <div class="help-text">
+                <strong>How it works:</strong> We will send a link to your email. Click it to log in—no password needed. Links expire in 15 minutes.
+            </div>
+        </div>
+
+        <!-- FIDO2 Tab -->
+        <div id="fido2" class="tab-content">
+            <form onsubmit="authenticateWithFIDO2(event)">
+                <div class="form-group">
+                    <label for="fido2-email">Email Address</label>
+                    <input type="email" id="fido2-email" name="email" required placeholder="you@example.com">
+                </div>
+                <button type="submit" class="btn btn-primary">Authenticate with Security Key</button>
+            </form>
+            <div class="help-text">
+                <strong>How it works:</strong> Enter your email, then tap your security key (YubiKey, Windows Hello, etc.) to log in.
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function switchTab(button, tabId) {
+            document.querySelectorAll(".tab-content").forEach(el => el.classList.remove("active"));
+            document.querySelectorAll(".tab-button").forEach(el => el.classList.remove("active"));
+            document.getElementById(tabId).classList.add("active");
+            button.classList.add("active");
+        }
+
+        async function sendMagicLink(event) {
+            event.preventDefault();
+            const form = new FormData(event.target);
+            const email = form.get("email");
+            try {
+                const response = await fetch("/auth/magic-link/send", {
+                    method: "POST",
+                    body: form,
+                });
+                if (response.ok) {
+                    alert("Check your email for login link!");
+                } else {
+                    alert("Error: Could not send login link.");
+                }
+            } catch (error) {
+                console.error("Error:", error);
+                alert("Network error.");
+            }
+        }
+
+        async function authenticateWithFIDO2(event) {
+            event.preventDefault();
+            alert("FIDO2 not yet implemented. Use Email Link or OAuth2.");
+        }
+    </script>
+</body>
+</html>

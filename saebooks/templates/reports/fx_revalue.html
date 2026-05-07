@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}FX revaluation — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>FX revaluation</h1>
+  <div class="meta">{{ company_name }}</div>
+</div>
+
+<p class="muted">
+  Restates every open foreign-currency invoice and bill to the
+  period-end rate, posts an <strong>adjusting</strong> journal dated
+  through the selected date, and a <strong>reversing</strong> journal
+  dated the following day. Reversal makes the adjustment ephemeral so
+  when the real settlement eventually posts its realised FX it isn't
+  double-counted against this snapshot. Re-running on the same date is
+  a no-op — per-currency adjustments already posted are skipped.
+</p>
+
+<form class="report-filter" method="get">
+  <label>Through <input name="through" type="date" value="{{ through }}" required></label>
+  <button type="submit" class="btn-secondary">Preview</button>
+</form>
+
+{% set posted_count = request.query_params.get('posted') %}
+{% if posted_count %}
+<div class="notice">
+  Posted {{ posted_count }} adjusting+reversing pair{% if posted_count != '1' %}s{% endif %}
+  through {{ through }}. Check the journal list for the entries tagged
+  <code>fx_reval</code>.
+</div>
+{% endif %}
+
+{% set err = request.query_params.get('error') %}
+{% if err %}
+<div class="notice error">
+  Revaluation failed: {{ err }}. Check that the RBA rate for every open
+  foreign currency is available at {{ through }}, and that accounts
+  <code>1-1200</code>, <code>2-1200</code>, <code>6-1630</code>, and
+  <code>6-1640</code> all exist in the chart of accounts.
+</div>
+{% endif %}
+
+{% if rate_error %}
+<div class="notice error">
+  Couldn't fetch a rate: {{ rate_error }}. Seed <code>fx_rate_snapshots</code>
+  manually or register a fetcher before running revaluation.
+</div>
+{% endif %}
+
+{% if preview %}
+<table class="report-table">
+  <thead>
+    <tr>
+      <th>Currency</th>
+      <th class="num">Rate @ {{ through }}</th>
+      <th class="num">Open AR (foreign)</th>
+      <th class="num">Current base AR</th>
+      <th class="num">Revalued base AR</th>
+      <th class="num">AR delta</th>
+      <th class="num">Open AP (foreign)</th>
+      <th class="num">Current base AP</th>
+      <th class="num">Revalued base AP</th>
+      <th class="num">AP delta</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for r in preview %}
+    <tr>
+      <td><strong>{{ r.currency }}</strong></td>
+      <td class="num">{{ "%.6f"|format(r.new_rate) }}</td>
+      <td class="num">{{ "%.2f"|format(r.outstanding_foreign_ar) }}</td>
+      <td class="num">{{ "%.2f"|format(r.current_base_ar) }}</td>
+      <td class="num">{{ "%.2f"|format(r.revalued_base_ar) }}</td>
+      <td class="num {% if r.ar_delta > 0 %}gain{% elif r.ar_delta < 0 %}loss{% endif %}">
+        {{ "%.2f"|format(r.ar_delta) }}
+      </td>
+      <td class="num">{{ "%.2f"|format(r.outstanding_foreign_ap) }}</td>
+      <td class="num">{{ "%.2f"|format(r.current_base_ap) }}</td>
+      <td class="num">{{ "%.2f"|format(r.revalued_base_ap) }}</td>
+      <td class="num {% if r.ap_delta > 0 %}loss{% elif r.ap_delta < 0 %}gain{% endif %}">
+        {{ "%.2f"|format(r.ap_delta) }}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<form method="post" class="form-actions" onsubmit="return confirm('Post FX revaluation journals (adjusting + reversing pair per currency) through {{ through }}?');">
+  <input type="hidden" name="through" value="{{ through }}">
+  <button type="submit" class="btn-primary">Post revaluation</button>
+</form>
+{% elif not rate_error %}
+<div class="empty-state">
+  No open foreign-currency AR or AP at {{ through }} — nothing to revalue.
+</div>
+{% endif %}
+{% endblock %}

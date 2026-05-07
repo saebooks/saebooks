@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Reports — SAE Books Classic{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Reports</h1>
+  <div class="meta">{{ company_name or "SAE Books" }}</div>
+</div>
+
+<div class="dashboard-grid">
+  <a class="card" href="/reports/trial-balance">
+    <h2>Trial balance</h2>
+    <p>Debit and credit totals per account.</p>
+  </a>
+  <a class="card" href="/reports/profit-loss">
+    <h2>Profit &amp; Loss</h2>
+    <p>Income minus expenses for a period.</p>
+  </a>
+  <a class="card" href="/reports/balance-sheet">
+    <h2>Balance sheet</h2>
+    <p>Assets, liabilities, equity at a point in time.</p>
+  </a>
+  <a class="card" href="/reports/bas">
+    <h2>BAS report</h2>
+    <p>GST collected and paid — ATO labels.</p>
+  </a>
+  <a class="card" href="/reports/aged-ar">
+    <h2>Aged debtors (AR)</h2>
+    <p>Who owes us, bucketed by days overdue.</p>
+  </a>
+  <a class="card" href="/reports/aged-ap">
+    <h2>Aged creditors (AP)</h2>
+    <p>Who we owe, bucketed by days overdue.</p>
+  </a>
+  <a class="card" href="/reports/pl-by-segment">
+    <h2>P&amp;L by project</h2>
+    <p>Income and expenses grouped by project tag.</p>
+  </a>
+  <a class="card" href="/reports/budget-vs-actual">
+    <h2>Budget vs actual</h2>
+    <p>Per-account monthly budget against posted actuals.</p>
+  </a>
+  <a class="card" href="/reports/cashflow-forecast">
+    <h2>Cashflow forecast</h2>
+    <p>Projected cash in/out over the next 90 days.</p>
+  </a>
+  <a class="card" href="/reports/close-year">
+    <h2>Close year</h2>
+    <p>Zero P&amp;L into retained earnings and lock the period.</p>
+  </a>
+</div>
+{% endblock %}

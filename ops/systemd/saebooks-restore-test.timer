@@ -1,0 +1,14 @@
+[Unit]
+Description=SAE Books weekly restore test (Sunday 03:15)
+Documentation=file:///opt/saebooks/scripts/restore-test.sh
+
+[Timer]
+# Sunday 03:15 local — after the fresh daily dump but early enough that
+# notifications fire before the work day.
+OnCalendar=Sun *-*-* 03:15:00
+RandomizedDelaySec=10min
+Persistent=true
+Unit=saebooks-restore-test.service
+
+[Install]
+WantedBy=timers.target

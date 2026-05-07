@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Dispose {{ asset.code }} — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Dispose · {{ asset.code }} {{ asset.name }}</h1>
+  <div class="meta">{{ company_name }}</div>
+</div>
+
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
+<p class="dim">
+  Disposal posts a single journal — DR cash + DR accumulated depreciation,
+  CR cost, with the gain or loss hitting <code>4-9100</code> or <code>6-9100</code>
+  as the plug. Depreciation will be caught up to the disposal date first.
+</p>
+
+<form method="post" action="/assets/{{ asset.id }}/dispose" class="tc-form" style="max-width:32rem">
+  <label>Disposal date <input name="disposal_date" type="date" required value="{{ today.isoformat() }}"></label>
+  <label>Proceeds <input name="proceeds" type="number" step="0.01" min="0" required placeholder="Sale price (0 if scrapped)"></label>
+  <label>Deposit to
+    <select name="cash_account_id" required>
+      {% for a in cash_accounts %}
+      <option value="{{ a.id }}">{{ a.code }} {{ a.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <div class="form-actions">
+    <button type="submit" class="btn">Dispose asset</button>
+    <a href="/assets/{{ asset.id }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

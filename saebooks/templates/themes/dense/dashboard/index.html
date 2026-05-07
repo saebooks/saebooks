@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — SAE Books{% endblock %}
+{#
+  Dense dashboard — Linear-style sparse KPI strip + a tight list
+  of "pinned" shortcuts. The point isn't to dwell on the dashboard;
+  the keyboard (g-nav, ⌘K) gets the user to a list in one keystroke.
+#}
+{% block content %}
+<section class="dn-section">
+  <header class="dn-section-head">
+    <h1>Dashboard</h1>
+    <span class="dn-section-meta">{{ company_name }} · {{ today.isoformat() }}</span>
+  </header>
+
+  <div class="dn-kpi-strip">
+    {% include "dashboard/_bank_balances.html" %}
+    {% include "dashboard/_aged_ar.html" %}
+    {% include "dashboard/_unmatched.html" %}
+    {% include "dashboard/_upcoming_recurring.html" %}
+  </div>
+</section>
+
+<section class="dn-section">
+  <header class="dn-section-head">
+    <h2>Cashflow</h2>
+    <a href="/reports/cashflow-forecast" class="dn-link">Open report →</a>
+  </header>
+  <div class="dn-panel">
+    {% include "dashboard/_cashflow.html" %}
+  </div>
+</section>
+
+<section class="dn-section">
+  <header class="dn-section-head">
+    <h2>Quick jump</h2>
+    <span class="dn-section-meta"><kbd>Ctrl</kbd><kbd>K</kbd> or press <kbd>g</kbd> then a letter</span>
+  </header>
+  <div class="dn-jump-grid">
+    <a href="/invoices" class="dn-jump"><kbd>g i</kbd><span class="dn-jump-label">Invoices</span></a>
+    <a href="/bills" class="dn-jump"><kbd>g b</kbd><span class="dn-jump-label">Bills</span></a>
+    <a href="/contacts" class="dn-jump"><kbd>g c</kbd><span class="dn-jump-label">Contacts</span></a>
+    <a href="/accounts" class="dn-jump"><kbd>g a</kbd><span class="dn-jump-label">Accounts</span></a>
+    <a href="/journal" class="dn-jump"><kbd>g j</kbd><span class="dn-jump-label">Journal</span></a>
+    <a href="/reports" class="dn-jump"><kbd>g r</kbd><span class="dn-jump-label">Reports</span></a>
+    <a href="/payments" class="dn-jump"><kbd>g p</kbd><span class="dn-jump-label">Payments</span></a>
+    <a href="/reconciliation" class="dn-jump"><kbd>g R</kbd><span class="dn-jump-label">Reconcile</span></a>
+  </div>
+</section>
+{% endblock %}

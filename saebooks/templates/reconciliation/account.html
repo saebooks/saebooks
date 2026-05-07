@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Reconcile {{ account.code }} — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Reconcile: {{ account.code }} — {{ account.name }}</h1>
+</div>
+
+{% if request.query_params.get('imported') %}
+<div class="alert alert-info">Imported {{ request.query_params.get('imported') }} statement lines.</div>
+{% endif %}
+{% if request.query_params.get('ran') %}
+<div class="alert alert-ok">Auto-rules created {{ request.query_params.get('ran') }} journal entries.</div>
+{% endif %}
+{% if request.query_params.get('error') %}
+<div class="alert alert-error">{{ request.query_params.get('error') }}</div>
+{% endif %}
+
+<div class="recon-toolbar">
+  <form method="post" action="/reconciliation/{{ account.id }}/import" enctype="multipart/form-data" class="import-form">
+    <label class="btn-secondary">
+      Import CSV
+      <input type="file" name="file" accept=".csv" onchange="this.form.submit()" hidden>
+    </label>
+  </form>
+
+  <form method="post" action="/reconciliation/{{ account.id }}/run-auto" style="display:inline"
+        onsubmit="return confirm('Apply all auto-create bank rules to unmatched lines on this account?')">
+    <button type="submit" class="btn-secondary">Run auto-rules</button>
+  </form>
+
+  <a href="/bank-rules" class="btn-secondary" style="text-decoration:none">Manage rules</a>
+
+  <div class="status-filter">
+    <a href="/reconciliation/{{ account.id }}" class="{{ 'active' if status_filter == 'all' }}">All</a>
+    <a href="/reconciliation/{{ account.id }}?status=unmatched" class="{{ 'active' if status_filter == 'unmatched' }}">Unmatched</a>
+    <a href="/reconciliation/{{ account.id }}?status=matched" class="{{ 'active' if status_filter == 'matched' }}">Matched</a>
+  </div>
+</div>
+
+{% if lines %}
+<table class="acct-table recon-table">
+  <thead>
+    <tr>
+      <th>Date</th>
+      <th>Description</th>
+      <th>Reference</th>
+      <th class="num">Amount</th>
+      <th>Status</th>
+      <th class="actions">Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for line in lines %}
+    <tr class="{{ 'recon-matched' if line.status.value == 'MATCHED' else 'recon-unmatched' }}">
+      <td>{{ line.txn_date }}</td>
+      <td>{{ line.description or '' }}</td>
+      <td class="code">{{ line.reference or '' }}</td>
+      <td class="num" style="color: {{ '#c33' if line.amount < 0 else 'inherit' }}">
+        {{ "%.2f"|format(line.amount) }}
+      </td>
+      <td>
+        {% if line.status.value == 'MATCHED' %}
+          <span class="status-posted">Matched</span>
+        {% else %}
+          <span class="status-draft">Unmatched</span>
+        {% endif %}
+      </td>
+      <td class="actions">
+        {% if line.status.value == 'MATCHED' %}
+          <a href="/journal/{{ line.matched_entry_id }}">View JE</a>
+          <form method="post" action="/reconciliation/{{ account.id }}/unmatch/{{ line.id }}" style="display:inline">
+            <button type="submit" class="linkish">Unmatch</button>
+          </form>
+        {% else %}
+          {% set sugg = suggestions.get(line.id) %}
+          {% if sugg %}
+            {% set sa = sugg_accounts.get(sugg.account_id) %}
+            <form method="post" action="/reconciliation/{{ account.id }}/apply-rule/{{ line.id }}/{{ sugg.id }}" style="display:inline"
+                  title="Apply rule '{{ sugg.name }}' → {{ sa.code if sa else '?' }} {{ sa.name if sa else '' }}">
+              <button type="submit" class="rule-suggest">→ {{ sa.code if sa else '' }} {{ sa.name if sa else sugg.name }}</button>
+            </form>
+            <a href="/reconciliation/{{ account.id }}/match/{{ line.id }}" class="dim">other</a>
+          {% else %}
+            <a href="/reconciliation/{{ account.id }}/match/{{ line.id }}">Match</a>
+          {% endif %}
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="dim">No statement lines. Import a CSV to get started.</p>
+{% endif %}
+{% endblock %}

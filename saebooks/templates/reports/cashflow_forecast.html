@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Cashflow forecast — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Cashflow forecast</h1>
+  <div class="meta">{{ company_name }} — {{ horizon }} days from {{ as_of }}</div>
+</div>
+
+<form class="report-filter" method="get">
+  <label>As of <input name="as_of" type="date" value="{{ as_of }}"></label>
+  <label>Horizon (days) <input name="horizon" type="number" value="{{ horizon }}" min="7" max="365"></label>
+  <button type="submit" class="btn-secondary">Run</button>
+</form>
+
+<section class="report-summary">
+  <dl>
+    <dt>Opening balance</dt>
+    <dd>{{ "%.2f"|format(report.opening_balance) }}</dd>
+    <dt>Projected inflows</dt>
+    <dd class="pos">+{{ "%.2f"|format(report.total_inflows) }}</dd>
+    <dt>Projected outflows</dt>
+    <dd class="neg">-{{ "%.2f"|format(report.total_outflows) }}</dd>
+    <dt>Projected closing</dt>
+    <dd><strong>{{ "%.2f"|format(report.projected_closing) }}</strong></dd>
+  </dl>
+</section>
+
+<h2>Weekly roll-up</h2>
+<table class="report-table">
+  <thead>
+    <tr>
+      <th>Week of</th>
+      <th class="num">In</th>
+      <th class="num">Out</th>
+      <th class="num">Net</th>
+      <th class="num">Running</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for wk in report.weeks %}
+    <tr>
+      <td>{{ wk.start.isoformat() }}</td>
+      <td class="num pos">{{ "%.2f"|format(wk.inflows) }}</td>
+      <td class="num neg">{{ "%.2f"|format(wk.outflows) }}</td>
+      <td class="num">{{ "%.2f"|format(wk.net) }}</td>
+      <td class="num"><strong>{{ "%.2f"|format(wk.running_balance) }}</strong></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>Projected items</h2>
+{% if not report.items %}
+<p class="empty-state">No open invoices, bills, or recurring templates in the forecast window.</p>
+{% else %}
+<table class="report-table">
+  <thead>
+    <tr>
+      <th>Date</th>
+      <th>Source</th>
+      <th>Description</th>
+      <th class="num">Amount</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for item in report.items %}
+    <tr>
+      <td>{{ item.expected_date.isoformat() }}</td>
+      <td>{{ item.source }}</td>
+      <td>{{ item.description }}</td>
+      <td class="num {% if item.amount < 0 %}neg{% else %}pos{% endif %}">
+        {{ "%.2f"|format(item.amount) }}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

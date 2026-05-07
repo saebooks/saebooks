@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Imports — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Imports &amp; exports</h1>
+</div>
+
+<div class="card-grid">
+  <a class="card" href="/admin/imports/bank">
+    <h2>Bank statements</h2>
+    <p>Upload CSV (CBA/ANZ/NAB/Westpac) or OFX to add statement lines for reconciliation.</p>
+  </a>
+  <a class="card" href="/admin/imports/coa">
+    <h2>Chart of accounts</h2>
+    <p>Export the CoA as CSV, or upload a CSV to add / edit accounts with a diff preview.</p>
+  </a>
+  <a class="card" href="/admin/imports/qbo">
+    <h2>QuickBooks Online migration</h2>
+    <p>Import QBO contact + account-list CSV exports. Open invoices / bills are out of scope for v1.</p>
+  </a>
+</div>
+{% endblock %}

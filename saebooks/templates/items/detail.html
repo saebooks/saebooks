@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}{{ item.sku }} — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{{ item.sku }} · {{ item.name }}</h1>
+  <div class="meta">
+    {% if item.archived_at %}<span class="contact-type archived">Archived</span> · {% endif %}
+    {{ company_name }}
+  </div>
+  <div class="toolbar">
+    <a href="/items/{{ item.id }}/edit" class="btn">Edit</a>
+    {% if not item.archived_at %}
+    <form method="post" action="/items/{{ item.id }}/archive" style="display:inline"
+          onsubmit="return confirm('Archive item {{ item.sku }}? Must have zero on-hand qty first.')">
+      <button type="submit" class="btn-warn">Archive</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<dl class="kv">
+  <dt>SKU</dt><dd><code>{{ item.sku }}</code></dd>
+  <dt>Name</dt><dd>{{ item.name }}</dd>
+  <dt>Cost method</dt><dd>{{ item.cost_method }}</dd>
+  <dt>On-hand qty</dt><dd>{{ '%.4f'|format(item.on_hand_qty) }}</dd>
+  <dt>WAC cost / unit</dt><dd>{{ '%.4f'|format(item.wac_cost) }}</dd>
+  <dt>On-hand value</dt><dd>{{ '%.4f'|format(item.on_hand_qty * item.wac_cost) }}</dd>
+  <dt>Default sale price</dt><dd>{{ '%.4f'|format(item.default_sale_price) }}</dd>
+  <dt>Inventory asset account</dt><dd>{% if inventory_account %}<code>{{ inventory_account.code }}</code> {{ inventory_account.name }}{% else %}<span class="dim">—</span>{% endif %}</dd>
+  <dt>COGS account</dt><dd>{% if cogs_account %}<code>{{ cogs_account.code }}</code> {{ cogs_account.name }}{% else %}<span class="dim">—</span>{% endif %}</dd>
+  <dt>Income account</dt><dd>{% if income_account %}<code>{{ income_account.code }}</code> {{ income_account.name }}{% else %}<span class="dim">—</span>{% endif %}</dd>
+  <dt>Created</dt><dd class="dim">{{ item.created_at }}</dd>
+  <dt>Updated</dt><dd class="dim">{{ item.updated_at }}</dd>
+  {% if item.archived_at %}<dt>Archived</dt><dd class="dim">{{ item.archived_at }}</dd>{% endif %}
+</dl>
+
+{% if item.description %}
+<h2>Description</h2>
+<pre class="notes">{{ item.description }}</pre>
+{% endif %}
+
+<p class="dim">Stock increases when you post a bill line referencing this item, and decreases when you post an invoice line referencing it. WAC re-blends on every receipt; issues post at current WAC into the COGS account.</p>
+{% endblock %}

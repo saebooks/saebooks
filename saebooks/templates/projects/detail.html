@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}{{ project.code }} — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{{ project.code }} · {{ project.name }}</h1>
+  <div class="meta">
+    <span class="contact-type {{ project.status.value|lower }}">{{ project.status.value|lower|title }}</span>
+    · {{ company_name }}
+  </div>
+  <div class="toolbar">
+    <a href="/projects/{{ project.id }}/edit" class="btn">Edit</a>
+    {% if not project.archived_at %}
+    <form method="post" action="/projects/{{ project.id }}/archive" style="display:inline"
+          onsubmit="return confirm('Archive project {{ project.code }}? It will disappear from pickers but historic postings are preserved.')">
+      <button type="submit" class="btn-warn">Archive</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<dl class="kv">
+  <dt>Code</dt><dd><code>{{ project.code }}</code></dd>
+  <dt>Name</dt><dd>{{ project.name }}</dd>
+  <dt>Status</dt><dd>{{ project.status.value|title }}</dd>
+  <dt>Start date</dt><dd>{{ project.start_date or '—' }}</dd>
+  <dt>End date</dt><dd>{{ project.end_date or '—' }}</dd>
+  <dt>Created</dt><dd class="dim">{{ project.created_at }}</dd>
+  <dt>Updated</dt><dd class="dim">{{ project.updated_at }}</dd>
+  {% if project.archived_at %}<dt>Archived</dt><dd class="dim">{{ project.archived_at }}</dd>{% endif %}
+</dl>
+
+{% if project.notes %}
+<h2>Notes</h2>
+<pre class="notes">{{ project.notes }}</pre>
+{% endif %}
+
+<p class="dim">To see this project's P&amp;L: <a href="/reports/pl-by-segment?segment=project&amp;project_id={{ project.id }}">run P&amp;L by project</a>.</p>
+{% endblock %}

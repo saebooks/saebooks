@@ -1,0 +1,14 @@
+{# 30-day cashflow sparkline — pre-rendered SVG straight from the service. #}
+<section class="widget widget-cashflow">
+  <header>
+    <h2>Cashflow · {{ dashboard.cashflow.days }}d</h2>
+  </header>
+  <div class="sparkline">{{ dashboard.cashflow_svg|safe }}</div>
+  {% if dashboard.cashflow.points %}
+  {% set first = dashboard.cashflow.points[0][0] %}
+  {% set last = dashboard.cashflow.points[-1][0] %}
+  <p class="subtle">
+    {{ first.isoformat() }} &mdash; {{ last.isoformat() }}
+  </p>
+  {% endif %}
+</section>

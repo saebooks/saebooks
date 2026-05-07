@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ account.code }} — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Edit account <span class="dim">{{ account.code }}</span></h1>
+  <div class="meta">{{ company_name }}</div>
+</div>
+
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
+{% if protected %}
+<div class="alert alert-warn">
+  <strong>Protected account.</strong> This is a system or structural account
+  ({{ account.code }} {{ account.name }}). Changing its type, code, or name
+  can corrupt your ledger and affect financial reports. Only proceed if you
+  understand double-entry accounting and the consequences of this change.
+</div>
+{% endif %}
+
+{% if account.system_managed %}
+<div class="alert alert-info" style="margin-bottom:0.5rem">
+  <strong>System-managed.</strong> This account is auto-posted by the GST engine.
+  Editing it may break automatic GST calculations. Consider turning off
+  <em>gst_auto_post</em> in <a href="/admin/settings">Settings</a> first.
+</div>
+{% endif %}
+
+<form method="post" action="/accounts/{{ account.id }}" class="tc-form"
+  {% if protected %}onsubmit="return confirm('You are about to modify a protected account. This can corrupt your ledger. Continue?')"{% endif %}>
+  <label>Code <input name="code" required maxlength="32"
+    pattern="\d+-\d+(-[a-zA-Z])?" title="Format: prefix-digits, e.g. 1-1234"
+    value="{{ account.code }}"></label>
+  <label>Name <input name="name" required value="{{ account.name }}"></label>
+  <label>Type
+    <select name="account_type">
+      {% for v, l in account_types %}
+      <option value="{{ v }}" {% if v == account.account_type.value %}selected{% endif %}>{{ l }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Reconcile
+    <select name="reconcile">
+      <option value="false" {% if not account.reconcile %}selected{% endif %}>No</option>
+      <option value="true" {% if account.reconcile %}selected{% endif %}>Yes</option>
+    </select>
+  </label>
+  <label>Header
+    <select name="is_header">
+      <option value="false" {% if not account.is_header %}selected{% endif %}>No</option>
+      <option value="true" {% if account.is_header %}selected{% endif %}>Yes</option>
+    </select>
+  </label>
+  <label>Default tax code <input name="tax_code_default" maxlength="16" value="{{ account.tax_code_default or '' }}"></label>
+  <div class="form-actions">
+    <button type="submit">Save</button>
+    <a href="/accounts">Cancel</a>
+  </div>
+</form>
+
+{% if account.parent_id %}
+<p class="dim" style="margin-top:0.75rem;font-size:12px">
+  Parent is auto-derived from code prefix.
+</p>
+{% endif %}
+{% endblock %}

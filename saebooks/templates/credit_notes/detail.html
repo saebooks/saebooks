@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Credit note {{ credit_note.number or '(draft)' }} — SAE Books{% endblock %}
+{% block content %}
+<h1>Credit note {{ credit_note.number or '(draft)' }}</h1>
+<p>
+  {{ company_name }} →
+  <strong>{{ contact.name if contact else '—' }}</strong>
+  <span class="badge badge-{{ credit_note.status|lower }}">{{ credit_note.status }}</span>
+</p>
+
+<div class="toolbar">
+  {% if credit_note.status == 'DRAFT' %}
+    <a class="btn" href="/credit-notes/{{ credit_note.id }}/edit">Edit</a>
+    <form method="post" action="/credit-notes/{{ credit_note.id }}/post" class="inline">
+      <button class="btn btn-primary" type="submit">Post</button>
+    </form>
+    <form method="post" action="/credit-notes/{{ credit_note.id }}/void" class="inline">
+      <button class="btn" type="submit">Discard</button>
+    </form>
+  {% elif credit_note.status == 'POSTED' %}
+    <form method="post" action="/credit-notes/{{ credit_note.id }}/void" class="inline">
+      <button class="btn btn-sm" type="submit"
+              onclick="return confirm('Void {{ credit_note.number }}? This posts a reversing journal.');">
+        Void
+      </button>
+    </form>
+  {% endif %}
+  <form method="post" action="/credit-notes/{{ credit_note.id }}/archive" class="inline">
+    <button class="btn btn-sm" type="submit">Archive</button>
+  </form>
+</div>
+
+<section>
+  <h2>Details</h2>
+  <dl class="kv">
+    <dt>Issue date</dt><dd>{{ credit_note.issue_date }}</dd>
+    {% if credit_note.reason %}<dt>Reason</dt><dd>{{ credit_note.reason }}</dd>{% endif %}
+    {% if credit_note.posted_at %}<dt>Posted</dt><dd>{{ credit_note.posted_at.strftime('%Y-%m-%d %H:%M') }}</dd>{% endif %}
+    {% if credit_note.journal_entry_id %}
+      <dt>Journal</dt>
+      <dd><a href="/journal/{{ credit_note.journal_entry_id }}">View GL entry</a></dd>
+    {% endif %}
+    {% if credit_note.void_journal_entry_id %}
+      <dt>Void journal</dt>
+      <dd><a href="/journal/{{ credit_note.void_journal_entry_id }}">View reversing entry</a></dd>
+    {% endif %}
+  </dl>
+</section>
+
+<section>
+  <h2>Lines</h2>
+  <table class="data">
+    <thead><tr>
+      <th>#</th><th>Description</th><th>Account</th><th>Tax</th>
+      <th class="right">Qty</th><th class="right">Unit</th>
+      <th class="right">Disc</th><th class="right">Subtotal</th>
+      <th class="right">Tax</th><th class="right">Total</th>
+    </tr></thead>
+    <tbody>
+      {% for ln in credit_note.lines %}
+      <tr>
+        <td>{{ ln.line_no }}</td>
+        <td>{{ ln.description }}</td>
+        <td>{{ account_map.get(ln.account_id).code if account_map.get(ln.account_id) else '—' }}</td>
+        <td>{{ tax_map.get(ln.tax_code_id).code if tax_map.get(ln.tax_code_id) else '—' }}</td>
+        <td class="right">{{ '{:g}'.format(ln.quantity) }}</td>
+        <td class="right">{{ '{:,.2f}'.format(ln.unit_price) }}</td>
+        <td class="right">{{ '{:g}'.format(ln.discount_pct) }}%</td>
+        <td class="right">{{ '{:,.2f}'.format(ln.line_subtotal) }}</td>
+        <td class="right">{{ '{:,.2f}'.format(ln.line_tax) }}</td>
+        <td class="right">{{ '{:,.2f}'.format(ln.line_total) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr><th colspan="9" class="right">Subtotal</th><th class="right">{{ '{:,.2f}'.format(credit_note.subtotal) }}</th></tr>
+      <tr><th colspan="9" class="right">Tax</th><th class="right">{{ '{:,.2f}'.format(credit_note.tax_total) }}</th></tr>
+      <tr><th colspan="9" class="right">Total</th><th class="right"><strong>{{ '{:,.2f}'.format(credit_note.total) }}</strong></th></tr>
+      {% if credit_note.amount_allocated > 0 %}
+      <tr><th colspan="9" class="right">Allocated</th><th class="right">{{ '{:,.2f}'.format(credit_note.amount_allocated) }}</th></tr>
+      {% endif %}
+    </tfoot>
+  </table>
+</section>
+
+{% if credit_note.notes %}
+<section>
+  <h2>Notes</h2>
+  <p>{{ credit_note.notes | replace('\n', '<br>') | safe }}</p>
+</section>
+{% endif %}
+{% endblock %}

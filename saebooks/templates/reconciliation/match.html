@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Match transaction — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Match transaction</h1>
+</div>
+
+<div class="match-source">
+  <h2 class="dim">Statement line</h2>
+  <table class="acct-table" style="max-width:40rem">
+    <tr><td class="dim">Date</td><td>{{ stmt_line.txn_date }}</td></tr>
+    <tr><td class="dim">Description</td><td>{{ stmt_line.description or '—' }}</td></tr>
+    <tr><td class="dim">Amount</td><td><strong>{{ "%.2f"|format(stmt_line.amount) }}</strong></td></tr>
+    <tr><td class="dim">Reference</td><td>{{ stmt_line.reference or '—' }}</td></tr>
+  </table>
+</div>
+
+{% if candidates %}
+<h2 class="dim" style="margin-top:1rem">Candidate journal entries</h2>
+<table class="acct-table">
+  <thead>
+    <tr>
+      <th>Ref</th>
+      <th>Date</th>
+      <th>Description</th>
+      <th class="actions">Action</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for entry in candidates %}
+    <tr>
+      <td class="code">{{ entry.ref }}</td>
+      <td>{{ entry.entry_date }}</td>
+      <td>{{ entry.description or '' }}</td>
+      <td class="actions">
+        <form method="post" action="/reconciliation/{{ account_id }}/match/{{ stmt_line.id }}" style="display:inline">
+          <input type="hidden" name="entry_id" value="{{ entry.id }}">
+          <button type="submit" class="linkish">Match</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="dim" style="margin-top:1rem">No matching journal entries found for this amount.</p>
+{% endif %}
+
+<div style="margin-top:1rem">
+  <a href="/reconciliation/{{ account_id }}" class="btn-secondary">Back</a>
+</div>
+{% endblock %}
