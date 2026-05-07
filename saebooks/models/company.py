@@ -49,6 +49,21 @@ class Company(Base):
     # "unsure" triggers a dashboard reminder to classify.
     psi_status: Mapped[str] = mapped_column(String(16), nullable=False, default="unsure")
 
+    # Cashbook edition (single-entry UX over double-entry storage). See
+    # docs/cashbook-edition-design.md. ``bookkeeping_mode`` flips the UX
+    # surface; the underlying ledger is always double-entry. CHECK
+    # constraint at the DB layer refuses ``cashbook`` mode without a
+    # default bank account set.
+    bookkeeping_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="full"
+    )
+    cashbook_default_bank_account_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("accounts.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    cashbook_categories: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
     # Optimistic-locking version — bumped on every write through the API.
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
