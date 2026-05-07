@@ -103,6 +103,14 @@ class CashbookEntryNotEditable(CashbookError):
     code = "cashbook_entry_not_editable"
 
 
+class CashbookSetupError(CashbookError):
+    """Onboarding / mode-switch refused. Subclass-less by design; the
+    message carries the why (e.g. "company has existing journal entries
+    — switch to cashbook is not supported mid-life")."""
+
+    code = "cashbook_setup_refused"
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -639,6 +647,134 @@ async def _find_by_idempotency(
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
+async def setup_cashbook_mode(
+    *,
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    company_id: uuid.UUID,
+    bank_account_id: uuid.UUID,
+    actor: str | None = None,
+) -> Company:
+    """Flip a company into cashbook mode and pin its default bank account.
+
+    Idempotent for already-cashbook companies (just updates the bank
+    account pointer). Refuses to flip a 'full' company that already has
+    journal entries — design says full→cashbook is not supported, so a
+    company carrying ledger history can never be downgraded by accident.
+
+    Parameters
+    ----------
+    db, tenant_id, company_id:
+        Standard scoping. ``company_id`` must belong to ``tenant_id``.
+    bank_account_id:
+        Must be an existing ``Account`` on this company. The CHECK
+        constraint at the DB layer (``ck_cashbook_requires_bank``)
+        enforces non-NULL when the mode is cashbook; we additionally
+        verify the account belongs to this company before assignment.
+    actor:
+        Audit-log actor identifier (currently unused by this helper —
+        accepted for symmetry with other cashbook service entry points).
+
+    Returns
+    -------
+    The refreshed ``Company`` row, with ``bookkeeping_mode='cashbook'``
+    and ``cashbook_default_bank_account_id`` set.
+
+    Raises
+    ------
+    CashbookError:
+        Company not found / wrong tenant.
+    CashbookSetupError:
+        Bank account does not belong to this company; or company is
+        currently in 'full' mode and already has journal entries.
+    """
+    company_stmt = select(Company).where(
+        Company.id == company_id,
+        Company.tenant_id == tenant_id,
+    )
+    company = (await db.execute(company_stmt)).scalar_one_or_none()
+    if company is None:
+        raise CashbookError(f"Company {company_id} not found in tenant")
+
+    # Bank account must belong to this company.
+    bank_stmt = select(Account.id).where(
+        Account.id == bank_account_id,
+        Account.company_id == company_id,
+    )
+    bank_id = (await db.execute(bank_stmt)).scalar_one_or_none()
+    if bank_id is None:
+        raise CashbookSetupError(
+            f"Bank account {bank_account_id} is not in this company's "
+            "chart of accounts."
+        )
+
+    # full → cashbook is only allowed on a fresh company. The design
+    # explicitly rules out "downgrade" mid-life; check for any JE first.
+    if company.bookkeeping_mode != "cashbook":
+        je_stmt = select(JournalEntry.id).where(
+            JournalEntry.company_id == company_id
+        ).limit(1)
+        existing = (await db.execute(je_stmt)).scalar_one_or_none()
+        if existing is not None:
+            raise CashbookSetupError(
+                "Company already has journal entries — switching to "
+                "cashbook mode mid-life is not supported. Cashbook "
+                "onboarding is for new companies only."
+            )
+
+    company.bookkeeping_mode = "cashbook"
+    company.cashbook_default_bank_account_id = bank_id
+    company.version = (company.version or 1) + 1
+    await db.commit()
+    await db.refresh(company)
+    return company
+
+
+async def upgrade_cashbook_to_full(
+    *,
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    company_id: uuid.UUID,
+    actor: str | None = None,
+) -> Company:
+    """One-way flip: ``bookkeeping_mode='cashbook'`` → ``'full'``.
+
+    Refuses if the company is already in 'full' mode (409 from the API
+    layer) — there is no further state change to perform, and the
+    caller likely has a stale view.
+
+    Cashbook entries already posted are real journal entries, so the
+    upgrade is purely a UX flag flip — no data migration runs.
+
+    Returns the refreshed company. Raises ``CashbookSetupError`` if
+    the company is not currently in cashbook mode (so the caller can
+    surface a precise 409).
+    """
+    company_stmt = select(Company).where(
+        Company.id == company_id,
+        Company.tenant_id == tenant_id,
+    )
+    company = (await db.execute(company_stmt)).scalar_one_or_none()
+    if company is None:
+        raise CashbookError(f"Company {company_id} not found in tenant")
+
+    if company.bookkeeping_mode != "cashbook":
+        raise CashbookSetupError(
+            f"Company is not in cashbook mode "
+            f"(bookkeeping_mode={company.bookkeeping_mode!r}); "
+            "nothing to upgrade."
+        )
+
+    company.bookkeeping_mode = "full"
+    # Leave cashbook_default_bank_account_id in place — it's still a
+    # valid bank account; the next cashbook entry recorded against this
+    # company would refuse anyway because mode is now 'full'.
+    company.version = (company.version or 1) + 1
+    await db.commit()
+    await db.refresh(company)
+    return company
+
+
 __all__ = [
     "CashbookError",
     "CashbookNotConfigured",
@@ -647,7 +783,10 @@ __all__ = [
     "CashbookAccountResolutionError",
     "CashbookEntryNotFound",
     "CashbookEntryNotEditable",
+    "CashbookSetupError",
     "record_cashbook_entry",
     "void_cashbook_entry",
     "replace_cashbook_entry",
+    "setup_cashbook_mode",
+    "upgrade_cashbook_to_full",
 ]

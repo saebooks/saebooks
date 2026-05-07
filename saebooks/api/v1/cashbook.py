@@ -21,8 +21,14 @@ Phase B.5 scope (added below)
 * ``PATCH /entries/{id}`` — void-and-recreate replacement.
 * ``DELETE /entries/{id}`` — soft-delete via reversal JE.
 
-Out of Phase B / B.5
---------------------
+Phase C scope (added below)
+---------------------------
+* ``POST /setup`` — onboarding endpoint: flip a fresh company into
+  cashbook mode, pin a default bank account.
+* ``POST /upgrade-to-full`` — one-way migration off cashbook.
+
+Out of Phase B / B.5 / C
+------------------------
 * Transfer endpoint (TX_TRANSFER) — needs two-bank-account flow;
   tracked separately.
 
@@ -143,6 +149,24 @@ class CashbookSummaryOut(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class CashbookSetupBody(BaseModel):
+    """POST /setup body — pick the bank account that becomes the
+    implicit counter-account for every cashbook entry."""
+
+    bank_account_id: UUID
+
+
+class CashbookModeOut(BaseModel):
+    """Response shape for /setup and /upgrade-to-full — the slice of
+    company state the caller actually cares about. The full company
+    record is available at /api/v1/companies/{id}."""
+
+    company_id: UUID
+    bookkeeping_mode: str
+    cashbook_default_bank_account_id: UUID | None
+    version: int
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -179,6 +203,8 @@ def _service_error_to_http(exc: cashbook_svc.CashbookError) -> HTTPException:
     if isinstance(exc, cashbook_svc.CashbookEntryNotFound):
         return HTTPException(status.HTTP_404_NOT_FOUND, body)
     if isinstance(exc, cashbook_svc.CashbookEntryNotEditable):
+        return HTTPException(status.HTTP_409_CONFLICT, body)
+    if isinstance(exc, cashbook_svc.CashbookSetupError):
         return HTTPException(status.HTTP_409_CONFLICT, body)
     return HTTPException(status.HTTP_400_BAD_REQUEST, body)
 
@@ -595,4 +621,97 @@ async def get_summary(
             "gst_collected": gst_collected,
             "gst_paid": gst_paid,
         }
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /setup — onboarding (Phase C)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/setup",
+    status_code=status.HTTP_200_OK,
+    response_model=CashbookModeOut,
+)
+async def setup_cashbook(
+    payload: CashbookSetupBody,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> CashbookModeOut:
+    """Flip the active company into cashbook mode.
+
+    Idempotent for already-cashbook companies (re-pinning the bank
+    account). Refuses if the company has any existing journal entries
+    (mid-life full→cashbook is unsupported by design).
+
+    The ``bank_account_id`` must be an existing account on this
+    company's chart of accounts. Create the account first via
+    ``POST /api/v1/accounts`` if needed.
+    """
+    tenant_id = resolve_tenant_id(request)
+    actor = getattr(request.state, "actor", None) or "api"
+
+    try:
+        company = await cashbook_svc.setup_cashbook_mode(
+            db=session,
+            tenant_id=tenant_id,
+            company_id=company_id,
+            bank_account_id=payload.bank_account_id,
+            actor=str(actor),
+        )
+    except cashbook_svc.CashbookError as exc:
+        raise _service_error_to_http(exc) from exc
+
+    return CashbookModeOut(
+        company_id=company.id,
+        bookkeeping_mode=company.bookkeeping_mode,
+        cashbook_default_bank_account_id=company.cashbook_default_bank_account_id,
+        version=company.version,
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /upgrade-to-full — one-way migration off cashbook (Phase C)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/upgrade-to-full",
+    status_code=status.HTTP_200_OK,
+    response_model=CashbookModeOut,
+)
+async def upgrade_to_full(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> CashbookModeOut:
+    """Flip the active company from cashbook → full edition.
+
+    One-way: cashbook entries are real journal entries, so the upgrade
+    is purely a UX flag flip. The reverse (full → cashbook) is
+    deliberately unsupported — see ``setup_cashbook`` and the design
+    doc §8.
+
+    Returns 409 if the company is already in 'full' mode.
+    """
+    tenant_id = resolve_tenant_id(request)
+    actor = getattr(request.state, "actor", None) or "api"
+
+    try:
+        company = await cashbook_svc.upgrade_cashbook_to_full(
+            db=session,
+            tenant_id=tenant_id,
+            company_id=company_id,
+            actor=str(actor),
+        )
+    except cashbook_svc.CashbookError as exc:
+        raise _service_error_to_http(exc) from exc
+
+    return CashbookModeOut(
+        company_id=company.id,
+        bookkeeping_mode=company.bookkeeping_mode,
+        cashbook_default_bank_account_id=company.cashbook_default_bank_account_id,
+        version=company.version,
     )

@@ -191,6 +191,11 @@ class CompanyOut(BaseModel):
     gst_effective_date: date | None = None
     psi_status: str = "unsure"
     address: dict[str, Any] | None = None
+    # Cashbook edition (single-entry UI mode). Surfaced here so the
+    # web UI can hide full-edition menu items when mode='cashbook'.
+    # See docs/cashbook-edition-design.md §7.
+    bookkeeping_mode: str = "full"
+    cashbook_default_bank_account_id: uuid.UUID | None = None
     version: int
     created_at: datetime
     archived_at: datetime | None = None

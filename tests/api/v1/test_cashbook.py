@@ -736,3 +736,122 @@ async def test_patch_unknown_entry_404(api_client: AsyncClient) -> None:
     assert r.status_code == 404
     detail = r.json().get("detail")
     assert isinstance(detail, dict) and detail.get("code") == "cashbook_entry_not_found"
+
+
+# ---------------------------------------------------------------------------
+# Phase C — onboarding (POST /setup) + upgrade (POST /upgrade-to-full)
+# ---------------------------------------------------------------------------
+
+
+async def _bank_account_id() -> uuid.UUID:
+    """Return the seeded 1-1110 Bank account id for the seed company."""
+    async with AsyncSessionLocal() as session:
+        co = (
+            await session.execute(
+                select(Company).where(Company.archived_at.is_(None)).order_by(Company.created_at)
+            )
+        ).scalars().first()
+        assert co is not None
+        bank = (
+            await session.execute(
+                select(Account).where(
+                    Account.company_id == co.id,
+                    Account.code == "1-1110",
+                )
+            )
+        ).scalar_one()
+        return bank.id
+
+
+async def test_setup_idempotent_when_already_cashbook(api_client: AsyncClient) -> None:
+    """Re-running /setup on a cashbook company just re-pins the bank
+    account — no error, version still bumps."""
+    await _seed_company_into_cashbook_mode(gst_registered=False)
+    bank_id = await _bank_account_id()
+    r = await api_client.post(
+        "/api/v1/cashbook/setup",
+        json={"bank_account_id": str(bank_id)},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["bookkeeping_mode"] == "cashbook"
+    assert body["cashbook_default_bank_account_id"] == str(bank_id)
+    assert body["version"] >= 2
+
+
+async def test_setup_refuses_full_company_with_existing_je(
+    api_client: AsyncClient,
+) -> None:
+    """Dev-DB seed company carries journal entries from prior runs, so
+    flipping it back to 'full' and trying to setup must refuse — design
+    rules out mid-life full→cashbook switching."""
+    await _reset_company_to_full_mode()
+    try:
+        bank_id = await _bank_account_id()
+        r = await api_client.post(
+            "/api/v1/cashbook/setup",
+            json={"bank_account_id": str(bank_id)},
+        )
+        assert r.status_code == 409, r.text
+        detail = r.json().get("detail")
+        assert isinstance(detail, dict)
+        assert detail.get("code") == "cashbook_setup_refused"
+    finally:
+        await _seed_company_into_cashbook_mode(gst_registered=False)
+
+
+async def test_setup_unknown_bank_account_409(api_client: AsyncClient) -> None:
+    await _seed_company_into_cashbook_mode(gst_registered=False)
+    r = await api_client.post(
+        "/api/v1/cashbook/setup",
+        json={"bank_account_id": str(uuid.uuid4())},
+    )
+    assert r.status_code == 409, r.text
+    detail = r.json().get("detail")
+    assert isinstance(detail, dict)
+    assert detail.get("code") == "cashbook_setup_refused"
+
+
+async def test_setup_missing_body_422(api_client: AsyncClient) -> None:
+    await _seed_company_into_cashbook_mode(gst_registered=False)
+    r = await api_client.post("/api/v1/cashbook/setup", json={})
+    assert r.status_code == 422
+
+
+async def test_upgrade_to_full_flips_mode(api_client: AsyncClient) -> None:
+    await _seed_company_into_cashbook_mode(gst_registered=False)
+    try:
+        r = await api_client.post("/api/v1/cashbook/upgrade-to-full")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["bookkeeping_mode"] == "full"
+        assert body["version"] >= 2
+    finally:
+        await _seed_company_into_cashbook_mode(gst_registered=False)
+
+
+async def test_upgrade_refuses_when_already_full(api_client: AsyncClient) -> None:
+    await _reset_company_to_full_mode()
+    try:
+        r = await api_client.post("/api/v1/cashbook/upgrade-to-full")
+        assert r.status_code == 409, r.text
+        detail = r.json().get("detail")
+        assert isinstance(detail, dict)
+        assert detail.get("code") == "cashbook_setup_refused"
+    finally:
+        await _seed_company_into_cashbook_mode(gst_registered=False)
+
+
+async def test_companies_endpoint_exposes_bookkeeping_mode(
+    api_client: AsyncClient,
+) -> None:
+    """CompanyOut surfaces bookkeeping_mode + cashbook_default_bank_account_id
+    so the web UI can hide full-edition menu items in cashbook mode.
+    """
+    _, company_id = await _seed_company_into_cashbook_mode(gst_registered=False)
+    bank_id = await _bank_account_id()
+    r = await api_client.get(f"/api/v1/companies/{company_id}")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["bookkeeping_mode"] == "cashbook"
+    assert body["cashbook_default_bank_account_id"] == str(bank_id)
