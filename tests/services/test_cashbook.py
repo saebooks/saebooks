@@ -589,3 +589,215 @@ async def test_negative_amount_rejected() -> None:
                 idempotency_key=_new_key("neg"),
                 actor="pytest",
             )
+
+
+# ---------------------------------------------------------------------------
+# Phase B.5 — void / replace
+# ---------------------------------------------------------------------------
+
+
+async def test_void_flips_status_and_posts_reversal() -> None:
+    """``void_cashbook_entry`` reverses a posted JE and flips it to REVERSED."""
+    from saebooks.services.cashbook import void_cashbook_entry
+
+    tenant_id, company_id = await _seed_company_into_cashbook_mode(
+        gst_registered=False
+    )
+    async with AsyncSessionLocal() as session:
+        original = await record_cashbook_entry(
+            db=session,
+            tenant_id=tenant_id,
+            company_id=company_id,
+            entry_date=date(2026, 5, 8),
+            description="to be voided",
+            amount=Decimal("75.00"),
+            direction="expense",
+            category_code="EXP_OTHER",
+            idempotency_key=_new_key("void-orig"),
+            actor="pytest",
+        )
+        original_id = original.id
+
+        reversal = await void_cashbook_entry(
+            db=session,
+            tenant_id=tenant_id,
+            company_id=company_id,
+            entry_id=original_id,
+            actor="pytest",
+        )
+
+    # Re-fetch in fresh session to confirm persisted state.
+    async with AsyncSessionLocal() as session:
+        refreshed_orig = (
+            await session.execute(
+                select(JournalEntry).where(JournalEntry.id == original_id)
+            )
+        ).scalar_one()
+        assert refreshed_orig.status == EntryStatus.REVERSED
+        assert reversal.reversal_of_id == original_id
+        assert reversal.status == EntryStatus.POSTED
+        # Reversal JE has no cashbook_meta — keeps it out of cashbook list/get.
+        assert not (reversal.attachments or {}).get("cashbook_meta")
+
+
+async def test_void_already_reversed_returns_existing_reversal() -> None:
+    """Void is idempotent — re-voiding returns the same reversal JE."""
+    from saebooks.services.cashbook import void_cashbook_entry
+
+    tenant_id, company_id = await _seed_company_into_cashbook_mode(
+        gst_registered=False
+    )
+    async with AsyncSessionLocal() as session:
+        original = await record_cashbook_entry(
+            db=session,
+            tenant_id=tenant_id,
+            company_id=company_id,
+            entry_date=date(2026, 5, 8),
+            description="double-void",
+            amount=Decimal("10.00"),
+            direction="expense",
+            category_code="EXP_OTHER",
+            idempotency_key=_new_key("dbl-void"),
+            actor="pytest",
+        )
+        rev1 = await void_cashbook_entry(
+            db=session,
+            tenant_id=tenant_id,
+            company_id=company_id,
+            entry_id=original.id,
+            actor="pytest",
+        )
+        rev2 = await void_cashbook_entry(
+            db=session,
+            tenant_id=tenant_id,
+            company_id=company_id,
+            entry_id=original.id,
+            actor="pytest",
+        )
+    assert rev1.id == rev2.id
+
+
+async def test_void_unknown_entry_raises_not_found() -> None:
+    from saebooks.services.cashbook import (
+        CashbookEntryNotFound,
+        void_cashbook_entry,
+    )
+
+    tenant_id, company_id = await _seed_company_into_cashbook_mode(
+        gst_registered=False
+    )
+    async with AsyncSessionLocal() as session:
+        with pytest.raises(CashbookEntryNotFound):
+            await void_cashbook_entry(
+                db=session,
+                tenant_id=tenant_id,
+                company_id=company_id,
+                entry_id=uuid.uuid4(),
+                actor="pytest",
+            )
+
+
+async def test_replace_voids_original_and_creates_replacement() -> None:
+    """``replace_cashbook_entry`` voids the original and creates a new
+    JE with the new payload + ``replaces_id`` link."""
+    from saebooks.services.cashbook import replace_cashbook_entry
+
+    tenant_id, company_id = await _seed_company_into_cashbook_mode(
+        gst_registered=False
+    )
+    async with AsyncSessionLocal() as session:
+        original = await record_cashbook_entry(
+            db=session,
+            tenant_id=tenant_id,
+            company_id=company_id,
+            entry_date=date(2026, 5, 8),
+            description="original payload",
+            amount=Decimal("100.00"),
+            direction="expense",
+            category_code="EXP_OTHER",
+            idempotency_key=_new_key("orig-pl"),
+            actor="pytest",
+        )
+        original_id = original.id
+
+        new_je = await replace_cashbook_entry(
+            db=session,
+            tenant_id=tenant_id,
+            company_id=company_id,
+            entry_id=original_id,
+            entry_date=date(2026, 5, 8),
+            description="new payload",
+            amount=Decimal("250.00"),
+            direction="expense",
+            category_code="EXP_TOOLS",
+            idempotency_key=_new_key("new-pl"),
+            actor="pytest",
+        )
+
+    async with AsyncSessionLocal() as session:
+        refreshed_orig = (
+            await session.execute(
+                select(JournalEntry).where(JournalEntry.id == original_id)
+            )
+        ).scalar_one()
+        assert refreshed_orig.status == EntryStatus.REVERSED
+
+        refreshed_new = (
+            await session.execute(
+                select(JournalEntry).where(JournalEntry.id == new_je.id)
+            )
+        ).scalar_one()
+        assert refreshed_new.status == EntryStatus.POSTED
+        meta = (refreshed_new.attachments or {}).get("cashbook_meta") or {}
+        assert meta.get("replaces_id") == str(original_id)
+        assert meta.get("category_code") == "EXP_TOOLS"
+        assert meta.get("gross_amount") == "250.00"
+
+
+async def test_replace_idempotency_replay_returns_same_replacement() -> None:
+    from saebooks.services.cashbook import replace_cashbook_entry
+
+    tenant_id, company_id = await _seed_company_into_cashbook_mode(
+        gst_registered=False
+    )
+    async with AsyncSessionLocal() as session:
+        original = await record_cashbook_entry(
+            db=session,
+            tenant_id=tenant_id,
+            company_id=company_id,
+            entry_date=date(2026, 5, 8),
+            description="original",
+            amount=Decimal("60.00"),
+            direction="expense",
+            category_code="EXP_OTHER",
+            idempotency_key=_new_key("rep-orig"),
+            actor="pytest",
+        )
+        replace_key = _new_key("rep-new")
+        first = await replace_cashbook_entry(
+            db=session,
+            tenant_id=tenant_id,
+            company_id=company_id,
+            entry_id=original.id,
+            entry_date=date(2026, 5, 8),
+            description="new",
+            amount=Decimal("65.00"),
+            direction="expense",
+            category_code="EXP_OTHER",
+            idempotency_key=replace_key,
+            actor="pytest",
+        )
+        second = await replace_cashbook_entry(
+            db=session,
+            tenant_id=tenant_id,
+            company_id=company_id,
+            entry_id=original.id,
+            entry_date=date(2026, 5, 8),
+            description="new",
+            amount=Decimal("65.00"),
+            direction="expense",
+            category_code="EXP_OTHER",
+            idempotency_key=replace_key,
+            actor="pytest",
+        )
+    assert first.id == second.id

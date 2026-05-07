@@ -88,6 +88,21 @@ class CashbookAccountResolutionError(CashbookError):
     code = "cashbook_account_unresolved"
 
 
+class CashbookEntryNotFound(CashbookError):
+    """The referenced cashbook entry does not exist for this company,
+    or exists as a non-cashbook JE (no ``cashbook_meta`` stamp)."""
+
+    code = "cashbook_entry_not_found"
+
+
+class CashbookEntryNotEditable(CashbookError):
+    """The referenced cashbook entry is not in a state that supports
+    edit/void (e.g. already REVERSED, or DRAFT — cashbook entries
+    are auto-posted so DRAFT shouldn't normally happen)."""
+
+    code = "cashbook_entry_not_editable"
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -438,6 +453,169 @@ async def record_cashbook_entry(
     return (await db.execute(stmt)).scalar_one()
 
 
+async def void_cashbook_entry(
+    *,
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    company_id: uuid.UUID,
+    entry_id: uuid.UUID,
+    reason: str | None = None,
+    actor: str | None = None,
+) -> JournalEntry:
+    """Void a posted cashbook entry by posting a reversing JE.
+
+    Idempotent: re-voiding an already-REVERSED entry returns the
+    existing reversal JE rather than failing. This makes
+    ``replace_cashbook_entry`` safe to retry after a partial failure
+    (void succeeded, record_cashbook_entry crashed, user retries).
+
+    The original entry's ``status`` flips to ``REVERSED``. The
+    reversal JE itself does NOT carry ``cashbook_meta``, so the
+    cashbook list/summary endpoints filter it out automatically.
+
+    Raises
+    ------
+    CashbookEntryNotFound:
+        The entry does not exist for this company, or exists as a
+        non-cashbook JE.
+    CashbookEntryNotEditable:
+        Status is ``DRAFT`` (shouldn't happen — cashbook always
+        auto-posts) or anything other than POSTED / REVERSED.
+    """
+    stmt = (
+        select(JournalEntry)
+        .options(selectinload(JournalEntry.lines))
+        .where(
+            JournalEntry.id == entry_id,
+            JournalEntry.company_id == company_id,
+        )
+    )
+    je = (await db.execute(stmt)).scalar_one_or_none()
+    if je is None:
+        raise CashbookEntryNotFound(
+            f"Cashbook entry {entry_id} not found in this company"
+        )
+    if not (je.attachments or {}).get("cashbook_meta"):
+        # Hide non-cashbook JEs from this surface — same 404 contract
+        # as the GET-by-id route.
+        raise CashbookEntryNotFound(
+            f"Entry {entry_id} is not a cashbook entry"
+        )
+
+    # Idempotent path: already reversed, return the existing reversal.
+    if je.status == EntryStatus.REVERSED:
+        rev_stmt = (
+            select(JournalEntry)
+            .options(selectinload(JournalEntry.lines))
+            .where(JournalEntry.reversal_of_id == je.id)
+        )
+        existing_rev = (await db.execute(rev_stmt)).scalar_one_or_none()
+        if existing_rev is not None:
+            return existing_rev
+        # Reversal JE missing for a REVERSED original — corrupt state.
+        # Fall through to re-create the reversal so the audit trail
+        # gets repaired.
+
+    if je.status not in (EntryStatus.POSTED, EntryStatus.REVERSED):
+        raise CashbookEntryNotEditable(
+            f"Cashbook entry {entry_id} cannot be voided: "
+            f"status={je.status!r}"
+        )
+
+    return await journal_svc.reverse(
+        db,
+        entry_id,
+        posted_by=actor,
+        override_reason=reason or "cashbook void",
+        tenant_id=tenant_id,
+    )
+
+
+async def replace_cashbook_entry(
+    *,
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    company_id: uuid.UUID,
+    entry_id: uuid.UUID,
+    entry_date: date,
+    description: str | None,
+    amount: Decimal,
+    direction: Literal["income", "expense"],
+    category_code: str,
+    gst_amount: Decimal | None = None,
+    idempotency_key: str,
+    actor: str | None = None,
+) -> JournalEntry:
+    """Void original + create a replacement cashbook entry.
+
+    Cashbook PATCH semantics: the design says "never edit in place,
+    always void & re-create" so the audit trail stays intact. The
+    original gets a reversal JE; a new JE is created with the new
+    payload. The new JE's ``cashbook_meta`` is stamped with
+    ``replaces_id`` pointing at the original; the original is left
+    pointing at its reversal via ``reversal_of_id`` (set by
+    ``journal.reverse``).
+
+    Idempotency: ``idempotency_key`` belongs to the *new* entry. The
+    same key on retry returns the same replacement JE — and the void
+    step is itself idempotent (already-REVERSED is a no-op), so the
+    retry case after a mid-flow failure recovers cleanly.
+
+    Returns the new (replacement) ``JournalEntry``.
+    """
+    # Idempotency replay shortcut. If a JE already exists for this
+    # key, return it — the original is presumed already voided.
+    existing = await _find_by_idempotency(
+        db, company_id=company_id, idempotency_key=idempotency_key
+    )
+    if existing is not None:
+        return existing
+
+    # Void the original (idempotent: returns existing reversal if
+    # already REVERSED, raises NotEditable otherwise).
+    await void_cashbook_entry(
+        db=db,
+        tenant_id=tenant_id,
+        company_id=company_id,
+        entry_id=entry_id,
+        reason=f"Replaced by new cashbook entry (key={idempotency_key})",
+        actor=actor,
+    )
+
+    # Create the replacement via the normal path.
+    new_je = await record_cashbook_entry(
+        db=db,
+        tenant_id=tenant_id,
+        company_id=company_id,
+        entry_date=entry_date,
+        description=description,
+        amount=amount,
+        direction=direction,
+        category_code=category_code,
+        gst_amount=gst_amount,
+        idempotency_key=idempotency_key,
+        actor=actor,
+    )
+
+    # Stamp the chain link on the new entry so admin / audit tools can
+    # walk back to the originating row.
+    meta = dict((new_je.attachments or {}).get("cashbook_meta") or {})
+    meta["replaces_id"] = str(entry_id)
+    new_je.attachments = {
+        **(new_je.attachments or {}),
+        "cashbook_meta": meta,
+    }
+    await db.commit()
+
+    # Reload with lines for caller.
+    stmt = (
+        select(JournalEntry)
+        .options(selectinload(JournalEntry.lines))
+        .where(JournalEntry.id == new_je.id)
+    )
+    return (await db.execute(stmt)).scalar_one()
+
+
 async def _find_by_idempotency(
     db: AsyncSession,
     *,
@@ -467,5 +645,9 @@ __all__ = [
     "CashbookCurrencyError",
     "CashbookCategoryError",
     "CashbookAccountResolutionError",
+    "CashbookEntryNotFound",
+    "CashbookEntryNotEditable",
     "record_cashbook_entry",
+    "void_cashbook_entry",
+    "replace_cashbook_entry",
 ]

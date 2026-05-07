@@ -565,3 +565,174 @@ async def test_summary_bad_range_400(api_client: AsyncClient) -> None:
         params={"from": "2099-01-31", "to": "2099-01-01"},
     )
     assert r.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# DELETE /entries/{id}  (soft-delete)
+# ---------------------------------------------------------------------------
+
+
+async def _create_entry(api_client: AsyncClient, **overrides) -> dict:
+    body = {
+        "entry_date": "2026-05-08",
+        "description": "patch/delete test",
+        "amount": "42.00",
+        "direction": "expense",
+        "category_code": "EXP_OTHER",
+    }
+    body.update(overrides)
+    r = await api_client.post(
+        "/api/v1/cashbook/entries",
+        json=body,
+        headers={"X-Idempotency-Key": _new_key("del-create")},
+    )
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+async def test_delete_entry_returns_204_and_hides_from_list(
+    api_client: AsyncClient,
+) -> None:
+    await _seed_company_into_cashbook_mode(gst_registered=False)
+    created = await _create_entry(api_client)
+    entry_id = created["id"]
+
+    r = await api_client.delete(f"/api/v1/cashbook/entries/{entry_id}")
+    assert r.status_code == 204
+
+    # GET-by-id returns 404
+    r2 = await api_client.get(f"/api/v1/cashbook/entries/{entry_id}")
+    assert r2.status_code == 404
+
+    # List by category — voided entry is filtered.
+    r3 = await api_client.get(
+        "/api/v1/cashbook/entries", params={"category": "EXP_OTHER"}
+    )
+    assert r3.status_code == 200
+    assert all(item["id"] != entry_id for item in r3.json()["items"])
+
+
+async def test_delete_entry_idempotent(api_client: AsyncClient) -> None:
+    await _seed_company_into_cashbook_mode(gst_registered=False)
+    created = await _create_entry(api_client)
+    entry_id = created["id"]
+
+    r1 = await api_client.delete(f"/api/v1/cashbook/entries/{entry_id}")
+    r2 = await api_client.delete(f"/api/v1/cashbook/entries/{entry_id}")
+    assert r1.status_code == 204
+    assert r2.status_code == 204
+
+
+async def test_delete_unknown_entry_404(api_client: AsyncClient) -> None:
+    await _seed_company_into_cashbook_mode(gst_registered=False)
+    r = await api_client.delete(f"/api/v1/cashbook/entries/{uuid.uuid4()}")
+    assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# PATCH /entries/{id}  (void + recreate)
+# ---------------------------------------------------------------------------
+
+
+async def test_patch_entry_creates_replacement_with_link(
+    api_client: AsyncClient,
+) -> None:
+    await _seed_company_into_cashbook_mode(gst_registered=False)
+    created = await _create_entry(
+        api_client,
+        amount="100.00",
+        description="original payload",
+        category_code="EXP_OTHER",
+    )
+    original_id = created["id"]
+
+    new_payload = {
+        "entry_date": "2026-05-08",
+        "description": "new payload",
+        "amount": "250.00",
+        "direction": "expense",
+        "category_code": "EXP_TOOLS",
+    }
+    r = await api_client.patch(
+        f"/api/v1/cashbook/entries/{original_id}",
+        json=new_payload,
+        headers={"X-Idempotency-Key": _new_key("patch")},
+    )
+    assert r.status_code == 200, r.text
+    new_entry = r.json()
+    assert new_entry["id"] != original_id
+    assert new_entry["amount"] == "250.00"
+    assert new_entry["category_code"] == "EXP_TOOLS"
+
+    # Original is hidden from cashbook surfaces.
+    r2 = await api_client.get(f"/api/v1/cashbook/entries/{original_id}")
+    assert r2.status_code == 404
+
+    # New is visible.
+    r3 = await api_client.get(f"/api/v1/cashbook/entries/{new_entry['id']}")
+    assert r3.status_code == 200
+
+
+async def test_patch_entry_idempotent_on_replay(api_client: AsyncClient) -> None:
+    await _seed_company_into_cashbook_mode(gst_registered=False)
+    created = await _create_entry(api_client)
+    original_id = created["id"]
+    key = _new_key("patch-idem")
+    body = {
+        "entry_date": "2026-05-08",
+        "description": "replay",
+        "amount": "55.00",
+        "direction": "expense",
+        "category_code": "EXP_OTHER",
+    }
+    r1 = await api_client.patch(
+        f"/api/v1/cashbook/entries/{original_id}",
+        json=body,
+        headers={"X-Idempotency-Key": key},
+    )
+    r2 = await api_client.patch(
+        f"/api/v1/cashbook/entries/{original_id}",
+        json=body,
+        headers={"X-Idempotency-Key": key},
+    )
+    assert r1.status_code == 200 and r2.status_code == 200
+    assert r1.json()["id"] == r2.json()["id"]
+
+
+async def test_patch_entry_missing_idempotency_key_400(
+    api_client: AsyncClient,
+) -> None:
+    await _seed_company_into_cashbook_mode(gst_registered=False)
+    created = await _create_entry(api_client)
+    body = {
+        "entry_date": "2026-05-08",
+        "description": "no key",
+        "amount": "11.00",
+        "direction": "expense",
+        "category_code": "EXP_OTHER",
+    }
+    r = await api_client.patch(
+        f"/api/v1/cashbook/entries/{created['id']}", json=body
+    )
+    assert r.status_code == 400
+    detail = r.json().get("detail")
+    assert isinstance(detail, dict) and detail.get("code") == "idempotency_key_required"
+
+
+async def test_patch_unknown_entry_404(api_client: AsyncClient) -> None:
+    await _seed_company_into_cashbook_mode(gst_registered=False)
+    body = {
+        "entry_date": "2026-05-08",
+        "description": "no entry",
+        "amount": "11.00",
+        "direction": "expense",
+        "category_code": "EXP_OTHER",
+    }
+    r = await api_client.patch(
+        f"/api/v1/cashbook/entries/{uuid.uuid4()}",
+        json=body,
+        headers={"X-Idempotency-Key": _new_key("patch-404")},
+    )
+    assert r.status_code == 404
+    detail = r.json().get("detail")
+    assert isinstance(detail, dict) and detail.get("code") == "cashbook_entry_not_found"

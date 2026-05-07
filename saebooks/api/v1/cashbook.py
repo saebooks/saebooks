@@ -16,11 +16,13 @@ Phase B scope
 * ``GET /summary`` — P&L-shaped projection over cashbook lines for a
   date range.
 
-Out of Phase B
---------------
-* ``PATCH`` / ``DELETE`` (void-and-recreate) — design says "void &
-  re-create, never in-place"; that's a small additional service
-  surface plus tests; tracked for Phase B.5.
+Phase B.5 scope (added below)
+-----------------------------
+* ``PATCH /entries/{id}`` — void-and-recreate replacement.
+* ``DELETE /entries/{id}`` — soft-delete via reversal JE.
+
+Out of Phase B / B.5
+--------------------
 * Transfer endpoint (TX_TRANSFER) — needs two-bank-account flow;
   tracked separately.
 
@@ -46,6 +48,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -172,6 +175,10 @@ def _service_error_to_http(exc: cashbook_svc.CashbookError) -> HTTPException:
     if isinstance(exc, cashbook_svc.CashbookCategoryError):
         return HTTPException(status.HTTP_400_BAD_REQUEST, body)
     if isinstance(exc, cashbook_svc.CashbookAccountResolutionError):
+        return HTTPException(status.HTTP_409_CONFLICT, body)
+    if isinstance(exc, cashbook_svc.CashbookEntryNotFound):
+        return HTTPException(status.HTTP_404_NOT_FOUND, body)
+    if isinstance(exc, cashbook_svc.CashbookEntryNotEditable):
         return HTTPException(status.HTTP_409_CONFLICT, body)
     return HTTPException(status.HTTP_400_BAD_REQUEST, body)
 
@@ -306,6 +313,11 @@ async def list_entries(
         select(JournalEntry)
         .where(JournalEntry.company_id == company_id)
         .where(JournalEntry.attachments["cashbook_meta"].isnot(None))
+        # Hide voided/replaced entries from the cashbook surface — the
+        # reversal JE has no cashbook_meta, but the original carries
+        # status=REVERSED with the meta intact. Filtering here keeps
+        # the picker view clean while preserving the audit row in JE.
+        .where(JournalEntry.status != EntryStatus.REVERSED)
     )
     if from_ is not None:
         stmt = stmt.where(JournalEntry.entry_date >= from_)
@@ -353,7 +365,99 @@ async def get_entry(
         # JE exists but isn't a cashbook entry — pretend it's not there to
         # keep the cashbook surface clean.
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Cashbook entry not found")
+    if je.status == EntryStatus.REVERSED:
+        # Voided / replaced entries are hidden from the cashbook GET-by-id
+        # surface for the same reason they're hidden from list. Audit
+        # tools query journal_entries directly.
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Cashbook entry not found")
     return _je_to_cashbook_out(je)
+
+
+# ---------------------------------------------------------------------------
+# DELETE /entries/{id}  (soft-delete via reversal)
+# ---------------------------------------------------------------------------
+
+
+@router.delete("/entries/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_entry(
+    entry_id: UUID,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> Response:
+    """Soft-delete a cashbook entry by posting a reversing JE.
+
+    The original entry's status flips to ``REVERSED`` and it disappears
+    from the cashbook list/get/summary surfaces. The audit trail stays
+    intact at the ``journal_entries`` layer.
+
+    Idempotent: re-deleting an already-voided entry returns 204 without
+    re-posting a reversal.
+    """
+    tenant_id = resolve_tenant_id(request)
+    actor = getattr(request.state, "actor", None) or "api"
+    try:
+        await cashbook_svc.void_cashbook_entry(
+            db=session,
+            tenant_id=tenant_id,
+            company_id=company_id,
+            entry_id=entry_id,
+            reason="cashbook delete",
+            actor=str(actor),
+        )
+    except cashbook_svc.CashbookError as exc:
+        raise _service_error_to_http(exc) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------------
+# PATCH /entries/{id}  (void + recreate)
+# ---------------------------------------------------------------------------
+
+
+@router.patch("/entries/{entry_id}", response_model=CashbookEntryOut)
+async def replace_entry(
+    entry_id: UUID,
+    payload: CashbookEntryCreate,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+    x_idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
+) -> CashbookEntryOut:
+    """Replace a cashbook entry — voids the original and creates a new
+    JE with the new payload.
+
+    Cashbook PATCH is "void & re-create, never in-place" — the original
+    JE gets a reversal entry; the new JE is the surface answer for
+    list/get/summary. The new entry's ``cashbook_meta.replaces_id``
+    points back at the original for audit walk-through.
+
+    Requires ``X-Idempotency-Key`` (the key tags the *new* entry; same
+    key + same body returns the same replacement).
+    """
+    tenant_id = resolve_tenant_id(request)
+    idem_key = _require_idempotency_key(x_idempotency_key)
+    actor = getattr(request.state, "actor", None) or "api"
+
+    try:
+        new_je = await cashbook_svc.replace_cashbook_entry(
+            db=session,
+            tenant_id=tenant_id,
+            company_id=company_id,
+            entry_id=entry_id,
+            entry_date=payload.entry_date,
+            description=payload.description,
+            amount=payload.amount,
+            direction=payload.direction,  # type: ignore[arg-type]
+            category_code=payload.category_code,
+            gst_amount=payload.gst_amount,
+            idempotency_key=idem_key,
+            actor=str(actor),
+        )
+    except cashbook_svc.CashbookError as exc:
+        raise _service_error_to_http(exc) from exc
+
+    return _je_to_cashbook_out(new_je)
 
 
 # ---------------------------------------------------------------------------
