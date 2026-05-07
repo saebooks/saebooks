@@ -278,6 +278,36 @@ class Settings(BaseSettings):
         default="http://localhost:8000", alias="SAEBOOKS_PUBLIC_BASE_URL"
     )
 
+    # ---------------------------------------------------------------- #
+    # Vault — saebooks-vault REST integration (Phase 1)                #
+    # ---------------------------------------------------------------- #
+    # File attachments (receipts, supporting docs) are stored in the
+    # closed-source ``saebooks-vault`` service, never in the accounting
+    # DB. SAE Books owns only the linkage (vault file_id + entity ref).
+    #
+    # ``VAULT_URL`` defaults to the in-compose service hostname so a
+    # sibling docker-compose setup (with a shared network) Just Works.
+    # Production deployments where the vault runs on a different host
+    # set this to the LAN/Tailnet bind, e.g. ``http://10.0.2.1:18820``.
+    #
+    # ``VAULT_SHARED_SECRET`` is the bearer token the vault expects in
+    # the ``Authorization`` header. Empty by default so an unconfigured
+    # install can't silently send unauthenticated requests.
+    #
+    # ``VAULT_ENABLED`` is the kill-switch. When false, the attachments
+    # router returns 503 — the rest of saebooks is unaffected. Lets a
+    # community/offline edition opt out cleanly.
+    vault_url: str = Field(
+        default="http://saebooks-vault-api:18820", alias="VAULT_URL"
+    )
+    vault_shared_secret: str = Field(default="", alias="VAULT_SHARED_SECRET")
+    vault_enabled: bool = Field(default=False, alias="VAULT_ENABLED")
+    # Per-call timeout (seconds) for upstream vault HTTP calls. Upload
+    # paths get the longer ``vault_upload_timeout``; metadata/list/delete
+    # use ``vault_timeout``.
+    vault_timeout: float = Field(default=10.0, alias="VAULT_TIMEOUT")
+    vault_upload_timeout: float = Field(default=60.0, alias="VAULT_UPLOAD_TIMEOUT")
+
     @property
     def oauth_allowed_emails_set(self) -> set[str]:
         return {e.strip().lower() for e in self.oauth_allowed_emails.split(",") if e.strip()}

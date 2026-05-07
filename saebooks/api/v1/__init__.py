@@ -26,6 +26,7 @@ from saebooks.api.v1.accounts import router as accounts_router
 from saebooks.api.v1.admin import router as admin_router
 from saebooks.api.v1.ai_extraction import router as ai_extraction_router
 from saebooks.api.v1.allocations import router as allocations_router
+from saebooks.api.v1.attachments import router as attachments_router
 from saebooks.api.v1.ato_sbr import router as ato_sbr_router
 from saebooks.api.v1.bank_accounts import router as bank_accounts_router
 from saebooks.api.v1.bank_feeds import router as bank_feeds_router
@@ -124,6 +125,9 @@ router.include_router(snapshot_router)
 router.include_router(ai_extraction_router)
 # FITC-6: allocation rules engine — Business+ feature-gated
 router.include_router(allocations_router)
+# Phase 1 vault wire-in: /api/v1/attachments — proxies blobs to
+# saebooks-vault. Returns 503 when vault_enabled=false.
+router.include_router(attachments_router)
 # Cat-C (W5): admin audit-log + SQL tool (FLAG_SQL_TOOL Pro+).
 router.include_router(admin_router)
 # Cat-C: multi-step import wizard (bank CSV/OFX community; QBO Pro+)
