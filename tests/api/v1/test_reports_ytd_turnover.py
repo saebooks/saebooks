@@ -1,9 +1,14 @@
 """Tests for GET /api/v1/reports/ytd_turnover (gap HOBB-2).
 
-Three tests:
+Tests:
 1. test_ytd_turnover_empty        — no income JEs in current FY → 0, not crossed
 2. test_ytd_turnover_below        — income below $75k → not crossed
 3. test_ytd_turnover_above        — income at or above $75k → threshold_crossed=True
+4. test_ytd_turnover_above_already_registered — income >= $75k AND
+   company.gst_registered=True → threshold_crossed=False (the registration
+   obligation is moot for an already-registered entity, so the dashboard
+   banner must not fire). Regression test for the "register within 21 days"
+   nag firing on long-standing GST-registered businesses.
 """
 from __future__ import annotations
 
@@ -15,8 +20,9 @@ from sqlalchemy import select
 
 from saebooks.api.v1.auth import current_token
 from saebooks.db import AsyncSessionLocal
-from saebooks.main import app
 from saebooks.models.account import Account, AccountType
+from saebooks.models.company import Company
+from saebooks.main import app
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -162,7 +168,16 @@ async def test_ytd_turnover_above_threshold(
     income_account_id: str,
     asset_account_id: str,
 ) -> None:
-    """Income >= $75k → threshold_crossed=True."""
+    """Income >= $75k AND company.gst_registered=False → threshold_crossed=True.
+
+    Asserts the seed company is unregistered (the default) so the
+    register-within-21-days obligation is real.
+    """
+    async with AsyncSessionLocal() as session:
+        company = (await session.execute(select(Company).limit(1))).scalar_one()
+        company.gst_registered = False
+        await session.commit()
+
     today = date.today()
     if today.month >= 7:
         entry_date = date(today.year, 9, 1).isoformat()
@@ -179,3 +194,39 @@ async def test_ytd_turnover_above_threshold(
     body = r.json()
     assert body["ytd_turnover"] >= 75000.0
     assert body["threshold_crossed"] is True
+
+
+async def test_ytd_turnover_above_threshold_already_registered(
+    api_client: AsyncClient,
+    income_account_id: str,
+    asset_account_id: str,
+) -> None:
+    """Income >= $75k AND company.gst_registered=True → threshold_crossed=False.
+
+    The "register with the ATO within 21 days" obligation only applies to
+    unregistered businesses that cross the $75k threshold. A long-standing
+    GST-registered entity showing $75k+ in revenue is the normal case and
+    must not trigger the dashboard banner. Regression test.
+    """
+    async with AsyncSessionLocal() as session:
+        company = (await session.execute(select(Company).limit(1))).scalar_one()
+        company.gst_registered = True
+        company.gst_effective_date = date(2020, 7, 1)
+        await session.commit()
+
+    today = date.today()
+    if today.month >= 7:
+        entry_date = date(today.year, 10, 1).isoformat()
+    else:
+        entry_date = date(today.year, 5, 1).isoformat()
+
+    await _post_income_je(
+        api_client, income_account_id, asset_account_id, "90000.00", entry_date
+    )
+
+    r = await api_client.get("/api/v1/reports/ytd_turnover")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ytd_turnover"] >= 75000.0
+    assert body["threshold_crossed"] is False
+    assert body["threshold_approaching"] is False

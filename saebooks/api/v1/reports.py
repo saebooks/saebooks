@@ -90,6 +90,7 @@ from saebooks.api.v1.schemas import (
 from saebooks.models.account import Account, AccountType
 from saebooks.models.bill import Bill, BillStatus
 from saebooks.models.budget import Budget
+from saebooks.models.company import Company
 from saebooks.models.contact import Contact
 from saebooks.models.depreciation_model import DepreciationModel
 from saebooks.models.fixed_asset import FixedAsset
@@ -1684,6 +1685,15 @@ async def ytd_turnover(
     Income accounts are credit-normal, so turnover = credit - debit for
     each matching journal line.  The result is always >= 0 (net credits
     cannot go negative for normal business income).
+
+    The ``threshold_crossed`` / ``threshold_approaching`` flags only fire
+    when the company is **not** already GST-registered. The 21-day-to-
+    register obligation in the ATO rules only applies to businesses that
+    have crossed the threshold without yet being registered; an already-
+    registered business showing $75k+ in revenue is the normal case and
+    must not be nagged. Suppressing both flags here is the correct fix —
+    the flags drive the dashboard banners and the profit-and-loss
+    threshold callout, none of which are relevant to a registered entity.
     """
     tenant_id = resolve_tenant_id(request)
     fy_start, fy_end = _current_fy_bounds()
@@ -1712,12 +1722,20 @@ async def ytd_turnover(
     raw = result.scalar_one()
     ytd = max(Decimal(str(raw)), Decimal("0"))
 
+    # Look up the company's GST status — if already registered, neither
+    # threshold flag fires (the registration obligation is moot).
+    company = await session.get(Company, company_id)
+    already_registered = bool(company and company.gst_registered)
+
     _approaching_floor = _GST_THRESHOLD * Decimal("0.80")
     return YTDTurnoverReport(
         fy_start=fy_start,
         fy_end=fy_end,
         ytd_turnover=float(ytd),
         threshold=float(_GST_THRESHOLD),
-        threshold_crossed=ytd >= _GST_THRESHOLD,
-        threshold_approaching=_approaching_floor <= ytd < _GST_THRESHOLD,
+        threshold_crossed=(not already_registered) and ytd >= _GST_THRESHOLD,
+        threshold_approaching=(
+            (not already_registered)
+            and _approaching_floor <= ytd < _GST_THRESHOLD
+        ),
     )
