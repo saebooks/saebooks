@@ -498,11 +498,19 @@ async def test_categories_hidden_dropped(api_client: AsyncClient) -> None:
 
 
 async def test_summary_aggregates_income_expense(api_client: AsyncClient) -> None:
+    """Summary aggregates correctly. Asserted as deltas so any DB state
+    left by prior runs (the dev DB persists across pytest sessions) is
+    tolerated — what the test owns is the *change* it caused."""
     await _seed_company_into_cashbook_mode(gst_registered=False)
 
-    # Use a date far enough in the future that prior tests' entries
-    # don't bleed into the aggregate range.
+    # Future date — no other test currently writes in 2099-Q1.
     target_date = "2099-01-15"
+    range_params = {"from": "2099-01-01", "to": "2099-01-31"}
+
+    from decimal import Decimal as _D
+
+    # Snapshot the current summary so we can assert deltas.
+    pre = (await api_client.get("/api/v1/cashbook/summary", params=range_params)).json()
 
     posts = [
         {
@@ -529,24 +537,25 @@ async def test_summary_aggregates_income_expense(api_client: AsyncClient) -> Non
         )
         assert r.status_code == 201, r.text
 
-    r = await api_client.get(
-        "/api/v1/cashbook/summary",
-        params={"from": "2099-01-01", "to": "2099-01-31"},
-    )
+    r = await api_client.get("/api/v1/cashbook/summary", params=range_params)
     assert r.status_code == 200, r.text
     out = r.json()
     assert out["from"] == "2099-01-01"
     assert out["to"] == "2099-01-31"
-    # Non-registered → no GST split, so amount-net == amount.
-    from decimal import Decimal as _D
-    assert _D(out["income_total"]) == _D("1000.00")
-    assert _D(out["expense_total"]) == _D("150.00")
-    assert _D(out["net"]) == _D("850.00")
+
+    # Non-registered → no GST split, so amount-net == amount. Assert
+    # the deltas.
+    assert _D(out["income_total"]) - _D(pre["income_total"]) == _D("1000.00")
+    assert _D(out["expense_total"]) - _D(pre["expense_total"]) == _D("150.00")
+    assert _D(out["net"]) - _D(pre["net"]) == _D("850.00")
     assert _D(out["gst_collected"]) == _D("0")
     assert _D(out["gst_paid"]) == _D("0")
+
     by_cat = {c["code"]: c for c in out["by_category"]}
     assert "INC_SALES" in by_cat
-    assert by_cat["INC_SALES"]["count"] == 1
+    # by_category is cumulative within the range — assert at least our
+    # contribution shows up (count >= 1) rather than == 1.
+    assert by_cat["INC_SALES"]["count"] >= 1
 
 
 async def test_summary_bad_range_400(api_client: AsyncClient) -> None:
