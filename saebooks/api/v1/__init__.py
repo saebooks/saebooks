@@ -35,6 +35,7 @@ from saebooks.api.v1.bank_statement_lines import router as bank_statement_lines_
 from saebooks.api.v1.billing import router as billing_router
 from saebooks.api.v1.bills import router as bills_router
 from saebooks.api.v1.budgets import router as budgets_router
+from saebooks.api.v1.cashbook import router as cashbook_router
 from saebooks.api.v1.changes import router as changes_router
 from saebooks.api.v1.companies import router as companies_router
 from saebooks.api.v1.contact_public import router as contact_public_router
@@ -138,5 +139,8 @@ router.include_router(integrations_router)
 router.include_router(integrations_public_router)
 # Cat-C (W1): pay-run / payroll v1 endpoints.
 router.include_router(pay_run_router)
+# Cashbook edition (single-entry UI over double-entry storage) — see
+# docs/cashbook-edition-design.md and saebooks.services.cashbook.
+router.include_router(cashbook_router)
 
 __all__ = ["router"]
