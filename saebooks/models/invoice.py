@@ -36,7 +36,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from saebooks.db import Base
@@ -131,6 +131,10 @@ class Invoice(CompanyScoped, Base):
         UUID(as_uuid=True),
         ForeignKey("journal_entries.id", ondelete="SET NULL"),
     )
+    external_id: Mapped[str | None] = mapped_column(String(255))
+    external_source: Mapped[str | None] = mapped_column(String(64))
+    external_etag: Mapped[str | None] = mapped_column(String(255))
+    external_payload: Mapped[dict | None] = mapped_column(JSONB)
     # --- Optimistic locking + multi-tenant (added cycle 7) ----------------
     # ``version`` starts at 1 on create; every PATCH via the API bumps it.
     # ``tenant_id`` defaults to the single default tenant so the legacy
