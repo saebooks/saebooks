@@ -98,8 +98,16 @@ async def _stamp_user_from_sub(request: Request, claims: dict[str, object]) -> N
     from saebooks.db import AsyncSessionLocal  # noqa: PLC0415
     from saebooks.models.user import User  # noqa: PLC0415
 
+    # Bind app.current_tenant from the JWT claim BEFORE the SELECT, otherwise
+    # FORCE-RLS on ``users`` silently drops every row and the caller looks
+    # like a token with no live user — admin gates then 403 because they
+    # fall back to the X-Admin header path. Mirrors the pattern in
+    # ``api/v1/login.py::_get_user`` and the 5c9b3c1 /auth/me fix.
+    tenant_claim = claims.get("tenant_id")
     try:
         async with AsyncSessionLocal() as session:
+            if tenant_claim:
+                session.info["tenant_id"] = str(tenant_claim)
             user = await session.get(User, user_id)
     except Exception as exc:  # defensive — DB hiccup shouldn't 500
         logger.warning("require_bearer user lookup failed for sub=%s: %s", sub, exc)
