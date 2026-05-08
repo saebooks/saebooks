@@ -1968,7 +1968,7 @@ class DepreciationRunAllResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Fixed Asset Convert-to-Inventory — gap MOTR-3
+# Fixed Asset Convert-to-Inventory
 # ---------------------------------------------------------------------------
 
 
@@ -2099,7 +2099,7 @@ class PLBySegmentReport(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Revenue by Customer — gap PSI-2
+# Revenue by Customer
 # ---------------------------------------------------------------------------
 
 
@@ -2539,3 +2539,262 @@ class PayRunConflictBody(BaseModel):
 class ExportAbaOut(BaseModel):
     aba_file_b64: str
     journal_id: uuid.UUID
+
+
+# ---------------------------------------------------------------------------
+# Purchase orders — commitment document (no GL impact)
+# ---------------------------------------------------------------------------
+
+
+class PurchaseOrderLineOut(BaseModel):
+    """One line of a PO. ``received_qty`` reflects what's already been
+    rolled into a converted bill — the unbilled remainder is
+    ``quantity - received_qty``."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    line_no: int
+    description: str
+    account_id: uuid.UUID
+    tax_code_id: uuid.UUID | None = None
+    quantity: Decimal
+    unit_price: Decimal
+    discount_pct: Decimal
+    line_subtotal: Decimal
+    line_tax: Decimal
+    line_total: Decimal
+    received_qty: Decimal
+    project_id: uuid.UUID | None = None
+    item_id: uuid.UUID | None = None
+
+
+class PurchaseOrderLineCreate(BaseModel):
+    """One line in a POST/PATCH payload.
+
+    ``received_qty`` is optional and defaults to 0 on a fresh line. On
+    PATCH against an OPEN/PARTIAL PO, callers MUST round-trip the
+    ``received_qty`` returned by the GET — see service docstring.
+    """
+
+    description: str = Field(min_length=1)
+    account_id: uuid.UUID
+    tax_code_id: uuid.UUID | None = None
+    quantity: Decimal = Decimal("1")
+    unit_price: Decimal = Decimal("0")
+    discount_pct: Decimal = Decimal("0")
+    received_qty: Decimal = Decimal("0")
+    project_id: uuid.UUID | None = None
+    item_id: uuid.UUID | None = None
+
+
+class PurchaseOrderBase(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    contact_id: uuid.UUID
+    issue_date: date
+    expected_date: date | None = None
+    delivery_address: str | None = None
+    notes: str | None = None
+    currency: str = Field(default="AUD", min_length=3, max_length=3)
+    fx_rate: Decimal = Field(default=Decimal("1"), gt=Decimal("0"))
+
+
+class PurchaseOrderCreate(PurchaseOrderBase):
+    """POST body — DRAFT is implied; lines optional."""
+
+    lines: list[PurchaseOrderLineCreate] = Field(default_factory=list)
+
+
+class PurchaseOrderUpdate(BaseModel):
+    """PATCH body — every field optional."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    contact_id: uuid.UUID | None = None
+    issue_date: date | None = None
+    expected_date: date | None = None
+    delivery_address: str | None = None
+    notes: str | None = None
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    fx_rate: Decimal | None = Field(default=None, gt=Decimal("0"))
+    lines: list[PurchaseOrderLineCreate] | None = None
+
+
+class PurchaseOrderOut(BaseModel):
+    """Full PO response — nested lines, tenant_id, version."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    tenant_id: uuid.UUID
+    contact_id: uuid.UUID
+    number: str | None = None
+    issue_date: date
+    expected_date: date | None = None
+    status: str
+    subtotal: Decimal
+    tax_total: Decimal
+    total: Decimal
+    currency: str
+    fx_rate: Decimal
+    delivery_address: str | None = None
+    notes: str | None = None
+    sent_at: datetime | None = None
+    closed_at: datetime | None = None
+    cancelled_at: datetime | None = None
+    version: int
+    created_at: datetime
+    updated_at: datetime
+    archived_at: datetime | None = None
+    lines: list[PurchaseOrderLineOut] = Field(default_factory=list)
+
+
+class PurchaseOrderListOut(BaseModel):
+    items: list[PurchaseOrderOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class PurchaseOrderConflictBody(BaseModel):
+    detail: str
+    current: PurchaseOrderOut
+
+
+class PurchaseOrderConvertBody(BaseModel):
+    """POST /{id}/convert-to-bill payload — all fields optional.
+
+    ``quantities`` lets the caller bill less than the full unreceived
+    remainder per line. Keys are ``line_no`` (1-indexed) values are the
+    quantity to bill on that line. Lines omitted are skipped. If
+    ``quantities`` is ``None`` the service bills everything outstanding.
+    """
+
+    quantities: dict[int, Decimal] | None = None
+    bill_issue_date: date | None = None
+    bill_due_date: date | None = None
+    supplier_reference: str | None = None
+
+
+class PurchaseOrderConvertOut(BaseModel):
+    purchase_order: PurchaseOrderOut
+    bill_id: uuid.UUID
+    bill_number: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Proration (/api/v1/proration/*) — see saebooks/services/proration.py
+# ---------------------------------------------------------------------------
+
+
+class ProratePreviewBody(BaseModel):
+    """Generic per-line/date-range prorate (Prorate flow #3)."""
+
+    full_period_amount: Decimal = Field(
+        ...,
+        description="Full-period amount (e.g. monthly rent, annual subscription).",
+    )
+    basis: str = Field(
+        ...,
+        description="DAILY / WEEKLY / MONTHLY / QUARTERLY / ANNUAL",
+    )
+    service_start: date
+    service_end: date
+
+
+class ProratePreviewOut(BaseModel):
+    full_period_amount: Decimal
+    basis: str
+    service_start: date
+    service_end: date
+    days_used: int
+    days_in_full: int
+    factor: Decimal
+    prorated_amount: Decimal
+
+
+class FirstPeriodPreviewBody(BaseModel):
+    """First-period recurring prorate (Prorate flow #1).
+
+    Identical body to the generic preview but the response includes a
+    suggested line-description string the caller can drop straight into
+    the first invoice's line."""
+
+    full_period_amount: Decimal
+    basis: str
+    service_start: date
+    service_end: date
+
+
+class FirstPeriodPreviewOut(BaseModel):
+    full_period_amount: Decimal
+    basis: str
+    service_start: date
+    service_end: date
+    days_used: int
+    days_in_full: int
+    factor: Decimal
+    prorated_amount: Decimal
+    line_description_suggestion: str
+
+
+class PlanChangePreviewBody(BaseModel):
+    """Mid-period plan-change (Prorate flow #2)."""
+
+    old_period_amount: Decimal = Field(
+        ..., description="Old plan's full-period amount."
+    )
+    new_period_amount: Decimal = Field(
+        ..., description="New plan's full-period amount."
+    )
+    period_start: date
+    period_end: date
+    change_date: date = Field(
+        ..., description="Day the customer switches plans (inclusive of new plan)."
+    )
+
+
+class PlanChangePreviewOut(BaseModel):
+    period_start: date
+    period_end: date
+    change_date: date
+    days_total: int
+    days_used: int
+    days_remaining: int
+    credit: Decimal
+    charge: Decimal
+    net: Decimal
+
+
+class DeferredRevenuePreviewBody(BaseModel):
+    """``period_date`` is any date inside the calendar month to recognise."""
+
+    period_date: date
+
+
+class DeferredRevenuePreviewLine(BaseModel):
+    invoice_line_id: uuid.UUID
+    invoice_number: str
+    description: str
+    income_account_id: uuid.UUID
+    amount: Decimal
+
+
+class DeferredRevenuePreviewOut(BaseModel):
+    period_first: date
+    total_recognized: Decimal
+    lines: list[DeferredRevenuePreviewLine] = Field(default_factory=list)
+
+
+class DeferredRevenueRecognizeBody(BaseModel):
+    period_date: date
+    override_reason: str | None = None
+
+
+class DeferredRevenueRecognizeOut(BaseModel):
+    period_first: date
+    total_recognized: Decimal
+    lines_recognized: int
+    posted: bool
