@@ -67,6 +67,7 @@ from saebooks.api.v1.reports import router as reports_router
 from saebooks.api.v1.search import router as search_router
 from saebooks.api.v1.signup import router as signup_router
 from saebooks.api.v1.snapshot import router as snapshot_router
+from saebooks.api.v1.sync_xero import router as sync_xero_router
 from saebooks.api.v1.tax_codes import router as tax_codes_router
 from saebooks.api.v1.users import permissions_router, router as users_router
 
@@ -148,5 +149,8 @@ router.include_router(pay_run_router)
 # Cashbook edition (single-entry UI over double-entry storage) — see
 # docs/cashbook-edition-design.md and saebooks.services.cashbook.
 router.include_router(cashbook_router)
+# Build #9: Xero accounting-package sync — Enterprise feature-gated
+# (FLAG_ACCOUNTING_SYNC + FLAG_SYNC_XERO).
+router.include_router(sync_xero_router)
 
 __all__ = ["router"]
