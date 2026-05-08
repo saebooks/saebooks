@@ -713,6 +713,7 @@ class InvoiceOut(BaseModel):
     company_id: uuid.UUID
     tenant_id: uuid.UUID
     contact_id: uuid.UUID
+    contact_name: str | None = None
     number: str | None = None
     issue_date: date
     due_date: date
@@ -832,6 +833,7 @@ class BillOut(BaseModel):
     company_id: uuid.UUID
     tenant_id: uuid.UUID
     contact_id: uuid.UUID
+    contact_name: str | None = None
     number: str | None = None
     supplier_reference: str | None = None
     issue_date: date

@@ -34,8 +34,13 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from typing import TYPE_CHECKING
+
 from saebooks.db import Base
 from saebooks.models._scope import CompanyScoped
+
+if TYPE_CHECKING:
+    from saebooks.models.contact import Contact
 
 
 class BillStatus(enum.StrEnum):
@@ -148,6 +153,16 @@ class Bill(CompanyScoped, Base):
         cascade="all, delete-orphan",
         order_by="BillLine.line_no",
     )
+    contact: Mapped["Contact"] = relationship(
+        "Contact",
+        foreign_keys=[contact_id],
+        lazy="raise_on_sql",
+    )
+
+    @property
+    def contact_name(self) -> str | None:
+        contact = self.__dict__.get("contact")
+        return contact.name if contact is not None else None
 
 
 class BillLine(Base):
