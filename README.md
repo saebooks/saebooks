@@ -23,9 +23,14 @@ cp .env.example .env
 # Edit .env — at minimum set:
 #   POSTGRES_PASSWORD
 #   SAEBOOKS_FIELD_ENCRYPTION_KEY  (openssl rand -base64 32)
+#   SAEBOOKS_SECRET_KEY            (openssl rand -base64 32)
 #   SAEBOOKS_WEB_SECRET_KEY        (openssl rand -base64 32)
 #   SAEBOOKS_SQL_RO_PASSWORD       (openssl rand -base64 24 | tr -d '/+=' | head -c 32)
 docker compose up -d
+
+# Mint the first owner + a bearer token:
+docker compose exec api \
+  python -m saebooks.cli bootstrap-admin --email you@example.com
 ```
 
 This pulls pre-built `saebooks/saebooks` and `saebooks/saebooks-web`
@@ -33,10 +38,14 @@ images from Docker Hub. To build from source instead, clone
 `saebooks-web` as a sibling directory and use
 `deploy/sap/docker-compose.yml`.
 
-Then open <http://localhost:8080>.
+| Surface | URL |
+|---|---|
+| Web UI | <http://localhost:8080> |
+| REST API | <http://localhost:8042> |
+| gRPC (desktop client) | `localhost:50051` |
 
-The first user to sign in becomes admin if you list their username in
-`SAEBOOKS_BOOTSTRAP_ADMINS`.
+For the full self-hosting walkthrough — TLS, Postgres tuning, backups,
+upgrades — see [SELFHOST.md](./SELFHOST.md).
 
 ### Hosted Community
 

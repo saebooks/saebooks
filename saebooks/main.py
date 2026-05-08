@@ -81,7 +81,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="SAE Books",
-        version="0.1.1",
+        version="0.1.2",
         description="Self-hosted double-entry accounting",
         lifespan=lifespan,
     )

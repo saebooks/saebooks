@@ -9,9 +9,12 @@
 #   # Edit .env — at minimum set:
 #   #   POSTGRES_PASSWORD
 #   #   SAEBOOKS_FIELD_ENCRYPTION_KEY  (openssl rand -base64 32)
+#   #   SAEBOOKS_SECRET_KEY            (openssl rand -base64 32)
 #   #   SAEBOOKS_WEB_SECRET_KEY        (openssl rand -base64 32)
 #   #   SAEBOOKS_SQL_RO_PASSWORD       (openssl rand -base64 24 | tr -d '/+=' | head -c 32)
 #   docker compose up -d
+#   # Mint the first owner + a bearer token:
+#   docker compose exec api python -m saebooks.cli bootstrap-admin --email you@example.com
 #
 # Web UI: http://localhost:8080
 # REST API: http://localhost:8042
@@ -48,6 +51,7 @@ services:
       SAEBOOKS_BOOTSTRAP_ADMINS: ${SAEBOOKS_BOOTSTRAP_ADMINS:-}
       SAEBOOKS_DEV_API_TOKEN: ${SAEBOOKS_DEV_API_TOKEN:-}
       SAEBOOKS_FIELD_ENCRYPTION_KEY: ${SAEBOOKS_FIELD_ENCRYPTION_KEY:?SAEBOOKS_FIELD_ENCRYPTION_KEY must be set in .env}
+      SAEBOOKS_SECRET_KEY: ${SAEBOOKS_SECRET_KEY:?SAEBOOKS_SECRET_KEY must be set in .env}
       SAEBOOKS_SQL_RO_PASSWORD: ${SAEBOOKS_SQL_RO_PASSWORD:?SAEBOOKS_SQL_RO_PASSWORD must be set in .env}
       SENTRY_DSN: ${SENTRY_DSN:-}
       SEED_COMPANY_NAME: ${SEED_COMPANY_NAME:-}

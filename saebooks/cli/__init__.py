@@ -12,6 +12,7 @@ Invoked like::
     python -m saebooks.cli fx-revalue
     python -m saebooks.cli fx-revalue --through 2026-03-31
     python -m saebooks.cli fx-revalue --company-id <uuid> --through 2026-03-31
+    python -m saebooks.cli bootstrap-admin --email you@example.com --name "You"
 
 Designed to be kicked by plain cron — no long-running worker, no queue
 runtime. Exits 0 on success, 1 on total failure; per-account errors are
@@ -40,9 +41,10 @@ import logging
 import sys
 import uuid
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime, timezone
 
-from sqlalchemy import text
+from sqlalchemy import func as sa_func
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from saebooks.config import settings
@@ -396,6 +398,150 @@ async def _fx_revalue(company_id: str | None, through: str | None) -> int:
     return 0
 
 
+async def _bootstrap_admin(
+    *,
+    email: str,
+    name: str | None,
+    ttl_hours: int,
+    force: bool,
+) -> int:
+    """Create the first owner user + Default tenant; print a one-time bearer token.
+
+    Idempotency: refuses if any users already exist (override with ``--force``).
+    Self-hosters run this once after ``docker compose up`` to get a JWT they
+    can paste into the desktop client's first-run wizard or use as a
+    ``curl -H 'Authorization: Bearer …'`` header.
+
+    Exit codes:
+        0 — created and token printed
+        1 — already bootstrapped (users exist)
+        2 — misconfigured (bad email, no SAEBOOKS_SECRET_KEY, DB unreachable)
+    """
+    # Late imports — keep startup cost off the other CLI commands.
+    from saebooks.models.tenant import Tenant
+    from saebooks.models.user import User, UserRole
+    from saebooks.services.jwt_tokens import make_access_token
+
+    email_lc = (email or "").strip().lower()
+    if "@" not in email_lc or len(email_lc) < 3:
+        logger.error("bootstrap-admin: invalid email %r", email)
+        return 2
+
+    # Without a stable secret key the printed token signs under an
+    # ephemeral per-process key and the API server (different process)
+    # can't verify it. Make this loud.
+    if not settings.secret_key.strip():
+        logger.error(
+            "bootstrap-admin: SAEBOOKS_SECRET_KEY is not set. The token printed "
+            "would be signed under an ephemeral per-process key and the API server "
+            "could not verify it. Set SAEBOOKS_SECRET_KEY (a 32+ char random string) "
+            "in the API container's environment, restart, then rerun this command."
+        )
+        return 2
+
+    DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+    try:
+        async with AsyncSessionLocal() as session:
+            # Idempotency guard — refuse if any user rows exist.
+            existing_count = (
+                await session.execute(
+                    select(sa_func.count()).select_from(User)
+                )
+            ).scalar_one()
+            if existing_count > 0 and not force:
+                logger.error(
+                    "bootstrap-admin: refusing to run — %d user row(s) already "
+                    "exist. Use --force to create another owner anyway "
+                    "(NOT recommended for normal use).",
+                    existing_count,
+                )
+                return 1
+
+            # Reuse the Default tenant if migrations seeded it; otherwise create it.
+            tenant = (
+                await session.execute(
+                    select(Tenant).where(Tenant.id == DEFAULT_TENANT_ID)
+                )
+            ).scalar_one_or_none()
+            if tenant is None:
+                tenant = Tenant(
+                    id=DEFAULT_TENANT_ID,
+                    name=name or "Default",
+                    slug="default",
+                )
+                session.add(tenant)
+                await session.flush()
+
+            # If --force and the email already exists, surface a clean error
+            # rather than letting the unique-constraint blow up the session.
+            existing_user = (
+                await session.execute(
+                    select(User).where(User.username == email_lc)
+                )
+            ).scalar_one_or_none()
+            if existing_user is not None:
+                logger.error(
+                    "bootstrap-admin: a user with username=%s already exists "
+                    "(id=%s, role=%s). Pick a different email or remove the "
+                    "row first.",
+                    email_lc,
+                    existing_user.id,
+                    existing_user.role,
+                )
+                return 1
+
+            user = User(
+                id=uuid.uuid4(),
+                tenant_id=tenant.id,
+                username=email_lc,
+                email=email_lc,
+                display_name=name or email_lc.split("@", 1)[0],
+                role=UserRole.OWNER.value,
+                # Pre-verified — the operator runs this from a trusted shell;
+                # forcing them through the email-verification flow would be
+                # daft when no SMTP is wired up yet.
+                email_verified_at=datetime.now(timezone.utc),
+                password_version=0,
+                version=1,
+            )
+            session.add(user)
+            await session.commit()
+
+            token = make_access_token(
+                user, expires_in_seconds=ttl_hours * 3600
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.error("bootstrap-admin: %s", exc)
+        return 2
+
+    bar = "=" * 72
+    print()
+    print(bar)
+    print("SAE Books — bootstrap successful")
+    print(bar)
+    print(f"  Email     : {email_lc}")
+    print(f"  Tenant    : {tenant.name}  ({tenant.id})")
+    print(f"  User ID   : {user.id}")
+    print("  Role      : owner")
+    print(f"  Token TTL : {ttl_hours}h")
+    print(bar)
+    print()
+    print("Bearer token (paste into the desktop first-run wizard, or use as")
+    print("`Authorization: Bearer <token>`):")
+    print()
+    print(f"  {token}")
+    print()
+    print("Smoke test:")
+    print(f"  curl -H 'Authorization: Bearer {token}' \\")
+    print("       http://localhost:8000/api/v1/companies")
+    print()
+    print("Token rotates with the next password reset. To mint a fresh one")
+    print("use the /auth/login endpoint after setting a password in the UI.")
+    print()
+    return 0
+
+
 async def _refresh_feed_issues(*, allow_bypass: bool) -> int:
     """Cache /sds/feedissues into bank_feed_issues.
 
@@ -484,6 +630,34 @@ def main(argv: list[str] | None = None) -> int:
         help="Override today's date (ISO-format) — useful for catch-up runs.",
     )
 
+    boot = sub.add_parser(
+        "bootstrap-admin",
+        help="Create the first owner user + Default tenant and print a "
+        "long-lived bearer token. Self-host first-run.",
+    )
+    boot.add_argument(
+        "--email",
+        required=True,
+        help="Owner email address (becomes the username).",
+    )
+    boot.add_argument(
+        "--name",
+        default=None,
+        help="Display name for the owner / Default tenant. Default: local-part of email.",
+    )
+    boot.add_argument(
+        "--ttl-hours",
+        type=int,
+        default=24 * 30,
+        help="Bearer token lifetime in hours. Default: 720 (30 days).",
+    )
+    boot.add_argument(
+        "--force",
+        action="store_true",
+        default=False,
+        help="Create another owner even if users already exist. NOT recommended.",
+    )
+
     fx = sub.add_parser(
         "fx-revalue",
         help="Post month-end FX revaluation (adjusting + reversing pair per "
@@ -523,6 +697,15 @@ def main(argv: list[str] | None = None) -> int:
         return asyncio.run(_reconcile_feeds(args.company_id))
     if args.command == "fx-revalue":
         return asyncio.run(_fx_revalue(args.company_id, args.through))
+    if args.command == "bootstrap-admin":
+        return asyncio.run(
+            _bootstrap_admin(
+                email=args.email,
+                name=args.name,
+                ttl_hours=args.ttl_hours,
+                force=args.force,
+            )
+        )
     parser.print_help()
     return 2
 

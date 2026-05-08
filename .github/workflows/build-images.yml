@@ -65,3 +65,69 @@ jobs:
           push: ${{ startsWith(github.ref, 'refs/tags/v') }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  release:
+    # On a v*.*.* tag, publish a GitHub Release containing the self-host
+    # bundle: the Docker-Hub-pulling docker-compose.yml + the annotated
+    # .env.example. Self-hosters grab these two files, set the secrets,
+    # `docker compose up -d`, and run `bootstrap-admin`. The image build
+    # job above keeps Docker Hub in sync; this job handles the GH side.
+    name: Attach self-host bundle to GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Stage release artefacts
+        run: |
+          mkdir -p dist
+          cp docker-compose.yml dist/docker-compose.yml
+          cp .env.example       dist/.env.example
+          # Convenience tarball that drops both files into a fresh
+          # directory in one go: `tar xzf saebooks-selfhost.tar.gz`.
+          tar -czf dist/saebooks-selfhost.tar.gz \
+              docker-compose.yml .env.example \
+              SELFHOST.md README.md LICENSE
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            dist/docker-compose.yml
+            dist/.env.example
+            dist/saebooks-selfhost.tar.gz
+          body: |
+            ## SAE Books ${{ github.ref_name }} — self-host bundle
+
+            **Quick start (Linux / Docker):**
+            ```bash
+            mkdir saebooks && cd saebooks
+            curl -L -o docker-compose.yml \
+              https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/docker-compose.yml
+            curl -L -o .env.example \
+              https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/.env.example
+            cp .env.example .env  # then edit secrets
+            export SAEBOOKS_TAG=${{ github.ref_name }}
+            docker compose up -d
+            docker compose exec api \
+              python -m saebooks.cli bootstrap-admin --email you@example.com
+            ```
+
+            Docker images pushed to:
+            - `saebooks/saebooks:${{ github.ref_name }}` (REST + gRPC API)
+            - `saebooks/saebooks-web:${{ github.ref_name }}` (Jinja/HTMX UI)
+
+            See [SELFHOST.md](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/SELFHOST.md)
+            for the full walkthrough.
+
+            > **Alpha note:** Windows users running the desktop client will
+            > see a SmartScreen warning — code-signing certificates are
+            > not yet provisioned. Click "More info → Run anyway".
