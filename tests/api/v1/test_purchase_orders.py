@@ -28,6 +28,8 @@ from saebooks.api.v1.auth import DEFAULT_TENANT_ID, current_token
 from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.account import Account, AccountType
+from saebooks.models.company import Company
+from saebooks.models.contact import ContactType
 from saebooks.models.change_log import ChangeLog
 from saebooks.models.contact import Contact
 
@@ -58,7 +60,12 @@ async def unauth_client() -> AsyncClient:
 
 @pytest.fixture
 async def po_deps() -> dict[str, str]:
-    """Return IDs needed to build a purchase-order payload."""
+    """Return IDs needed to build a purchase-order payload.
+
+    The AU CoA seeder loads accounts but no contacts; this fixture
+    lazily provisions a SUPPLIER contact in the seed company so the
+    PO suite is self-bootstrapping against a fresh test DB.
+    """
     async with AsyncSessionLocal() as session:
         expense = (
             await session.execute(
@@ -74,12 +81,32 @@ async def po_deps() -> dict[str, str]:
                 select(Contact).where(
                     Contact.archived_at.is_(None),
                     Contact.tenant_id == DEFAULT_TENANT_ID,
+                    Contact.contact_type == ContactType.SUPPLIER,
                 ).limit(1)
             )
         ).scalars().first()
+        if contact is None:
+            company = (
+                await session.execute(
+                    select(Company).where(
+                        Company.tenant_id == DEFAULT_TENANT_ID,
+                        Company.archived_at.is_(None),
+                    ).limit(1)
+                )
+            ).scalars().first()
+            assert company is not None, "Seed company missing — load_au_coa fixture broken"
+            contact = Contact(
+                tenant_id=DEFAULT_TENANT_ID,
+                company_id=company.id,
+                name="Test Vendor",
+                contact_type=ContactType.SUPPLIER,
+            )
+            session.add(contact)
+            await session.commit()
+            await session.refresh(contact)
 
     assert expense is not None, "Test DB has no EXPENSE account in default tenant"
-    assert contact is not None, "Test DB has no contact in default tenant"
+    assert contact is not None, "Failed to provision test contact"
     return {
         "expense_account_id": str(expense.id),
         "contact_id": str(contact.id),
