@@ -23,6 +23,7 @@ from saebooks.config import Settings
 from saebooks.services.features import (
     ALL_FLAGS,
     FLAG_ABR_LOOKUP,
+    FLAG_ACCOUNTING_SYNC,
     FLAG_AI_EXTRACTION,
     FLAG_ALLOCATION_RULES,
     FLAG_ASSET_V2,
@@ -44,6 +45,9 @@ from saebooks.services.features import (
     FLAG_SMTP_RELAY,
     FLAG_SQL_TOOL,
     FLAG_STRIPE_INTEGRATION,
+    FLAG_SYNC_MYOB,
+    FLAG_SYNC_QBO,
+    FLAG_SYNC_XERO,
     FLAG_THEMES,
     TIER_ORDER,
     active_flags,
@@ -100,6 +104,12 @@ EXPECTED_PRO = EXPECTED_BUSINESS | frozenset({
 
 EXPECTED_ENTERPRISE = EXPECTED_PRO | frozenset({
     FLAG_PER_COMPANY_SISS,
+    # Build #9 — accounting-package sync. Umbrella + per-provider sub-
+    # flags. All four Enterprise-only.
+    FLAG_ACCOUNTING_SYNC,
+    FLAG_SYNC_XERO,
+    FLAG_SYNC_MYOB,
+    FLAG_SYNC_QBO,
 })
 
 

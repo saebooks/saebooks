@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Numeric, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from saebooks.db import Base
@@ -94,3 +94,14 @@ class Contact(CompanyScoped, Base):
     # also route through the same service layer so the counter stays
     # authoritative. See alembic/versions/0036_phase0_api_scaffolding.py.
     version: Mapped[int] = mapped_column(default=1, nullable=False)
+
+    # External-id quartet (mig 0095). Matches the shape installed on
+    # bills/invoices/credit_notes/payments by 0092. Required for the
+    # Build #9 Xero/MYOB/QBO sync round-trip to be idempotent on retry.
+    # ``external_payload`` carries the full provider-shaped record at
+    # last pull, used by the conflict-detection diff in
+    # ``services/sync/xero/push.py``.
+    external_id: Mapped[str | None] = mapped_column(String(255))
+    external_source: Mapped[str | None] = mapped_column(String(64))
+    external_etag: Mapped[str | None] = mapped_column(String(255))
+    external_payload: Mapped[dict | None] = mapped_column(JSONB)

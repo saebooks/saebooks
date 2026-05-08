@@ -35,6 +35,16 @@ from saebooks.models.pay_run import PayRun, PayRunLine, PayRunStatus
 from saebooks.models.project import Project, ProjectStatus
 from saebooks.models.settings import Setting
 from saebooks.models.sql_query import SqlQuery
+from saebooks.models.sync import (
+    SyncAuditLog,
+    SyncCoaAccountRequest,
+    SyncConnection,
+    SyncConnectionStatus,
+    SyncDirection,
+    SyncObjectType,
+    SyncProvider,
+    SyncState,
+)
 from saebooks.models.tax_code import TaxCode
 from saebooks.models.tenant import Tenant
 from saebooks.models.user import User, UserRole
@@ -84,6 +94,14 @@ __all__ = [
     "Setting",
     "SqlQuery",
     "StatementLineStatus",
+    "SyncAuditLog",
+    "SyncCoaAccountRequest",
+    "SyncConnection",
+    "SyncConnectionStatus",
+    "SyncDirection",
+    "SyncObjectType",
+    "SyncProvider",
+    "SyncState",
     "TaxCode",
     "Tenant",
     "User",

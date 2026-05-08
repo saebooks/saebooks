@@ -100,6 +100,22 @@ FLAG_AI_EXTRACTION = "ai_extraction"
 # overhead. Gated at Business+ since multi-company is the primary driver.
 FLAG_ALLOCATION_RULES = "allocation_rules"
 
+# --- Build #9 (accounting-package sync — Enterprise tier) ---------------- #
+# Bidirectional sync with external accounting packages (Xero / MYOB / QBO).
+# The umbrella flag gates the whole feature surface (Settings -> Sync UI,
+# /api/v1/sync/* routes, the worker entry-point). The three sub-flags each
+# gate a specific provider so a customer can enable e.g. Xero alone while
+# their MYOB connection waits on the accountant's call.
+#
+# Decided 2026-05-06 as Enterprise-only — bidirectional sync is "extra
+# work" beyond Pro's banking + lodgement scope. See plan
+# `~/.claude/plans/saebooks-accounting-sync.md` § "Tier" for the
+# decision log.
+FLAG_ACCOUNTING_SYNC = "accounting_sync"
+FLAG_SYNC_XERO = "sync_xero"
+FLAG_SYNC_MYOB = "sync_myob"
+FLAG_SYNC_QBO = "sync_qbo"
+
 ALL_FLAGS: tuple[str, ...] = (
     FLAG_BANK_FEEDS,
     FLAG_ABR_LOOKUP,
@@ -124,6 +140,10 @@ ALL_FLAGS: tuple[str, ...] = (
     FLAG_SCHEDULED_BACKUPS,
     FLAG_AI_EXTRACTION,
     FLAG_ALLOCATION_RULES,
+    FLAG_ACCOUNTING_SYNC,
+    FLAG_SYNC_XERO,
+    FLAG_SYNC_MYOB,
+    FLAG_SYNC_QBO,
 )
 
 _ALL_FLAGS_SET: frozenset[str] = frozenset(ALL_FLAGS)
@@ -172,6 +192,14 @@ _PRO_FLAGS: frozenset[str] = _BUSINESS_FLAGS | frozenset({
 
 _ENTERPRISE_FLAGS: frozenset[str] = _PRO_FLAGS | frozenset({
     FLAG_PER_COMPANY_SISS,
+    # Build #9 — bidirectional accounting-package sync. Umbrella + per-
+    # provider sub-flags. All four are Enterprise-only; flipping the
+    # umbrella off via the licence JWT disables every sub-flag too
+    # because the sync router checks the umbrella before the sub-flag.
+    FLAG_ACCOUNTING_SYNC,
+    FLAG_SYNC_XERO,
+    FLAG_SYNC_MYOB,
+    FLAG_SYNC_QBO,
 })
 
 _TIER_FLAGS: dict[str, frozenset[str]] = {

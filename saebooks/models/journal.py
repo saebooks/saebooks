@@ -63,6 +63,15 @@ class JournalEntry(CompanyScoped, Base):
     override_reason: Mapped[str | None] = mapped_column(Text)
     attachments: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # External-id quartet (mig 0095). Sync direction for journal_entries
+    # is push-only — accountant-side adjustments come down to us as
+    # journals on the SAE Books side, but daily-ops journals from this
+    # side push up. The quartet still needs to exist so the upsert key
+    # is stable on retry.
+    external_id: Mapped[str | None] = mapped_column(String(255))
+    external_source: Mapped[str | None] = mapped_column(String(64))
+    external_etag: Mapped[str | None] = mapped_column(String(255))
+    external_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
