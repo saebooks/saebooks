@@ -30,7 +30,10 @@ from saebooks.services.licence.enforcement import (
     has_capacity_for_role_change,
 )
 from saebooks.services.licence.models import LicenceSource, ResolvedLicence
-from saebooks.services.licence.resolver import resolve_licence
+from saebooks.services.licence.resolver import (
+    resolve_licence,
+    resolve_licence_for_user,
+)
 
 __all__ = [
     "TIER_CAPS",
@@ -46,6 +49,7 @@ __all__ = [
     "check_employee_seat",
     "has_capacity_for_role_change",
     "resolve_licence",
+    "resolve_licence_for_user",
     "LicenseService",
     "LicenseSnapshot",
 ]

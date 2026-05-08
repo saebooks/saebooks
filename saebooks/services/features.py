@@ -52,12 +52,15 @@ Usage::
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException, Request, status
 
 from saebooks.config import Settings
 from saebooks.config import settings as _default_settings
+
+_log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------- #
 # Flag identifiers                                                       #
@@ -197,12 +200,22 @@ TIER_ORDER: tuple[str, ...] = (
 # ---------------------------------------------------------------------- #
 
 
-def is_enabled(flag: str, *, settings: Settings | None = None) -> bool:
+def is_enabled(
+    flag: str,
+    *,
+    settings: Settings | None = None,
+    edition: str | None = None,
+) -> bool:
     """Return ``True`` when ``flag`` is active under the given settings.
 
     ``settings`` defaults to the module-level singleton; pass an explicit
     ``Settings`` for tests that want to exercise alternate editions
     without monkey-patching.
+
+    ``edition`` is an explicit override that bypasses ``settings`` —
+    used by ``require_feature`` to apply a per-user effective edition
+    (e.g. launch-promo Pro JWT) without mutating the singleton. When
+    both are passed, ``edition`` wins.
 
     Unknown flags raise ``ValueError`` — typoed flag names should fail
     loud rather than silently return ``False`` (which would hide a
@@ -210,6 +223,8 @@ def is_enabled(flag: str, *, settings: Settings | None = None) -> bool:
     """
     if flag not in _ALL_FLAGS_SET:
         raise ValueError(f"Unknown feature flag: {flag!r}")
+    if edition is not None:
+        return flag in _TIER_FLAGS.get(edition, frozenset())
     effective = settings if settings is not None else _default_settings
     return flag in _TIER_FLAGS.get(effective.edition, frozenset())
 
@@ -233,11 +248,61 @@ def tier_flags(tier: str) -> frozenset[str]:
     return _TIER_FLAGS[tier]
 
 
-def require_feature(flag: str) -> Callable[[], Awaitable[None]]:
+def _effective_edition_for_request(request: Request | None) -> str:
+    """Return the edition that gates feature access for this request.
+
+    The launch-promo flow stamps a Pro-tier JWT on
+    ``users.launch_promo_jwt`` for the first 1,000 customers. Without
+    a per-request override, those users would still bind to
+    ``settings.edition`` (Community for the SaaS deployment) and
+    silently lose every Pro feature they were promised.
+
+    Resolution order:
+
+    1. ``request.state.user.launch_promo_jwt`` (verified, non-expired)
+       via ``resolve_licence_for_user`` — wins over the singleton so
+       a promo'd user sees Pro on a Community-default deployment.
+    2. ``_default_settings.edition`` — the process-wide singleton,
+       used for unauthenticated routes, system jobs, and CLI calls.
+
+    Test failures resolving the per-user JWT (bad sig, expired, no
+    portal pubkey) fall through to the singleton — never to a *lower*
+    tier than the user would otherwise have. Defensive: a corrupt
+    promo JWT must not deny baseline access.
+    """
+    if request is None:
+        return _default_settings.edition
+    user = getattr(request.state, "user", None)
+    if user is None:
+        return _default_settings.edition
+
+    # Lazy import — features.py is imported during settings module load
+    # in some paths and the resolver pulls in the full licence package.
+    from saebooks.services.licence.resolver import resolve_licence_for_user
+
+    try:
+        licence = resolve_licence_for_user(user)
+    except Exception:  # defensive — never fail-closed on resolver glitch
+        _log.exception(
+            "feature gate: resolve_licence_for_user raised; "
+            "falling back to settings.edition"
+        )
+        return _default_settings.edition
+    return licence.edition
+
+
+def require_feature(flag: str) -> Callable[[Request], Awaitable[None]]:
     """FastAPI dependency factory: 404 when ``flag`` is disabled.
 
     Attach via ``Depends(require_feature(FLAG_X))`` or on a router via
     ``dependencies=[Depends(require_feature(FLAG_X))]``.
+
+    The dep is **per-request** as of the launch-promo fix: the gate
+    looks up ``request.state.user`` (stamped by ``require_bearer``)
+    and consults ``resolve_licence_for_user`` so a user with a Pro
+    promo JWT gets Pro features even when ``settings.edition`` is
+    Community. Routes without an authenticated user fall back to the
+    singleton edition.
 
     Returns 404 (not 403) so a lower-tier build doesn't advertise the
     existence of higher-tier routes — they simply aren't part of the
@@ -246,8 +311,9 @@ def require_feature(flag: str) -> Callable[[], Awaitable[None]]:
     if flag not in _ALL_FLAGS_SET:
         raise ValueError(f"Unknown feature flag: {flag!r}")
 
-    async def _dep() -> None:
-        if not is_enabled(flag):
+    async def _dep(request: Request) -> None:
+        edition = _effective_edition_for_request(request)
+        if not is_enabled(flag, edition=edition):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
     return _dep

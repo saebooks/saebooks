@@ -125,10 +125,17 @@ def _wizard_summary(wizard_id: UUID, state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def _check_qbo_flag() -> None:
-    """Callable used as a dep-factory result for QBO kind gating."""
+async def _check_qbo_flag(request: Request) -> None:
+    """Callable used as a dep-factory result for QBO kind gating.
+
+    Passes the ``Request`` through so the per-user effective edition
+    (e.g. launch-promo Pro JWT on the user row) is honoured rather
+    than only the process-wide singleton. Without this hop a promo'd
+    user on a Community-default deployment would get 404 here even
+    though their licence covers QBO import.
+    """
     dep = require_feature(FLAG_QBO_IMPORT)
-    await dep()
+    await dep(request)
 
 
 # ---------------------------------------------------------------------------
@@ -154,7 +161,7 @@ async def start_wizard(
 
     # QBO kind requires Pro+ flag.
     if payload.kind in _QBO_KINDS:
-        await _check_qbo_flag()
+        await _check_qbo_flag(request)
 
     if key is not None:
         raw_body = await request.body()

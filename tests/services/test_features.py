@@ -299,5 +299,100 @@ async def test_require_feature_allows_business_and_above(
     assert resp.json() == {"ok": "true"}
 
 
+# ---------------------------------------------------------------------- #
+# require_feature — per-user (launch promo) resolution                   #
+# ---------------------------------------------------------------------- #
+# These tests pin the launch-promo critic fix: a user with a Pro JWT
+# stamped on users.launch_promo_jwt must clear a Pro-flag gate even
+# when the singleton is Community. Without per-user resolution every
+# promo'd customer would silently run on Community.
+
+
+@pytest.mark.parametrize(
+    "flag,user_edition,want_status",
+    [
+        # User with Pro promo JWT clears a Business+ flag on Community.
+        ("bank_feeds", "pro", 200),
+        # User with Pro promo JWT clears a Pro+ flag on Community.
+        ("ato_sbr", "pro", 200),
+        # No user (unauthenticated path) must still respect singleton —
+        # Community → Business flag blocked.
+        ("bank_feeds", None, 404),
+    ],
+)
+async def test_require_feature_consults_per_user_promo_jwt(
+    flag: str,
+    user_edition: str | None,
+    want_status: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Per-user override beats Community singleton.
+
+    Mirrors the v0.1 launch scenario: SAEBOOKS_EDITION=community on
+    the SaaS box; first-1000 users carry a Pro JWT on their row;
+    every gated Pro/Business route should let them in.
+    """
+    from saebooks.config import settings as module_settings
+    from saebooks.services.features import require_feature
+    from saebooks.services.licence import (
+        LicenceSource,
+        ResolvedLicence,
+        caps_for,
+    )
+    from saebooks.services.licence import resolver as resolver_mod
+
+    monkeypatch.setattr(module_settings, "edition", "community")
+
+    # Stub the per-user resolver to behave as if the request user has
+    # a verified Pro JWT (or no JWT at all if user_edition is None).
+    def _fake_for_user(u):  # noqa: ANN001
+        if u is None or user_edition is None:
+            # singleton fallback
+            return ResolvedLicence(
+                edition="community",
+                source=LicenceSource.COMMUNITY_FALLBACK,
+                caps=caps_for("community"),
+            )
+        return ResolvedLicence(
+            edition=user_edition,
+            source=LicenceSource.JWT,
+            caps=caps_for(user_edition),
+        )
+
+    monkeypatch.setattr(
+        resolver_mod, "resolve_licence_for_user", _fake_for_user
+    )
+
+    app = FastAPI()
+
+    @app.middleware("http")
+    async def _stamp_user(request, call_next):  # noqa: ANN001
+        # Tests inject "X-Test-User: 1" to simulate a logged-in
+        # request whose user row carries a Pro promo JWT. Absence
+        # leaves request.state.user unset, exercising the fallback.
+        if request.headers.get("X-Test-User"):
+            class _U:
+                id = "test-user"
+                launch_promo_jwt = "header.payload.sig"
+            request.state.user = _U()
+        return await call_next(request)
+
+    @app.get(
+        "/gated",
+        dependencies=[Depends(require_feature(flag))],
+    )
+    async def gated() -> dict[str, str]:
+        return {"ok": "true"}
+
+    headers = {"X-Test-User": "1"} if user_edition is not None else {}
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as ac:
+        resp = await ac.get("/gated", headers=headers)
+    assert resp.status_code == want_status, (
+        f"flag={flag} user_edition={user_edition} → {resp.status_code}"
+    )
+
+
 # NOTE: /admin/license HTML page tests removed in Cat-C rollup; replace with
 # tests against /api/v1/admin/license when that endpoint lands.
