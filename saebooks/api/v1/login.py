@@ -28,11 +28,15 @@ even after an admin edits the user.
 from __future__ import annotations
 
 import uuid
+from functools import lru_cache
 
 from fastapi import APIRouter, Header, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
+from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.user import User
 from saebooks.services.jwt_tokens import JWTError, create_access_token, decode_access_token
@@ -86,8 +90,39 @@ def _extract_bearer(authorization: str | None) -> str | None:
     return parts[1].strip()
 
 
+@lru_cache(maxsize=1)
+def _owner_session_factory() -> async_sessionmaker[AsyncSession]:
+    """Sessionmaker bound to the BYPASSRLS owner role.
+
+    Email lookup at login time is **intrinsically pre-tenant** — we
+    cannot know which tenant a user belongs to before we have looked
+    them up by email. The runtime web engine connects as the
+    ``saebooks_app`` role (FORCE RLS, BYPASSRLS=f) and the ``users``
+    table has a ``tenant_isolation`` policy keyed on
+    ``current_setting('app.current_tenant')``. Without a tenant set,
+    SELECTs return zero rows, so login silently fails for every user.
+
+    Mirrors the pattern in ``saebooks/cli/seed_demo.py`` — build a
+    dedicated engine from ``settings.database_url`` (the OWNER URL,
+    BYPASSRLS=t) just for this one lookup, then close the session.
+    The rest of the login flow (password verify, token mint) is local
+    or runs through the regular RLS-bound session, so this widens
+    blast radius by exactly one SELECT.
+    """
+    engine = create_async_engine(
+        settings.database_url,
+        echo=False,
+        future=True,
+        poolclass=NullPool,
+    )
+    return async_sessionmaker(
+        engine, expire_on_commit=False, class_=AsyncSession
+    )
+
+
 async def _user_by_email(email: str) -> User | None:
-    async with AsyncSessionLocal() as session:
+    SessionLocal = _owner_session_factory()
+    async with SessionLocal() as session:
         result = await session.execute(
             select(User).where(User.email == email)
         )

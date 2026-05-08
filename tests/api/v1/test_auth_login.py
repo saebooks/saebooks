@@ -23,6 +23,7 @@ from unittest.mock import patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
@@ -309,3 +310,133 @@ async def test_refresh_via_body_field(client: AsyncClient) -> None:
     )
     assert r.status_code == 200, r.text
     assert "access_token" in r.json()
+
+
+# ---------------------------------------------------------------------------
+# Regression: login email lookup must bypass RLS (post-squash defect)
+# ---------------------------------------------------------------------------
+#
+# Background
+# ----------
+# In production app.saebooks.com.au, the api container connects via
+# SAEBOOKS_APP_DATABASE_URL (the saebooks_app role: NOBYPASSRLS, FORCE
+# RLS on users). Email lookup at login time is intrinsically pre-tenant
+# — you cannot know which tenant a user belongs to before you've found
+# them by email. The previous implementation opened the FORCE-RLS
+# session for the email SELECT, the tenant_isolation policy returned
+# zero rows, and login 401'd for every user.
+#
+# The fix makes the email lookup go through a narrow BYPASSRLS owner
+# engine (mirroring saebooks/cli/seed_demo.py:_owner_session_factory).
+# This test pins the runtime AsyncSessionLocal to a NOBYPASSRLS engine
+# that matches prod's role topology, then exercises POST /auth/login
+# end-to-end. Pre-fix, this test 401s. Post-fix, it 200s.
+
+
+async def test_login_works_under_force_rls_app_role() -> None:
+    """Regression: login must succeed when AsyncSessionLocal is bound to
+    a FORCE-RLS role (saebooks_app shape) — the prod configuration.
+
+    Skipped on SQLite or when the saebooks_app role is missing
+    (migration 0056 not applied).
+    """
+    import os
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import (
+        async_sessionmaker as _async_sessionmaker,
+        create_async_engine as _create_async_engine,
+    )
+    from sqlalchemy.pool import NullPool as _NullPool
+
+    from saebooks.db import engine as _owner_engine
+    from saebooks.api.v1 import login as login_module
+
+    if not _owner_engine.url.get_backend_name().startswith("postgres"):
+        pytest.skip("RLS regression is meaningless on SQLite.")
+
+    # Make sure saebooks_app exists and we know its password.
+    app_role_pw = "test-only-app-pw"
+    async with _owner_engine.begin() as conn:
+        exists = (
+            await conn.execute(
+                text("SELECT 1 FROM pg_roles WHERE rolname = 'saebooks_app'")
+            )
+        ).first()
+        if exists is None:
+            pytest.skip("saebooks_app role missing — migration 0056 not applied")
+        await conn.execute(
+            text(f"ALTER ROLE saebooks_app WITH PASSWORD '{app_role_pw}'")
+        )
+
+    # Build a session factory bound to saebooks_app, same shape as prod.
+    raw = str(_owner_engine.url)
+    db_name = raw.rsplit("/", 1)[-1].split("?", 1)[0]
+    app_url = (
+        f"postgresql+asyncpg://saebooks_app:{app_role_pw}@db:5432/{db_name}"
+    )
+    app_engine = _create_async_engine(
+        app_url, poolclass=_NullPool, future=True
+    )
+    app_session_factory = _async_sessionmaker(
+        app_engine, expire_on_commit=False, class_=AsyncSession
+    )
+
+    # Seed a known user via the owner engine (BYPASSRLS) — bypassing
+    # _make_user so this test is self-contained and not coupled to the
+    # role-enum drift in the rest of the suite.
+    from sqlalchemy import delete as sa_delete
+
+    seed_email = "rls_login@test.com"
+    seed_pw = "rls-secret-1"
+    Owner = _async_sessionmaker(
+        _owner_engine, expire_on_commit=False, class_=AsyncSession
+    )
+    async with Owner() as session:
+        await session.execute(sa_delete(User).where(User.email == seed_email))
+        session.add(
+            User(
+                id=uuid.uuid4(),
+                tenant_id=_DEFAULT_TENANT,
+                username=f"rls_{uuid.uuid4().hex[:8]}",
+                email=seed_email,
+                role="viewer",
+                password_hash=hash_password(seed_pw),
+                version=1,
+            )
+        )
+        await session.commit()
+
+    # Reset the cached owner-session factory the patched _user_by_email
+    # uses so this test isn't influenced by an earlier import.
+    if hasattr(login_module._owner_session_factory, "cache_clear"):
+        login_module._owner_session_factory.cache_clear()
+
+    # Pin AsyncSessionLocal in the login module to the FORCE-RLS factory.
+    # The login route's email lookup must NOT use this factory after the
+    # fix — it must build its own owner-bound session — so calling
+    # /auth/login should still return 200.
+    original_local = login_module.AsyncSessionLocal
+    login_module.AsyncSessionLocal = app_session_factory  # type: ignore[assignment]
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as ac:
+            r = await ac.post(
+                "/api/v1/auth/login",
+                json={
+                    "email": seed_email,
+                    "password": seed_pw,
+                },
+            )
+        assert r.status_code == 200, (
+            f"login under FORCE-RLS app role failed: "
+            f"{r.status_code} {r.text}"
+        )
+        body = r.json()
+        assert "access_token" in body
+        assert body["token_type"] == "bearer"
+    finally:
+        login_module.AsyncSessionLocal = original_local  # type: ignore[assignment]
+        if hasattr(login_module._owner_session_factory, "cache_clear"):
+            login_module._owner_session_factory.cache_clear()
+        await app_engine.dispose()
