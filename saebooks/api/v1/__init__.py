@@ -53,7 +53,7 @@ from saebooks.api.v1.invoices import router as invoices_router
 from saebooks.api.v1.items import router as items_router
 from saebooks.api.v1.journal_entries import router as journal_entries_router
 from saebooks.api.v1.journal_templates import router as journal_templates_router
-from saebooks.api.v1.license import router as license_router
+from saebooks.api.v1.license import router as license_router, _promo_router as promo_stats_router
 from saebooks.api.v1.lodgement import router as lodgement_router
 from saebooks.api.v1.login import router as login_router
 from saebooks.api.v1.pay_run import router as pay_run_router
@@ -90,6 +90,8 @@ router.include_router(signup_router)
 router.include_router(billing_router)
 # saebooks-infrastructure §8 build #4 — licence snapshot/upload/refresh.
 router.include_router(license_router)
+# Public promo-stats — unauthenticated, polled by signup banner.
+router.include_router(promo_stats_router)
 router.include_router(lodgement_router)
 # Public contact form — unauthenticated, rate-limited per IP/hour.
 router.include_router(contact_public_router)

@@ -224,3 +224,24 @@ async def refresh_token() -> dict[str, Any]:
         "refreshed": True,
         "upstream_status": 200,
     }
+
+
+# --------------------------------------------------------------------- #
+# GET /api/v1/license/promo-stats  (unauthenticated — public counter)   #
+# --------------------------------------------------------------------- #
+# Returns the live promo counter from the license-server. The web
+# signup page polls this endpoint (cached 60 s) to show "N spots left".
+# When LAUNCH_PROMO_ENABLED is false the response shows enabled=false
+# without hitting the license-server at all.
+
+_promo_router = APIRouter(prefix="/license", tags=["license"])
+
+
+@_promo_router.get("/promo-stats")
+async def promo_stats() -> dict:
+    """Public endpoint — no auth required.
+
+    Returns ``{"enabled":bool,"issued":int,"limit":int,"remaining":int}``.
+    """
+    from saebooks.services.launch_promo import get_promo_stats
+    return await get_promo_stats()

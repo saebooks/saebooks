@@ -73,8 +73,8 @@ class Settings(BaseSettings):
     # Defaults are empty / production values; the bank_feeds service
     # raises on use if client_id / secret / subscription_key are unset.
     # Set these via env or .env once SISS onboarding produces a real
-    # credential set. See acsiss/09-open-question-answers.md Q2 for why
-    # SISS_SANDBOX is a separate flag.
+    # credential set. ``SISS_SANDBOX`` is kept as a separate flag so
+    # the sandbox vs production switch is explicit, never auto-derived.
     siss_client_id: str = Field(default="", alias="SISS_CLIENT_ID")
     siss_client_secret: str = Field(default="", alias="SISS_CLIENT_SECRET")
     siss_subscription_key: str = Field(default="", alias="SISS_SUBSCRIPTION_KEY")
@@ -133,7 +133,7 @@ class Settings(BaseSettings):
     smtp_port: int = Field(default=587, alias="SMTP_PORT")
     smtp_user: str = Field(default="", alias="SMTP_USER")
     smtp_password: str = Field(default="", alias="SMTP_PASSWORD")
-    smtp_from: str = Field(default="books@sauer.com.au", alias="SMTP_FROM")
+    smtp_from: str = Field(default="books@example.com", alias="SMTP_FROM")
     smtp_tls: bool = Field(default=True, alias="SMTP_TLS")
     mail_outbox_dir: str = Field(
         default="/app/mail-outbox", alias="SAEBOOKS_MAIL_OUTBOX_DIR"
@@ -221,16 +221,18 @@ class Settings(BaseSettings):
     stripe_publishable_key: str = Field(default="", alias="STRIPE_PUBLISHABLE_KEY")
 
     # ---------------------------------------------------------------- #
-    # AI document extraction (B/46)                                    #
+    # AI document extraction                                           #
     # ---------------------------------------------------------------- #
-    # LiteLLM proxy for Claude Haiku vision extraction. When
-    # litellm_api_key is empty the ai_extraction service raises
-    # AiExtractionNotConfiguredError on use so a misconfigured install
-    # can't silently fail. Only reached on Business+ editions
-    # (FLAG_AI_EXTRACTION gate).
+    # OpenAI-compatible API endpoint for vision-capable LLM extraction
+    # of receipts/invoices. When ``litellm_api_key`` is empty the
+    # ai_extraction service raises ``AiExtractionNotConfiguredError`` on
+    # use so a misconfigured install can't silently fail. Only reached
+    # on Business+ editions (FLAG_AI_EXTRACTION gate). Point
+    # ``LITELLM_BASE_URL`` at any OpenAI-compatible endpoint
+    # (LiteLLM proxy, vLLM, OpenAI, etc.).
     litellm_api_key: str = Field(default="", alias="LITELLM_API_KEY")
     litellm_base_url: str = Field(
-        default="https://litellm.sauer.com.au/v1",
+        default="https://api.openai.com/v1",
         alias="LITELLM_BASE_URL",
     )
 
@@ -288,7 +290,7 @@ class Settings(BaseSettings):
     # ``VAULT_URL`` defaults to the in-compose service hostname so a
     # sibling docker-compose setup (with a shared network) Just Works.
     # Production deployments where the vault runs on a different host
-    # set this to the LAN/Tailnet bind, e.g. ``http://10.0.2.1:18820``.
+    # set this to the LAN/VPN bind for that host.
     #
     # ``VAULT_SHARED_SECRET`` is the bearer token the vault expects in
     # the ``Authorization`` header. Empty by default so an unconfigured
@@ -307,6 +309,31 @@ class Settings(BaseSettings):
     # use ``vault_timeout``.
     vault_timeout: float = Field(default=10.0, alias="VAULT_TIMEOUT")
     vault_upload_timeout: float = Field(default=60.0, alias="VAULT_UPLOAD_TIMEOUT")
+
+    # ---------------------------------------------------------------- #
+    # Launch promo — first-1000-customers free Pro for 12 months.     #
+    # ---------------------------------------------------------------- #
+    # LAUNCH_PROMO_ENABLED: master switch. Default false.
+    # LAUNCH_PROMO_LIMIT: cap (default 1000). Must match license-server.
+    # LICENSE_SERVER_URL: base URL for license.saebooks.com.au.
+    #   The signup flow calls /api/v1/license/issue-launch-promo on
+    #   success when the promo is active.
+    # LICENSE_SERVER_SHARED_SECRET: bearer token for the internal
+    #   admin endpoint (not used by issue-launch-promo which is public,
+    #   but reserved for future admin calls). Leave empty to disable.
+    launch_promo_enabled: bool = Field(
+        default=False, alias="LAUNCH_PROMO_ENABLED"
+    )
+    launch_promo_limit: int = Field(
+        default=1000, alias="LAUNCH_PROMO_LIMIT"
+    )
+    license_server_url: str = Field(
+        default="https://license.saebooks.com.au",
+        alias="LICENSE_SERVER_URL",
+    )
+    license_server_timeout: float = Field(
+        default=5.0, alias="LICENSE_SERVER_TIMEOUT"
+    )
 
     @property
     def oauth_allowed_emails_set(self) -> set[str]:
