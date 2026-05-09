@@ -60,7 +60,12 @@ from saebooks.services.lodgement.exceptions import (
     LodgementUpstreamUnavailable,
     LodgementValidationError,
 )
-from saebooks.services.lodgement.factory import get_lodgement_service
+from saebooks.services.lodgement.factory import (
+    UnknownJurisdiction,
+    UnknownRoute,
+    get_adapter,
+    get_lodgement_service,
+)
 from saebooks.services.lodgement.null import NullLodgementService
 from saebooks.services.lodgement.remote import RemoteLodgementService
 
@@ -77,5 +82,8 @@ __all__ = [
     "LodgementValidationError",
     "NullLodgementService",
     "RemoteLodgementService",
+    "UnknownJurisdiction",
+    "UnknownRoute",
+    "get_adapter",
     "get_lodgement_service",
 ]
