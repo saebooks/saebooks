@@ -1,3 +1,5 @@
+import logging
+import os
 from collections.abc import AsyncIterator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -6,23 +8,49 @@ from sqlalchemy.pool import NullPool
 
 from saebooks.config import settings
 
+logger = logging.getLogger("saebooks.db")
+
+
+_DEV_TEST_ENVS = frozenset({"dev", "test", "ci", ""})
+
 
 def _runtime_database_url() -> str:
     """Pick the URL the request-time engine should connect with.
 
     Preference order (P0 cross-tenant leak fix — see migration
-    0056_split_db_role.py):
+    0056_split_db_role.py and audit-trail/06):
 
     1. ``SAEBOOKS_APP_DATABASE_URL`` if set — explicit non-superuser role.
-    2. ``DATABASE_URL`` — fallback for dev / single-role setups.
+    2. ``DATABASE_URL`` — only in dev/test/ci. Outside those envs we
+       refuse to boot rather than silently run with BYPASSRLS.
 
-    The value chosen here governs RLS enforcement: if the URL points at
-    a superuser or a role with ``BYPASSRLS``, FORCE row security is a
-    no-op and tenant isolation collapses to the application-layer
-    filters only.
+    Why strict: the schema-owner role is a superuser. If the runtime
+    web engine connects as the owner, ``FORCE ROW LEVEL SECURITY`` is
+    a no-op and tenant isolation collapses to the application-layer
+    filters only — which is exactly the gap that mig 0056 was created
+    to close. The CLI engine below has been strict since 0056; this
+    function makes the web engine match.
     """
     if settings.app_database_url:
         return settings.app_database_url
+
+    env = os.environ.get("SAEBOOKS_ENV", "").strip().lower()
+    if env not in _DEV_TEST_ENVS:
+        raise RuntimeError(
+            "SAEBOOKS_APP_DATABASE_URL is required in non-dev environments. "
+            "The schema-owner role bypasses RLS, so the runtime web engine "
+            "must connect as the saebooks_app role to enforce FORCE ROW "
+            "LEVEL SECURITY (see migration 0056_split_db_role.py). "
+            f"SAEBOOKS_ENV={env!r}; set SAEBOOKS_APP_DATABASE_URL or set "
+            "SAEBOOKS_ENV=dev/test/ci for local work."
+        )
+
+    logger.warning(
+        "SAEBOOKS_APP_DATABASE_URL is unset; runtime engine falling back to "
+        "DATABASE_URL (BYPASSRLS owner role). Permitted because "
+        "SAEBOOKS_ENV=%r, but RLS will not enforce tenant isolation.",
+        env,
+    )
     return settings.database_url
 
 

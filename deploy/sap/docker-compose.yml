@@ -41,7 +41,15 @@ services:
       db:
         condition: service_healthy
     environment:
+      # DATABASE_URL is the schema-owner role — used only by alembic for DDL.
       DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-saebooks}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-saebooks}"
+      # SAEBOOKS_APP_DATABASE_URL is the request-time role (saebooks_app),
+      # which is NOSUPERUSER + NOBYPASSRLS so FORCE ROW LEVEL SECURITY
+      # actually binds — see migration 0056_split_db_role.py. Required in
+      # production; the API will refuse to boot without it when
+      # SAEBOOKS_ENV != dev/test/ci.
+      SAEBOOKS_APP_DATABASE_URL: "postgresql+asyncpg://saebooks_app:${SAEBOOKS_APP_DB_PASSWORD:?SAEBOOKS_APP_DB_PASSWORD must be set in .env}@db:5432/${POSTGRES_DB:-saebooks}"
+      SAEBOOKS_ENV: ${SAEBOOKS_ENV:-production}
       SAEBOOKS_EDITION: ${SAEBOOKS_EDITION:-community}
       SAEBOOKS_LOG_LEVEL: ${SAEBOOKS_LOG_LEVEL:-INFO}
       SAEBOOKS_LOG_JSON: ${SAEBOOKS_LOG_JSON:-false}
