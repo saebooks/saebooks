@@ -516,8 +516,32 @@ async def delete(
     performed_by: str | None = None,
     tenant_id: uuid.UUID | None = None,
 ) -> None:
-    """Delete a journal entry and its lines. Any status — MYOB-style."""
+    """Delete a journal entry and its lines. Any status — MYOB-style.
+
+    Audit-trail note (audit M5)
+    ---------------------------
+    The DELETE on the JE cascades to ``journal_lines`` via the
+    ``cascade="all, delete-orphan"`` relationship. Snapshotting only
+    the entry header would lose the line detail — and the lines are
+    where the actual GL meaning lives. We snapshot every line first,
+    then the parent entry, so the legacy ``audit_snapshots`` table
+    holds the complete forensic record.
+
+    The wider audit-trail consolidation (move all snapshot_row callers
+    to ``services.hard_delete.hard_delete_with_audit`` / ``audit_log``)
+    is deferred: the hard-delete helper requires a ``User`` actor and
+    only snapshots a single row, neither of which suits the web
+    router or a parent-with-children delete without further design.
+    Tracked in audit M5 follow-up.
+    """
     entry = await get(session, entry_id, tenant_id=tenant_id)
+    for line in entry.lines:
+        await audit_svc.snapshot_row(
+            session, line,
+            action="delete",
+            performed_by=performed_by,
+            reason=f"cascade from journal_entry {entry.id}",
+        )
     await audit_svc.snapshot_row(
         session, entry,
         action="delete",
