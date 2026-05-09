@@ -1,12 +1,12 @@
 [Unit]
 Description=SAE Books nightly pg_dump
-Documentation=file:///opt/saebooks/scripts/backup.sh
+Documentation=file:///home/sauer/projects/saebooks/scripts/backup.sh
 After=docker.service
 Wants=docker.service
 
 [Service]
 Type=oneshot
-ExecStart=/opt/saebooks/scripts/backup.sh
+ExecStart=/home/sauer/projects/saebooks/scripts/backup.sh
 # Keep systemd from killing the pipeline if dump takes a while.
 TimeoutStartSec=30min
 # Log via journal.

@@ -28,7 +28,7 @@ from saebooks.services import crypto as crypto_svc
 from saebooks.services.ato_sbr import onboarding as sbr
 
 
-def _pkcs12(password: str = "pw", cn: str = "Acme Pty Ltd") -> bytes:
+def _pkcs12(password: str = "pw", cn: str = "Sauer Pty Ltd") -> bytes:
     key = rsa.generate_private_key(65537, 2048)
     subject = issuer = x509.Name(
         [x509.NameAttribute(NameOID.COMMON_NAME, cn)]

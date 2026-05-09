@@ -538,7 +538,7 @@ async def post_depreciation(
 
 
 # ---------------------------------------------------------------------------
-# Convert to Inventory (demonstrator → used-vehicle stock)
+# Convert to Inventory (demonstrator → used-vehicle stock) — gap MOTR-3
 # ---------------------------------------------------------------------------
 
 

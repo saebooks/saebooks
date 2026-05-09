@@ -417,7 +417,7 @@ async def test_cannot_edit_posted_bill() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Regression: retention_pct on bill lines
+# CIVL-3: retention_pct on bill lines
 # ---------------------------------------------------------------------------
 
 

@@ -166,3 +166,12 @@ class User(Base):
     fido2_credential_count: Mapped[int] = mapped_column(
         sa.Integer(), nullable=False, default=0, server_default="0"
     )
+
+    # ----- 0096_launch_promo — first-1000 Pro JWT stamp -------------- #
+    # When the launch promo is active and the user claimed a slot, the
+    # license-server Ed25519 JWT is cached here. The app reads this at
+    # login to determine the effective edition for the session without
+    # hitting the license-server on every request. NULL = no promo.
+    launch_promo_jwt: Mapped[str | None] = mapped_column(
+        sa.Text(), nullable=True
+    )

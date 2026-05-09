@@ -53,6 +53,7 @@ from saebooks.services.jwt_tokens import (
     make_access_token,
     verify_password,
 )
+from saebooks.services.launch_promo import attempt_promo
 from saebooks.services.mailer import send_email
 
 logger = logging.getLogger("saebooks.signup")
@@ -320,6 +321,24 @@ async def signup(body: SignupRequest) -> MessageResponse:
         )
         session.add(user)
         await session.commit()
+
+    # Attempt launch-promo JWT claim (best-effort, non-blocking).
+    # If the promo is enabled and slots remain, we get a signed Pro JWT
+    # back from the license-server and stamp it on the user row. A
+    # failure here never aborts signup — the user just starts at Community.
+    promo_jwt = await attempt_promo(
+        email=body.email,
+        licensed_to=tenant_name,
+    )
+    if promo_jwt is not None:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(User).where(User.email.ilike(body.email))
+            )
+            promo_user = result.scalars().first()
+            if promo_user is not None:
+                promo_user.launch_promo_jwt = promo_jwt
+                await session.commit()
 
     # Send the verification email outside the DB transaction so a
     # downstream SMTP timeout doesn't roll back the user.

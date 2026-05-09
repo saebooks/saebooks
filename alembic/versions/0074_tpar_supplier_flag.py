@@ -1,6 +1,6 @@
 """Add is_tpar_supplier flag to contacts table.
 
-Reason: no TPAR flag on contacts; civil
+Gap CIVL-5 (medium-civil-contractor): no TPAR flag on contacts; civil
 contractors cannot generate ATO-ready sub-contractor payment report.
 
 Revision ID: 0074_tpar_supplier_flag

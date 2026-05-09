@@ -1,6 +1,6 @@
 """Convert-to-inventory endpoint tests — POST /api/v1/fixed_assets/{id}/convert_to_inventory.
 
-Regression: demonstrator vehicle conversion from FA register to inventory.
+Gap MOTR-3: demonstrator vehicle conversion from FA register to inventory.
 
 Tests:
 * test_convert_to_inventory_happy      — 201, asset disposed, item created at NBV

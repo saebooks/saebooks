@@ -3,15 +3,15 @@
 The raw ABR JSON shape (circa 2026) looks roughly like::
 
     {
-      "Abn": "12345678901",
+      "Abn": "87744586592",
       "AbnStatus": "Active",
       "AbnStatusEffectiveFrom": "2024-02-15",
-      "Acn": "123456789",
+      "Acn": "683275756",
       "AddressDate": "2024-02-15",
       "AddressPostcode": "4350",
       "AddressState": "QLD",
       "BusinessName": [],
-      "EntityName": "Acme Pty Ltd",
+      "EntityName": "Sauer Pty Ltd ATF Saueesti Trust",
       "EntityTypeCode": "DIT",
       "EntityTypeName": "Discretionary Investment Trust",
       "Gst": "2024-02-15",
@@ -153,7 +153,7 @@ def apply_to_contact(
 
 
 def _format_abn(raw: str) -> str:
-    """ '12345678901' -> '12 345 678 901' (ABR canonical form)."""
+    """ '87744586592' -> '87 744 586 592' (ABR canonical form)."""
     digits = "".join(ch for ch in raw if ch.isdigit())
     if len(digits) != 11:
         return raw

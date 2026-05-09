@@ -1,4 +1,4 @@
-"""Tests for deferred-revenue posting and recognition (regression).
+"""Tests for deferred-revenue posting and recognition (FITC-3).
 
 Gap: multi-month contract revenue was fully booked to income on the posting
 date.  Fix: lines with service_start_date / service_end_date spanning > 1

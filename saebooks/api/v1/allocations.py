@@ -1,7 +1,7 @@
 """JSON router — ``/api/v1/allocation_rules``.
 
 Overhead allocation rules for multi-company / multi-site cost sharing.
-Regression: /allocations previously returned 404.
+Gap FITC-6 (medium-fitness-chain): /allocations previously returned 404.
 
 * Bearer-token auth via ``SAEBOOKS_DEV_API_TOKEN``.
 * Feature-gated to Business+ via FLAG_ALLOCATION_RULES.

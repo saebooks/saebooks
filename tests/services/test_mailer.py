@@ -31,7 +31,7 @@ def _dev_settings(tmp_path: Path, **overrides: object) -> Settings:
     """Settings with SMTP empty so the outbox path is exercised by default."""
     kwargs: dict[str, object] = {
         "SMTP_HOST": "",
-        "SMTP_FROM": "books@example.com",
+        "SMTP_FROM": "books@sauer.com.au",
         "SAEBOOKS_MAIL_OUTBOX_DIR": str(tmp_path),
     }
     kwargs.update(overrides)
@@ -44,7 +44,7 @@ def _live_settings(**overrides: object) -> Settings:
         SMTP_PORT=587,
         SMTP_USER="user",
         SMTP_PASSWORD="pw",
-        SMTP_FROM="books@example.com",
+        SMTP_FROM="books@sauer.com.au",
         SMTP_TLS=True,
         **overrides,  # type: ignore[arg-type]
     )
@@ -74,7 +74,7 @@ async def test_outbox_mode_writes_eml(tmp_path: Path) -> None:
 
     msg = email.message_from_bytes(eml_path.read_bytes())
     assert msg["To"] == "acme@example.com"
-    assert msg["From"] == "books@example.com"
+    assert msg["From"] == "books@sauer.com.au"
     assert msg["Subject"] == "Your invoice INV-000001"
     # multipart/alternative — text + html
     assert msg.is_multipart()
@@ -125,7 +125,7 @@ async def test_outbox_write_failure_raises(tmp_path: Path, monkeypatch: pytest.M
     bad_path.write_text("I am a file")
     cfg = Settings(  # type: ignore[call-arg]
         SMTP_HOST="",
-        SMTP_FROM="books@example.com",
+        SMTP_FROM="books@sauer.com.au",
         SAEBOOKS_MAIL_OUTBOX_DIR=str(bad_path),
     )
     with pytest.raises(EmailError, match="Cannot create mail outbox"):
@@ -197,11 +197,11 @@ async def test_custom_sender_overrides_settings(tmp_path: Path) -> None:
         "a@example.com",
         "test",
         "<p>x</p>",
-        sender="custom@example.com",
+        sender="custom@sauer.com.au",
         settings=cfg,
     )
     msg = email.message_from_bytes(Path(result.outbox_path or "").read_bytes())
-    assert msg["From"] == "custom@example.com"
+    assert msg["From"] == "custom@sauer.com.au"
 
 
 @pytest.mark.asyncio

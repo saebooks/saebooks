@@ -1,6 +1,6 @@
 """Add settlement_date to invoices for real-estate commission BAS timing.
 
-Reason: commissions were posted to the BAS
+Gap RLES-6 (financial_correctness): commissions were posted to the BAS
 period of the invoice issue date. Real estate commissions are earned at
 unconditional exchange or settlement, which can be weeks to months later.
 This nullable column lets operators record the exchange/settlement date;

@@ -2,9 +2,10 @@
 
 Why these tests exist
 ---------------------
-10 parallel POSTs with the same ``X-Idempotency-Key`` previously produced
+Alex Morgan's API critic (P0-4, audit-trail/05-api-critic-alex-morgan.md)
+found that 10 parallel POSTs with the same ``X-Idempotency-Key`` produced
 1x success + 9x HTTP 500 (worker crashes from DB unique-constraint
-violations). Simultaneously, the same key with a different body silently
+violations).  Simultaneously, the same key with a different body silently
 returned the original resource instead of the RFC 8417-required 422.
 
 The fix is in ``saebooks.services.idempotency``:
@@ -40,10 +41,9 @@ Test 3 — replay returns cached response
     returns the stored bytes and status code verbatim.
 
 NOTE: these tests connect directly to Postgres (``DATABASE_URL``
-or the default dev URL). They will be skipped if the DB is
-unreachable — run them inside the dev compose stack where the
-``db`` service is up, not on a bare developer machine without
-Postgres.
+or the default dev URL).  They will be skipped if the DB is
+unreachable — that is expected in GitHub CI on scada; they run in the
+r420 CI environment which has Postgres available.
 """
 from __future__ import annotations
 

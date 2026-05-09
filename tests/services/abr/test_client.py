@@ -40,14 +40,14 @@ def test_strip_jsonp_leaves_bare_json_alone() -> None:
 
 
 def test_normalise_abn_strips_spaces_and_non_digits() -> None:
-    assert _normalise_abn("12 345 678 901") == "12345678901"
-    assert _normalise_abn("ABN: 87-744-586-592") == "12345678901"
+    assert _normalise_abn("87 744 586 592") == "87744586592"
+    assert _normalise_abn("ABN: 87-744-586-592") == "87744586592"
 
 
 async def test_lookup_raises_when_guid_not_configured() -> None:
     s = _settings(ABR_API_GUID="")
     with pytest.raises(AbrNotConfiguredError):
-        await lookup_abn_raw("12345678901", settings=s)
+        await lookup_abn_raw("87744586592", settings=s)
 
 
 async def test_lookup_raises_on_short_abn() -> None:
@@ -59,9 +59,9 @@ async def test_lookup_raises_on_short_abn() -> None:
 async def test_lookup_returns_parsed_envelope() -> None:
     payload = (
         'callback({'
-        '"Abn":"12345678901",'
+        '"Abn":"87744586592",'
         '"AbnStatus":"Active",'
-        '"EntityName":"Acme Pty Ltd",'
+        '"EntityName":"Sauer Pty Ltd",'
         '"AddressState":"QLD",'
         '"AddressPostcode":"4350",'
         '"Gst":"2024-02-15",'
@@ -71,13 +71,13 @@ async def test_lookup_returns_parsed_envelope() -> None:
     route = respx.get(f"{ABR_BASE}/AbnDetails.aspx").mock(
         return_value=httpx.Response(200, text=payload)
     )
-    result = await lookup_abn_raw("12 345 678 901", settings=_settings())
+    result = await lookup_abn_raw("87 744 586 592", settings=_settings())
     assert route.called
-    assert result["Abn"] == "12345678901"
-    assert result["EntityName"] == "Acme Pty Ltd"
+    assert result["Abn"] == "87744586592"
+    assert result["EntityName"] == "Sauer Pty Ltd"
     # GUID + normalised ABN threaded through as query params
     called = route.calls.last.request.url.params
-    assert called["abn"] == "12345678901"
+    assert called["abn"] == "87744586592"
     assert called["guid"] == "test-guid"
 
 
@@ -91,7 +91,7 @@ async def test_lookup_raises_on_abr_error_message() -> None:
         return_value=httpx.Response(200, text=payload)
     )
     with pytest.raises(AbrError, match="not a valid ABN"):
-        await lookup_abn_raw("12345678901", settings=_settings())
+        await lookup_abn_raw("87744586592", settings=_settings())
 
 
 @respx.mock
@@ -100,4 +100,4 @@ async def test_lookup_raises_on_http_500() -> None:
         return_value=httpx.Response(500, text="down")
     )
     with pytest.raises(AbrError, match="HTTP 500"):
-        await lookup_abn_raw("12345678901", settings=_settings())
+        await lookup_abn_raw("87744586592", settings=_settings())

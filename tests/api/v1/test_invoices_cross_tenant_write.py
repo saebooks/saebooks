@@ -1,8 +1,11 @@
-"""Cross-tenant FK injection regression — invoices.
+"""BKPR-1 P0 regression — cross-tenant FK injection on invoices.
 
-POST /invoices/new previously accepted ``contact_id``, ``account_id`` and
-``tax_code_id`` values from a different tenant verbatim — the session did
-not check that referenced FKs belonged to the caller's tenant.
+audit-trail reference: edge-motor-dealer-20260427T144846Z (gap BKPR-1)
+
+The edge-motor-dealer critic POSTed an invoice via POST /invoices/new with
+foreign-tenant ``contact_id``, ``account_id``, and ``tax_code_id`` values
+supplied verbatim. The session accepted the walsh-co UUIDs without any
+tenant-scope check.
 
 The fix in ``services/invoices.py`` validates every FK reference against
 the caller's tenant_id before INSERT/UPDATE. This file exercises the
@@ -51,7 +54,7 @@ async def two_tenant_seed() -> dict:
             session.add(
                 Tenant(
                     id=tenant_id,
-                    name=f"Test-{label}-{suffix}",
+                    name=f"BKPR-{label}-{suffix}",
                     slug=f"bkpr-{label}-{suffix}",
                 )
             )
@@ -61,7 +64,7 @@ async def two_tenant_seed() -> dict:
                 Company(
                     id=company_id,
                     tenant_id=tenant_id,
-                    name=f"Test-{label}-{suffix}",
+                    name=f"BKPR-{label}-{suffix}",
                     base_currency="AUD",
                     fin_year_start_month=7,
                 )
@@ -73,7 +76,7 @@ async def two_tenant_seed() -> dict:
                     id=contact_id,
                     tenant_id=tenant_id,
                     company_id=company_id,
-                    name=f"Test-Contact-{label}",
+                    name=f"BKPR-Contact-{label}",
                     contact_type=ContactType.CUSTOMER,
                 )
             )
@@ -83,7 +86,7 @@ async def two_tenant_seed() -> dict:
                     tenant_id=tenant_id,
                     company_id=company_id,
                     code=f"BKP{suffix[:3]}{label[0].upper()}",
-                    name=f"Test Income {label}",
+                    name=f"BKPR Income {label}",
                     account_type=AccountType.INCOME,
                 )
             )
@@ -93,7 +96,7 @@ async def two_tenant_seed() -> dict:
                     tenant_id=tenant_id,
                     company_id=company_id,
                     code=f"BK{suffix[:3]}{label[0].upper()}",
-                    name=f"Test GST {label}",
+                    name=f"BKPR GST {label}",
                     rate=Decimal(tax_rate),
                     tax_system="GST",
                     reporting_type="taxable",

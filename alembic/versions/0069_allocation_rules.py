@@ -1,6 +1,6 @@
 """Add allocation_rules table for overhead allocation engine.
 
-Reason: /allocations and /settings/allocations
+Gap FITC-6 (medium-fitness-chain): /allocations and /settings/allocations
 returned 404 because no allocation rules engine existed. This migration
 adds the persistence layer.
 

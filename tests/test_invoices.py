@@ -437,7 +437,7 @@ async def test_margin_scheme_zero_acq_cost_treated_as_full_margin() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Regression: retention_pct on invoice lines
+# CIVL-2: retention_pct on invoice lines
 # ---------------------------------------------------------------------------
 
 
@@ -624,13 +624,13 @@ async def test_no_retention_uses_standard_ar_path() -> None:
 
 
 # ---------------------------------------------------------------------------
-# regression: settlement_date drives BAS period attribution
+# RLES-6: settlement_date drives BAS period attribution
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_settlement_date_used_as_journal_entry_date() -> None:
-    """GL entry_date uses settlement_date, not issue_date, when set (regression).
+    """GL entry_date uses settlement_date, not issue_date, when set (RLES-6).
 
     Real estate commissions are earned at unconditional exchange/settlement.
     BAS period must follow settlement_date so the monthly allocation is correct.
@@ -708,7 +708,7 @@ async def test_no_settlement_date_falls_back_to_issue_date() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Regression: trade-in vehicle recorded as separate AP bill, not negative line
+# MOTR-2: trade-in vehicle recorded as separate AP bill, not negative line
 # ---------------------------------------------------------------------------
 
 

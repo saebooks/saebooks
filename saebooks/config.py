@@ -310,6 +310,31 @@ class Settings(BaseSettings):
     vault_timeout: float = Field(default=10.0, alias="VAULT_TIMEOUT")
     vault_upload_timeout: float = Field(default=60.0, alias="VAULT_UPLOAD_TIMEOUT")
 
+    # ---------------------------------------------------------------- #
+    # Launch promo — first-1000-customers free Pro for 12 months.     #
+    # ---------------------------------------------------------------- #
+    # LAUNCH_PROMO_ENABLED: master switch. Default false.
+    # LAUNCH_PROMO_LIMIT: cap (default 1000). Must match license-server.
+    # LICENSE_SERVER_URL: base URL for license.saebooks.com.au.
+    #   The signup flow calls /api/v1/license/issue-launch-promo on
+    #   success when the promo is active.
+    # LICENSE_SERVER_SHARED_SECRET: bearer token for the internal
+    #   admin endpoint (not used by issue-launch-promo which is public,
+    #   but reserved for future admin calls). Leave empty to disable.
+    launch_promo_enabled: bool = Field(
+        default=False, alias="LAUNCH_PROMO_ENABLED"
+    )
+    launch_promo_limit: int = Field(
+        default=1000, alias="LAUNCH_PROMO_LIMIT"
+    )
+    license_server_url: str = Field(
+        default="https://license.saebooks.com.au",
+        alias="LICENSE_SERVER_URL",
+    )
+    license_server_timeout: float = Field(
+        default=5.0, alias="LICENSE_SERVER_TIMEOUT"
+    )
+
     @property
     def oauth_allowed_emails_set(self) -> set[str]:
         return {e.strip().lower() for e in self.oauth_allowed_emails.split(",") if e.strip()}

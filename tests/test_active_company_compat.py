@@ -1,6 +1,6 @@
 """Tests for the ``first_company_compat`` shim and contextvar binding.
 
-Regression: every router used to define ``async def _first_company()`` that
+Gap P0-5: every router used to define ``async def _first_company()`` that
 picked the oldest non-archived company by ``created_at``, ignoring the
 user's active-company cookie. The fix replaces each helper body with a
 delegate to ``active_svc.first_company_compat()``, which:

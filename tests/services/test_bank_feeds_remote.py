@@ -70,7 +70,7 @@ async def test_create_connection_201_returns_connection_id_and_url() -> None:
     svc = RemoteBankFeedsService()
     body = await svc.create_connection(
         bank="AU000001",
-        account_label="Acme — Operating",
+        account_label="Sauer — Operating",
         idempotency_key="key-1",
     )
     assert route.called

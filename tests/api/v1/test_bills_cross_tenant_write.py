@@ -1,13 +1,17 @@
-"""Cross-tenant FK injection regression — bills.
+"""CIVL-1 P0 regression — cross-tenant FK injection on bills.
 
-POST /bills/new previously accepted ``contact_id``, ``account_id`` and
-``tax_code_id`` values from a different tenant verbatim — the session did
-not check that referenced FKs belonged to the caller's tenant, and the
-line item's GST was computed at the foreign tenant's tax rate.
-``services/bills.py`` now validates every FK reference against the
-caller's tenant_id before INSERT/UPDATE; this file exercises the service
-layer directly (no RLS dependency) so the regression catches a removal
-of the validation helpers even on the schema-owner role.
+audit-trail reference: medium-civil-contractor-2026-04-27T192354Z (gap CIVL-1)
+
+The medium-civil-contractor critic landed bill 8de8b51f via POST /bills/new
+with foreign-tenant ``contact_id``, ``account_id`` and ``tax_code_id``
+values supplied verbatim. Apex's session accepted the walsh-co UUIDs and
+the line item's GST was computed at walsh's 10% rate instead of Apex's 7%.
+
+The fix in ``services/bills.py`` validates every FK reference against the
+caller's tenant_id before INSERT/UPDATE. This file exercises the service
+layer directly (no RLS dependency) so the regression catches a removal of
+the validation helpers even on the schema-owner role used by the default
+test engine.
 """
 from __future__ import annotations
 
@@ -51,7 +55,7 @@ async def two_tenant_seed() -> dict:
             session.add(
                 Tenant(
                     id=tenant_id,
-                    name=f"Test-{label}-{suffix}",
+                    name=f"CIVL-{label}-{suffix}",
                     slug=f"civl-{label}-{suffix}",
                 )
             )
@@ -61,7 +65,7 @@ async def two_tenant_seed() -> dict:
                 Company(
                     id=company_id,
                     tenant_id=tenant_id,
-                    name=f"Test-{label}-{suffix}",
+                    name=f"CIVL-{label}-{suffix}",
                     base_currency="AUD",
                     fin_year_start_month=7,
                 )
@@ -73,7 +77,7 @@ async def two_tenant_seed() -> dict:
                     id=contact_id,
                     tenant_id=tenant_id,
                     company_id=company_id,
-                    name=f"Test-Contact-{label}",
+                    name=f"CIVL-Contact-{label}",
                     contact_type=ContactType.SUPPLIER,
                 )
             )
@@ -83,7 +87,7 @@ async def two_tenant_seed() -> dict:
                     tenant_id=tenant_id,
                     company_id=company_id,
                     code=f"CIV{suffix[:3]}{label[0].upper()}",
-                    name=f"Test Expense {label}",
+                    name=f"CIVL Expense {label}",
                     account_type=AccountType.EXPENSE,
                 )
             )
@@ -93,7 +97,7 @@ async def two_tenant_seed() -> dict:
                     tenant_id=tenant_id,
                     company_id=company_id,
                     code=f"CV{suffix[:3]}{label[0].upper()}",
-                    name=f"Test GST {label}",
+                    name=f"CIVL GST {label}",
                     rate=Decimal(tax_rate),
                     tax_system="GST",
                     reporting_type="taxable",

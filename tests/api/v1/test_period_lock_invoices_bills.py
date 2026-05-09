@@ -1,6 +1,6 @@
-"""Period-lock enforcement tests for invoices and bills.
+"""Period-lock enforcement tests for invoices and bills (gap CIVL-4).
 
-regression (P1): invoices and bills dated inside a locked period were accepted
+CIVL-4 (P1): invoices and bills dated inside a locked period were accepted
 without warning. The fix adds a period-lock check to api_create() for both
 invoices and bills, and translates PostingError → InvoiceError/BillError in
 the post transition so the router returns 422 instead of 500.
@@ -47,21 +47,21 @@ async def _create_locked_company() -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
         session.add(Company(
             id=cid,
             tenant_id=_DEFAULT_TENANT_ID,
-            name=f"Test Corp {cid.hex[:6]}",
+            name=f"CIVL4 Corp {cid.hex[:6]}",
         ))
         await session.flush()
 
         contact = Contact(
             company_id=cid,
             tenant_id=_DEFAULT_TENANT_ID,
-            name="Test Customer",
+            name="CIVL4 Customer",
             contact_type=ContactType.CUSTOMER,
         )
         income_acct = Account(
             company_id=cid,
             tenant_id=_DEFAULT_TENANT_ID,
             code=f"4-{cid.hex[:4]}",
-            name="Test Income",
+            name="CIVL4 Income",
             account_type=AccountType.INCOME,
             is_header=False,
         )
@@ -69,7 +69,7 @@ async def _create_locked_company() -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
             company_id=cid,
             tenant_id=_DEFAULT_TENANT_ID,
             code=f"6-{cid.hex[:4]}",
-            name="Test Expense",
+            name="CIVL4 Expense",
             account_type=AccountType.EXPENSE,
             is_header=False,
         )
@@ -103,7 +103,7 @@ async def _make_client(company_id: uuid.UUID) -> AsyncClient:
 
 
 # ---------------------------------------------------------------------------
-# Regression: invoice create blocked when issue_date inside locked period
+# CIVL-4: invoice create blocked when issue_date inside locked period
 # ---------------------------------------------------------------------------
 
 
@@ -111,7 +111,7 @@ async def _make_client(company_id: uuid.UUID) -> AsyncClient:
 async def test_invoice_create_blocked_by_period_lock() -> None:
     """POST /invoices with issue_date inside locked period must return 422.
 
-    Regression: before the fix api_create() had no period-lock check
+    Gap CIVL-4 (P1): before the fix api_create() had no period-lock check
     and accepted backdated invoice DRAFTs silently.
     """
     cid, contact_id, income_id = await _create_locked_company()
@@ -122,7 +122,7 @@ async def test_invoice_create_blocked_by_period_lock() -> None:
             "issue_date": str(_DATE_INSIDE_LOCK),
             "due_date": "2026-02-15",
             "lines": [{
-                "description": "regression test line",
+                "description": "CIVL-4 test line",
                 "account_id": str(income_id),
                 "quantity": "1",
                 "unit_price": "100.00",
@@ -141,7 +141,7 @@ async def test_invoice_create_blocked_by_period_lock() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Regression: bill create blocked when issue_date inside locked period
+# CIVL-4: bill create blocked when issue_date inside locked period
 # ---------------------------------------------------------------------------
 
 
@@ -149,7 +149,7 @@ async def test_invoice_create_blocked_by_period_lock() -> None:
 async def test_bill_create_blocked_by_period_lock() -> None:
     """POST /bills with issue_date inside locked period must return 422.
 
-    Regression: same guard applied to bills as per the finding.
+    Gap CIVL-4 (P1): same guard applied to bills as per the finding.
     """
     cid, contact_id, expense_id = await _create_locked_company()
 
@@ -159,7 +159,7 @@ async def test_bill_create_blocked_by_period_lock() -> None:
             "issue_date": str(_DATE_INSIDE_LOCK),
             "due_date": "2026-02-15",
             "lines": [{
-                "description": "regression bill test line",
+                "description": "CIVL-4 bill test line",
                 "account_id": str(expense_id),
                 "quantity": "1",
                 "unit_price": "200.00",
@@ -178,7 +178,7 @@ async def test_bill_create_blocked_by_period_lock() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Regression: positive control — current-period invoice and bill accepted
+# CIVL-4: positive control — current-period invoice and bill accepted
 # ---------------------------------------------------------------------------
 
 
@@ -196,7 +196,7 @@ async def test_invoice_create_after_lock_accepted() -> None:
             "issue_date": str(_DATE_AFTER_LOCK),
             "due_date": "2026-05-15",
             "lines": [{
-                "description": "regression positive control",
+                "description": "CIVL-4 positive control",
                 "account_id": str(income_id),
                 "quantity": "1",
                 "unit_price": "100.00",
@@ -224,7 +224,7 @@ async def test_bill_create_after_lock_accepted() -> None:
             "issue_date": str(_DATE_AFTER_LOCK),
             "due_date": "2026-05-15",
             "lines": [{
-                "description": "regression bill positive control",
+                "description": "CIVL-4 bill positive control",
                 "account_id": str(expense_id),
                 "quantity": "1",
                 "unit_price": "200.00",

@@ -398,7 +398,7 @@ async def test_cannot_dispose_already_disposed() -> None:
 
 
 # ---------------------------------------------------------------------- #
-# Convert to inventory (regression)                                          #
+# Convert to inventory (MOTR-3)                                          #
 # ---------------------------------------------------------------------- #
 
 
@@ -434,7 +434,7 @@ async def test_convert_to_inventory_posts_journal_and_marks_disposed() -> None:
     inv_id = await _inventory_acct_id(ctx)
     asset = await _fresh_asset(
         ctx,
-        name="Demo vehicle regression",
+        name="Demo vehicle MOTR-3",
         cost=Decimal("80000"),
         model="asset_5_year_linear",
         in_service=date(2026, 1, 1),
@@ -480,7 +480,7 @@ async def test_convert_fully_depreciated_asset() -> None:
     inv_id = await _inventory_acct_id(ctx)
     asset = await _fresh_asset(
         ctx,
-        name="Fully dep demo regression",
+        name="Fully dep demo MOTR-3",
         cost=Decimal("10000"),
         model="asset_3_year_linear",
         in_service=date(2020, 1, 1),
@@ -511,7 +511,7 @@ async def test_cannot_convert_already_disposed() -> None:
     ctx = await _ctx()
     inv_id = await _inventory_acct_id(ctx)
     asset = await _fresh_asset(
-        ctx, name="Double convert regression", cost=Decimal("5000"),
+        ctx, name="Double convert MOTR-3", cost=Decimal("5000"),
         model="asset_no_depreciation",
     )
     async with AsyncSessionLocal() as session:

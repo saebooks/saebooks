@@ -13,9 +13,15 @@ Covers:
 Note on database
 ----------------
 These tests require a live Postgres DB (the same one other API tests use).
-Run inside the dev compose stack:
+If run on scada without a local Postgres, skip with:
 
-    docker compose exec -T app pytest tests/api/v1/test_ato_sbr.py -x
+    pytest tests/api/v1/test_ato_sbr.py -x \
+        --ignore-glob="*test_ato_sbr.py"
+
+On r420 run via:
+
+    sudo docker compose -f /home/sauer/bosun/compose/saebooks/docker-compose.yml \
+        exec -T saebooks2-app-1 pytest tests/api/v1/test_ato_sbr.py -x
 
 Note on keystore fixture
 -------------------------

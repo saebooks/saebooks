@@ -1,12 +1,12 @@
 [Unit]
 Description=SAE Books weekly restore test
-Documentation=file:///opt/saebooks/scripts/restore-test.sh
+Documentation=file:///home/sauer/projects/saebooks/scripts/restore-test.sh
 After=docker.service
 Wants=docker.service
 
 [Service]
 Type=oneshot
-ExecStart=/opt/saebooks/scripts/restore-test.sh
+ExecStart=/home/sauer/projects/saebooks/scripts/restore-test.sh
 TimeoutStartSec=30min
 StandardOutput=journal
 StandardError=journal

@@ -1,12 +1,19 @@
-"""Cross-tenant FK injection regression — journal entry lines.
+"""RLES-4 P0 regression — cross-tenant FK injection on journal entry lines.
 
-The journal-entries API previously accepted JE lines that referenced
-``account_id`` values from a different tenant — the JE itself sat in
-tenant A but a line referenced an account from tenant B. ``services/
-journal_entries.py`` now calls ``_validate_accounts_tenant`` before any
-INSERT so foreign-tenant accounts are rejected. This file tests the
-service layer directly (no RLS dependency) so the regression catches a
-removal of the validation helpers even on the schema-owner role.
+audit-trail reference: edge-real-estate-20260427T182650Z (gap RLES-4)
+
+The edge-real-estate critic accepted journal entry d39d814b via the API
+with a line referencing account 85202b25 (walsh-co bank account) from a
+different tenant (acct_tenant=fd77be6f) while the JE belonged to
+chen_apex (je_tenant=37bfa91f).
+
+The fix in ``services/journal_entries.py`` calls ``_validate_accounts_tenant``
+before any INSERT so accounts from foreign tenants are rejected. This file
+tests that service layer directly — no RLS dependency — so the regression
+catches a removal of the validation helpers even on the schema-owner role.
+
+Same vulnerability class as CIVL-1 (bills) and PRTR-1 (general JE create);
+this test exercises the ``journal_entries`` API service path specifically.
 """
 from __future__ import annotations
 
@@ -44,7 +51,7 @@ async def rles4_seed() -> dict:
             session.add(
                 Tenant(
                     id=tenant_id,
-                    name=f"Test-{label}-{suffix}",
+                    name=f"RLES4-{label}-{suffix}",
                     slug=f"rles4-{label}-{suffix}",
                 )
             )
@@ -54,7 +61,7 @@ async def rles4_seed() -> dict:
                 Company(
                     id=company_id,
                     tenant_id=tenant_id,
-                    name=f"Test-{label}-{suffix}",
+                    name=f"RLES4-{label}-{suffix}",
                     base_currency="AUD",
                     fin_year_start_month=7,
                 )
@@ -66,7 +73,7 @@ async def rles4_seed() -> dict:
                 tenant_id=tenant_id,
                 company_id=company_id,
                 code=f"RL4{suffix[:3]}{label[0].upper()}A",
-                name=f"Test Asset {label}",
+                name=f"RLES4 Asset {label}",
                 account_type=AccountType.ASSET,
             )
             expense = Account(
@@ -74,7 +81,7 @@ async def rles4_seed() -> dict:
                 tenant_id=tenant_id,
                 company_id=company_id,
                 code=f"RL4{suffix[:3]}{label[0].upper()}E",
-                name=f"Test Expense {label}",
+                name=f"RLES4 Expense {label}",
                 account_type=AccountType.EXPENSE,
             )
             session.add_all([asset, expense])
@@ -157,9 +164,9 @@ async def test_je_create_same_tenant_succeeds(rles4_seed: dict) -> None:
 
 
 async def test_je_create_foreign_tenant_account_rejected(rles4_seed: dict) -> None:
-    """Cross-tenant regression: a JE created under tenant A with a line that
-    references an account from tenant B must raise JournalEntryError before
-    any INSERT.
+    """RLES-4 core regression: JE line with walsh-co account in apex session must
+    raise JournalEntryError — the same scenario as JE d39d814b from the
+    edge-real-estate carousel run.
     """
     apex = rles4_seed["apex"]
     walsh = rles4_seed["walsh"]
@@ -172,11 +179,11 @@ async def test_je_create_foreign_tenant_account_rejected(rles4_seed: dict) -> No
                 apex["tenant_id"],
                 actor="test:rles4-cross-tenant",
                 entry_date=date(2026, 5, 1),
-                narration="Cross-tenant attack (regression)",
+                narration="Cross-tenant attack (RLES-4)",
                 lines=[
                     # line 1: own-tenant debit (OK)
                     {"account_id": str(apex["asset_id"]), "debit": Decimal("500"), "credit": Decimal("0")},
-                    # line 2: foreign-tenant account in current session (attack)
+                    # line 2: walsh-co account in apex session (attack)
                     {"account_id": str(walsh["expense_id"]), "debit": Decimal("0"), "credit": Decimal("500")},
                 ],
             )
@@ -201,7 +208,7 @@ async def test_je_create_unknown_account_rejected(rles4_seed: dict) -> None:
                 apex["tenant_id"],
                 actor="test:rles4-unknown-acct",
                 entry_date=date(2026, 5, 1),
-                narration="Unknown account (regression negative control)",
+                narration="Unknown account (RLES-4 negative control)",
                 lines=[
                     {"account_id": str(apex["asset_id"]), "debit": Decimal("100"), "credit": Decimal("0")},
                     {"account_id": str(uuid.uuid4()), "debit": Decimal("0"), "credit": Decimal("100")},
@@ -215,7 +222,7 @@ async def test_je_create_unknown_account_rejected(rles4_seed: dict) -> None:
 
 
 async def test_je_update_foreign_tenant_account_rejected(rles4_seed: dict) -> None:
-    """regression: PATCH path must also validate account tenant ownership."""
+    """RLES-4: PATCH path must also validate account tenant ownership."""
     apex = rles4_seed["apex"]
     walsh = rles4_seed["walsh"]
 
@@ -227,7 +234,7 @@ async def test_je_update_foreign_tenant_account_rejected(rles4_seed: dict) -> No
             apex["tenant_id"],
             actor="test:rles4-update-setup",
             entry_date=date(2026, 5, 1),
-            narration="Setup for update test (regression)",
+            narration="Setup for update test (RLES-4)",
             lines=[
                 {"account_id": str(apex["asset_id"]), "debit": Decimal("100"), "credit": Decimal("0")},
                 {"account_id": str(apex["expense_id"]), "debit": Decimal("0"), "credit": Decimal("100")},

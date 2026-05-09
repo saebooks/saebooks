@@ -1,4 +1,4 @@
-"""Tests for the trust distribution module.
+"""Tests for the trust distribution module (gap PRTR-2).
 
 Covers:
 * Service: create validates % sum, rejects empty entitlements.

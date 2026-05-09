@@ -365,7 +365,7 @@ async def _check_psi_distribution(
             "Non-arms-length wage payment flagged for PSI review: "
             "s.86-70 ITAA97 restricts deductibility of distributions to related parties. "
             "Provide a compliance override reason (e.g. 'Business determination in place' "
-            "or 'PAYG-W withholding applied') to post this entry. (gap PSI)"
+            "or 'PAYG-W withholding applied') to post this entry. (gap PSI-3)"
         )
 
 

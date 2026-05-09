@@ -1,6 +1,6 @@
 """Add currency_code to contacts for foreign-supplier billing currency.
 
-Reason: contacts with country != Australia had no
+Gap ETSY-2 (micro-etsy-reseller): contacts with country != Australia had no
 billing currency field, causing bills to default to AUD face-value entry with
 no FX prompt. This column stores the preferred ISO 4217 billing currency so
 bill creation can default to the supplier's currency and offer an FX rate input.

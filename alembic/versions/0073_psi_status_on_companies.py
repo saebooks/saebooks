@@ -1,6 +1,6 @@
 """Add psi_status column to companies table.
 
-Reason: no PSI/80-20 classification surface in
+Gap PSI-1 (micro-it-contractor): no PSI/80-20 classification surface in
 settings or dashboard; contractors could deduct disallowed PSI expenses
 without warning. "unsure" default causes a dashboard banner prompting
 the operator to classify their business type.

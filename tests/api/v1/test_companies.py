@@ -254,7 +254,7 @@ async def test_x_company_id_header_valid_uuid_returns_200(api_client: AsyncClien
 
 
 # ---------------------------------------------------------------------------
-# regression — gst_registered + gst_effective_date fields
+# HOBB-1 — gst_registered + gst_effective_date fields
 # ---------------------------------------------------------------------------
 
 
@@ -345,7 +345,7 @@ async def test_companies_change_log_on_update(api_client: AsyncClient) -> None:
 
 
 # ---------------------------------------------------------------------------
-# regression — GST backdating: 4-year limit + backdate-preview endpoint
+# HOBB-5 — GST backdating: 4-year limit + backdate-preview endpoint
 # ---------------------------------------------------------------------------
 
 

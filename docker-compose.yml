@@ -1,94 +1,127 @@
-# SAE Books — top-level public docker-compose
-#
-# Pulls pre-built images from Docker Hub. For the "build from source"
-# variant (useful when you want to hack on the code), see
-# deploy/sap/docker-compose.yml.
-#
-# Quickstart:
-#   cp .env.example .env
-#   # Edit .env — at minimum set:
-#   #   POSTGRES_PASSWORD
-#   #   SAEBOOKS_FIELD_ENCRYPTION_KEY  (openssl rand -base64 32)
-#   #   SAEBOOKS_WEB_SECRET_KEY        (openssl rand -base64 32)
-#   #   SAEBOOKS_SQL_RO_PASSWORD       (openssl rand -base64 24 | tr -d '/+=' | head -c 32)
-#   docker compose up -d
-#
-# Web UI: http://localhost:8080
-# REST API: http://localhost:8042
-# gRPC (desktop client): localhost:50051
-
 services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-saebooks}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-local-only}
       POSTGRES_DB: ${POSTGRES_DB:-saebooks}
     volumes:
       - saebooks_db:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval: 5s
-      timeout: 5s
+      interval: 3s
+      timeout: 3s
       retries: 20
-      start_period: 10s
 
-  api:
-    image: saebooks/saebooks:${SAEBOOKS_TAG:-v0.1}
+  app:
+    build: .
     restart: unless-stopped
+    env_file:
+      - .env
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - ./saebooks:/app/saebooks
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+      - ./tests:/app/tests
+      # Backup directory mounted read-only so /admin/backups can list
+      # dumps + parse the status log. The host path is whatever pg_dump
+      # writes to (defaults to $HOME/saebooks-backups in scripts/backup.sh).
+      - ${SAEBOOKS_BACKUP_DIR:-/home/sauer/saebooks-backups}:/app/backups:ro
     environment:
-      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-saebooks}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-saebooks}"
-      SAEBOOKS_EDITION: ${SAEBOOKS_EDITION:-community}
-      SAEBOOKS_LOG_LEVEL: ${SAEBOOKS_LOG_LEVEL:-INFO}
-      SAEBOOKS_LOG_JSON: ${SAEBOOKS_LOG_JSON:-false}
-      SAEBOOKS_BOOTSTRAP_ADMINS: ${SAEBOOKS_BOOTSTRAP_ADMINS:-}
-      SAEBOOKS_DEV_API_TOKEN: ${SAEBOOKS_DEV_API_TOKEN:-}
-      SAEBOOKS_FIELD_ENCRYPTION_KEY: ${SAEBOOKS_FIELD_ENCRYPTION_KEY:?SAEBOOKS_FIELD_ENCRYPTION_KEY must be set in .env}
-      SAEBOOKS_SQL_RO_PASSWORD: ${SAEBOOKS_SQL_RO_PASSWORD:?SAEBOOKS_SQL_RO_PASSWORD must be set in .env}
-      SENTRY_DSN: ${SENTRY_DSN:-}
-      SEED_COMPANY_NAME: ${SEED_COMPANY_NAME:-}
-      SEED_COMPANY_LEGAL_NAME: ${SEED_COMPANY_LEGAL_NAME:-}
-      SEED_COMPANY_ABN: ${SEED_COMPANY_ABN:-}
-      SMTP_HOST: ${SMTP_HOST:-}
-      SMTP_PORT: ${SMTP_PORT:-587}
-      SMTP_USER: ${SMTP_USER:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      SMTP_FROM: ${SMTP_FROM:-books@example.com}
+      SAEBOOKS_BACKUP_DIR_IN_CONTAINER: /app/backups
     ports:
       - "8042:8000"
-      - "50051:50051"
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/api/v1/healthz || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 45s
+    networks:
+      - default
+      - revproxy
 
-  web:
-    image: saebooks/saebooks-web:${SAEBOOKS_TAG:-v0.1}
+  # Second app instance pinned to the MYOB Classic theme, sharing the
+  # same database + codebase as ``app``. Lets the two themes be
+  # compared side-by-side at books.sauer.com.au (default) vs
+  # books-classic.sauer.com.au (classic) without restarting the main
+  # app. The env var ``SAEBOOKS_FRONTEND=classic`` swaps the Jinja
+  # ChoiceLoader at boot (see services/theme.py → validate_startup_theme).
+  # No host port is published — Caddy reaches it over the revproxy
+  # network by compose name (``saebooks-classic-1:8000``).
+  classic:
+    build: .
     restart: unless-stopped
+    env_file:
+      - .env
     depends_on:
-      api:
+      db:
         condition: service_healthy
+    volumes:
+      - ./saebooks:/app/saebooks
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+      - ./tests:/app/tests
+      - ${SAEBOOKS_BACKUP_DIR:-/home/sauer/saebooks-backups}:/app/backups:ro
     environment:
-      SAEBOOKS_API_URL: "http://api:8000"
-      SAEBOOKS_WEB_SECRET_KEY: ${SAEBOOKS_WEB_SECRET_KEY:?SAEBOOKS_WEB_SECRET_KEY must be set in .env}
-      SAEBOOKS_WEB_PORT: "8080"
-      SAEBOOKS_WEB_LOG_LEVEL: ${SAEBOOKS_WEB_LOG_LEVEL:-INFO}
-      SAEBOOKS_WEB_SITE_ORIGINS: ${SAEBOOKS_WEB_SITE_ORIGINS:-http://localhost:8080}
-    ports:
-      - "8080:8080"
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/healthz || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
+      SAEBOOKS_BACKUP_DIR_IN_CONTAINER: /app/backups
+      SAEBOOKS_FRONTEND: classic
+    networks:
+      - default
+      - revproxy
+
+  # Cloud theme (QuickBooks-Online-inspired). Reached by Caddy as
+  # saebooks-cloud-1:8000 — no host port published.
+  cloud:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./saebooks:/app/saebooks
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+      - ./tests:/app/tests
+      - ${SAEBOOKS_BACKUP_DIR:-/home/sauer/saebooks-backups}:/app/backups:ro
+    environment:
+      SAEBOOKS_BACKUP_DIR_IN_CONTAINER: /app/backups
+      SAEBOOKS_FRONTEND: cloud
+    networks:
+      - default
+      - revproxy
+
+  # Dense theme (information-dense power-user layout). Reached by Caddy
+  # as saebooks-dense-1:8000.
+  dense:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./saebooks:/app/saebooks
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+      - ./tests:/app/tests
+      - ${SAEBOOKS_BACKUP_DIR:-/home/sauer/saebooks-backups}:/app/backups:ro
+    environment:
+      SAEBOOKS_BACKUP_DIR_IN_CONTAINER: /app/backups
+      SAEBOOKS_FRONTEND: dense
+    networks:
+      - default
+      - revproxy
+
+networks:
+  # 'default' stays on the compose-managed bridge so app↔db keeps
+  # working; revproxy is the external shared network Caddy uses so
+  # app.saebooks.com.au can reverse-proxy to this container by its
+  # compose name.
+  default:
+  revproxy:
+    external: true
 
 volumes:
   saebooks_db:
-    driver: local

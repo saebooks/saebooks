@@ -449,7 +449,7 @@ async def test_reconciliation_auto_match_matches_line(
 
 
 # ---------------------------------------------------------------------------
-# POST /bank_statement_lines/{id}/split_match  (regression)
+# POST /bank_statement_lines/{id}/split_match  (ETSY-4)
 # ---------------------------------------------------------------------------
 
 

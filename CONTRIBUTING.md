@@ -1,7 +1,11 @@
 # Contributing to SAE Books
 
-SAE Books is in public alpha (v0.1). External contributions are open,
-under the rules below. The CLA is mandatory — read [CLA.md](./CLA.md).
+**The project is currently in private development and not accepting
+external contributions.** This document exists now so the policy is set
+before the repo ever goes public — CLA coverage only works if it's in
+place from the first external PR.
+
+When SAE Books goes public, the rules below apply.
 
 ## Licence
 
@@ -37,7 +41,7 @@ contributions by that contributor.
   then a ban.
 - If you're unsure whether something is OK, ask privately first.
 
-## How to contribute
+## How to contribute (once public)
 
 1. Open an issue describing the bug, feature, or change.
 2. Wait for a reply confirming it's in scope and not already claimed.
@@ -75,5 +79,5 @@ We will respond within 72 hours and coordinate a disclosure timeline.
 
 ## Questions
 
-For anything not covered here, open a discussion on the repo or email
-the maintainer.
+For anything not covered here, open a discussion on the repo (once
+public) or email the maintainer.

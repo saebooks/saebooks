@@ -1,4 +1,4 @@
-"""Tests for GET /api/v1/reports/ytd_turnover.
+"""Tests for GET /api/v1/reports/ytd_turnover (gap HOBB-2).
 
 Tests:
 1. test_ytd_turnover_empty        — no income JEs in current FY → 0, not crossed

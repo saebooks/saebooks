@@ -88,11 +88,10 @@ FLAG_SQL_TOOL = "sql_tool"
 FLAG_AUDIT_SNAPSHOTS = "audit_snapshots"
 FLAG_SCHEDULED_BACKUPS = "scheduled_backups"
 
-# --- AI document extraction --------------------------------------------- #
-# Vision-capable LLM extraction of receipts/invoices via an
-# OpenAI-compatible API. Each call costs real money, so Community (free)
-# and Offline (perpetual / no-phone-home) tiers never get it.
-# Business+ only.
+# --- B/46 (AI document extraction via Claude Haiku vision) --------------- #
+# Requires a live Anthropic API call per document — costs real money, so
+# Community (free) and Offline (perpetual / no-phone-home) tiers never get
+# it. Business+ only.
 FLAG_AI_EXTRACTION = "ai_extraction"
 
 # --- B/49 (overhead allocation rules — multi-company overhead split) ----- #

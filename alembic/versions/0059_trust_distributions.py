@@ -1,6 +1,6 @@
 """Add trust_distributions and beneficiary_entitlements tables.
 
-Reason: no distribution module;
+Gap PRTR-2 (medium-property-trust persona): no distribution module;
 year-end entitlements were untracked with no data model.
 
 Revision ID: 0059_trust_distributions

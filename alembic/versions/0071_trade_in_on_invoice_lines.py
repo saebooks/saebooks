@@ -1,6 +1,6 @@
 """Add is_trade_in flag to invoice_lines for motor-dealer trade-in handling.
 
-Reason: trade-in vehicles were recorded as negative
+Gap MOTR-2 (edge-motor-dealer): trade-in vehicles were recorded as negative
 discount lines on the sales invoice, hiding the full new-car sale price from
 G1 and omitting the trade-in acquisition from AP/inventory. This column flags
 a line as a trade-in acquisition; the posting service then excludes it from the

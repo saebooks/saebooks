@@ -66,7 +66,7 @@ async def test_abr_lookup_404_in_community(
     client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(app_settings, "edition", "community")
-    r = await client.post("/contacts/abr-lookup", data={"abn": "12345678901"})
+    r = await client.post("/contacts/abr-lookup", data={"abn": "87744586592"})
     assert r.status_code == 404
 
 
@@ -74,7 +74,7 @@ async def test_abr_lookup_502_when_unconfigured(
     client: AsyncClient, enterprise: None
 ) -> None:
     # Enterprise but no guid -> AbrNotConfiguredError -> 502
-    r = await client.post("/contacts/abr-lookup", data={"abn": "12345678901"})
+    r = await client.post("/contacts/abr-lookup", data={"abn": "87744586592"})
     assert r.status_code == 502
     assert "not configured" in r.text
 
@@ -85,9 +85,9 @@ async def test_abr_lookup_returns_result_fragment(
 ) -> None:
     payload = (
         'callback({'
-        '"Abn":"12345678901","AbnStatus":"Active",'
-        '"EntityName":"Acme Pty Ltd",'
-        '"BusinessName":["Acme"],'
+        '"Abn":"87744586592","AbnStatus":"Active",'
+        '"EntityName":"Sauer Pty Ltd",'
+        '"BusinessName":["SAE Engineering"],'
         '"AddressState":"QLD","AddressPostcode":"4350",'
         '"Gst":"2024-02-15"'
         '})'
@@ -96,11 +96,11 @@ async def test_abr_lookup_returns_result_fragment(
         return_value=httpx.Response(200, text=payload)
     )
     r = await client.post(
-        "/contacts/abr-lookup", data={"abn": "12 345 678 901"}
+        "/contacts/abr-lookup", data={"abn": "87 744 586 592"}
     )
     assert r.status_code == 200
     assert "ABR match" in r.text
-    assert "Acme" in r.text
+    assert "SAE Engineering" in r.text
     assert "QLD" in r.text
 
 
@@ -131,8 +131,8 @@ async def test_abr_apply_merges_and_persists(
     try:
         payload = (
             'callback({'
-            '"Abn":"12345678901","AbnStatus":"Active",'
-            '"EntityName":"Acme Pty Ltd",'
+            '"Abn":"87744586592","AbnStatus":"Active",'
+            '"EntityName":"Sauer Pty Ltd",'
             '"AddressState":"QLD","AddressPostcode":"4350",'
             '"Gst":"2024-02-15"'
             '})'
@@ -142,7 +142,7 @@ async def test_abr_apply_merges_and_persists(
         )
         r = await client.post(
             f"/contacts/{contact.id}/abr-apply",
-            data={"abn": "12 345 678 901"},
+            data={"abn": "87 744 586 592"},
         )
         assert r.status_code == 200
         assert "ABR applied" in r.text
@@ -152,7 +152,7 @@ async def test_abr_apply_merges_and_persists(
             assert refreshed is not None
             assert refreshed.state == "QLD"
             assert refreshed.postcode == "4350"
-            assert refreshed.abn == "12 345 678 901"
+            assert refreshed.abn == "87 744 586 592"
     finally:
         await _cleanup_contact(contact.id)
 
@@ -164,6 +164,6 @@ async def test_abr_apply_404_in_community(
 
     monkeypatch.setattr(app_settings, "edition", "community")
     r = await client.post(
-        f"/contacts/{_u.uuid4()}/abr-apply", data={"abn": "12345678901"}
+        f"/contacts/{_u.uuid4()}/abr-apply", data={"abn": "87744586592"}
     )
     assert r.status_code == 404

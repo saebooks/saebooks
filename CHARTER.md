@@ -120,9 +120,9 @@ it wrong.
   public.
 - **Copyright:** © 2026 Richard Sauer / SAE Engineering. Every source
   file gets a header.
-- **No contributions accepted without a signed CLA.** Code committed
-  by automated tooling on behalf of a maintainer counts as that
-  maintainer's work and is covered by the same CLA.
+- **No contributions accepted without CLA.** Even from Claude. Any code
+  committed by automated tools on behalf of Richard counts as Richard's
+  work.
 
 ## 6. Monetisation model — open core
 
@@ -858,14 +858,16 @@ a third-party service to see their own data. This is a hard line.
 
 ## 14. Reference material
 
-The data model and AU localisation were derived from publicly available
-references during project kickoff:
+Extracted during project kickoff, retained as source material:
 
-- The MYOB ODBC Direct v10 user guide (publicly distributed) for the
-  authoritative MYOB business data model — 48+ tables, used as the
-  baseline for the SAE Books schema.
-- The Odoo Community AU localisation (`l10n_au`) for the v1 chart of
-  accounts, tax codes, and BAS tags.
+- `/home/sauer/projects/infra-blueprint/teardowns/myob-v19/SPEC.md`
+  — the detailed technical spec (subordinate to this charter).
+- `/home/sauer/projects/infra-blueprint/teardowns/myob-v19/reference/`:
+  - `odbc_user_guide.pdf` — MYOB ODBC Direct v10 user guide (494 pp.)
+    Authoritative MYOB data model. 48+ business tables documented.
+  - `Clearwtr.MYO` — MYOB Clearwater sample company file.
+  - `odoo-l10n-au/` — Odoo Community AU chart of accounts + tax codes
+    + BAS tags. This is our v1 seed.
 
 ## 15. What's next
 

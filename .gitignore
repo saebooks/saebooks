@@ -47,6 +47,3 @@ node_modules/
 
 # gRPC generated stubs (re-run protoc to regenerate)
 saebooks/grpc_gen/
-
-# Local agent / tooling state
-.claude/

@@ -94,7 +94,7 @@ def test_loads_ato_sbr_credential_store() -> None:
     key = rsa.generate_private_key(65537, 2048)
     subject = x509.Name([
         x509.NameAttribute(x509.NameOID.COUNTRY_NAME, "AU"),
-        x509.NameAttribute(x509.NameOID.ORGANIZATION_NAME, "12345678901"),
+        x509.NameAttribute(x509.NameOID.ORGANIZATION_NAME, "87744586592"),
         x509.NameAttribute(x509.NameOID.COMMON_NAME, "SAE-Books"),
     ])
     cert = (
@@ -115,7 +115,7 @@ def test_loads_ato_sbr_credential_store() -> None:
         f'<credentialStore xmlns="{ns}">\n'
         f'  <salt>dGVzdHNhbHQ=</salt>\n'
         f'  <credentials><credential credentialType="D"\n'
-        f'    id="ABRD:12345678901_SAE-Books"\n'
+        f'    id="ABRD:87744586592_SAE-Books"\n'
         f'    credentialSalt="dGVzdA==" integrityValue="dGVzdA==">\n'
         f'    <publicCertificate>{b64}</publicCertificate>\n'
         f'    <protectedPrivateKey>dGVzdA==</protectedPrivateKey>\n'
@@ -130,7 +130,7 @@ def test_loads_ato_sbr_credential_store() -> None:
 def test_multi_rdn_subject_picks_cn() -> None:
     key = rsa.generate_private_key(65537, 2048)
     subject = issuer = x509.Name([
-        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Acme Pty Ltd"),
+        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Sauer Pty Ltd"),
         x509.NameAttribute(NameOID.COMMON_NAME, "Machine Cred 1"),
     ])
     cert = (

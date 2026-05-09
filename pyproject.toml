@@ -1,11 +1,11 @@
 [project]
 name = "saebooks"
-version = "0.1.0"
+version = "0.0.1"
 description = "Self-hosted double-entry accounting for small-to-medium businesses"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "AGPL-3.0-or-later" }
-authors = [{ name = "SAE Engineering", email = "security@saee.com.au" }]
+authors = [{ name = "Richard Sauer", email = "richard@sauer.com.au" }]
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",

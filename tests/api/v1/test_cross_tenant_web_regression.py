@@ -41,9 +41,8 @@ Coverage:
   - journal   /{id}
   - recurring_invoices  /{id}  /{id}/edit
 
-DB availability: tests skip cleanly when Postgres or the
-``saebooks_app`` role is unavailable. Run them inside the dev
-compose stack where the ``db`` service is up.
+DB availability: tests skip cleanly when Postgres / saebooks_app role is
+unavailable (e.g. scada).  Full suite runs on r420.
 """
 from __future__ import annotations
 

@@ -22,14 +22,14 @@ Expected context shape (``render_invoice_pdf`` / ``render_bill_pdf``):
         "issue_date": "2026-04-20",
         "due_date":   "2026-05-18",
         "company": {
-            "name": "Acme Pty Ltd",
-            "abn":  "12 345 678 901",
+            "name": "Sauer Pty Ltd ATF Saueesti Trust",
+            "abn":  "87 744 586 592",
             "address_lines": ["...", "..."],
-            "email": "accounts@example.com",
+            "email": "accounts@sauer.com.au",
         },
         "contact": {
-            "name": "Beta Corp",
-            "abn":  "98 765 432 109",
+            "name": "Acme Corp",
+            "abn":  "12 345 678 901",
             "address_lines": ["..."],
         },
         "lines": [

@@ -675,7 +675,7 @@ async def test_update_unbalanced_lines_returns_422(
 
 
 # ---------------------------------------------------------------------------
-# regression regression: cross-tenant account reference must be rejected
+# PRTR-1 regression: cross-tenant account reference must be rejected
 # ---------------------------------------------------------------------------
 
 
@@ -683,35 +683,37 @@ async def test_create_je_rejects_cross_tenant_account(
     api_client: AsyncClient,
     account_ids: dict[str, str],
 ) -> None:
-    """POST /api/v1/journal_entries with a line referencing an account from
-    a different tenant must return 422, not 201/303.
+    """PRTR-1: POST /api/v1/journal_entries with a line referencing an account
+    from a different tenant must return 422, not 201/303.
+
+    Carousel run: 20260427T203251Z, gap PRTR-1 (cross_tenant_write).
     """
     foreign_tid = uuid.uuid4()
     foreign_cid = uuid.uuid4()
     async with AsyncSessionLocal() as session:
         session.add(Tenant(
             id=foreign_tid,
-            name=f"ForeignTenant-Test1-{foreign_tid.hex[:6]}",
+            name=f"ForeignTenant-PRTR1-{foreign_tid.hex[:6]}",
             slug=f"prtr1-{foreign_tid.hex[:6]}",
         ))
         await session.flush()
         session.add(Company(
             id=foreign_cid,
             tenant_id=foreign_tid,
-            name=f"Foreign Corp Test1 {foreign_tid.hex[:6]}",
+            name=f"Foreign Corp PRTR1 {foreign_tid.hex[:6]}",
         ))
         await session.flush()
         f_asset = Account(
             company_id=foreign_cid, tenant_id=foreign_tid,
             code=f"1-{foreign_tid.hex[:4]}",
-            name="Foreign Asset Test1",
+            name="Foreign Asset PRTR1",
             account_type=AccountType.ASSET,
             is_header=False,
         )
         f_expense = Account(
             company_id=foreign_cid, tenant_id=foreign_tid,
             code=f"6-{foreign_tid.hex[:4]}",
-            name="Foreign Expense Test1",
+            name="Foreign Expense PRTR1",
             account_type=AccountType.EXPENSE,
             is_header=False,
         )
@@ -723,7 +725,7 @@ async def test_create_je_rejects_cross_tenant_account(
     # Mixed-tenant lines: line 1 own tenant, line 2 foreign tenant (the attack)
     payload = {
         "entry_date": "2026-04-10",
-        "narration": "Cross-tenant attack (regression)",
+        "narration": "Cross-tenant attack (PRTR-1)",
         "lines": [
             {
                 "account_id": account_ids["asset_id"],
@@ -752,7 +754,7 @@ async def test_create_je_rejects_cross_tenant_account(
 
 
 # ---------------------------------------------------------------------------
-# regression: reference field must be rejected when > 32 chars
+# CAFE-1: reference field must be rejected when > 32 chars
 # ---------------------------------------------------------------------------
 
 
@@ -760,9 +762,9 @@ async def test_create_je_reference_too_long_returns_422(
     api_client: AsyncClient,
     account_ids: dict[str, str],
 ) -> None:
-    """regression: POST with reference > 32 chars must return 422, not 500.
+    """CAFE-1: POST with reference > 32 chars must return 422, not 500.
 
-    Validates that the API rejects oversize references before they hit the DB.
+    Gap CAFE-1 (validation_ux), carousel run 20260427T210813Z.
     """
     payload = _entry_payload(account_ids, reference="X" * 33)
     r = await api_client.post("/api/v1/journal_entries", json=payload)
@@ -775,7 +777,7 @@ async def test_patch_je_reference_too_long_returns_422(
     api_client: AsyncClient,
     account_ids: dict[str, str],
 ) -> None:
-    """regression: PATCH with reference > 32 chars must return 422, not 500."""
+    """CAFE-1: PATCH with reference > 32 chars must return 422, not 500."""
     r = await api_client.post("/api/v1/journal_entries", json=_entry_payload(account_ids))
     assert r.status_code == 201
     entry_id = r.json()["id"]
@@ -795,7 +797,7 @@ async def test_create_je_reference_at_max_length_accepted(
     api_client: AsyncClient,
     account_ids: dict[str, str],
 ) -> None:
-    """regression positive control: reference exactly 32 chars must be accepted."""
+    """CAFE-1 positive control: reference exactly 32 chars must be accepted."""
     unique_ref = uuid.uuid4().hex  # exactly 32 chars, unique per run
     payload = _entry_payload(account_ids, reference=unique_ref)
     r = await api_client.post("/api/v1/journal_entries", json=payload)
@@ -806,7 +808,7 @@ async def test_create_je_reference_at_max_length_accepted(
 
 
 # ---------------------------------------------------------------------------
-# Period-lock enforcement via POST /{id}/post
+# PSI-5: period-lock enforcement via POST /{id}/post (gap PSI-5 carousel 20260427T220251Z)
 # ---------------------------------------------------------------------------
 
 
@@ -816,7 +818,7 @@ async def test_je_post_blocked_by_period_lock(
 ) -> None:
     """POST /{id}/post must return 4xx when the JE date falls inside a locked period.
 
-    Regression: before the fix, PostingError from _check_period_lock()
+    Gap PSI-5 (P1): before the fix, PostingError from _check_period_lock()
     escaped api_post() uncaught and produced a 500 instead of a 4xx, leaving
     the entry DRAFT but returning no useful error to the caller. The fix
     translates PostingError → JournalEntryError so the router returns 422.
@@ -884,7 +886,7 @@ async def test_je_post_blocked_by_period_lock(
         # Create a JE dated inside the locked period
         payload = {
             "entry_date": "2026-03-15",
-            "narration": "PSI test — locked period",
+            "narration": "PSI-5 test — locked period",
             "lines": [
                 {"account_id": iso_asset_id, "debit": "100.00", "credit": "0.00"},
                 {"account_id": iso_expense_id, "debit": "0.00", "credit": "100.00"},
@@ -919,7 +921,7 @@ async def test_je_post_blocked_by_period_lock(
         # Positive control: JE after the lock boundary must post successfully
         payload_ok = {
             "entry_date": "2026-04-15",
-            "narration": "PSI positive control",
+            "narration": "PSI-5 positive control",
             "lines": [
                 {"account_id": iso_asset_id, "debit": "50.00", "credit": "0.00"},
                 {"account_id": iso_expense_id, "debit": "0.00", "credit": "50.00"},
@@ -938,7 +940,7 @@ async def test_je_post_blocked_by_period_lock(
 
 
 # ---------------------------------------------------------------------------
-# regression: period-lock gate + override_reason bypass
+# FITC-4: period-lock gate + override_reason bypass (gap FITC-4 from medium-fitness-chain)
 # ---------------------------------------------------------------------------
 
 
@@ -946,9 +948,9 @@ async def test_fitc4_period_lock_gate_and_override(
     api_client: AsyncClient,
     account_ids: dict[str, str],
 ) -> None:
-    """POST /{id}/post must reject entries dated inside a locked period (regression).
+    """POST /{id}/post must reject entries dated inside a locked period (FITC-4).
 
-    Regression: the period_locks table was empty on the dev instance so
+    Gap FITC-4 (P1): the period_locks table was empty on the dev instance so
     every entry_date was accepted. The fix seeds Q1 2026 (locked_through
     2026-03-31) and exposes override_reason in the /post request body so a
     bookkeeper can still post with an explicit justification.
@@ -972,18 +974,18 @@ async def test_fitc4_period_lock_gate_and_override(
         session.add(Company(
             id=cid,
             tenant_id=_DEFAULT_TENANT_ID,
-            name=f"Test Corp {cid.hex[:6]}",
+            name=f"FITC4 Corp {cid.hex[:6]}",
         ))
         await session.flush()
 
         asset_acct = Account(
             company_id=cid, tenant_id=_DEFAULT_TENANT_ID,
-            code=f"1-{cid.hex[:4]}", name="Test Asset",
+            code=f"1-{cid.hex[:4]}", name="FITC4 Asset",
             account_type=AccountType.ASSET, is_header=False,
         )
         expense_acct = Account(
             company_id=cid, tenant_id=_DEFAULT_TENANT_ID,
-            code=f"6-{cid.hex[:4]}", name="Test Expense",
+            code=f"6-{cid.hex[:4]}", name="FITC4 Expense",
             account_type=AccountType.EXPENSE, is_header=False,
         )
         session.add_all([asset_acct, expense_acct])
@@ -1010,7 +1012,7 @@ async def test_fitc4_period_lock_gate_and_override(
         # 1. Create DRAFT JE dated inside the locked period
         r_create = await iso.post("/api/v1/journal_entries", json={
             "entry_date": "2026-03-15",
-            "narration": "regression backdated entry",
+            "narration": "FITC-4 backdated entry",
             "lines": [
                 {"account_id": asset_id, "debit": "200.00", "credit": "0.00"},
                 {"account_id": expense_id, "debit": "0.00", "credit": "200.00"},
@@ -1026,17 +1028,17 @@ async def test_fitc4_period_lock_gate_and_override(
             headers={"If-Match": str(version)},
         )
         assert r_block.status_code in range(400, 500), (
-            f"regression: expected 4xx for locked-period post, got {r_block.status_code}: {r_block.text}"
+            f"FITC-4: expected 4xx for locked-period post, got {r_block.status_code}: {r_block.text}"
         )
         detail_str = str(r_block.json()).lower()
         assert "lock" in detail_str or "period" in detail_str, (
-            f"regression: expected 'lock' or 'period' in error body, got: {r_block.json()}"
+            f"FITC-4: expected 'lock' or 'period' in error body, got: {r_block.json()}"
         )
 
         # Entry must still be DRAFT after rejected post
         r_check = await iso.get(f"/api/v1/journal_entries/{entry_id}")
         assert r_check.json()["status"] == "DRAFT", (
-            f"regression: entry must remain DRAFT after rejected post"
+            f"FITC-4: entry must remain DRAFT after rejected post"
         )
 
         # 3. Post with override_reason → must succeed
@@ -1046,19 +1048,19 @@ async def test_fitc4_period_lock_gate_and_override(
             json={"override_reason": "CFO approved late entry — corrects March payroll accrual"},
         )
         assert r_override.status_code == 200, (
-            f"regression: expected 200 with override_reason, got {r_override.status_code}: {r_override.text}"
+            f"FITC-4: expected 200 with override_reason, got {r_override.status_code}: {r_override.text}"
         )
         posted = r_override.json()
-        assert posted["status"] == "POSTED", f"regression: entry must be POSTED after override"
-        assert posted["override_reason"] is not None, "regression: override_reason must be stored"
+        assert posted["status"] == "POSTED", f"FITC-4: entry must be POSTED after override"
+        assert posted["override_reason"] is not None, "FITC-4: override_reason must be stored"
         assert "CFO" in posted["override_reason"], (
-            f"regression: override_reason not persisted correctly: {posted['override_reason']}"
+            f"FITC-4: override_reason not persisted correctly: {posted['override_reason']}"
         )
 
         # 4. Positive control: JE dated after the lock posts without override
         r_after = await iso.post("/api/v1/journal_entries", json={
             "entry_date": "2026-04-01",
-            "narration": "regression positive control",
+            "narration": "FITC-4 positive control",
             "lines": [
                 {"account_id": asset_id, "debit": "100.00", "credit": "0.00"},
                 {"account_id": expense_id, "debit": "0.00", "credit": "100.00"},
@@ -1070,5 +1072,5 @@ async def test_fitc4_period_lock_gate_and_override(
             headers={"If-Match": str(r_after.json()["version"])},
         )
         assert r_post_after.status_code == 200, (
-            f"regression: post after lock boundary must succeed, got {r_post_after.status_code}: {r_post_after.text}"
+            f"FITC-4: post after lock boundary must succeed, got {r_post_after.status_code}: {r_post_after.text}"
         )

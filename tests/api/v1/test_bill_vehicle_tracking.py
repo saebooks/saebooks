@@ -1,4 +1,4 @@
-"""Tests for Regression: tracking_vehicle_id on bill lines.
+"""Tests for MOTR-4: tracking_vehicle_id on bill lines.
 
 Verifies that:
 * tracking_vehicle_id is accepted on bill line create and returned in response

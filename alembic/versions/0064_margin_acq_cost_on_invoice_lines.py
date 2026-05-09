@@ -1,6 +1,6 @@
 """Add margin_acq_cost to invoice_lines for Div 75 margin-scheme GST.
 
-Reason: no margin-scheme tax code existed; used-vehicle
+Gap MOTR-1 (edge-motor-dealer): no margin-scheme tax code existed; used-vehicle
 sales were charged full 10 % GST instead of 1/11 × (sale − acq). This column
 stores the per-line acquisition cost so the service layer can compute the
 correct margin GST.

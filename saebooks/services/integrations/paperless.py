@@ -10,7 +10,7 @@ Two responsibilities:
    scan with one click.
 
 The browser-facing URL is built from ``settings.paperless_url`` (the
-URL the user sees in their browser, e.g. ``https://paperless.example.com``)
+URL the user sees in their browser, e.g. ``https://papers.sauer.com.au``)
 — different from ``settings.paperless_api_url`` which may be an
 internal hostname (``http://paperless:8000`` over the Docker network)
 that only the server uses.

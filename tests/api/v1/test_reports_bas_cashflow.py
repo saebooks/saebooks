@@ -406,7 +406,7 @@ async def test_bas_mid_quarter_registration_split(
 ) -> None:
     """Mid-quarter GST registration: pre-reg sales in G1 but excluded from 1A.
 
-    Scenario (regression fix):
+    Scenario (HOBB-3 fix):
       Quarter     2027-07-01 to 2027-09-30
       Registration effective 2027-08-01
       Pre-reg sale  2027-07-15  AUD 2000 taxable

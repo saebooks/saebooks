@@ -1,10 +1,8 @@
-"""AI document extraction service.
+"""AI document extraction service (B/46).
 
 Accepts a raw file (receipt, supplier invoice, bank statement) and
-returns structured accounting data extracted by a vision-capable LLM
-behind any OpenAI-compatible endpoint (LiteLLM proxy, OpenAI direct,
-vLLM, etc.). The model is selected by the
-``LITELLM_VISION_MODEL`` env var (default ``gpt-4o-mini``).
+returns structured accounting data extracted by Claude Haiku via the
+LiteLLM proxy (OpenAI-compatible endpoint).
 
 The caller is responsible for checking ``FLAG_AI_EXTRACTION`` before
 reaching this module. The endpoint router does that via
@@ -62,9 +60,7 @@ class AiExtractionNotConfiguredError(AiExtractionError):
 # Constants                                                               #
 # ---------------------------------------------------------------------- #
 
-import os
-
-_MODEL = os.environ.get("LITELLM_VISION_MODEL", "gpt-4o-mini")
+_MODEL = "claude-haiku-4-5-20251001"
 
 _SYSTEM_PROMPT = """You are an accounting document parser. Extract structured data from
 the supplied document (receipt, invoice, bank statement, or similar) and return ONLY a

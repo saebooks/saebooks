@@ -127,7 +127,7 @@ async def create_company(
 
     async with AsyncSessionLocal() as session:
         # Reject duplicate names within the tenant — multi-company UX
-        # gets confusing when "Acme Pty Ltd" and "Acme Pty Ltd"
+        # gets confusing when "Sauer Pty Ltd" and "Sauer Pty Ltd"
         # both appear in the switcher with no other distinguisher.
         existing = await session.execute(
             select(func.count(Company.id)).where(

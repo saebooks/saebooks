@@ -7,7 +7,7 @@
 * test_aged_receivables_90_plus
 * test_aged_receivables_as_of_date
 * test_aged_receivables_tenant_isolation
-* test_aged_receivables_retentions_row  (regression)
+* test_aged_receivables_retentions_row  (CIVL-7)
 * test_aged_payables_empty
 * test_aged_payables_overdue
 * test_aged_payables_tenant_isolation
@@ -410,7 +410,7 @@ async def test_aged_receivables_retentions_row(
     for simplicity) should produce:
       - retentions_receivable total = $50 (5% of $1000)
       - contact trade debtor balance = $950
-    This verifies Regression: retentions are no longer buried in Trade Debtors.
+    This verifies CIVL-7: retentions are no longer buried in Trade Debtors.
     """
     today = date.today()
     tomorrow = today + timedelta(days=1)
@@ -479,7 +479,7 @@ async def test_aged_receivables_retentions_row(
 
     # retentions_receivable should be present and carry the 5% ($50).
     assert body["retentions_receivable"] is not None, (
-        "Expected retentions_receivable row in AR aging (regression)"
+        "Expected retentions_receivable row in AR aging (CIVL-7)"
     )
     assert body["retentions_receivable"]["total"] == pytest.approx(50.0, abs=0.01), (
         "Retentions Receivable total should be $50 (5% of $1000)"

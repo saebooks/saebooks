@@ -1,28 +1,7 @@
 # SAE Books — Cashbook edition (single-entry for sole traders)
 
-Status: design doc, draft 1.
-
-## Implementation status
-
-| Phase | Scope | Commit | Tests |
-|---|---|---|---|
-| **A** | Schema migration 0093, `record_cashbook_entry` service, default category dataclass, idempotency, period locks, GST. | `088b4eb` | 15 service ✓ |
-| **Gate 1** | AU sole-trader category signoff. | `e688a43` | n/a |
-| **B** | `/api/v1/cashbook` POST/GET/list/categories/summary routes. | `8f5b29d` | 19 API ✓ |
-| **B.5** | `PATCH` (void-and-recreate) + `DELETE` (soft-delete via reversal JE), idempotent. | `2b150cd` | 5 service + 7 API ✓ |
-| **C** | `POST /setup` onboarding, `POST /upgrade-to-full` one-way migration, `bookkeeping_mode` + `cashbook_default_bank_account_id` in `CompanyOut` for menu gating. | `5723fc6` | 7 API ✓ |
-| **D** | End-to-end happy-path test (setup → entries → upgrade), this status table. | `a873036` | 1 e2e ✓ |
-| **Gate 2** | Mode-switch UX review. | pending — needs `saebooks-web` templates |
-| **Out of scope (v1)** | TX_TRANSFER endpoint (needs two-bank-account flow); SISS bank-feed wiring; mobile-app shell. | — | — |
-
-Total tests: **54 passing** (20 service + 33 API contract + 1 e2e).
-
-Outstanding follow-ups for Gate 2 / next iteration:
-
-- `saebooks-web` cashbook templates (mobile-first list + entry form per §7).
-- `TX_TRANSFER` endpoint (two-bank flow, P&L-neutral).
-- Receipt attachments via the Phase 1 vault (`entity_type='cashbook'`).
-- BAS prep (G1/G3/1A/1B) projection — uses the existing BAS calc engine.
+Status: design doc, draft 1. Word count target 2400. Calibrated against Phase 3 / 1.6.
+Authors: Richard + Claude (Opus 1M). Date: 2026-05-08.
 
 ## 1. Problem and target user
 
@@ -74,7 +53,7 @@ This matters: (a) the ledger stays pure — future SISS feeds match the
 auto-generated JE without caring about mode; (b) upgrade is trivial — every
 historic cashbook entry is *already* a real JE in the right accounts;
 (c) marketing position holds — one ledger, one UI mode hiding it, no
-parallel "single-entry storage" engine sitting alongside the journal.
+parallel "single-entry storage" engine for critics to point at.
 
 The risk is the inverse — that cashbook UX leaks accounting jargon.
 Mitigate by treating the mode as a *strict subset* of full-edition surface,

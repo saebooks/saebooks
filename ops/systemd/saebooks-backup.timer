@@ -1,6 +1,6 @@
 [Unit]
 Description=SAE Books nightly pg_dump (02:15 daily)
-Documentation=file:///opt/saebooks/scripts/backup.sh
+Documentation=file:///home/sauer/projects/saebooks/scripts/backup.sh
 
 [Timer]
 # 02:15 local time every day. Randomised +/- 5 min so a fleet of machines

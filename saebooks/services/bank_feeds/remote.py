@@ -84,7 +84,7 @@ class RemoteBankFeedsService:
         svc = RemoteBankFeedsService()
         row = await svc.create_connection(
             bank="AU000001",
-            account_label="Acme Pty Ltd — Operating",
+            account_label="Sauer Pty Ltd — Operating",
             idempotency_key=str(uuid.uuid4()),
         )
     """

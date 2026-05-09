@@ -1,6 +1,6 @@
 """Add gst_registered and gst_effective_date to companies table.
 
-Reason: no GST registration effective-date
+Gap HOBB-1 (micro-hobby-transition): no GST registration effective-date
 field in company settings; POST silently discarded extra fields.
 
 Revision ID: 0065_gst_fields

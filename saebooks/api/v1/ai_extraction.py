@@ -1,10 +1,8 @@
 """JSON router — ``/api/v1/documents/extract``.
 
-AI document extraction endpoint. Accepts a multipart file upload
+B/46 AI document extraction endpoint. Accepts a multipart file upload
 (receipt, supplier invoice, bank statement) and returns structured
-accounting data extracted by a vision-capable LLM behind any
-OpenAI-compatible API (configured via ``LITELLM_BASE_URL`` +
-``LITELLM_VISION_MODEL``).
+accounting data extracted by Claude Haiku vision.
 
 Feature-gated to Business+ (``FLAG_AI_EXTRACTION``). Community and
 Offline editions receive 404, consistent with the CHARTER §6 pattern

@@ -29,7 +29,7 @@ from saebooks.main import app
 # Fixtures                                                                #
 # ---------------------------------------------------------------------- #
 
-_LITELLM_URL = "https://api.openai.com/v1/chat/completions"
+_LITELLM_URL = "https://litellm.sauer.com.au/v1/chat/completions"
 
 
 @pytest.fixture

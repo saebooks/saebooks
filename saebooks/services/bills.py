@@ -767,7 +767,8 @@ async def api_get(
 #
 # Behaviour: a foreign-tenant or unknown id raises ``BillError`` with the
 # message ``"<entity> not found in current tenant"``. The router maps
-# ``BillError`` to HTTP 422.
+# ``BillError`` to HTTP 422, matching the contract the medium-civil-
+# contractor critic expected (gap CIVL-1).
 
 
 async def _validate_contact_tenant(
