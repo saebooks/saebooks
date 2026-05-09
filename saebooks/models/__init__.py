@@ -16,6 +16,7 @@ from saebooks.models.bank_statement import BankStatementLine, StatementLineStatu
 from saebooks.models.bsl_match import BslMatch
 from saebooks.models.allocation_rule import AllocationRule
 from saebooks.models.budget import Budget
+from saebooks.models.business_identifier import BusinessIdentifier
 from saebooks.models.change_log import ChangeLog
 from saebooks.models.distribution import (
     BeneficiaryEntitlement,
@@ -60,6 +61,7 @@ __all__ = [
     "BslMatch",
     "BeneficiaryEntitlement",
     "Budget",
+    "BusinessIdentifier",
     "ChangeLog",
     "DistributionStatus",
     "TrustDistribution",
