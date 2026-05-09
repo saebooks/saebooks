@@ -33,6 +33,15 @@ class Company(Base):
     # service layer. Defaults to AU because that is the only jurisdiction
     # wired end-to-end at v0.1.4 (see docs/multi-jurisdiction.md).
     jurisdiction: Mapped[str] = mapped_column(String(3), default="AU", nullable=False)
+    # Chart-of-accounts template the company was bootstrapped from. Free
+    # text (no FK) — the registry of templates lives in
+    # ``saebooks.services.templates`` and is dispatched at apply-time.
+    # Defaults to ``au/default`` because that is the only template wired
+    # end-to-end at v0.1.4. NZ/UK/EE templates are stubs in M0 and
+    # implemented per-jurisdiction in M1/M2/M3.
+    coa_template_key: Mapped[str] = mapped_column(
+        String(64), default="au/default", nullable=False
+    )
     fin_year_start_month: Mapped[int] = mapped_column(Integer, default=7, nullable=False)
     audit_mode: Mapped[str] = mapped_column(String, default="immutable", nullable=False)
 

@@ -291,32 +291,23 @@ async def _seed_period_locks(session: AsyncSession, company: Company) -> int:
 
 
 async def main() -> None:
+    """Bootstrap the seed company with the AU template.
+
+    Dispatches through ``services.templates.apply_template`` so the
+    template registry is the single entry point for all jurisdictions.
+    The template body still calls the helpers in this module — we
+    preserve them for the time being (M1+ will retire this file once
+    the per-jurisdiction templates own their data shape end-to-end).
+    """
+    from saebooks.services.templates import apply_template
+
     logging.basicConfig(level=logging.INFO)
     async with AsyncSessionLocal() as session:
         company = await ensure_seed_company(session)
-        tax_inserted = await ensure_tax_codes(session, company.id)
-        logger.info("Tax codes: %d inserted", tax_inserted)
-        inserted, skipped = await _load_accounts(session, company)
+        await apply_template(session, company.id, company.coa_template_key)
         logger.info(
-            "Accounts for %s: %d inserted, %d already present", company.name, inserted, skipped
+            "Applied template %s to %s", company.coa_template_key, company.name
         )
-
-        locks_seeded = await _seed_period_locks(session, company)
-        logger.info("Period locks seeded: %d", locks_seeded)
-
-        raw_sources = [
-            ("raw_au_tax_codes", "account.tax-au.csv"),
-            ("raw_au_tax_groups", "account.tax.group-au.csv"),
-            ("raw_au_fiscal_positions", "account.fiscal.position-au.csv"),
-            ("raw_au_account_tags", "account.account.tag.csv"),
-            ("raw_au_depreciation_models", "account.depreciation.model-au.csv"),
-        ]
-        for table, name in raw_sources:
-            n = await _load_raw(session, table, name)
-            logger.info("  %s: %d rows", table, n)
-
-        dep_models = await _load_depreciation_models(session)
-        logger.info("  depreciation_models (typed): %d rows", dep_models)
 
 
 if __name__ == "__main__":
