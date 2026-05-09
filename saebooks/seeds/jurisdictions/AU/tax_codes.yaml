@@ -1,0 +1,102 @@
+# Australian GST tax codes — canonical starter set used by AU BAS feeders.
+# Rates effective 2000-07-01 (GST inception); revise via point-release seed.
+# report_box_keys reference BAS box codes wired in tax_return_box_definitions
+# at v0.1.5.
+table: tax_codes
+key: [jurisdiction, code, effective_from]
+rows:
+  - jurisdiction: AUS
+    code: GST
+    name: GST on sales (10%)
+    rate_percent: 10.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    gl_account_hint: GST Payable
+    effective_from: 2000-07-01
+    report_box_keys: ["BAS:G1", "BAS:1A"]
+  - jurisdiction: AUS
+    code: GST_FREE
+    name: GST-free sales
+    rate_percent: 0.0000
+    direction: sale
+    gl_account_hint: GST Payable
+    effective_from: 2000-07-01
+    report_box_keys: ["BAS:G2"]
+  - jurisdiction: AUS
+    code: EXPORT
+    name: Export sales (GST-free)
+    rate_percent: 0.0000
+    direction: sale
+    gl_account_hint: GST Payable
+    effective_from: 2000-07-01
+    report_box_keys: ["BAS:G2"]
+  - jurisdiction: AUS
+    code: INPUT_TAXED
+    name: Input-taxed sales
+    rate_percent: 0.0000
+    direction: sale
+    gl_account_hint: GST Payable
+    effective_from: 2000-07-01
+    report_box_keys: ["BAS:G3"]
+  - jurisdiction: AUS
+    code: FRE
+    name: GST-free purchases
+    rate_percent: 0.0000
+    direction: purchase
+    gl_account_hint: GST Receivable
+    effective_from: 2000-07-01
+    report_box_keys: ["BAS:G14"]
+  - jurisdiction: AUS
+    code: INP
+    name: Input-taxed purchases
+    rate_percent: 0.0000
+    direction: purchase
+    gl_account_hint: GST Receivable
+    effective_from: 2000-07-01
+    report_box_keys: ["BAS:G13"]
+  - jurisdiction: AUS
+    code: NCG
+    name: GST on purchases (10%)
+    rate_percent: 10.0000
+    direction: purchase
+    gl_account_hint: GST Receivable
+    effective_from: 2000-07-01
+    report_box_keys: ["BAS:G11", "BAS:1B"]
+  - jurisdiction: AUS
+    code: CAP
+    name: GST on capital purchases
+    rate_percent: 10.0000
+    direction: purchase
+    gl_account_hint: GST Receivable
+    effective_from: 2000-07-01
+    report_box_keys: ["BAS:G10", "BAS:1B"]
+  - jurisdiction: AUS
+    code: NTR
+    name: Not reportable (out of scope)
+    rate_percent: 0.0000
+    direction: both
+    effective_from: 2000-07-01
+  - jurisdiction: AUS
+    code: ITS
+    name: Imported services — reverse charge
+    rate_percent: 10.0000
+    direction: purchase
+    reverse_charge: true
+    gl_account_hint: GST Payable
+    effective_from: 2017-07-01
+    report_box_keys: ["BAS:1A", "BAS:1B"]
+  - jurisdiction: AUS
+    code: WET
+    name: Wine Equalisation Tax (29%)
+    rate_percent: 29.0000
+    direction: sale
+    gl_account_hint: WET Payable
+    effective_from: 2000-07-01
+  - jurisdiction: AUS
+    code: LCT
+    name: Luxury Car Tax (33%)
+    rate_percent: 33.0000
+    direction: sale
+    gl_account_hint: LCT Payable
+    effective_from: 2008-07-01

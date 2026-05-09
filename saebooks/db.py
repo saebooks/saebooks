@@ -83,3 +83,104 @@ class Base(DeclarativeBase):
 async def get_session() -> AsyncIterator[AsyncSession]:
     async with AsyncSessionLocal() as session:
         yield session
+
+
+# ====================================================================== #
+# Reference DB (multi-jurisdiction master data)                          #
+# ====================================================================== #
+#
+# The reference DB is on the same Postgres cluster but in its own
+# database. We expose two independent engines:
+#
+#   reference_engine          — read-only app role for runtime lookups
+#   reference_migration_engine — owner role for alembic + seed loader
+#
+# CompanySession and ReferenceSession are deliberately NOT joined.
+# There is no cross-DB FK; validation that a code in the company DB
+# resolves to a row in the reference DB happens at the service layer.
+#
+# Both engines opt out if their URL is unset so dev environments and
+# the existing test suite keep working unchanged. Code that needs
+# reference data and finds the engine None should raise
+# ReferenceNotConfiguredError (defined in services/reference/__init__.py).
+
+# Alias for clarity at call sites — CompanySession is the same engine
+# the rest of the app already uses.
+CompanySession = AsyncSessionLocal
+
+
+class ReferenceNotConfiguredError(RuntimeError):
+    """Raised when reference DB lookup is attempted but no engine exists."""
+
+
+_reference_engine = (
+    create_async_engine(
+        settings.reference_database_url,
+        echo=False,
+        future=True,
+        poolclass=NullPool,
+        # Belt-and-braces: the role itself should be NOLOGIN-write, but
+        # asking Postgres to also refuse writes at the transaction level
+        # turns "I forgot" into a loud error rather than a silent
+        # mutation in the rare case the role grants drift.
+        connect_args={
+            "server_settings": {"default_transaction_read_only": "on"},
+        },
+    )
+    if settings.reference_database_url
+    else None
+)
+
+ReferenceSession: async_sessionmaker[AsyncSession] | None = (
+    async_sessionmaker(
+        _reference_engine, expire_on_commit=False, class_=AsyncSession
+    )
+    if _reference_engine is not None
+    else None
+)
+
+
+_reference_migration_engine = (
+    create_async_engine(
+        settings.reference_migration_database_url,
+        echo=False,
+        future=True,
+        poolclass=NullPool,
+    )
+    if settings.reference_migration_database_url
+    else None
+)
+
+ReferenceMigrationSession: async_sessionmaker[AsyncSession] | None = (
+    async_sessionmaker(
+        _reference_migration_engine,
+        expire_on_commit=False,
+        class_=AsyncSession,
+    )
+    if _reference_migration_engine is not None
+    else None
+)
+
+
+class ReferenceBase(DeclarativeBase):
+    """Separate declarative base for reference-DB models.
+
+    Kept apart from ``Base`` so a stray ``Base.metadata.create_all``
+    against the company DB cannot create reference tables there, and
+    vice-versa. Same reason alembic gets its own env.
+    """
+
+
+async def get_reference_session() -> AsyncIterator[AsyncSession]:
+    """FastAPI dependency yielding a reference-DB session.
+
+    Raises if reference DB is not configured. Routes that depend on
+    this should be conditionally registered, or the absence reported
+    as a 503 at the route layer.
+    """
+    if ReferenceSession is None:
+        raise ReferenceNotConfiguredError(
+            "REFERENCE_DATABASE_URL is not configured"
+        )
+    async with ReferenceSession() as session:
+        yield session

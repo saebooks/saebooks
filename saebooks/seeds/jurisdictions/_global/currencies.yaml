@@ -1,0 +1,8 @@
+table: currencies
+key: [code]
+rows:
+  - {code: AUD, name: Australian Dollar, decimal_places: 2, symbol: "$"}
+  - {code: NZD, name: New Zealand Dollar, decimal_places: 2, symbol: "$"}
+  - {code: GBP, name: Pound Sterling,   decimal_places: 2, symbol: "£"}
+  - {code: EUR, name: Euro,             decimal_places: 2, symbol: "€"}
+  - {code: USD, name: United States Dollar, decimal_places: 2, symbol: "$"}

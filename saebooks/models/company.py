@@ -28,6 +28,11 @@ class Company(Base):
     acn: Mapped[str | None] = mapped_column(String(20))
     address: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     base_currency: Mapped[str] = mapped_column(String(3), default="AUD", nullable=False)
+    # Multi-jurisdiction routing key. Free text (no FK) because the
+    # jurisdiction registry lives in the reference DB; validated at the
+    # service layer. Defaults to AU because that is the only jurisdiction
+    # wired end-to-end at v0.1.4 (see docs/multi-jurisdiction.md).
+    jurisdiction: Mapped[str] = mapped_column(String(3), default="AU", nullable=False)
     fin_year_start_month: Mapped[int] = mapped_column(Integer, default=7, nullable=False)
     audit_mode: Mapped[str] = mapped_column(String, default="immutable", nullable=False)
 

@@ -335,6 +335,38 @@ class Settings(BaseSettings):
         default=5.0, alias="LICENSE_SERVER_TIMEOUT"
     )
 
+    # ---------------------------------------------------------------- #
+    # Multi-jurisdiction reference DB (v0.1.4)                          #
+    # ---------------------------------------------------------------- #
+    # The reference DB carries jurisdiction master data (rates, codes,
+    # form definitions, brackets, calendars). It lives on the SAME
+    # Postgres cluster as the company DB but in a separate database so
+    # it can be packaged, versioned, and signed independently of any
+    # one customers ledger.
+    #
+    # Two roles are expected:
+    #
+    #   reference_app  — the role the API uses at request time.
+    #                    Connects with default_transaction_read_only=on
+    #                    via connect_args. The app NEVER writes to the
+    #                    reference DB; rate corrections ship as
+    #                    point-release seed updates.
+    #
+    #   reference_owner — the role the seed loader and alembic_reference
+    #                     use. Has DDL + write privileges. Set
+    #                     ``REFERENCE_MIGRATION_DATABASE_URL`` for it.
+    #
+    # If reference_database_url is empty the API still boots and the
+    # ReferenceSession factory returns None — code paths that need
+    # reference data raise ReferenceNotConfiguredError so the absence
+    # is loud, not silent.
+    reference_database_url: str = Field(
+        default="", alias="REFERENCE_DATABASE_URL"
+    )
+    reference_migration_database_url: str = Field(
+        default="", alias="REFERENCE_MIGRATION_DATABASE_URL"
+    )
+
     @property
     def oauth_allowed_emails_set(self) -> set[str]:
         return {e.strip().lower() for e in self.oauth_allowed_emails.split(",") if e.strip()}

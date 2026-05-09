@@ -37,6 +37,9 @@ from saebooks.models.quote import Quote, QuoteLine, QuoteStatus
 from saebooks.models.settings import Setting
 from saebooks.models.sql_query import SqlQuery
 from saebooks.models.tax_code import TaxCode
+from saebooks.models.tax_period import TaxPeriod, TaxPeriodStatus, TaxPeriodType
+from saebooks.models.tax_return import TaxReturn, TaxReturnStatus
+from saebooks.models.lodgement_record import LodgementRecord, LodgementStatus
 from saebooks.models.tenant import Tenant
 from saebooks.models.user import User, UserRole
 
@@ -89,6 +92,13 @@ __all__ = [
     "SqlQuery",
     "StatementLineStatus",
     "TaxCode",
+    "TaxPeriod",
+    "TaxPeriodStatus",
+    "TaxPeriodType",
+    "TaxReturn",
+    "TaxReturnStatus",
+    "LodgementRecord",
+    "LodgementStatus",
     "Tenant",
     "User",
     "UserRole",

@@ -500,6 +500,29 @@ def main(argv: list[str] | None = None) -> int:
         help="Revaluation date (ISO-format). Default: today.",
     )
 
+    refload = sub.add_parser(
+        "reference-load",
+        help="Load reference-DB seed YAMLs (multi-jurisdiction master data).",
+    )
+    refload.add_argument(
+        "jurisdiction",
+        nargs="?",
+        default=None,
+        help="Jurisdiction directory under saebooks/seeds/jurisdictions/ "
+             "(e.g. AU). Omit to load every jurisdiction.",
+    )
+    refload.add_argument(
+        "--all",
+        action="store_true",
+        default=False,
+        help="Equivalent to omitting JURISDICTION.",
+    )
+    refload.add_argument(
+        "--version-tag",
+        default=None,
+        help="Stamp schema_meta with this tag after a successful load.",
+    )
+
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -523,6 +546,21 @@ def main(argv: list[str] | None = None) -> int:
         return asyncio.run(_reconcile_feeds(args.company_id))
     if args.command == "fx-revalue":
         return asyncio.run(_fx_revalue(args.company_id, args.through))
+    if args.command == "reference-load":
+        from saebooks.services.reference.loader import (
+            SeedLoaderNotConfiguredError, load_seeds,
+        )
+        jur = None if args.all else args.jurisdiction
+        try:
+            counts = asyncio.run(
+                load_seeds(jur, version_tag=args.version_tag)
+            )
+        except SeedLoaderNotConfiguredError as exc:
+            logger.error("reference-load: %s", exc)
+            return 2
+        for path, n in counts.items():
+            print(f"{path}: {n} row(s)")
+        return 0
     parser.print_help()
     return 2
 

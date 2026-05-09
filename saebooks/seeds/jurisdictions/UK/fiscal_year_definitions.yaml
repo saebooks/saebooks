@@ -1,0 +1,7 @@
+# UK personal/corp tax FY starts 6 April. Quarter anchors below match
+# the most common VAT staggered-quarter group (April–June, …); MTD
+# customers can override per company once we wire that in.
+table: fiscal_year_definitions
+key: [jurisdiction]
+rows:
+  - {jurisdiction: GBR, fy_start_month: 4, fy_start_day: 6, quarter_anchors: [4, 7, 10, 1]}
