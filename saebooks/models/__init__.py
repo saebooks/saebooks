@@ -33,6 +33,7 @@ from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine, Peri
 from saebooks.models.journal_template import JournalTemplate
 from saebooks.models.pay_run import PayRun, PayRunLine, PayRunStatus
 from saebooks.models.project import Project, ProjectStatus
+from saebooks.models.quote import Quote, QuoteLine, QuoteStatus
 from saebooks.models.settings import Setting
 from saebooks.models.sql_query import SqlQuery
 from saebooks.models.tax_code import TaxCode
@@ -81,6 +82,9 @@ __all__ = [
     "PeriodLock",
     "Project",
     "ProjectStatus",
+    "Quote",
+    "QuoteLine",
+    "QuoteStatus",
     "Setting",
     "SqlQuery",
     "StatementLineStatus",
