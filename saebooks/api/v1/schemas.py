@@ -2798,3 +2798,124 @@ class DeferredRevenueRecognizeOut(BaseModel):
     total_recognized: Decimal
     lines_recognized: int
     posted: bool
+
+
+# ---------------------------------------------------------------------------
+# Quotes — pre-invoice sales documents
+# ---------------------------------------------------------------------------
+
+
+class QuoteLineOut(BaseModel):
+    """One line of a quote (nested in QuoteOut)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    line_no: int
+    description: str
+    quantity: Decimal
+    unit_price: Decimal
+    line_total: Decimal
+    tax_code_id: uuid.UUID | None = None
+    account_id: uuid.UUID | None = None
+
+
+class QuoteLineCreate(BaseModel):
+    """One line in a POST/PATCH payload."""
+
+    description: str = Field(min_length=1)
+    quantity: Decimal = Decimal("1")
+    unit_price: Decimal = Decimal("0")
+    tax_code_id: uuid.UUID | None = None
+    account_id: uuid.UUID | None = None
+
+
+class QuoteBase(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    customer_id: uuid.UUID
+    issue_date: date
+    expiry_date: date | None = None
+    currency: str = Field(default="AUD", min_length=3, max_length=3)
+    validity_days: int = Field(default=28, ge=1)
+    deposit_pct: Decimal = Decimal("50")
+    late_fee_pct_per_month: Decimal = Decimal("2.5")
+    is_supply_only: bool = False
+    notes: str | None = None
+    terms: str | None = None
+
+
+class QuoteCreate(QuoteBase):
+    """POST body — DRAFT is implied."""
+
+    lines: list[QuoteLineCreate] = Field(default_factory=list)
+
+
+class QuoteUpdate(BaseModel):
+    """PATCH body — every field optional."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    customer_id: uuid.UUID | None = None
+    issue_date: date | None = None
+    expiry_date: date | None = None
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    validity_days: int | None = Field(default=None, ge=1)
+    deposit_pct: Decimal | None = None
+    late_fee_pct_per_month: Decimal | None = None
+    is_supply_only: bool | None = None
+    notes: str | None = None
+    terms: str | None = None
+    lines: list[QuoteLineCreate] | None = None
+
+
+class QuoteOut(BaseModel):
+    """Full quote response — nested lines, tenant_id, version."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    tenant_id: uuid.UUID
+    customer_id: uuid.UUID
+    number: str | None = None
+    issue_date: date
+    expiry_date: date | None = None
+    status: str
+    subtotal: Decimal
+    tax_total: Decimal
+    total: Decimal
+    currency: str
+    validity_days: int
+    deposit_pct: Decimal
+    late_fee_pct_per_month: Decimal
+    is_supply_only: bool
+    notes: str | None = None
+    terms: str | None = None
+    accepted_at: datetime | None = None
+    declined_at: datetime | None = None
+    invoiced_at: datetime | None = None
+    invoice_id: uuid.UUID | None = None
+    version: int
+    created_at: datetime
+    updated_at: datetime
+    lines: list[QuoteLineOut] = Field(default_factory=list)
+
+
+class QuoteListOut(BaseModel):
+    items: list[QuoteOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class QuoteConflictBody(BaseModel):
+    detail: str
+    current: QuoteOut
+
+
+class QuoteConvertOut(BaseModel):
+    """Response from POST /quotes/{id}/convert-to-invoice."""
+
+    quote: QuoteOut
+    invoice_id: uuid.UUID

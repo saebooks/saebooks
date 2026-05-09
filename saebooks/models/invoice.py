@@ -162,6 +162,12 @@ class Invoice(CompanyScoped, Base):
     # Gated by FLAG_STRIPE_INTEGRATION at the router level; stored here so
     # the URL survives across requests and can be included in email templates.
     stripe_payment_link: Mapped[str | None] = mapped_column(Text)
+    # --- Quote audit trail (0097) ------------------------------------------
+    # Set when the invoice was minted by POST /api/v1/quotes/{id}/convert-to-invoice.
+    source_quote_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("quotes.id", ondelete="SET NULL"),
+    )
 
     lines: Mapped[list[InvoiceLine]] = relationship(
         back_populates="invoice",
