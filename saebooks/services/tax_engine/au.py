@@ -390,6 +390,13 @@ class AUTaxEngine:
     jurisdiction: str = "AU"
 
     def compute(self, ctx: PostingContext) -> TaxTreatment:
+        # ``rate`` is round-tripped from the input as-is. Production
+        # callers fill this from ``TaxCode.rate`` which stores the rate
+        # in percentage points (``10.000`` == 10%). Direct unit-test
+        # callers may pass a fraction (``0.10``) — both are valid; the
+        # engine stores what it's given. Tax derivation falls back to
+        # ``gst_amount`` when supplied so the convention only matters
+        # for tax_engine consumers reading the snapshot back.
         rate = ctx.rate if ctx.rate is not None else Decimal("0")
         reporting_type = ctx.reporting_type or "no_tax"
         code = ctx.tax_code or "GST"

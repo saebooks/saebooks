@@ -17,10 +17,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from saebooks.models.account import Account, AccountType
+from saebooks.models.company import Company
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine, PeriodLock
+from saebooks.models.tax_code import TaxCode
 from saebooks.services import audit as audit_svc
 from saebooks.services import gst as gst_svc
 from saebooks.services import settings as settings_svc
+from saebooks.services.tax_engine import PostingContext, get_engine
 
 
 class PostingError(Exception):
@@ -369,6 +372,85 @@ async def _check_psi_distribution(
         )
 
 
+async def _apply_tax_treatment(
+    session: AsyncSession,
+    entry: JournalEntry,
+) -> None:
+    """Snapshot per-jurisdiction tax determination onto every line.
+
+    Called from ``post()`` after GST auto-posting so the GST lines
+    themselves get a treatment too. Looks up the company's
+    ``jurisdiction`` and dispatches to the matching ``TaxEngine``.
+
+    Skips silently when the engine for the company's jurisdiction
+    isn't implemented yet (NZ/UK/EE in M0). The column is nullable
+    by design — pre-engine lines and lines on accounts the engine
+    classifies as ``direction='none'`` simply leave it null.
+    """
+    if not entry.lines:
+        return
+
+    company = (
+        await session.execute(
+            select(Company).where(Company.id == entry.company_id)
+        )
+    ).scalar_one_or_none()
+    if company is None:
+        return  # extreme edge case — let the existing flow surface the error
+    jurisdiction = company.jurisdiction or "AU"
+
+    try:
+        engine = get_engine(jurisdiction)
+    except (KeyError, NotImplementedError):
+        # Unknown or stubbed jurisdiction — leave tax_treatment null
+        # so the column behaves as a soft, additive snapshot rather
+        # than a posting blocker.
+        return
+
+    # Bulk-load account_type + tax_code rows referenced by the lines.
+    acct_ids = {ln.account_id for ln in entry.lines}
+    acct_rows = await session.execute(
+        select(Account.id, Account.account_type).where(Account.id.in_(acct_ids))
+    )
+    acct_types: dict[uuid.UUID, AccountType] = {r[0]: r[1] for r in acct_rows.all()}
+
+    tc_ids = {ln.tax_code_id for ln in entry.lines if ln.tax_code_id is not None}
+    tax_codes: dict[uuid.UUID, TaxCode] = {}
+    if tc_ids:
+        tc_rows = await session.execute(
+            select(TaxCode).where(TaxCode.id.in_(tc_ids))
+        )
+        tax_codes = {tc.id: tc for tc in tc_rows.scalars().all()}
+
+    for line in entry.lines:
+        acct_type = acct_types.get(line.account_id)
+        if acct_type is None:
+            continue
+        tax_code = tax_codes.get(line.tax_code_id) if line.tax_code_id else None
+
+        # Amount = absolute net (debit for purchases, credit for sales).
+        # Both are present on every line as Numeric(14,2); only one is
+        # non-zero on a normal line, so the sum-then-abs handles any
+        # convention safely.
+        amount = abs(line.debit + line.credit) if (line.debit or line.credit) else Decimal("0")
+
+        ctx = PostingContext(
+            company_id=entry.company_id,
+            jurisdiction=jurisdiction,
+            posting_date=entry.entry_date,
+            account_id=line.account_id,
+            account_type=acct_type,
+            amount=amount,
+            gst_amount=line.gst_amount,
+            tax_code=tax_code.code if tax_code else None,
+            tax_code_id=line.tax_code_id,
+            rate=tax_code.rate if tax_code else None,
+            reporting_type=tax_code.reporting_type if tax_code else None,
+        )
+        treatment = engine.compute(ctx)
+        line.tax_treatment = treatment.to_jsonable()
+
+
 async def _check_period_lock(
     session: AsyncSession,
     company_id: uuid.UUID,
@@ -427,6 +509,13 @@ async def post(
 
     # Final balance check — the entry must balance after GST has been posted.
     await _check_balance(entry)
+
+    # Per-jurisdiction tax-treatment snapshot — frozen onto each line
+    # so historic returns stay self-consistent even if tax_codes change
+    # later. Runs AFTER auto_post_gst_lines so GST lines get a treatment
+    # too. Soft-failure: unknown / stubbed jurisdictions leave the
+    # column null rather than block the post.
+    await _apply_tax_treatment(session, entry)
 
     entry.status = EntryStatus.POSTED
     entry.posted_at = datetime.now(UTC)
