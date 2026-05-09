@@ -693,6 +693,60 @@ async def test_quotes_convert_requires_accepted_state(
     assert r3.status_code == 422
 
 
+async def test_quotes_convert_hard_fails_on_missing_account_id(
+    api_client: AsyncClient, quote_deps: dict[str, str]
+) -> None:
+    """convert-to-invoice must 422 when any line is missing account_id,
+    and the error body must identify the offending line number(s)."""
+    # Create a quote where line 2 has no account_id
+    payload = _quote_payload(
+        quote_deps,
+        lines=[
+            {
+                "description": "Line with account",
+                "quantity": "1",
+                "unit_price": "100.00",
+                "account_id": quote_deps["income_account_id"],
+            },
+            {
+                "description": "Line without account",
+                "quantity": "2",
+                "unit_price": "50.00",
+                # no account_id
+            },
+        ],
+    )
+    r = await api_client.post("/api/v1/quotes", json=payload)
+    assert r.status_code == 201, r.text
+    quote_id = r.json()["id"]
+    v = r.json()["version"]
+
+    # Walk to ACCEPTED
+    r2 = await api_client.post(
+        f"/api/v1/quotes/{quote_id}/send", headers={"If-Match": str(v)}
+    )
+    assert r2.status_code == 200, r2.text
+    v = r2.json()["version"]
+
+    r3 = await api_client.post(
+        f"/api/v1/quotes/{quote_id}/accept", headers={"If-Match": str(v)}
+    )
+    assert r3.status_code == 200, r3.text
+    v = r3.json()["version"]
+
+    # Convert should hard-fail with 422
+    r4 = await api_client.post(
+        f"/api/v1/quotes/{quote_id}/convert-to-invoice",
+        headers={"If-Match": str(v)},
+    )
+    assert r4.status_code == 422, r4.text
+
+    # Error body must mention the missing line number
+    detail = r4.json().get("detail", "")
+    assert "2" in detail, f"Expected line number '2' in error detail, got: {detail}"
+    assert "account_id" in detail.lower(), f"Expected 'account_id' in error detail, got: {detail}"
+
+
 # ---------------------------------------------------------------------------
 # Tenant isolation (RLS)
 # ---------------------------------------------------------------------------

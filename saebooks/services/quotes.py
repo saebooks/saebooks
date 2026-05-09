@@ -745,6 +745,15 @@ async def convert_to_invoice(
             f"Quote {quote.id} is {quote.status.value}; convert-to-invoice requires ACCEPTED"
         )
 
+    # Hard-fail if any line is missing account_id — invoice lines require it.
+    missing = [ln.line_no for ln in quote.lines if ln.account_id is None]
+    if missing:
+        line_list = ", ".join(str(n) for n in missing)
+        raise QuoteError(
+            f"Cannot convert to invoice: line(s) {line_list} are missing account_id. "
+            "Set an account on every line before converting."
+        )
+
     # Build invoice lines from quote lines
     invoice_lines: list[dict] = [
         {
@@ -756,7 +765,6 @@ async def convert_to_invoice(
             "discount_pct": Decimal("0"),
         }
         for ln in quote.lines
-        if ln.account_id is not None  # invoice lines require account_id
     ]
 
     today = date.today()
