@@ -386,6 +386,11 @@ async def _upsert_contact(
         if pulled.archived and existing.archived_at is None:
             existing.archived_at = datetime.now(UTC)
 
+    # Mark the local version as already-in-sync upstream so the
+    # subsequent push pass doesn't re-push the row we just pulled.
+    # Without this, freshly-pulled rows have ``last_pushed_version IS NULL``
+    # and the push selector picks them up, overwriting their
+    # ``external_id`` with a new one and breaking the link.
     await _upsert_state(
         session,
         connection=connection,
@@ -393,7 +398,7 @@ async def _upsert_contact(
         external_id=pulled.external_id,
         local_id=existing.id,
         last_pulled_etag=pulled.external_etag,
-        # Don't touch last_pushed_version on pull.
+        last_pushed_version=existing.version,
         # Don't touch quarantined flag here.
     )
 
@@ -502,6 +507,8 @@ async def _upsert_invoice(
         existing.external_etag = pulled.external_etag
         existing.external_payload = xero_payload
 
+    # Same rationale as ``_upsert_contact``: record the local version
+    # so push doesn't re-push the just-pulled invoice.
     await _upsert_state(
         session,
         connection=connection,
@@ -509,6 +516,7 @@ async def _upsert_invoice(
         external_id=pulled.external_id,
         local_id=existing.id,
         last_pulled_etag=pulled.external_etag,
+        last_pushed_version=existing.version,
     )
 
     if is_conflict:
