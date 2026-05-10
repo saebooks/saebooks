@@ -7,7 +7,7 @@ warning, not to refuse outright. ``force_sync_override=True`` proceeds.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import select
@@ -81,7 +81,7 @@ async def _seed() -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
             external_id=external_id,
             local_id=contact.id,
             last_pulled_etag="ETAG",
-            last_pulled_at=datetime.now(timezone.utc),
+            last_pulled_at=datetime.now(UTC),
         )
         session.add(state)
         await session.commit()

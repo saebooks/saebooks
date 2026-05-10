@@ -7,7 +7,7 @@ appends an audit log row.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 import respx
@@ -160,7 +160,7 @@ async def test_pull_contacts_inserts_new_contact() -> None:
         conn = await session.get(SyncConnection, conn_id)
         assert conn is not None
         assert conn.last_pulled_at is not None
-        assert conn.last_pulled_at >= datetime(2026, 4, 15, 12, 0, 0, tzinfo=timezone.utc)
+        assert conn.last_pulled_at >= datetime(2026, 4, 15, 12, 0, 0, tzinfo=UTC)
 
 
 @respx.mock

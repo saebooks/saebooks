@@ -4,7 +4,7 @@ URL construction, pagination, and If-Modified-Since formatting.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 import respx
@@ -37,7 +37,7 @@ def _make_client() -> XeroClient:
 
 
 def test_ifms_strips_microseconds_and_offset() -> None:
-    dt = datetime(2026, 4, 1, 12, 30, 45, 123456, tzinfo=timezone.utc)
+    dt = datetime(2026, 4, 1, 12, 30, 45, 123456, tzinfo=UTC)
     assert endpoints.ifms(dt) == "2026-04-01T12:30:45"
 
 
