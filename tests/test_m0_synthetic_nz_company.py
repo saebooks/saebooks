@@ -3,10 +3,11 @@
 Creates a synthetic NZ company (no AU coupling) and proves all four
 M0 surfaces dispatch by jurisdiction:
 
-1. ``services.tax_engine.get_engine('NZ')`` raises
-   ``NotImplementedError`` keyed to M1.
+1. ``services.tax_engine.get_engine('NZ')`` returns the M1 NZ engine
+   and computes a deterministic treatment.
 2. ``services.templates.apply_template(<nz_co>, 'nz/default')``
-   raises ``NotImplementedError`` keyed to M1.
+   raises ``NotImplementedError`` keyed to M1 (CoA template still
+   pending — separate piece).
 3. ``services.lodgement.get_adapter('NZ', 'gst101')`` returns the NZ
    stub adapter, and calling ``.lodge('gst101', ...)`` raises
    ``NotImplementedError`` keyed to M1.
@@ -32,7 +33,6 @@ from saebooks.services import business_identifiers as bi_svc
 from saebooks.services.lodgement import get_adapter
 from saebooks.services.tax_engine import get_engine
 from saebooks.services.templates import apply_template
-
 
 _TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
@@ -75,9 +75,36 @@ async def _delete_company(company_id: uuid.UUID) -> None:
 async def test_m0_acceptance_nz_company_routes_through_jurisdiction_dispatchers() -> None:
     company_id = await _make_synthetic_nz_company()
     try:
-        # 1. tax_engine dispatcher raises NotImplementedError(M1).
-        with pytest.raises(NotImplementedError, match="M1"):
-            get_engine("NZ")
+        # 1. tax_engine dispatcher returns the M1 NZ engine and computes
+        #    a real treatment (no AU coupling — the engine never reads
+        #    company state, just snapshots the PostingContext).
+        from datetime import date
+        from decimal import Decimal
+
+        from saebooks.models.account import AccountType
+        from saebooks.services.tax_engine import PostingContext
+        from saebooks.services.tax_engine.nz import NZTaxEngine
+
+        nz_engine = get_engine("NZ")
+        assert isinstance(nz_engine, NZTaxEngine)
+        assert nz_engine.jurisdiction == "NZ"
+
+        treatment = nz_engine.compute(
+            PostingContext(
+                company_id=company_id,
+                jurisdiction="NZ",
+                posting_date=date(2026, 4, 1),
+                account_id=uuid.uuid4(),
+                account_type=AccountType.INCOME,
+                amount=Decimal("100.00"),
+                rate=Decimal("0.15"),
+                tax_code="GST",
+                reporting_type="standard",
+            )
+        )
+        assert treatment.jurisdiction == "NZ"
+        assert treatment.tax == Decimal("15.00")
+        assert treatment.direction == "output"
 
         # 2. CoA template dispatcher raises NotImplementedError(M1).
         async with AsyncSessionLocal() as session:

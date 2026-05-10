@@ -80,6 +80,12 @@ def _au_factory() -> TaxEngine:
     return AUTaxEngine()
 
 
+def _nz_factory() -> TaxEngine:
+    from saebooks.services.tax_engine.nz import NZTaxEngine
+
+    return NZTaxEngine()
+
+
 def _stub(jurisdiction: str, milestone: str):
     def _factory() -> TaxEngine:  # noqa: ANN202 — local helper
         raise NotImplementedError(
@@ -91,7 +97,7 @@ def _stub(jurisdiction: str, milestone: str):
 
 _REGISTRY: dict[str, Any] = {
     "AU": _au_factory,
-    "NZ": _stub("NZ", "M1"),
+    "NZ": _nz_factory,
     "UK": _stub("UK", "M2"),
     "EE": _stub("EE", "M3"),
 }

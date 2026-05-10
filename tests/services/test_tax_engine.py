@@ -50,9 +50,13 @@ def test_get_engine_unknown_raises_keyerror() -> None:
         get_engine("XX")
 
 
-def test_get_engine_nz_raises_not_implemented() -> None:
-    with pytest.raises(NotImplementedError, match="M1"):
-        get_engine("NZ")
+def test_get_engine_nz_returns_nztaxengine() -> None:
+    """NZ landed in M1 — registry now resolves to a real engine."""
+    from saebooks.services.tax_engine.nz import NZTaxEngine
+
+    engine = get_engine("NZ")
+    assert isinstance(engine, NZTaxEngine)
+    assert engine.jurisdiction == "NZ"
 
 
 def test_get_engine_uk_raises_not_implemented() -> None:
