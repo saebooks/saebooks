@@ -11,12 +11,14 @@ HTTP via respx and proves the round-trip:
     -> assertions:
        * the remote contact is now in our Contact table
        * the local contact now has an external_id
-       * a sync_state row exists for both
+       * a sync_state row exists for both, with the right ``origin``:
+         pulled row -> 'remote'; pushed row -> 'synced'
        * connection.last_pulled_at / last_pushed_at advanced
        * refresh token was rotated and re-encrypted on the connection
        * sync_audit_log carries a "sync run complete" row
-       * the just-pulled contact is NOT re-pushed (regression guard:
-         pull must record ``last_pushed_version`` so push skips it)
+       * the just-pulled contact is NOT re-pushed (regression guard;
+         the push selector is now origin-aware so rows with
+         origin='remote' AND version=1 are excluded by construction)
 
 This is the cheapest test that proves the full happy path works.
 
@@ -42,6 +44,7 @@ from saebooks.models.sync import (
     SyncConnectionStatus,
     SyncProvider,
     SyncState,
+    SyncStateOrigin,
 )
 from saebooks.models.tenant import Tenant
 from saebooks.services.crypto import decrypt_field, encrypt_field
@@ -230,12 +233,22 @@ async def test_sync_xero_round_trips_contact_pull_and_push() -> None:
         ext_ids = {s.external_id for s in states}
         assert pulled_external_id in ext_ids
         assert local.external_id in ext_ids
-        # Pulled contact's sync_state must record last_pushed_version =
-        # local.version (so the next push pass skips it).
+        # Pulled contact's sync_state must be origin='remote' with
+        # last_pushed_version=NULL — the push selector excludes
+        # (origin='remote' AND version=1) by construction, which is
+        # what stops the re-push (no version-stamping workaround).
         pulled_state = next(
             s for s in states if s.external_id == pulled_external_id
         )
-        assert pulled_state.last_pushed_version == pulled.version
+        assert pulled_state.origin == SyncStateOrigin.REMOTE.value
+        assert pulled_state.last_pushed_version is None
+        # Locally-created contact got pushed -> origin='synced',
+        # last_pushed_version=local.version.
+        local_state = next(
+            s for s in states if s.external_id == local.external_id
+        )
+        assert local_state.origin == SyncStateOrigin.SYNCED.value
+        assert local_state.last_pushed_version == local.version
 
         # Connection: refresh rotated, watermarks advanced, status ACTIVE.
         conn = await session.get(SyncConnection, conn_id)
@@ -344,3 +357,154 @@ async def test_sync_xero_does_not_repush_freshly_pulled_contact() -> None:
     # just-pulled contact must not be re-pushed).
     assert pushes_after_second == pushes_after_first
     assert report.contacts_push.pushed == 0
+
+
+@respx.mock
+async def test_origin_state_transitions_explicit() -> None:
+    """Pin the SyncStateOrigin state machine end-to-end.
+
+    Three rows go through the connector and we assert the canonical
+    end-state of each:
+
+    * a locally-created contact with no external_id          -> 'synced'
+      (after push, the new sync_state row carries SYNCED)
+    * a remote contact arriving via pull                     -> 'remote'
+      (insert; last_pushed_version stays NULL — no workaround)
+    * a contact that was pulled, then has its name edited
+      locally, then re-syncs                                 -> 'synced'
+      (REMOTE -> SYNCED transition fires on first push)
+    """
+    tenant_id, company_id, conn_id, local_contact_id = await _seed_isolated()
+    pulled_external_id = f"XC-PULL-{uuid.uuid4().hex[:8]}"
+
+    respx.post(XERO_TOKEN_URL).mock(return_value=_ok_refresh())
+    respx.get(XERO_API_BASE + "Contacts").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "Contacts": [
+                    {
+                        "ContactID": pulled_external_id,
+                        "Name": "Pulled Then Edited",
+                        "IsCustomer": True,
+                        "ContactStatus": "ACTIVE",
+                        "UpdatedDateUTC": "2026-04-15T12:00:00",
+                    }
+                ]
+            },
+        )
+    )
+    respx.get(XERO_API_BASE + "Invoices").mock(
+        return_value=httpx.Response(200, json={"Invoices": []})
+    )
+
+    def _echo(request: httpx.Request) -> httpx.Response:
+        body = _json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "Contacts": [
+                    {
+                        "ContactID": f"XC-PUSH-{uuid.uuid4().hex[:12]}",
+                        "Name": c.get("Name"),
+                        "UpdatedDateUTC": "2026-04-20T08:00:00",
+                    }
+                    for c in body.get("Contacts", [])
+                ]
+            },
+        )
+
+    respx.post(XERO_API_BASE + "Contacts").mock(side_effect=_echo)
+    respx.post(XERO_API_BASE + "Invoices").mock(
+        return_value=httpx.Response(200, json={"Invoices": []})
+    )
+
+    # First cycle: local contact gets pushed; remote contact gets pulled.
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            text(f"SET LOCAL app.current_tenant = '{tenant_id}'")
+        )
+        conn = await session.get(SyncConnection, conn_id)
+        assert conn is not None
+        await sync_xero(session, connection=conn, company_id=company_id)
+        await session.commit()
+
+    # After cycle 1: pulled is REMOTE, local is SYNCED.
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            text(f"SET LOCAL app.current_tenant = '{tenant_id}'")
+        )
+        states = list(
+            (
+                await session.execute(
+                    select(SyncState).where(SyncState.connection_id == conn_id)
+                )
+            ).scalars()
+        )
+        pulled_state = next(
+            s for s in states if s.external_id == pulled_external_id
+        )
+        assert pulled_state.origin == SyncStateOrigin.REMOTE.value
+        assert pulled_state.last_pushed_version is None
+
+        local = await session.get(Contact, local_contact_id)
+        assert local is not None and local.external_id is not None
+        local_state = next(
+            s for s in states if s.external_id == local.external_id
+        )
+        assert local_state.origin == SyncStateOrigin.SYNCED.value
+        assert local_state.last_pushed_version == local.version
+
+        # Now bump the pulled contact's local version (simulating an
+        # operator edit). Going through the service layer would also
+        # write a change_log row; for this test we mutate directly and
+        # bump the version counter ourselves.
+        pulled = (
+            await session.execute(
+                select(Contact).where(Contact.external_id == pulled_external_id)
+            )
+        ).scalar_one()
+        pulled.name = "Pulled Then Edited LOCAL"
+        pulled.version = pulled.version + 1
+        await session.commit()
+
+    # Second cycle: the edited remote-origin contact should now be
+    # picked up by the push selector via (origin='remote' AND version > 1).
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            text(f"SET LOCAL app.current_tenant = '{tenant_id}'")
+        )
+        conn = await session.get(SyncConnection, conn_id)
+        assert conn is not None
+        report = await sync_xero(session, connection=conn, company_id=company_id)
+        await session.commit()
+
+    # The pulled contact should have flipped REMOTE -> SYNCED on push.
+    # Note: the push echo handler returns a fresh ContactID, so the
+    # contact's external_id changes; we look it up by local_id.
+    assert report.contacts_push.pushed >= 1
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            text(f"SET LOCAL app.current_tenant = '{tenant_id}'")
+        )
+        pulled = (
+            await session.execute(
+                select(Contact).where(
+                    Contact.name == "Pulled Then Edited LOCAL",
+                    Contact.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one()
+        # Find the state row by local_id (external_id was rewritten by
+        # the echo'd push response).
+        post_state = (
+            await session.execute(
+                select(SyncState).where(
+                    SyncState.connection_id == conn_id,
+                    SyncState.local_id == pulled.id,
+                    SyncState.external_id == pulled.external_id,
+                )
+            )
+        ).scalar_one()
+        assert post_state.origin == SyncStateOrigin.SYNCED.value
+        assert post_state.last_pushed_version == pulled.version

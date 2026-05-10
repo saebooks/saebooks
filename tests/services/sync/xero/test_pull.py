@@ -22,6 +22,7 @@ from saebooks.models.sync import (
     SyncConnectionStatus,
     SyncProvider,
     SyncState,
+    SyncStateOrigin,
 )
 from saebooks.services.sync.xero.client import XERO_API_BASE, XeroClient
 from saebooks.services.sync.xero.pull import pull_contacts
@@ -144,6 +145,12 @@ async def test_pull_contacts_inserts_new_contact() -> None:
         ).scalar_one_or_none()
         assert state is not None
         assert state.local_id == contact.id
+        # Pulled rows must be origin='remote' with last_pushed_version
+        # NULL — they have not been pushed back upstream. The push
+        # selector ignores them on its first pass thanks to the origin
+        # column (no version-stamping workaround needed).
+        assert state.origin == SyncStateOrigin.REMOTE.value
+        assert state.last_pushed_version is None
 
         audit = list(
             (

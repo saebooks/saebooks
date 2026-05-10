@@ -21,6 +21,7 @@ from saebooks.models.sync import (
     SyncConnectionStatus,
     SyncProvider,
     SyncState,
+    SyncStateOrigin,
 )
 from saebooks.services.sync.xero.client import XERO_API_BASE, XeroClient
 from saebooks.services.sync.xero.push import (
@@ -151,6 +152,8 @@ async def test_push_contacts_creates_remote_and_records_external_id() -> None:
         assert state.last_pushed_version == c.version
         assert state.local_id == c.id
         assert state.external_id == c.external_id
+        # First successful push transitions origin -> SYNCED.
+        assert state.origin == SyncStateOrigin.SYNCED.value
 
 
 def test_detect_conflict_pure_function() -> None:
