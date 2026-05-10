@@ -36,6 +36,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+import sqlalchemy as sa
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,6 +47,7 @@ from saebooks.models.sync import (
     SyncDirection,
     SyncObjectType,
     SyncState,
+    SyncStateOrigin,
 )
 from saebooks.services.sync.errors import (
     SyncConflictError,
@@ -219,6 +221,9 @@ async def push_journal(
         local_id=local_id,
         last_pulled_etag=rows[0].get("UpdatedDateUTC"),
         last_pushed_version=1,
+        # Manual journals are push-only; they never come from a pull,
+        # so the very first state row is SYNCED (we wrote it upstream).
+        origin=SyncStateOrigin.SYNCED,
     )
     await _audit(
         session,
@@ -280,6 +285,9 @@ async def _push_one_contact(
         contact.external_etag = new_etag
     contact.external_payload = rows[0]
 
+    # First successful push transitions origin -> SYNCED. This is the
+    # only writer that flips the column; pull never touches it after
+    # the initial INSERT.
     await _upsert_state(
         session,
         connection=connection,
@@ -288,6 +296,7 @@ async def _push_one_contact(
         local_id=contact.id,
         last_pulled_etag=new_etag,
         last_pushed_version=contact.version,
+        origin=SyncStateOrigin.SYNCED,
     )
     await _audit(
         session,
@@ -420,6 +429,7 @@ async def _push_one_invoice(
         local_id=invoice.id,
         last_pulled_etag=new_etag,
         last_pushed_version=invoice.version,
+        origin=SyncStateOrigin.SYNCED,
     )
     await _audit(
         session,
@@ -442,24 +452,41 @@ async def _select_contact_push_candidates(
     session: AsyncSession,
     connection: SyncConnection,
 ) -> list[Contact]:
-    """Find Contacts that need pushing.
+    """Find Contacts that need pushing — origin-aware.
 
-    A Contact needs pushing when any of:
+    Three buckets, in order:
 
-    * It has no ``external_id`` yet (never pushed).
-    * Its ``version`` exceeds the matching ``sync_state.last_pushed_version``.
+    1. **First push** — no ``external_id`` yet. These are local rows the
+       operator created in SAE Books, never round-tripped. We push,
+       record an external_id, and mark the new ``sync_state`` row with
+       ``origin='synced'`` (see ``_push_one_contact``).
 
-    Both cases are expressed via a LEFT JOIN — rows with no state row
-    qualify as "never pushed".
+    2. **Update push (already SYNCED)** — pushed at least once before;
+       the ``sync_state`` row is ``origin='synced'``. Push iff
+       ``contact.version > sync_state.last_pushed_version``.
+
+    3. **Remote-then-edited push** — ``origin='remote'`` and the local
+       row's ``version`` has advanced past 1 (the version it carried
+       at pull insert; only local writes bump version). On first
+       successful push the row transitions to ``origin='synced'``.
+
+    We deliberately do NOT pick up ``origin='remote' AND version=1``
+    rows (the bug we are closing — re-pushing a freshly-pulled row
+    would overwrite its ``external_id`` with a fresh POST response and
+    break the upstream link).
+
+    Quarantined rows are excluded in all three branches.
     """
-    # Contacts not yet linked to Xero (external_id is NULL).
+    # 1. New rows — no external_id, no state.
     stmt_new = select(Contact).where(
         Contact.tenant_id == connection.tenant_id,
         Contact.external_id.is_(None),
     )
     new_rows = list((await session.execute(stmt_new)).scalars())
 
-    # Contacts already linked — push if version > last_pushed_version.
+    # 2 + 3. Existing rows. The branch on origin is in the predicate
+    # so a single index scan suffices; ``ix_sync_state_push_selector``
+    # (mig 0096) is the partial composite that backs this.
     stmt_existing = (
         select(Contact)
         .join(
@@ -472,9 +499,30 @@ async def _select_contact_push_candidates(
             Contact.tenant_id == connection.tenant_id,
             Contact.external_source == "xero",
             Contact.external_id.is_not(None),
-            (SyncState.last_pushed_version.is_(None))
-            | (Contact.version > SyncState.last_pushed_version),
             SyncState.quarantined.is_(False),
+            sa.or_(
+                # SYNCED with local edits since last push.
+                sa.and_(
+                    SyncState.origin == SyncStateOrigin.SYNCED.value,
+                    SyncState.last_pushed_version.is_not(None),
+                    Contact.version > SyncState.last_pushed_version,
+                ),
+                # REMOTE with local edits since pull (version > 1).
+                sa.and_(
+                    SyncState.origin == SyncStateOrigin.REMOTE.value,
+                    Contact.version > 1,
+                ),
+                # LOCAL with no external_id collision but a state row
+                # already exists (rare — only if push partially
+                # succeeded before; handled the same as SYNCED below).
+                sa.and_(
+                    SyncState.origin == SyncStateOrigin.LOCAL.value,
+                    sa.or_(
+                        SyncState.last_pushed_version.is_(None),
+                        Contact.version > SyncState.last_pushed_version,
+                    ),
+                ),
+            ),
         )
     )
     changed_rows = list((await session.execute(stmt_existing)).scalars())
@@ -485,7 +533,11 @@ async def _select_invoice_push_candidates(
     session: AsyncSession,
     connection: SyncConnection,
 ) -> list[Invoice]:
-    """Find Invoices that need pushing — POSTED and version-bumped only."""
+    """Find Invoices that need pushing — POSTED and origin-aware.
+
+    Same three-bucket shape as ``_select_contact_push_candidates``.
+    Invoices have the additional filter that DRAFT rows stay local.
+    """
     stmt_new = select(Invoice).where(
         Invoice.tenant_id == connection.tenant_id,
         Invoice.external_id.is_(None),
@@ -506,9 +558,25 @@ async def _select_invoice_push_candidates(
             Invoice.external_source == "xero",
             Invoice.external_id.is_not(None),
             Invoice.status == "POSTED",
-            (SyncState.last_pushed_version.is_(None))
-            | (Invoice.version > SyncState.last_pushed_version),
             SyncState.quarantined.is_(False),
+            sa.or_(
+                sa.and_(
+                    SyncState.origin == SyncStateOrigin.SYNCED.value,
+                    SyncState.last_pushed_version.is_not(None),
+                    Invoice.version > SyncState.last_pushed_version,
+                ),
+                sa.and_(
+                    SyncState.origin == SyncStateOrigin.REMOTE.value,
+                    Invoice.version > 1,
+                ),
+                sa.and_(
+                    SyncState.origin == SyncStateOrigin.LOCAL.value,
+                    sa.or_(
+                        SyncState.last_pushed_version.is_(None),
+                        Invoice.version > SyncState.last_pushed_version,
+                    ),
+                ),
+            ),
         )
     )
     changed_rows = list((await session.execute(stmt_existing)).scalars())

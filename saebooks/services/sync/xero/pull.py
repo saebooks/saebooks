@@ -51,6 +51,7 @@ from saebooks.models.sync import (
     SyncDirection,
     SyncObjectType,
     SyncState,
+    SyncStateOrigin,
 )
 from saebooks.services.sync.errors import SyncValidationError
 from saebooks.services.sync.xero.client import XeroClient
@@ -333,12 +334,21 @@ async def _upsert_contact(
         external_id=pulled.external_id,
     )
 
-    # Conflict if local has unsynced changes (version > last_pushed_version).
-    is_conflict = (
-        existing is not None
-        and state is not None
-        and state.last_pushed_version is not None
-        and existing.version > state.last_pushed_version
+    # Conflict detection — see ``SyncStateOrigin`` for the state machine.
+    # Whether the local row has been edited since we last reconciled with
+    # upstream depends on the sync_state origin:
+    #
+    # * SYNCED  — last_pushed_version is the watermark; conflict iff
+    #             local.version moved past it.
+    # * REMOTE  — never been pushed; the local copy was created by a
+    #             prior pull at version=1, so version > 1 means a local
+    #             edit has happened since pull. Surface as conflict.
+    # * LOCAL   — would mean the operator created a row locally and
+    #             then somehow Xero served back a row with the same
+    #             external_id (pre-existing operator entry?). Treat as
+    #             conflict — operator must reconcile manually.
+    is_conflict = existing is not None and _has_unsynced_local_edits(
+        existing_version=existing.version, state=state
     )
 
     if existing is None:
@@ -386,11 +396,15 @@ async def _upsert_contact(
         if pulled.archived and existing.archived_at is None:
             existing.archived_at = datetime.now(UTC)
 
-    # Mark the local version as already-in-sync upstream so the
-    # subsequent push pass doesn't re-push the row we just pulled.
-    # Without this, freshly-pulled rows have ``last_pushed_version IS NULL``
-    # and the push selector picks them up, overwriting their
-    # ``external_id`` with a new one and breaking the link.
+    # Record sync_state. ``origin`` is only set on INSERT — it is
+    # sticky thereafter (push transitions REMOTE -> SYNCED in
+    # ``push.py``). We do NOT stamp ``last_pushed_version`` here:
+    # the previous workaround (commit e5a092c) used that field to mark
+    # pulled rows as "already pushed" and shut up the push selector,
+    # but the push selector now reads ``origin`` so the workaround is
+    # no longer needed and would re-introduce the schema lie this work
+    # is closing out.
+    is_new_state = state is None
     await _upsert_state(
         session,
         connection=connection,
@@ -398,8 +412,7 @@ async def _upsert_contact(
         external_id=pulled.external_id,
         local_id=existing.id,
         last_pulled_etag=pulled.external_etag,
-        last_pushed_version=existing.version,
-        # Don't touch quarantined flag here.
+        origin=SyncStateOrigin.REMOTE if is_new_state else None,
     )
 
     if is_conflict:
@@ -436,11 +449,8 @@ async def _upsert_invoice(
         external_id=pulled.external_id,
     )
 
-    is_conflict = (
-        existing is not None
-        and state is not None
-        and state.last_pushed_version is not None
-        and existing.version > state.last_pushed_version
+    is_conflict = existing is not None and _has_unsynced_local_edits(
+        existing_version=existing.version, state=state
     )
 
     if existing is None:
@@ -507,8 +517,11 @@ async def _upsert_invoice(
         existing.external_etag = pulled.external_etag
         existing.external_payload = xero_payload
 
-    # Same rationale as ``_upsert_contact``: record the local version
-    # so push doesn't re-push the just-pulled invoice.
+    # See ``_upsert_contact`` for why we no longer stamp
+    # ``last_pushed_version`` on pull. ``origin`` is sticky after the
+    # first INSERT — the push success-handler is the only thing that
+    # transitions it onward (REMOTE -> SYNCED).
+    is_new_state = state is None
     await _upsert_state(
         session,
         connection=connection,
@@ -516,7 +529,7 @@ async def _upsert_invoice(
         external_id=pulled.external_id,
         local_id=existing.id,
         last_pulled_etag=pulled.external_etag,
-        last_pushed_version=existing.version,
+        origin=SyncStateOrigin.REMOTE if is_new_state else None,
     )
 
     if is_conflict:
@@ -527,6 +540,41 @@ async def _upsert_invoice(
 # ---------------------------------------------------------------------- #
 # Sync-state helpers                                                     #
 # ---------------------------------------------------------------------- #
+
+
+def _has_unsynced_local_edits(
+    *,
+    existing_version: int,
+    state: SyncState | None,
+) -> bool:
+    """Has the local row been edited since we last reconciled with upstream?
+
+    The answer depends on the sync_state row's ``origin``:
+
+    * ``SYNCED``  — last_pushed_version is the watermark; we have
+                    edits iff existing.version > last_pushed_version.
+    * ``REMOTE``  — never been pushed; the row was inserted by a prior
+                    pull at version=1 and only local writes bump
+                    version. Any version > 1 is a local edit.
+    * ``LOCAL``   — by construction this row has never appeared in a
+                    pull (no external_id collision), so a pull hitting
+                    it means something unusual; flag as conflict so
+                    the operator reconciles manually.
+    * No state    — first time we've heard of this external_id; the
+                    pull will INSERT a fresh state. Not a conflict.
+    """
+    if state is None:
+        return False
+    origin = state.origin
+    if origin == SyncStateOrigin.SYNCED.value:
+        return (
+            state.last_pushed_version is not None
+            and existing_version > state.last_pushed_version
+        )
+    if origin == SyncStateOrigin.REMOTE.value:
+        return existing_version > 1
+    # origin == LOCAL — see docstring; treat as conflict.
+    return True
 
 
 async def _get_state(
@@ -555,7 +603,21 @@ async def _upsert_state(
     last_pushed_version: int | None = None,
     quarantined: bool | None = None,
     quarantine_reason: str | None = None,
+    origin: SyncStateOrigin | None = None,
 ) -> SyncState:
+    """Insert or update one ``sync_state`` row.
+
+    ``origin`` semantics:
+
+    * On INSERT, ``origin`` is required for correctness; callers must
+      pass a value. Defaults to ``LOCAL`` only as a last-resort fallback
+      to keep the function call-safe — every real callsite specifies it.
+    * On UPDATE, ``origin`` is normally NOT supplied (None) — the
+      provenance tag is sticky once set. The only legal transitions are
+      ``LOCAL`` -> ``SYNCED`` and ``REMOTE`` -> ``SYNCED``, performed
+      by the push success-handler. Any other transition would re-open
+      the bug we are closing here, so be explicit about the value.
+    """
     state = await _get_state(session, connection.id, object_type, external_id)
     now = datetime.now(UTC)
     if state is None:
@@ -572,6 +634,7 @@ async def _upsert_state(
             last_pushed_at=now if last_pushed_version is not None else None,
             quarantined=bool(quarantined) if quarantined is not None else False,
             quarantine_reason=quarantine_reason,
+            origin=(origin or SyncStateOrigin.LOCAL).value,
         )
         session.add(state)
         await session.flush()
@@ -587,6 +650,11 @@ async def _upsert_state(
     if quarantined is not None:
         state.quarantined = bool(quarantined)
         state.quarantine_reason = quarantine_reason
+    if origin is not None:
+        # Caller is asserting a transition (e.g. push success: -> SYNCED).
+        # We don't second-guess: the schema CHECK constraint prevents
+        # bogus values; the call sites are the ones that must be careful.
+        state.origin = origin.value
     return state
 
 
