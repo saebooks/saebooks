@@ -33,9 +33,9 @@ BROWSER_BASE = "https://papers.example.com"
 
 def _settings(**overrides: object) -> Settings:
     base = {
-        "PAPETestS_API_URL": API_BASE,
-        "PAPETestS_URL": BROWSER_BASE,
-        "PAPETestS_API_TOKEN": "token-xyz",
+        "PAPERLESS_API_URL": API_BASE,
+        "PAPERLESS_URL": BROWSER_BASE,
+        "PAPERLESS_API_TOKEN": "token-xyz",
     }
     base.update(overrides)
     return Settings(**base)  # type: ignore[arg-type]
@@ -55,13 +55,13 @@ def test_build_browser_url_appends_details_suffix() -> None:
 
 async def test_client_raises_when_token_missing() -> None:
     with pytest.raises(PaperlessNotConfiguredError, match="TOKEN"):
-        PaperlessClient(settings=_settings(PAPETestS_API_TOKEN=""))
+        PaperlessClient(settings=_settings(PAPERLESS_API_TOKEN=""))
 
 
 async def test_client_raises_when_api_url_missing() -> None:
-    with pytest.raises(PaperlessNotConfiguredError, match="PAPETestS_API_URL"):
+    with pytest.raises(PaperlessNotConfiguredError, match="PAPERLESS_API_URL"):
         PaperlessClient(
-            settings=_settings(PAPETestS_API_URL="", PAPETestS_URL="")
+            settings=_settings(PAPERLESS_API_URL="", PAPERLESS_URL="")
         )
 
 
