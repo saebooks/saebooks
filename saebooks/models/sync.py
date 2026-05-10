@@ -85,6 +85,37 @@ class SyncDirection(enum.StrEnum):
     DISCONNECT = "disconnect"
 
 
+class SyncStateOrigin(enum.StrEnum):
+    """Provenance tag on a ``sync_state`` row — drives push eligibility.
+
+    Migration 0096 adds the column. The three values are mutually
+    exclusive and form a small state machine:
+
+    * ``LOCAL``  — row was created locally and never pushed; the next
+      push pass will pick it up via ``last_pushed_version IS NULL``.
+    * ``REMOTE`` — row was pulled from upstream. Push pass must NOT
+      pick it up unless the local copy has been edited since pull
+      (detected via ``version > 1`` on the underlying object — the
+      object's ``version`` column starts at 1 on insert and only bumps
+      on local writes).
+    * ``SYNCED`` — has been successfully pushed at least once. Push
+      pass picks it up iff ``version > last_pushed_version``.
+
+    Transitions::
+
+        LOCAL  --(first successful push)--> SYNCED
+        REMOTE --(first successful push)--> SYNCED
+        SYNCED stays SYNCED across subsequent push/pull cycles.
+
+    The CHECK constraint at the DB layer enforces these three values;
+    do not introduce a fourth without a migration.
+    """
+
+    LOCAL = "local"
+    REMOTE = "remote"
+    SYNCED = "synced"
+
+
 class SyncObjectType(enum.StrEnum):
     """Object types we sync.
 
@@ -218,6 +249,14 @@ class SyncState(Base):
     )
     last_pushed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+    # See ``SyncStateOrigin`` and migration 0096 for semantics. Stored
+    # as TEXT (CHECK-constrained) rather than ENUM so adding a fourth
+    # value down the line is a no-DDL change to the CHECK predicate.
+    origin: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default=SyncStateOrigin.LOCAL.value,
     )
 
     quarantined: Mapped[bool] = mapped_column(
