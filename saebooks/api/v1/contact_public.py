@@ -140,10 +140,18 @@ async def contact_submit(body: ContactRequest, request: Request) -> JSONResponse
         fake_id = str(uuid.uuid4())
         return JSONResponse(content={"ok": True, "id": fake_id})
 
-    # Determine client IP (honours X-Forwarded-For, same logic as rate_limit.py)
-    xff = request.headers.get("x-forwarded-for")
-    if xff:
-        client_ip = xff.split(",", 1)[0].strip() or "0.0.0.0"
+    # Determine client IP. Honours X-Forwarded-For ONLY when
+    # SAEBOOKS_TRUST_PROXY_XFF=1 (set in prod compose, behind Caddy).
+    # Without the env opt-in, anyone could rotate XFF to defeat the
+    # 5/hour contact-form rate limit. Mirrors middleware/rate_limit.py:_client_ip.
+    if os.environ.get("SAEBOOKS_TRUST_PROXY_XFF", "").strip() == "1":
+        xff = request.headers.get("x-forwarded-for")
+        if xff:
+            client_ip = xff.split(",", 1)[0].strip() or "0.0.0.0"
+        elif request.client is not None:
+            client_ip = request.client.host or "0.0.0.0"
+        else:
+            client_ip = "0.0.0.0"
     elif request.client is not None:
         client_ip = request.client.host or "0.0.0.0"
     else:

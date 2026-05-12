@@ -158,7 +158,7 @@ def create_app() -> FastAPI:
         schema["paths"] = {
             path: item
             for path, item in schema.get("paths", {}).items()
-            if not path.startswith("/admin/")
+            if not (path.startswith("/admin/") or path.startswith("/api/v1/admin/"))
         }
         return schema
 

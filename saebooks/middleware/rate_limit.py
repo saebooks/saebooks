@@ -24,6 +24,7 @@ Public surface:
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Awaitable, Callable
 
 from fastapi import HTTPException, Request, status
@@ -74,9 +75,15 @@ def _client_ip(request: Request) -> str:
     Caddy), otherwise falls back to ``request.client.host`` and "0.0.0.0"
     for the truly headless case (testclient direct ASGI).
     """
-    xff = request.headers.get("x-forwarded-for")
-    if xff:
-        return xff.split(",", 1)[0].strip() or "0.0.0.0"
+    # XFF is only honoured when the upstream proxy is configured as trusted.
+    # In production the API sits behind Caddy on host network; the first XFF
+    # hop is the real client IP. When SAEBOOKS_TRUST_PROXY_XFF is unset the
+    # header is ignored — anyone can otherwise rotate XFF to defeat per-IP
+    # rate limits on signup / magic-link / password-reset / contact-form.
+    if os.environ.get("SAEBOOKS_TRUST_PROXY_XFF", "").strip() == "1":
+        xff = request.headers.get("x-forwarded-for")
+        if xff:
+            return xff.split(",", 1)[0].strip() or "0.0.0.0"
     if request.client is not None:
         return request.client.host or "0.0.0.0"
     return "0.0.0.0"
