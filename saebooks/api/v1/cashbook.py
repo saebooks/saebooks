@@ -48,7 +48,7 @@ surface without a separate "is this a cashbook company?" call.
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID
@@ -358,8 +358,15 @@ async def list_entries(
             JournalEntry.attachments["cashbook_meta"]["category_code"].astext
             == category
         )
-    if cursor is not None:
-        stmt = stmt.where(JournalEntry.created_at < cursor)
+    if cursor:
+        try:
+            cursor_dt = datetime.fromisoformat(cursor)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail='invalid cursor',
+            ) from exc
+        stmt = stmt.where(JournalEntry.created_at < cursor_dt)
     stmt = stmt.order_by(
         JournalEntry.entry_date.desc(),
         JournalEntry.created_at.desc(),
