@@ -381,15 +381,27 @@ async def _check_period_lock(
         )
     )
     locked_through = result.scalar_one_or_none()
-    if (
-        locked_through is not None
-        and entry_date <= locked_through
-        and not override_reason
-    ):
-        raise PostingError(
-            f"Period is locked through {locked_through}. "
-            f"Provide an override reason to post into a locked period."
-        )
+    if locked_through is not None and entry_date <= locked_through:
+        if not override_reason:
+            raise PostingError(
+                f"Period is locked through {locked_through}. "
+                f"Provide an override reason to post into a locked period."
+            )
+        # F-04 interim: refuse trivial / stop-word overrides. A non-admin
+        # user can still bypass by typing a 12-char string, but the worst
+        # case ("x" / "override" / blank-ish) is closed off. Full
+        # role-gate plumbing (actor_role through post/reverse/update_draft
+        # and bank_feeds.py:464) is tracked separately — see overnight
+        # 2026-05-13/F-04-deferred.md.
+        _cleaned = override_reason.strip().lower()
+        _STOPS = {"x", ".", "yes", "ok", "override", "reason", "no", "y", "-", "na", "n/a"}
+        if len(_cleaned) < 12 or _cleaned in _STOPS:
+            raise PostingError(
+                f"Period is locked through {locked_through}. "
+                f"Override reason must be a meaningful explanation "
+                f"(minimum 12 characters, not a stop-word). "
+                f"Provided: {override_reason!r}."
+            )
 
 
 async def post(
