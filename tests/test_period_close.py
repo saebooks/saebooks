@@ -128,6 +128,7 @@ async def _post_income(
         posted = await journal_svc.post(
             session, draft.id, posted_by="tests",
             override_reason="test fixture",
+            actor_role="admin",  # F-04: period-lock override requires role
         )
         return posted.id
 
@@ -156,6 +157,7 @@ async def _post_expense(
         posted = await journal_svc.post(
             session, draft.id, posted_by="tests",
             override_reason="test fixture",
+            actor_role="admin",  # F-04: period-lock override requires role
         )
         return posted.id
 
@@ -297,6 +299,7 @@ async def test_close_year_posts_balanced_journal_and_locks() -> None:
             posted_by="tests",
             from_date=from_d,
             override_reason="test fixture",
+            actor_role="admin",  # F-04: period-lock override requires role
         )
 
     assert entry is not None
@@ -344,6 +347,7 @@ async def test_close_year_is_idempotent_on_second_run() -> None:
             # WITHOUT needing an override reason.
             lock_period=False,
             override_reason="test fixture",
+            actor_role="admin",  # F-04
         )
     assert first is not None
 
@@ -357,6 +361,7 @@ async def test_close_year_is_idempotent_on_second_run() -> None:
             from_date=from_d,
             lock_period=False,
             override_reason="test fixture",
+            actor_role="admin",  # F-04
         )
     assert second is None  # no-op — nothing to close
 
@@ -402,6 +407,7 @@ async def test_close_year_does_not_touch_later_periods() -> None:
             from_date=h1_from,
             lock_period=False,
             override_reason="test fixture",
+            actor_role="admin",  # F-04
         )
         assert entry is not None
 
