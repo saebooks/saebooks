@@ -186,6 +186,7 @@ async def close_year(
     from_date: date | None = None,
     lock_period: bool = True,
     override_reason: str | None = None,
+    actor_role: str | None = None,
 ) -> JournalEntry | None:
     """Build + post the year-end close journal, then lock the period.
 
@@ -196,6 +197,12 @@ async def close_year(
     Set ``lock_period=False`` when running from a test that wants to
     post further journals in the same period — the lock blocks
     additional posts without an override reason.
+
+    ``actor_role`` is the F-04 period-lock override role. Year-end close
+    routinely posts INTO a date that is immediately about to be locked,
+    so callers from an admin-gated route must pass ``actor_role="admin"``
+    (or accountant/owner). Callers that don't supply a role cannot
+    override a pre-existing lock at ``through_date`` — fail-closed.
     """
     preview = await preview_close(
         session,
@@ -223,6 +230,7 @@ async def close_year(
         draft.id,
         posted_by=posted_by,
         override_reason=override_reason,
+        actor_role=actor_role,
     )
 
     if lock_period:
