@@ -431,6 +431,7 @@ async def api_post(
     expected_version: int,
     *,
     override_reason: str | None = None,
+    actor_role: str | None = None,
 ) -> JournalEntry:
     """Transition DRAFT → POSTED with optimistic locking + change_log.
 
@@ -440,6 +441,12 @@ async def api_post(
 
     ``override_reason`` is passed through to the period-lock check — when
     non-empty it bypasses the lock and is stored on the entry for audit.
+
+    ``actor_role`` (F-04) is the role string of the calling user, resolved
+    by the router from ``request.state.role``. It gates the override path
+    inside ``_check_period_lock`` — only admin/accountant/owner may bypass
+    a closed period. The role is also persisted on the change_log row so
+    audit replay sees the authorisation level.
     """
     from saebooks.services import journal as journal_svc  # avoid circular at module level
 
@@ -463,7 +470,11 @@ async def api_post(
     # router's existing except clause returns 422 instead of propagating a 500.
     try:
         entry = await journal_svc.post(
-            session, entry_id, posted_by=actor, override_reason=override_reason
+            session,
+            entry_id,
+            posted_by=actor,
+            override_reason=override_reason,
+            actor_role=actor_role,
         )
     except journal_svc.PostingError as exc:
         raise JournalEntryError(str(exc)) from exc
@@ -476,13 +487,19 @@ async def api_post(
     entry = await _get_with_lines(session, entry_id)
     assert entry is not None
 
+    # F-04: include actor_role in the change_log payload so the audit
+    # replay surface shows which authorisation level approved the post.
+    payload = _serialise(entry)
+    if actor_role:
+        payload["_actor_role"] = actor_role
+
     await change_log_svc.append(
         session,
         entity="journal_entry",
         entity_id=entry.id,
         op="posted",
         actor=actor,
-        payload=_serialise(entry),
+        payload=payload,
         version=entry.version,
     )
     await session.commit()
@@ -494,6 +511,8 @@ async def api_reverse(
     entry_id: uuid.UUID,
     actor: str,
     expected_version: int,
+    *,
+    actor_role: str | None = None,
 ) -> JournalEntry:
     """Create a reversal of a POSTED journal entry.
 
@@ -525,7 +544,14 @@ async def api_reverse(
 
     # Delegate to legacy pipeline — creates reversal JE, posts it, marks
     # original REVERSED, and commits. Returns the new reversal entry.
-    reversal = await journal_svc.reverse(session, entry_id, posted_by=actor)
+    # F-04: thread actor_role so the reversal's auto-post inherits the
+    # period-lock override gate.
+    try:
+        reversal = await journal_svc.reverse(
+            session, entry_id, posted_by=actor, actor_role=actor_role
+        )
+    except journal_svc.PostingError as exc:
+        raise JournalEntryError(str(exc)) from exc
 
     # Re-fetch the original (now REVERSED) and bump its version so that
     # callers get a consistent If-Match token after the transition.
@@ -537,13 +563,19 @@ async def api_reverse(
     original = await _get_with_lines(session, entry_id)
     assert original is not None
 
+    # F-04: stamp actor_role into both change_log payloads so audit
+    # replay can attribute the reversal to a role, not just a token id.
+    reversed_payload = _serialise(original)
+    if actor_role:
+        reversed_payload["_actor_role"] = actor_role
+
     await change_log_svc.append(
         session,
         entity="journal_entry",
         entity_id=original.id,
         op="reversed",
         actor=actor,
-        payload=_serialise(original),
+        payload=reversed_payload,
         version=original.version,
     )
 
@@ -551,13 +583,17 @@ async def api_reverse(
     reversal_loaded = await _get_with_lines(session, reversal.id)
     assert reversal_loaded is not None
 
+    create_payload = _serialise(reversal_loaded)
+    if actor_role:
+        create_payload["_actor_role"] = actor_role
+
     await change_log_svc.append(
         session,
         entity="journal_entry",
         entity_id=reversal_loaded.id,
         op="create",
         actor=actor,
-        payload=_serialise(reversal_loaded),
+        payload=create_payload,
         version=reversal_loaded.version,
     )
 
