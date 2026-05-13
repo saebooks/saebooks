@@ -23,6 +23,58 @@ os.environ.setdefault("SAEBOOKS_TEST_TRUSTED_USER_HEADER", "1")
 # up with EmailError → 500 in tests. /tmp is world-writable.
 os.environ.setdefault("SAEBOOKS_MAIL_OUTBOX_DIR", "/tmp/saebooks-mail-outbox")
 
+
+def _is_sqlite_backend() -> bool:
+    """Inspect DATABASE_URL to detect the SQLite Cashbook backend.
+
+    Returns True if the runtime engine will be SQLite, so the suite
+    knows to (a) skip ``@pytest.mark.postgres_only`` tests and (b)
+    bootstrap the schema via ``Base.metadata.create_all`` instead of
+    expecting alembic to have already migrated the DB.
+    """
+    url = os.environ.get("DATABASE_URL", "")
+    return url.startswith("sqlite") or "+aiosqlite" in url
+
+
+_BACKEND_IS_SQLITE = _is_sqlite_backend()
+
+
+def pytest_collection_modifyitems(config, items):  # type: ignore[no-untyped-def]
+    """Skip ``@pytest.mark.postgres_only`` tests when on SQLite.
+
+    Postgres-only tests are those that exercise RLS / tenant isolation /
+    role splits / sequence-based refs — features the SQLite Cashbook
+    backend does not implement (single-tenant, application-layer
+    isolation). Marking these explicitly keeps the SQLite suite focused
+    on what Cashbook actually runs.
+    """
+    if not _BACKEND_IS_SQLITE:
+        return
+    skip = pytest.mark.skip(
+        reason="postgres_only test skipped on SQLite Cashbook backend"
+    )
+    for item in items:
+        if "postgres_only" in item.keywords:
+            item.add_marker(skip)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _bootstrap_sqlite_schema() -> None:
+    """On SQLite backend, build the schema from ORM metadata before tests run.
+
+    On Postgres this is a no-op — alembic upgrade head is expected to
+    have run as part of the dev container bring-up.
+    """
+    if not _BACKEND_IS_SQLITE:
+        return
+    from saebooks.db import bootstrap_schema, engine
+
+    async def _run() -> None:
+        await bootstrap_schema(engine)
+
+    asyncio.run(_run())
+
+
 from saebooks.main import app
 
 
@@ -34,7 +86,14 @@ def seed_coa() -> None:
 
     ``load_au_coa.main()`` is idempotent — safe against an already-seeded DB.
     Runs once per pytest session before any test touches the DB.
+
+    Skipped on SQLite — ``_load_raw`` in the AU seed uses Postgres-only
+    SQL (``CAST(:data AS jsonb)`` + ``ON CONFLICT``) against
+    raw_au_tax_codes etc. that are not in the ORM. Tests that need
+    AU-seed data should be marked ``postgres_only``.
     """
+    if _BACKEND_IS_SQLITE:
+        return
     from sqlalchemy import text
 
     from saebooks.db import AsyncSessionLocal

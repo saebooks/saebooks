@@ -65,6 +65,9 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
+pytestmark = pytest.mark.postgres_only
+
+
 # Pin the JWT secret BEFORE any saebooks module loads so the tokens
 # we mint match what the running app verifies. ``conftest.py`` only
 # sets SAEBOOKS_ENV, not the secret.
