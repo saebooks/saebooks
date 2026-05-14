@@ -24,6 +24,7 @@ from httpx import ASGITransport, AsyncClient, Response
 
 from saebooks.api.v1.auth import current_token
 from saebooks.main import app
+pytestmark = pytest.mark.postgres_only
 
 # ---------------------------------------------------------------------- #
 # Fixtures                                                                #

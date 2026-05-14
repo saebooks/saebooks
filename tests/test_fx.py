@@ -43,6 +43,7 @@ from saebooks.services.fx import (
     get_rate,
 )
 from saebooks.services.fx import rates as fx_rates
+pytestmark = pytest.mark.postgres_only
 
 # ------------------------------------------------------------------ #
 # Test DB prep                                                       #

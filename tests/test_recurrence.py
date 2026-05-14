@@ -37,6 +37,7 @@ from saebooks.models.recurring_invoice import (
 )
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import recurrence as svc
+pytestmark = pytest.mark.postgres_only
 
 
 async def _ctx() -> tuple[uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID]:

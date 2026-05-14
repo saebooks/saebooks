@@ -19,6 +19,7 @@ from sqlalchemy import select
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
+pytestmark = pytest.mark.postgres_only
 
 
 async def _first_company_id() -> uuid.UUID:

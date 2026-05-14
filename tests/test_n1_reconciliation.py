@@ -40,6 +40,7 @@ from saebooks.models.bsl_match import (
 from saebooks.models.company import Company
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
 from saebooks.services import reconciliation as recon_svc
+pytestmark = pytest.mark.postgres_only
 
 
 # ---------------------------------------------------------------- #

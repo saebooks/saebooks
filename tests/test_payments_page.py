@@ -27,6 +27,7 @@ from saebooks.models.contact import Contact, ContactType
 from saebooks.models.document_counter import DocumentCounter
 from saebooks.models.payment import Payment
 from saebooks.services import payments as svc
+pytestmark = pytest.mark.postgres_only
 
 
 async def _fast_forward_payment_counter() -> None:

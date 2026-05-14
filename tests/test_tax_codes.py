@@ -9,6 +9,7 @@ from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import tax_codes as svc
+pytestmark = pytest.mark.postgres_only
 
 
 async def _active_company() -> Company:

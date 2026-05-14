@@ -33,6 +33,8 @@ from saebooks.models.fixed_asset import FixedAsset
 from saebooks.services import assets as asset_svc
 from saebooks.services import assets_reports as svc
 from saebooks.main import create_app
+import pytest
+pytestmark = pytest.mark.postgres_only
 
 
 class _Ctx:

@@ -24,6 +24,7 @@ from saebooks.main import app
 from saebooks.models.user import User
 from saebooks.services import launch_promo as _promo_mod
 from saebooks.services.jwt_tokens import _reset_secret_cache
+pytestmark = pytest.mark.postgres_only
 
 
 @pytest.fixture(autouse=True)

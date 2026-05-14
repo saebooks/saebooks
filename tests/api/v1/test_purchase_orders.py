@@ -32,6 +32,7 @@ from saebooks.models.company import Company
 from saebooks.models.contact import ContactType
 from saebooks.models.change_log import ChangeLog
 from saebooks.models.contact import Contact
+pytestmark = pytest.mark.postgres_only
 
 
 # ---------------------------------------------------------------------------

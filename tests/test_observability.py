@@ -20,6 +20,7 @@ import pytest
 
 from saebooks.config import Settings
 from saebooks.services import observability
+pytestmark = pytest.mark.postgres_only
 
 
 @pytest.fixture(autouse=True)

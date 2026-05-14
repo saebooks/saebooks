@@ -35,6 +35,7 @@ from saebooks.models.account import Account, AccountType
 from saebooks.models.contact import Contact
 from saebooks.models.invoice import Invoice, InvoiceStatus
 from saebooks.services.integrations.stripe_links import _CHECKOUT_URL
+pytestmark = pytest.mark.postgres_only
 
 # ---------------------------------------------------------------------------
 # Constants

@@ -36,6 +36,7 @@ from saebooks.services.jwt_tokens import (
     _b64url_decode,
     _reset_secret_cache,
 )
+pytestmark = pytest.mark.postgres_only
 
 
 @pytest.fixture(autouse=True)

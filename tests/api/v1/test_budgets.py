@@ -91,6 +91,7 @@ async def deps() -> dict[str, str]:
 
 import os as _os
 import time as _time
+pytestmark = pytest.mark.postgres_only
 
 # Session-unique base: combine PID and epoch-second to pick a starting
 # year in the far future (well beyond any real budget data).

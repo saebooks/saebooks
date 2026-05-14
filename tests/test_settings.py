@@ -1,5 +1,7 @@
 from saebooks.db import AsyncSessionLocal
 from saebooks.services import settings as svc
+import pytest
+pytestmark = pytest.mark.postgres_only
 
 
 async def test_settings_round_trip() -> None:

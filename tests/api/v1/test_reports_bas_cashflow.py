@@ -26,6 +26,7 @@ from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.account import Account, AccountType
 from saebooks.models.tax_code import TaxCode
+pytestmark = pytest.mark.postgres_only
 
 
 # ---------------------------------------------------------------------------
