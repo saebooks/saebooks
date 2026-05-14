@@ -310,7 +310,13 @@ async def _run_on_role(
     truncated = False
     rowcount = 0
     async with engine.connect() as conn:
-        if tenant_id is not None:
+        # SET LOCAL is a Postgres GUC; on SQLite there is no per-txn
+        # variable and the admin-SQL tool is a Postgres-only feature
+        # anyway (RO/RW role split, pg_read_all_data). Skip the bind
+        # if we're not on Postgres so the engine doesn't trip on
+        # syntax — callers should already have gated this code path
+        # with ``backend_supports_rls()``.
+        if tenant_id is not None and conn.dialect.name == "postgresql":
             await conn.execute(
                 text(f"SET LOCAL app.current_tenant = '{tenant_id}'")
             )

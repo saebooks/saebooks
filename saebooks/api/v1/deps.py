@@ -89,7 +89,19 @@ def _set_current_tenant_on_begin(
     it runs before the path-operation function sees the session, and
     re-runs at the start of every subsequent transaction (after
     ``session.commit()`` triggers a new BEGIN).
+
+    SQLite skip
+    -----------
+    ``SET LOCAL`` is a Postgres GUC and a syntax error on SQLite.
+    Cashbook (the SQLite backend) is single-tenant by physical device —
+    tenant isolation is a property of the device, not a DB constraint —
+    so the binding is a no-op on non-Postgres connections. See
+    ``saebooks/db.py::backend_supports_rls`` for the canonical
+    predicate; we inline the dialect check here to avoid a circular
+    import (deps.py is imported very early during app startup).
     """
+    if connection.dialect.name != "postgresql":  # type: ignore[attr-defined]
+        return
     tid = session.info.get("tenant_id")
     if tid is not None:
         connection.execute(  # type: ignore[attr-defined]

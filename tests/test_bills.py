@@ -33,6 +33,7 @@ from saebooks.models.document_counter import DocumentCounter
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import bills as svc
+pytestmark = pytest.mark.postgres_only
 
 
 async def _fast_forward_bill_counter() -> None:

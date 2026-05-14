@@ -27,6 +27,7 @@ from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 from saebooks.models.project import Project, ProjectStatus
 from saebooks.services import projects as svc
+pytestmark = pytest.mark.postgres_only
 
 
 async def _company_id() -> uuid.UUID:

@@ -29,7 +29,7 @@ from saebooks.main import app
 from saebooks.models.change_log import ChangeLog
 
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.asyncio, pytest.mark.postgres_only]
 
 
 # ---------------------------------------------------------------------------

@@ -86,7 +86,7 @@ from saebooks.services.jwt_tokens import _reset_secret_cache, create_access_toke
 # ---------------------------------------------------------------------------
 
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.asyncio, pytest.mark.postgres_only]
 
 
 async def _db_available() -> bool:

@@ -24,6 +24,7 @@ from saebooks.models.company import Company
 from saebooks.models.fixed_asset import FixedAsset
 from saebooks.services import assets_import as imp
 from saebooks.services.assets_import import AssetImportError
+pytestmark = pytest.mark.postgres_only
 
 # ---------------------------------------------------------------------- #
 # Sample CSV fixtures                                                    #

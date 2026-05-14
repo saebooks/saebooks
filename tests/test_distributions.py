@@ -30,6 +30,7 @@ from saebooks.models.distribution import (
 )
 from saebooks.services import distributions as svc
 from saebooks.services import journal as journal_svc
+pytestmark = pytest.mark.postgres_only
 
 # ---------------------------------------------------------------------------
 # Helpers

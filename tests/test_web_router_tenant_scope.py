@@ -58,6 +58,9 @@ from saebooks.models.tenant import Tenant
 from saebooks.routers.deps import get_web_session
 from saebooks.services.tenant import bypass_tenant_scope
 
+pytestmark = pytest.mark.postgres_only
+
+
 
 # --------------------------------------------------------------------- #
 # Fixture: two tenants, two companies, two trust_distribution rows.

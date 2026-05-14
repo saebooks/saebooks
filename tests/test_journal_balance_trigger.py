@@ -20,6 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account
 from saebooks.models.company import Company
+pytestmark = pytest.mark.postgres_only
 
 
 async def _ctx() -> tuple[uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID]:

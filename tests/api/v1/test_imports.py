@@ -26,6 +26,9 @@ from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.models.tenant import Tenant
 
+pytestmark = pytest.mark.postgres_only
+
+
 _DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 # Minimal generic bank CSV accepted by the bank importer

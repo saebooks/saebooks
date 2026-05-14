@@ -34,6 +34,7 @@ from saebooks.models.journal import JournalEntry
 from saebooks.models.payment import Payment
 from saebooks.models.project import Project
 from saebooks.models.tax_code import TaxCode
+pytestmark = pytest.mark.postgres_only
 
 # ---------------------------------------------------------------------------
 # Expected entity order (must match snapshot.py dependency order)

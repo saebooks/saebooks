@@ -42,6 +42,7 @@ from saebooks.api.v1.auth import current_token
 from saebooks.main import app
 import saebooks.services.features as features_mod
 from saebooks.services.ato_sbr.keystore import KeystoreError, LoadedKeystore
+pytestmark = pytest.mark.postgres_only
 
 
 # ---------------------------------------------------------------------------

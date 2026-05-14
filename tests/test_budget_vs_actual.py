@@ -29,6 +29,7 @@ from saebooks.models.journal import JournalEntry
 from saebooks.services import budgets as budget_svc
 from saebooks.services import journal as journal_svc
 from saebooks.services import reports as svc
+pytestmark = pytest.mark.postgres_only
 
 TEST_YEAR = 2099
 

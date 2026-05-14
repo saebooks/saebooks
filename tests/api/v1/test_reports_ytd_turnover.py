@@ -23,6 +23,7 @@ from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.main import app
+pytestmark = pytest.mark.postgres_only
 
 # ---------------------------------------------------------------------------
 # Fixtures

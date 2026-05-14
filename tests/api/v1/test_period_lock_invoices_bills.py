@@ -23,6 +23,7 @@ from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
 from saebooks.services import journal as journal_svc
+pytestmark = pytest.mark.postgres_only
 
 _DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 

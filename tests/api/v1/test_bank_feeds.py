@@ -44,6 +44,7 @@ from saebooks.services.bank_feeds.exceptions import (
     FeedsNotFoundError,
     FeedsStubError,
 )
+pytestmark = pytest.mark.postgres_only
 
 
 # ---------------------------------------------------------------------- #

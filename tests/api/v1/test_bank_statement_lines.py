@@ -37,6 +37,7 @@ from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.account import Account, AccountType
 from saebooks.models.change_log import ChangeLog
+pytestmark = pytest.mark.postgres_only
 
 
 # ---------------------------------------------------------------------------

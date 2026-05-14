@@ -28,6 +28,7 @@ from saebooks.models.account import Account, AccountType
 from saebooks.models.bill import Bill, BillLine
 from saebooks.models.contact import Contact, ContactType
 from saebooks.models.invoice import Invoice, InvoiceLine
+pytestmark = pytest.mark.postgres_only
 
 
 @pytest.fixture

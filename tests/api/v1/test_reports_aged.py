@@ -28,6 +28,7 @@ from saebooks.main import app
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact
+pytestmark = pytest.mark.postgres_only
 
 
 # ---------------------------------------------------------------------------

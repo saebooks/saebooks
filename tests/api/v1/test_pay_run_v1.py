@@ -37,6 +37,7 @@ from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
 from saebooks.models.journal import JournalEntry, JournalLine
+pytestmark = pytest.mark.postgres_only
 
 
 # ---------------------------------------------------------------------------

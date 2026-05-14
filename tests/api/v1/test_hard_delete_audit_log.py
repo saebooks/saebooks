@@ -5,6 +5,7 @@ import pytest
 from sqlalchemy import inspect, text
 
 from saebooks.db import engine, AsyncSessionLocal
+pytestmark = pytest.mark.postgres_only
 
 
 async def test_audit_log_table_exists() -> None:

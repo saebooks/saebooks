@@ -29,6 +29,7 @@ from saebooks.models.bank_feed import (
 from saebooks.models.bank_statement import BankStatementLine
 from saebooks.models.company import Company
 from saebooks.services.bank_feeds import repo
+pytestmark = pytest.mark.postgres_only
 
 
 async def _seed_ctx() -> tuple[uuid.UUID, uuid.UUID]:

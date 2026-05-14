@@ -17,6 +17,9 @@ from sqlalchemy import text
 from saebooks.api.v1._wizard import Wizard, WizardExpiredError, WizardNotFoundError
 from saebooks.db import AsyncSessionLocal
 
+pytestmark = pytest.mark.postgres_only
+
+
 # Reuse the default dev tenant (matches conftest + migration seed).
 _TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 

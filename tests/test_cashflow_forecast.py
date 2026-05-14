@@ -30,6 +30,7 @@ from saebooks.models.invoice import Invoice
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import invoices as inv_svc
 from saebooks.services import reports as svc
+pytestmark = pytest.mark.postgres_only
 
 
 async def _ctx() -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
