@@ -200,11 +200,15 @@ async def bills_list(
     request: Request,
     status: str = Query("all"),
     q: str | None = Query(None),
+    page: int = Query(1, ge=1),
 ) -> HTMLResponse:
     company = await _first_company()
     filter_status: BillStatus | None = None
     if status.upper() in BillStatus.__members__:
         filter_status = BillStatus(status.upper())
+
+    page_size = 50
+    offset = (page - 1) * page_size
 
     async with AsyncSessionLocal() as session:
         bills = await svc.list_bills(
@@ -212,7 +216,11 @@ async def bills_list(
             company.id,
             status=filter_status,
             include_archived=(status == "archived"),
+            limit=page_size + 1,
+            offset=offset,
         )
+        has_next = len(bills) > page_size
+        bills = bills[:page_size]
         contact_map: dict[uuid.UUID, str] = {}
         contact_ids = {b.contact_id for b in bills}
         if contact_ids:
@@ -241,6 +249,8 @@ async def bills_list(
             "status_filter": status,
             "search_q": q or "",
             "total": len(bills),
+            "page": page,
+            "has_next": has_next,
         },
     )
 

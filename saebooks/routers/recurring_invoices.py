@@ -168,12 +168,17 @@ def _parse_lines_from_form(form: dict[str, Any]) -> list[dict[str, object]]:
 
 @router.get("", response_class=HTMLResponse)
 async def recurring_list(
-    request: Request, status: str = Query("all")
+    request: Request,
+    status: str = Query("all"),
+    page: int = Query(1, ge=1),
 ) -> HTMLResponse:
     company = await _first_company()
     filter_status: RecurrenceStatus | None = None
     if status.upper() in RecurrenceStatus.__members__:
         filter_status = RecurrenceStatus(status.upper())
+
+    page_size = 50
+    offset = (page - 1) * page_size
 
     async with AsyncSessionLocal() as session:
         tmpls = await svc.list_templates(
@@ -181,7 +186,11 @@ async def recurring_list(
             company.id,
             status=filter_status,
             include_archived=(status == "archived"),
+            limit=page_size + 1,
+            offset=offset,
         )
+        has_next = len(tmpls) > page_size
+        tmpls = tmpls[:page_size]
         contact_map: dict[uuid.UUID, str] = {}
         contact_ids = {t.contact_id for t in tmpls}
         if contact_ids:
@@ -202,6 +211,8 @@ async def recurring_list(
             "status_filter": status,
             "total": len(tmpls),
             "today": date.today(),
+            "page": page,
+            "has_next": has_next,
         },
     )
 

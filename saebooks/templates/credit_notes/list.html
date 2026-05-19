@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_pager.html" import pager %}
 {% block title %}Credit notes — SAE Books{% endblock %}
 {% block content %}
 <h1>Credit notes</h1>
@@ -45,4 +46,5 @@
   {% endfor %}
   </tbody>
 </table>
+{{ pager(request, page, has_next) }}
 {% endblock %}

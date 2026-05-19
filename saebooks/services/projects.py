@@ -54,6 +54,7 @@ async def list_active(
     search: str | None = None,
     include_archived: bool = False,
     limit: int = 200,
+    offset: int = 0,
 ) -> list[Project]:
     """List projects for a company.
 
@@ -69,7 +70,7 @@ async def list_active(
     if search:
         pattern = f"%{search}%"
         stmt = stmt.where(Project.name.ilike(pattern) | Project.code.ilike(pattern))
-    stmt = stmt.order_by(Project.code).limit(limit)
+    stmt = stmt.order_by(Project.code).offset(offset).limit(limit)
     result = await session.execute(stmt)
     return list(result.scalars().all())
 

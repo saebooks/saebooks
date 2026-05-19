@@ -1,0 +1,25 @@
+{# Pager macro — emits Prev / Page N / Next preserving current querystring.
+   Usage:
+     {% from "_pager.html" import pager %}
+     {{ pager(request, page, has_next) }}
+   The macro reads request.url.path and request.query_params and rewrites only
+   the `page` key. Hides itself entirely when there's no previous or next page. #}
+{% macro pager(request, page, has_next) -%}
+{% if page > 1 or has_next %}
+{% set base = request.url.path %}
+{% set qs = [] %}
+{%- for k, v in request.query_params.multi_items() if k != 'page' -%}
+  {%- set _ = qs.append(k ~ '=' ~ v) -%}
+{%- endfor -%}
+{% set qstr = '&'.join(qs) %}
+<div class="pager">
+  {% if page > 1 %}
+    <a href="{{ base }}?page={{ page - 1 }}{% if qstr %}&{{ qstr }}{% endif %}">← Prev</a>
+  {% endif %}
+  <span class="dim">Page {{ page }}</span>
+  {% if has_next %}
+    <a href="{{ base }}?page={{ page + 1 }}{% if qstr %}&{{ qstr }}{% endif %}">Next →</a>
+  {% endif %}
+</div>
+{% endif %}
+{%- endmacro %}

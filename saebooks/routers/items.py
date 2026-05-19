@@ -72,16 +72,23 @@ async def items_list(
     request: Request,
     q: str | None = Query(None),
     archived: str | None = Query(None),
+    page: int = Query(1, ge=1),
 ) -> HTMLResponse:
     company = await _first_company()
     include_archived = archived in ("1", "true", "on", "yes")
+    page_size = 50
+    offset = (page - 1) * page_size
     async with AsyncSessionLocal() as session:
         items = await svc.list_items(
             session,
             company.id,
             search=q or None,
             include_archived=include_archived,
+            limit=page_size + 1,
+            offset=offset,
         )
+    has_next = len(items) > page_size
+    items = items[:page_size]
     return templates.TemplateResponse(
         request,
         "items/list.html",
@@ -92,6 +99,8 @@ async def items_list(
             "total": len(items),
             "include_archived": include_archived,
             "search_q": q or "",
+            "page": page,
+            "has_next": has_next,
         },
     )
 

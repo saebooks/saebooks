@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_pager.html" import pager %}
 {% block title %}Projects — SAE Books{% endblock %}
 {% block content %}
 <div class="page-header">
@@ -46,6 +47,7 @@
     {% endfor %}
   </tbody>
 </table>
+{{ pager(request, page, has_next) }}
 {% else %}
 <p class="dim">No projects. <a href="/projects/new">Create your first project</a> to start tagging journal, invoice, or bill lines for job-costing reports.</p>
 {% endif %}

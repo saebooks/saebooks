@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_pager.html" import pager %}
 {% block title %}Journal entries — SAE Books{% endblock %}
 {% block content %}
 <div class="page-header">
@@ -50,4 +51,5 @@
     {% endif %}
   </tbody>
 </table>
+{{ pager(request, page, has_next) }}
 {% endblock %}

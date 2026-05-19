@@ -61,11 +61,22 @@ async def _accounts_and_tax_codes(
 async def journal_list(
     request: Request,
     status: str | None = Query(None),
+    page: int = Query(1, ge=1),
 ) -> HTMLResponse:
     company = await _first_company()
     filter_status = EntryStatus(status) if status else None
+    page_size = 50
+    offset = (page - 1) * page_size
     async with AsyncSessionLocal() as session:
-        entries = await svc.list_entries(session, company.id, status=filter_status)
+        entries = await svc.list_entries(
+            session,
+            company.id,
+            status=filter_status,
+            limit=page_size + 1,
+            offset=offset,
+        )
+        has_next = len(entries) > page_size
+        entries = entries[:page_size]
         total = await session.execute(
             select(func.count())
             .select_from(JournalEntry)
@@ -81,6 +92,8 @@ async def journal_list(
             "entries": entries,
             "total": count,
             "filter_status": status or "all",
+            "page": page,
+            "has_next": has_next,
         },
     )
 

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_pager.html" import pager %}
 {% block title %}Items — SAE Books{% endblock %}
 {% block content %}
 <div class="page-header">
@@ -41,6 +42,7 @@
     {% endfor %}
   </tbody>
 </table>
+{{ pager(request, page, has_next) }}
 {% else %}
 <p class="dim">No items. <a href="/items/new">Create your first item</a> to start tracking stock on invoices and bills.</p>
 {% endif %}

@@ -122,6 +122,7 @@ async def payments_list(
     request: Request,
     status: str = Query("all"),
     direction: str = Query("all"),
+    page: int = Query(1, ge=1),
 ) -> HTMLResponse:
     company = await _first_company()
     filter_status: PaymentStatus | None = None
@@ -131,6 +132,9 @@ async def payments_list(
     if direction.upper() in PaymentDirection.__members__:
         filter_direction = PaymentDirection(direction.upper())
 
+    page_size = 50
+    offset = (page - 1) * page_size
+
     async with AsyncSessionLocal() as session:
         pays = await svc.list_payments(
             session,
@@ -138,7 +142,11 @@ async def payments_list(
             status=filter_status,
             direction=filter_direction,
             include_archived=(status == "archived"),
+            limit=page_size + 1,
+            offset=offset,
         )
+        has_next = len(pays) > page_size
+        pays = pays[:page_size]
         contact_ids = {p.contact_id for p in pays}
         contact_map: dict[uuid.UUID, str] = {}
         if contact_ids:
@@ -157,6 +165,8 @@ async def payments_list(
             "status_filter": status,
             "direction_filter": direction,
             "total": len(pays),
+            "page": page,
+            "has_next": has_next,
         },
     )
 

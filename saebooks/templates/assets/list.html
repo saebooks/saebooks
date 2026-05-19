@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_pager.html" import pager %}
 {% block title %}Assets — SAE Books{% endblock %}
 {% block content %}
 <div class="page-header">
@@ -49,6 +50,7 @@
     {% endfor %}
   </tbody>
 </table>
+{{ pager(request, page, has_next) }}
 {% else %}
 <p class="dim">No {{ status_filter }} assets.</p>
 {% endif %}

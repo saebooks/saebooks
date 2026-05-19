@@ -141,16 +141,23 @@ def _optional_date(raw: str, field: str) -> date | None:
 async def assets_list(
     request: Request,
     status: str = Query("active"),
+    page: int = Query(1, ge=1),
 ) -> HTMLResponse:
     company = await _first_company()
     filter_status: str | None = status if status in {"active", "disposed", "archived"} else None
+    page_size = 50
+    offset = (page - 1) * page_size
     async with AsyncSessionLocal() as session:
         assets = await svc.list_assets(
             session,
             company.id,
             status=filter_status,
             include_archived=(status == "archived"),
+            limit=page_size + 1,
+            offset=offset,
         )
+    has_next = len(assets) > page_size
+    assets = assets[:page_size]
     return templates.TemplateResponse(
         request,
         "assets/list.html",
@@ -160,6 +167,8 @@ async def assets_list(
             "assets": assets,
             "status_filter": status,
             "total": len(assets),
+            "page": page,
+            "has_next": has_next,
         },
     )
 

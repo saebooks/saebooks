@@ -113,6 +113,7 @@ async def list_items(
     search: str | None = None,
     include_archived: bool = False,
     limit: int = 200,
+    offset: int = 0,
 ) -> list[Item]:
     stmt = select(Item).where(Item.company_id == company_id)
     if not include_archived:
@@ -120,7 +121,7 @@ async def list_items(
     if search:
         pattern = f"%{search}%"
         stmt = stmt.where(Item.name.ilike(pattern) | Item.sku.ilike(pattern))
-    stmt = stmt.order_by(Item.sku).limit(limit)
+    stmt = stmt.order_by(Item.sku).offset(offset).limit(limit)
     result = await session.execute(stmt)
     return list(result.scalars().all())
 

@@ -58,10 +58,13 @@ async def projects_list(
     status: str | None = Query(None),
     q: str | None = Query(None),
     archived: str | None = Query(None),
+    page: int = Query(1, ge=1),
 ) -> HTMLResponse:
     company = await _first_company()
     filter_status = _parse_status(status)
     include_archived = archived in ("1", "true", "on", "yes")
+    page_size = 50
+    offset = (page - 1) * page_size
     async with AsyncSessionLocal() as session:
         projects = await svc.list_active(
             session,
@@ -69,7 +72,11 @@ async def projects_list(
             status=filter_status,
             search=q or None,
             include_archived=include_archived,
+            limit=page_size + 1,
+            offset=offset,
         )
+    has_next = len(projects) > page_size
+    projects = projects[:page_size]
     return templates.TemplateResponse(
         request,
         "projects/list.html",
@@ -81,6 +88,8 @@ async def projects_list(
             "status_filter": status or "all",
             "include_archived": include_archived,
             "search_q": q or "",
+            "page": page,
+            "has_next": has_next,
         },
     )
 

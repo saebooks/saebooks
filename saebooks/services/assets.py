@@ -76,6 +76,7 @@ async def list_assets(
     status: str | None = "active",
     include_archived: bool = False,
     limit: int = 200,
+    offset: int = 0,
 ) -> list[FixedAsset]:
     """List assets for a company.
 
@@ -88,7 +89,7 @@ async def list_assets(
         stmt = stmt.where(FixedAsset.archived_at.is_(None))
     if status is not None:
         stmt = stmt.where(FixedAsset.status == status)
-    stmt = stmt.order_by(FixedAsset.code).limit(limit)
+    stmt = stmt.order_by(FixedAsset.code).offset(offset).limit(limit)
     result = await session.execute(stmt)
     return list(result.scalars().all())
 

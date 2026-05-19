@@ -181,11 +181,15 @@ async def invoices_list(
     request: Request,
     status: str = Query("all"),
     q: str | None = Query(None),
+    page: int = Query(1, ge=1),
 ) -> HTMLResponse:
     company = await _first_company()
     filter_status: InvoiceStatus | None = None
     if status.upper() in InvoiceStatus.__members__:
         filter_status = InvoiceStatus(status.upper())
+
+    page_size = 50
+    offset = (page - 1) * page_size
 
     async with AsyncSessionLocal() as session:
         invoices = await svc.list_invoices(
@@ -193,7 +197,11 @@ async def invoices_list(
             company.id,
             status=filter_status,
             include_archived=(status == "archived"),
+            limit=page_size + 1,
+            offset=offset,
         )
+        has_next = len(invoices) > page_size
+        invoices = invoices[:page_size]
         # Contact names
         contact_map: dict[uuid.UUID, str] = {}
         contact_ids = {inv.contact_id for inv in invoices}
@@ -223,6 +231,8 @@ async def invoices_list(
             "status_filter": status,
             "search_q": q or "",
             "total": len(invoices),
+            "page": page,
+            "has_next": has_next,
         },
     )
 

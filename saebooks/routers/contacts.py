@@ -134,11 +134,15 @@ async def contacts_list(
     request: Request,
     type: str | None = Query(None),
     q: str | None = Query(None),
+    page: int = Query(1, ge=1),
 ) -> HTMLResponse:
     company = await _first_company()
     contact_type = None
     if type and type in ("CUSTOMER", "SUPPLIER", "BOTH", "BENEFICIARY"):
         contact_type = ContactType(type)
+
+    page_size = 50
+    offset = (page - 1) * page_size
 
     async with AsyncSessionLocal() as session:
         contacts = await svc.list_active(
@@ -146,7 +150,12 @@ async def contacts_list(
             company.id,
             contact_type=contact_type,
             search=q or None,
+            limit=page_size + 1,
+            offset=offset,
         )
+
+    has_next = len(contacts) > page_size
+    contacts = contacts[:page_size]
 
     return templates.TemplateResponse(
         request,
@@ -158,6 +167,8 @@ async def contacts_list(
             "contacts": contacts,
             "type_filter": type or "all",
             "search_q": q or "",
+            "page": page,
+            "has_next": has_next,
         },
     )
 

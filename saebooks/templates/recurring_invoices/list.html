@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_pager.html" import pager %}
 {% block title %}Recurring invoices — SAE Books{% endblock %}
 {% block content %}
 <h1>Recurring invoices</h1>
@@ -55,4 +56,5 @@
   {% endfor %}
   </tbody>
 </table>
+{{ pager(request, page, has_next) }}
 {% endblock %}

@@ -157,18 +157,25 @@ def _parse_lines_from_form(form: dict[str, Any]) -> list[dict[str, object]]:
 async def credit_notes_list(
     request: Request,
     status: str = Query("all"),
+    page: int = Query(1, ge=1),
 ) -> HTMLResponse:
     company = await _first_company()
     filter_status: CreditNoteStatus | None = None
     if status.upper() in CreditNoteStatus.__members__:
         filter_status = CreditNoteStatus(status.upper())
+    page_size = 50
+    offset = (page - 1) * page_size
     async with AsyncSessionLocal() as session:
         notes = await svc.list_credit_notes(
             session,
             company.id,
             status=filter_status,
             include_archived=(status == "archived"),
+            limit=page_size + 1,
+            offset=offset,
         )
+        has_next = len(notes) > page_size
+        notes = notes[:page_size]
         contact_ids = {cn.contact_id for cn in notes}
         contact_map: dict[uuid.UUID, str] = {}
         if contact_ids:
@@ -186,6 +193,8 @@ async def credit_notes_list(
             "contact_map": contact_map,
             "status_filter": status,
             "total": len(notes),
+            "page": page,
+            "has_next": has_next,
         },
     )
 

@@ -1,9 +1,10 @@
 {% extends "base.html" %}
+{% from "_pager.html" import pager %}
 {% block title %}Contacts — SAE Books{% endblock %}
 {% block content %}
 <div class="page-header">
   <h1>Contacts</h1>
-  <div class="meta">{{ total }} contacts · {{ company_name }}</div>
+  <div class="meta">{{ total }} on this page · {{ company_name }}</div>
   <a href="/contacts/new" class="btn">+ New</a>
 </div>
 
@@ -47,6 +48,7 @@
     {% endfor %}
   </tbody>
 </table>
+{{ pager(request, page, has_next) }}
 {% else %}
 <p class="dim">No contacts found.</p>
 {% endif %}
