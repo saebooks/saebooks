@@ -32,6 +32,7 @@ from saebooks.api.v1.schemas import (
     BankAccountUpdate,
 )
 from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
+from saebooks.models.account import AccountKind
 from saebooks.services import bank_accounts as svc
 from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
@@ -158,6 +159,11 @@ async def create_bank_account(
             )
 
     try:
+        kind = AccountKind(payload.account_kind) if payload.account_kind else AccountKind.BANK_CHECKING
+    except ValueError as exc:
+        raise HTTPException(422, f"invalid account_kind {payload.account_kind!r}") from exc
+
+    try:
         account = await svc.api_create(
             session,
             company_id,
@@ -165,6 +171,7 @@ async def create_bank_account(
             actor=f"api:{bearer[:8]}…",
             code=payload.code,
             name=payload.name,
+            account_kind=kind,
             bsb=payload.bsb,
             bank_account_number=payload.bank_account_number,
             bank_account_title=payload.bank_account_title,
@@ -234,13 +241,22 @@ async def update_bank_account(
                 status_code=claim.response_status or 200,
             )
 
+    update_kwargs = payload.model_dump(exclude_unset=True)
+    if "account_kind" in update_kwargs and update_kwargs["account_kind"]:
+        try:
+            update_kwargs["account_kind"] = AccountKind(update_kwargs["account_kind"])
+        except ValueError as exc:
+            raise HTTPException(
+                422, f"invalid account_kind {update_kwargs['account_kind']!r}"
+            ) from exc
+
     try:
         account = await svc.api_update(
             session,
             bank_account_id,
             actor=f"api:{bearer[:8]}…",
             expected_version=expected,
-            **payload.model_dump(exclude_unset=True),
+            **update_kwargs,
         )
     except svc.VersionConflict as exc:
         body = BankAccountConflictBody(

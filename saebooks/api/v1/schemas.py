@@ -1085,12 +1085,17 @@ class CreditNoteConflictBody(BaseModel):
 
 
 class BankAccountCreate(BaseModel):
-    """POST body for creating a new bank account."""
+    """POST body for creating a new bank-side account (bank/card/loan/cash)."""
 
     code: str = Field(min_length=1, max_length=32)
     name: str = Field(min_length=1, max_length=255)
-    bsb: str = Field(min_length=6, max_length=7, description="BSB formatted 'xxx-xxx'")
-    bank_account_number: str | None = Field(default=None, max_length=9)
+    account_kind: str = Field(
+        default="BANK_CHECKING",
+        description="One of BANK_CHECKING / BANK_SAVINGS / CREDIT_CARD / BANK_LOAN / CASH / OTHER",
+    )
+    bsb: str | None = Field(default=None, min_length=6, max_length=7,
+        description="BSB formatted 'xxx-xxx' — required for BANK_* kinds, ignored otherwise")
+    bank_account_number: str | None = Field(default=None, max_length=32)
     bank_account_title: str | None = Field(default=None, max_length=32)
     apca_user_id: str | None = Field(default=None, max_length=6)
     bank_abbreviation: str | None = Field(default=None, max_length=3)
@@ -1104,6 +1109,8 @@ class BankAccountUpdate(BaseModel):
 
     code: str | None = Field(default=None, min_length=1, max_length=32)
     name: str | None = Field(default=None, min_length=1, max_length=255)
+    account_kind: str | None = Field(default=None,
+        description="Re-classify between BANK_*/CREDIT_CARD/BANK_LOAN/CASH/OTHER")
     bsb: str | None = Field(default=None, min_length=6, max_length=7)
     bank_account_number: str | None = None
     bank_account_title: str | None = None
@@ -1122,6 +1129,8 @@ class BankAccountOut(BaseModel):
     tenant_id: uuid.UUID
     code: str
     name: str
+    account_kind: str | None = None
+    account_type: str | None = None
     bsb: str | None = None
     bank_account_number: str | None = None
     bank_account_title: str | None = None
@@ -2919,3 +2928,115 @@ class QuoteConvertOut(BaseModel):
 
     quote: QuoteOut
     invoice_id: uuid.UUID
+
+
+# ---------------------------------------------------------------------------
+# Expenses — paid-at-checkout sibling of bills
+# ---------------------------------------------------------------------------
+
+
+class ExpenseLineOut(BaseModel):
+    """One line of an expense (nested in ExpenseOut)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    line_no: int
+    description: str
+    account_id: uuid.UUID
+    tax_code_id: uuid.UUID | None = None
+    quantity: Decimal
+    unit_price: Decimal
+    discount_pct: Decimal
+    line_subtotal: Decimal
+    line_tax: Decimal
+    line_total: Decimal
+    project_id: uuid.UUID | None = None
+
+
+class ExpenseLineCreate(BaseModel):
+    """One line in a POST/PATCH payload."""
+
+    description: str = Field(min_length=1)
+    account_id: uuid.UUID
+    tax_code_id: uuid.UUID | None = None
+    quantity: Decimal = Decimal("1")
+    unit_price: Decimal = Decimal("0")
+    discount_pct: Decimal = Decimal("0")
+    project_id: uuid.UUID | None = None
+
+
+class ExpenseBase(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    payment_account_id: uuid.UUID
+    expense_date: date
+    contact_id: uuid.UUID | None = None
+    reference: str | None = None
+    notes: str | None = None
+    currency: str = Field(default="AUD", min_length=3, max_length=3)
+    fx_rate: Decimal = Field(default=Decimal("1"), gt=Decimal("0"))
+
+
+class ExpenseCreate(ExpenseBase):
+    """POST body."""
+
+    lines: list[ExpenseLineCreate] = Field(default_factory=list)
+
+
+class ExpenseUpdate(BaseModel):
+    """PATCH body — every field optional."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    payment_account_id: uuid.UUID | None = None
+    contact_id: uuid.UUID | None = None
+    expense_date: date | None = None
+    notes: str | None = None
+    reference: str | None = None
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    fx_rate: Decimal | None = Field(default=None, gt=Decimal("0"))
+    lines: list[ExpenseLineCreate] | None = None
+
+
+class ExpenseOut(BaseModel):
+    """Full expense response — includes nested lines, tenant_id, version."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    tenant_id: uuid.UUID
+    contact_id: uuid.UUID | None = None
+    payment_account_id: uuid.UUID
+    number: str | None = None
+    reference: str | None = None
+    expense_date: date
+    status: str
+    subtotal: Decimal
+    tax_total: Decimal
+    total: Decimal
+    currency: str
+    fx_rate: Decimal
+    notes: str | None = None
+    journal_entry_id: uuid.UUID | None = None
+    void_journal_entry_id: uuid.UUID | None = None
+    posted_at: datetime | None = None
+    posted_by: str | None = None
+    version: int
+    created_at: datetime
+    updated_at: datetime
+    archived_at: datetime | None = None
+    lines: list[ExpenseLineOut] = Field(default_factory=list)
+
+
+class ExpenseListOut(BaseModel):
+    items: list[ExpenseOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class ExpenseConflictBody(BaseModel):
+    detail: str
+    current: ExpenseOut

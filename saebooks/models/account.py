@@ -31,6 +31,25 @@ class AccountType(enum.StrEnum):
     OTHER_EXPENSE = "OTHER_EXPENSE"
 
 
+class AccountKind(enum.StrEnum):
+    """Sub-classification of accounts that surface on the Bank Accounts page.
+
+    Set on any CoA account that should appear under "Bank Accounts" in the
+    UI — covers actual bank accounts (ASSET), credit cards and bank loans
+    (LIABILITY), and petty cash. Left NULL on every other account.
+
+    Used by SISS-style bank-feed adapters to pick a feed type per account:
+    a CREDIT_CARD account ships a card-feed query, a BANK_LOAN account
+    ships a loan-statement query, etc.
+    """
+    BANK_CHECKING = "BANK_CHECKING"
+    BANK_SAVINGS = "BANK_SAVINGS"
+    CREDIT_CARD = "CREDIT_CARD"
+    BANK_LOAN = "BANK_LOAN"
+    CASH = "CASH"
+    OTHER = "OTHER"
+
+
 class Account(CompanyScoped, Base):
     __tablename__ = "accounts"
     __table_args__ = (UniqueConstraint("company_id", "code", name="uq_accounts_company_code"),)
@@ -81,6 +100,12 @@ class Account(CompanyScoped, Base):
     )
     bank_abbreviation: Mapped[str | None] = mapped_column(
         String(3), comment="3-letter ABA bank code — CBA, ANZ, NAB, WBC, …"
+    )
+    account_kind: Mapped[AccountKind | None] = mapped_column(
+        Enum(AccountKind, name="account_kind_enum"),
+        comment="Sub-classification surfaced on the Bank Accounts page. NULL "
+                "for ordinary CoA accounts; set for bank/card/loan/cash to "
+                "make SISS-style feed mapping unambiguous.",
     )
     extra: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # Optimistic-locking version — bumped on every write through the API.

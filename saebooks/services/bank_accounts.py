@@ -1,11 +1,13 @@
-"""Bank-account service — view over ``accounts`` where ``bsb IS NOT NULL``.
+"""Bank-account service — view over ``accounts`` where ``account_kind IS NOT NULL``.
 
-Design (a): bank accounts are not a separate table.  They are ``Account``
-rows with ``account_type=ASSET`` and a non-null ``bsb`` field.  This
-service provides API-oriented CRUD that delegates most logic to
-``saebooks.services.accounts`` while enforcing the bank-account
-invariant (bsb must be present on create, and the account_type is
-fixed to ASSET).
+Bank accounts are not a separate table — they are ``Account`` rows with
+a non-null ``account_kind`` (BANK_CHECKING, BANK_SAVINGS, CREDIT_CARD,
+BANK_LOAN, CASH, OTHER). ``account_type`` is derived from the kind:
+ASSET for bank/cash, LIABILITY for cards and loans.
+
+This consolidates everything a bank-feed adapter (SISS-style) needs to
+sync — checking, savings, credit-card statements, loan transactions —
+under one management surface.
 
 Optimistic locking, change_log, and tenant scoping follow the same
 conventions as every other API-tier service.
@@ -20,10 +22,23 @@ from typing import Any
 from sqlalchemy import func as sa_func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from saebooks.models.account import Account, AccountType
+from saebooks.models.account import Account, AccountKind, AccountType
 from saebooks.services import change_log as change_log_svc
 
 _DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+# Derive AccountType from AccountKind on create. Bank/cash are ASSETs;
+# credit cards and bank loans are LIABILITIES; OTHER falls back to ASSET
+# (most external "money" accounts the operator wants on this page are
+# asset-like — override via the API if needed).
+_KIND_TO_TYPE: dict[AccountKind, AccountType] = {
+    AccountKind.BANK_CHECKING: AccountType.ASSET,
+    AccountKind.BANK_SAVINGS:  AccountType.ASSET,
+    AccountKind.CASH:          AccountType.ASSET,
+    AccountKind.CREDIT_CARD:   AccountType.LIABILITY,
+    AccountKind.BANK_LOAN:     AccountType.LIABILITY,
+    AccountKind.OTHER:         AccountType.ASSET,
+}
 
 # Columns written to change_log.payload for bank-account operations.
 _BA_COLUMNS: tuple[str, ...] = (
@@ -33,6 +48,7 @@ _BA_COLUMNS: tuple[str, ...] = (
     "code",
     "name",
     "account_type",
+    "account_kind",
     "bsb",
     "bank_account_number",
     "bank_account_title",
@@ -71,8 +87,8 @@ class VersionConflict(Exception):
 
 
 def _is_bank_account(account: Account) -> bool:
-    """True if this account has been configured as a bank account."""
-    return account.bsb is not None
+    """True if this account has been configured to surface on Bank Accounts."""
+    return account.account_kind is not None
 
 
 def _serialise(account: Account) -> dict[str, Any]:
@@ -91,11 +107,11 @@ def _serialise(account: Account) -> dict[str, Any]:
 
 
 def _bank_account_filter(company_id: uuid.UUID):
-    """WHERE clause that selects bank-account rows."""
+    """WHERE clause that selects rows surfaced on Bank Accounts (any kind)."""
     return [
         Account.company_id == company_id,
         Account.archived_at.is_(None),
-        Account.bsb.isnot(None),
+        Account.account_kind.isnot(None),
     ]
 
 
@@ -168,23 +184,33 @@ async def api_create(
     *,
     code: str,
     name: str,
-    bsb: str,
+    account_kind: AccountKind = AccountKind.BANK_CHECKING,
+    bsb: str | None = None,
     bank_account_number: str | None = None,
     bank_account_title: str | None = None,
     apca_user_id: str | None = None,
     bank_abbreviation: str | None = None,
     is_trust_account: bool = False,
 ) -> Account:
-    """Create a new bank-account row (account_type=ASSET, bsb required)."""
+    """Create a new account that surfaces under Bank Accounts.
+
+    ``account_kind`` drives ``account_type`` selection (ASSET for
+    bank/cash, LIABILITY for cards/loans). ``bsb`` is optional now —
+    only AU bank accounts have one; credit cards and loans typically do
+    not. The chosen kind is also persisted so the bank-feed adapter can
+    map to the right SISS feed type later.
+    """
     # Import here to avoid circular imports at module level
     from saebooks.services import accounts as accounts_svc
+
+    account_type = _KIND_TO_TYPE.get(account_kind, AccountType.ASSET)
 
     account = await accounts_svc.create(
         session,
         company_id,
         code=code,
         name=name,
-        account_type=AccountType.ASSET,
+        account_type=account_type,
         reconcile=True,
         is_trust_account=is_trust_account,
         tenant_id=tenant_id,
@@ -192,6 +218,7 @@ async def api_create(
         skip_validation=True,
     )
     # Patch the bank-specific fields the accounts.create() doesn't expose
+    account.account_kind = account_kind
     account.bsb = bsb
     account.bank_account_number = bank_account_number
     account.bank_account_title = bank_account_title
@@ -225,6 +252,7 @@ async def api_update(
     *,
     code: str | None = None,
     name: str | None = None,
+    account_kind: AccountKind | None = None,
     bsb: str | None = None,
     bank_account_number: str | None = None,
     bank_account_title: str | None = None,
@@ -243,6 +271,9 @@ async def api_update(
         account.code = code.strip()
     if name is not None:
         account.name = name.strip()
+    if account_kind is not None:
+        account.account_kind = account_kind
+        account.account_type = _KIND_TO_TYPE.get(account_kind, account.account_type)
     if bsb is not None:
         account.bsb = bsb
     if bank_account_number is not None:
