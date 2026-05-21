@@ -34,6 +34,13 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column(
+            "tenant_id",
+            sa.UUID(),
+            sa.ForeignKey("tenants.id", ondelete="RESTRICT"),
+            nullable=False,
+            server_default=sa.text("'00000000-0000-0000-0000-000000000001'::uuid"),
+        ),
+        sa.Column(
             "user_id",
             sa.UUID(),
             sa.ForeignKey("users.id", ondelete="CASCADE"),
