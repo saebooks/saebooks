@@ -347,6 +347,12 @@ def main() -> None:
         # FastMCP's settings live on mcp.settings — set host/port before run.
         mcp.settings.host = host
         mcp.settings.port = port
+        # Allow arbitrary Host headers. In production this server lives
+        # behind Caddy/Authentik — the edge enforces TLS + cert SAN, so
+        # FastMCP's own DNS-rebinding guard would just block legit
+        # traffic from the LAN bind. Set via env if you want to keep it.
+        if os.getenv("SAEBOOKS_MCP_DISABLE_HOST_CHECK", "1") == "1":
+            mcp.settings.transport_security.enable_dns_rebinding_protection = False
         mcp.run(transport)
     else:
         raise SystemExit(f"unknown transport: {transport}")
