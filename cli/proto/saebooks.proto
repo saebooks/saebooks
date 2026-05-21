@@ -1,0 +1,182 @@
+syntax = "proto3";
+package saebooks;
+option py_generic_services = false;
+option go_package = "github.com/saebooks/saebooks/cli/gen/saebooks";
+
+// Pagination
+message PageRequest { int32 page = 1; int32 page_size = 2; }
+message PageInfo { int32 total = 1; int32 page = 2; int32 page_size = 3; }
+
+// Contacts
+message ContactRecord {
+  string id = 1;
+  string name = 2;
+  string email = 3;
+  string phone = 4;
+  int32 version = 5;
+  string updated_at = 6;
+}
+message ListContactsRequest { PageRequest page = 1; string search = 2; }
+message ListContactsResponse { repeated ContactRecord contacts = 1; PageInfo page_info = 2; }
+message GetContactRequest { string id = 1; }
+message CreateContactRequest { string name = 1; string email = 2; string phone = 3; }
+message UpdateContactRequest { string id = 1; string name = 2; string email = 3; string phone = 4; int32 if_match_version = 5; }
+message ArchiveContactRequest { string id = 1; int32 if_match_version = 2; }
+message ContactResponse { ContactRecord contact = 1; }
+
+// Invoices
+message InvoiceRecord {
+  string id = 1;
+  string number = 2;
+  string contact_id = 3;
+  string issue_date = 4;
+  string due_date = 5;
+  string status = 6;
+  double total = 7;
+  double amount_paid = 8;
+  int32 version = 9;
+}
+message ListInvoicesRequest { PageRequest page = 1; string status = 2; }
+message ListInvoicesResponse { repeated InvoiceRecord invoices = 1; PageInfo page_info = 2; }
+message GetInvoiceRequest { string id = 1; }
+message InvoiceResponse { InvoiceRecord invoice = 1; }
+
+// Bills
+message BillRecord {
+  string id = 1;
+  string number = 2;
+  string contact_id = 3;
+  string issue_date = 4;
+  string due_date = 5;
+  string status = 6;
+  double total = 7;
+  double amount_paid = 8;
+  int32 version = 9;
+}
+message ListBillsRequest { PageRequest page = 1; string status = 2; }
+message ListBillsResponse { repeated BillRecord bills = 1; PageInfo page_info = 2; }
+message GetBillRequest { string id = 1; }
+message BillResponse { BillRecord bill = 1; }
+
+// Payments
+message PaymentRecord {
+  string id = 1;
+  string contact_id = 2;
+  string payment_date = 3;
+  string direction = 4;   // INCOMING / OUTGOING
+  double amount = 5;
+  string method = 6;
+  string reference = 7;
+  int32 version = 8;
+}
+message ListPaymentsRequest { PageRequest page = 1; string direction = 2; }
+message ListPaymentsResponse { repeated PaymentRecord payments = 1; PageInfo page_info = 2; }
+message GetPaymentRequest { string id = 1; }
+message PaymentResponse { PaymentRecord payment = 1; }
+
+// Journal Entries
+message JournalEntryRecord {
+  string id = 1;
+  string ref = 2;
+  string entry_date = 3;
+  string description = 4;
+  string status = 5;   // DRAFT / POSTED / REVERSED
+  int32 version = 6;
+}
+message ListJournalEntriesRequest { PageRequest page = 1; string status = 2; }
+message ListJournalEntriesResponse { repeated JournalEntryRecord entries = 1; PageInfo page_info = 2; }
+message GetJournalEntryRequest { string id = 1; }
+message JournalEntryResponse { JournalEntryRecord entry = 1; }
+
+// Collaborative presence
+message PresenceRequest {
+  string tenant_id = 1;
+  string user_id = 2;        // who is watching
+  string entity_type = 3;    // e.g. "invoice"
+  string entity_id = 4;      // which entity they're viewing (empty = global)
+}
+
+message PresenceEvent {
+  string user_id = 1;
+  string user_name = 2;
+  string entity_type = 3;
+  string entity_id = 4;
+  string action = 5;          // "viewing" | "editing" | "left"
+  string timestamp = 6;       // ISO8601
+}
+
+message AcquireLockRequest {
+  string tenant_id = 1;
+  string entity_type = 2;
+  string entity_id = 3;
+  string user_id = 4;
+  int32 ttl_seconds = 5;      // default 30; auto-released if not renewed
+}
+
+message LockResponse {
+  bool acquired = 1;
+  string locked_by = 2;       // if acquired=false, who holds the lock
+  string expires_at = 3;
+}
+
+message ReleaseLockRequest {
+  string tenant_id = 1;
+  string entity_type = 2;
+  string entity_id = 3;
+  string user_id = 4;
+}
+
+message ReleaseLockResponse { bool released = 1; }
+
+// Change stream (replaces NDJSON polling)
+message WatchChangesRequest { int64 cursor = 1; }
+message ChangeEvent {
+  string entity = 1;
+  string entity_id = 2;
+  string op = 3;       // create | update | archive
+  int64 cursor = 4;
+  string payload_json = 5;
+  int32 version = 6;
+}
+
+// Auth
+message HeartbeatRequest { string licence_jwt = 1; }
+message HeartbeatResponse { string status = 1; string fresh_jwt = 2; }
+
+// ApiTokens service (added by backend track — stub until proto lands)
+// TODO: Uncomment when backend track adds ApiTokens service to proto
+// message CreateApiTokenRequest { string name = 1; repeated string scopes = 2; }
+// message CreateApiTokenResponse { string token = 1; string id = 2; }
+// message ListApiTokensRequest {}
+// message ApiTokenRecord { string id = 1; string name = 2; string last_used = 3; string created = 4; }
+// message ListApiTokensResponse { repeated ApiTokenRecord tokens = 1; }
+// message RevokeApiTokenRequest { string id = 1; }
+// message RevokeApiTokenResponse { bool revoked = 1; }
+
+service SAEBooks {
+  rpc ListContacts(ListContactsRequest) returns (ListContactsResponse);
+  rpc GetContact(GetContactRequest) returns (ContactResponse);
+  rpc CreateContact(CreateContactRequest) returns (ContactResponse);
+  rpc UpdateContact(UpdateContactRequest) returns (ContactResponse);
+  rpc ArchiveContact(ArchiveContactRequest) returns (ContactResponse);
+  rpc ListInvoices(ListInvoicesRequest) returns (ListInvoicesResponse);
+  rpc GetInvoice(GetInvoiceRequest) returns (InvoiceResponse);
+  rpc ListBills(ListBillsRequest) returns (ListBillsResponse);
+  rpc GetBill(GetBillRequest) returns (BillResponse);
+  rpc ListPayments(ListPaymentsRequest) returns (ListPaymentsResponse);
+  rpc GetPayment(GetPaymentRequest) returns (PaymentResponse);
+  rpc ListJournalEntries(ListJournalEntriesRequest) returns (ListJournalEntriesResponse);
+  rpc GetJournalEntry(GetJournalEntryRequest) returns (JournalEntryResponse);
+  rpc WatchChanges(WatchChangesRequest) returns (stream ChangeEvent);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc WatchPresence(PresenceRequest) returns (stream PresenceEvent);
+  rpc AcquireLock(AcquireLockRequest) returns (LockResponse);
+  rpc ReleaseLock(ReleaseLockRequest) returns (ReleaseLockResponse);
+}
+
+// TODO: ApiTokens service — waiting on backend track proto
+// service ApiTokens {
+//   rpc CreateApiToken(CreateApiTokenRequest) returns (CreateApiTokenResponse);
+//   rpc ListApiTokens(ListApiTokensRequest) returns (ListApiTokensResponse);
+//   rpc RevokeApiToken(RevokeApiTokenRequest) returns (RevokeApiTokenResponse);
+// }

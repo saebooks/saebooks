@@ -1,5 +1,6 @@
 from saebooks.models.account import Account, AccountType
 from saebooks.models.account_range import AccountRange
+from saebooks.models.api_token import ApiToken
 from saebooks.models.ato_sbr import AtoSbrConfig
 from saebooks.models.bank_feed import (
     BankFeedAccount,

@@ -1,0 +1,31 @@
+name: saebooks-mcp
+
+services:
+  mcp:
+    build:
+      context: /home/sauer/projects/saebooks/mcp
+    image: saebooks-mcp:0.1
+    container_name: saebooks-mcp
+    restart: unless-stopped
+    ports:
+      - "10.0.2.1:18314:8000"
+    environment:
+      SAEBOOKS_API_URL: http://saebooks-api-1:8000
+      SAEBOOKS_MCP_TRANSPORT: sse
+      SAEBOOKS_MCP_LOG_LEVEL: INFO
+      # SAEBOOKS_API_TOKEN is intentionally NOT set here — every
+      # client supplies their own saebk_* token via the MCP transport
+      # Authorization header. Set it only for a single-tenant dev
+      # deployment.
+    networks:
+      - saebooks_default
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/sse', timeout=2).status < 500 else 1)\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  saebooks_default:
+    external: true
+    name: saebooks_default

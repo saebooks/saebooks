@@ -26,6 +26,7 @@ from saebooks.api.v1.accounts import router as accounts_router
 from saebooks.api.v1.admin import router as admin_router
 from saebooks.api.v1.ai_extraction import router as ai_extraction_router
 from saebooks.api.v1.allocations import router as allocations_router
+from saebooks.api.v1.api_tokens import router as api_tokens_router
 from saebooks.api.v1.attachments import router as attachments_router
 from saebooks.api.v1.ato_sbr import router as ato_sbr_router
 from saebooks.api.v1.bank_accounts import router as bank_accounts_router
@@ -152,5 +153,10 @@ router.include_router(pay_run_router)
 # Cashbook edition (single-entry UI over double-entry storage) — see
 # docs/cashbook-edition-design.md and saebooks.services.cashbook.
 router.include_router(cashbook_router)
+# Machine API tokens — issuance/list/revoke. Mounted at /api/v1/api-tokens.
+# Used by the CLI, MCP server, and any third-party automation that
+# needs long-lived bearer access without a browser session. See
+# saebooks/services/api_tokens.py.
+router.include_router(api_tokens_router)
 
 __all__ = ["router"]
