@@ -1,6 +1,5 @@
 from saebooks.models.account import Account, AccountType
 from saebooks.models.account_range import AccountRange
-from saebooks.models.api_token import ApiToken
 from saebooks.models.ato_sbr import AtoSbrConfig
 from saebooks.models.bank_feed import (
     BankFeedAccount,
@@ -33,6 +32,7 @@ from saebooks.models.item import CostMethod, Item
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine, PeriodLock
 from saebooks.models.journal_template import JournalTemplate
 from saebooks.models.pay_run import PayRun, PayRunLine, PayRunStatus
+from saebooks.models.payg import PaygTaxScale, StslCoefficient
 from saebooks.models.project import Project, ProjectStatus
 from saebooks.models.quote import Quote, QuoteLine, QuoteStatus
 from saebooks.models.settings import Setting
@@ -83,6 +83,8 @@ __all__ = [
     "PayRun",
     "PayRunLine",
     "PayRunStatus",
+    "PaygTaxScale",
+    "StslCoefficient",
     "PeriodLock",
     "Project",
     "ProjectStatus",
@@ -104,3 +106,33 @@ __all__ = [
     "User",
     "UserRole",
 ]
+
+# Payroll Phase 1A foundations (employees + super funds + time entries)
+from saebooks.models.employee import (  # noqa: E402,F401
+    Employee,
+    EmploymentBasis,
+    IncomeStreamType,
+    PayBasis,
+    PayFrequency,
+    PayslipDelivery,
+    TerminationReason,
+    TfnStatus,
+)
+from saebooks.models.super_fund import SuperFund  # noqa: E402,F401
+from saebooks.models.time_entry import (  # noqa: E402,F401
+    TimeEntry,
+    TimeEntryApprovalStatus,
+)
+# Payroll Phase 3 — STP submission tracking
+from saebooks.models.stp_submission import (  # noqa: E402,F401
+    StpEventType,
+    StpStatus,
+    StpSubmission,
+)
+# Payroll Phase 4 — leave balances + accruals
+from saebooks.models.leave import (  # noqa: E402,F401
+    LeaveAccrual,
+    LeaveAccrualKind,
+    LeaveBalance,
+    LeaveType,
+)

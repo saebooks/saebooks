@@ -6,7 +6,7 @@ Kept in one module for Phase 0/1 — once more entities land, split into
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Any
 
@@ -38,6 +38,10 @@ class ContactBase(BaseModel):
     bank_account_number: str | None = None
     bank_account_title: str | None = None
     currency_code: str | None = Field(default=None, max_length=3, description="ISO 4217 billing currency")
+    is_one_off: bool = Field(
+        default=False,
+        description="Hidden from main /contacts list. Cash purchases / walk-ins / once-off counterparties.",
+    )
 
 
 class ContactCreate(ContactBase):
@@ -68,6 +72,7 @@ class ContactUpdate(BaseModel):
     default_account_id: uuid.UUID | None = None
     default_tax_code: str | None = None
     currency_code: str | None = Field(default=None, max_length=3)
+    is_one_off: bool | None = None
 
 
 class ContactOut(ContactBase):
@@ -85,6 +90,35 @@ class ContactListOut(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class OneOffCandidate(BaseModel):
+    """One row of /api/v1/contacts/one-off-candidates."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    contact_type: str
+    kind: str | None = None
+    posted_date: str | None = None
+    posted_total: str | None = None
+    last_seen: str | None = None
+
+
+class OneOffCandidatesOut(BaseModel):
+    items: list[OneOffCandidate]
+    total: int
+
+
+class OneOffBulkTagRequest(BaseModel):
+    """POST body for /api/v1/contacts/bulk-tag-one-off."""
+
+    contact_ids: list[uuid.UUID] = Field(min_length=1)
+
+
+class OneOffBulkTagOut(BaseModel):
+    flipped: int
 
 
 class ConflictBody(BaseModel):
@@ -675,7 +709,7 @@ class InvoiceLineCreate(BaseModel):
 class InvoiceBase(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    contact_id: uuid.UUID
+    contact_id: uuid.UUID | None = None
     issue_date: date
     due_date: date
     settlement_date: date | None = None
@@ -712,7 +746,7 @@ class InvoiceOut(BaseModel):
     id: uuid.UUID
     company_id: uuid.UUID
     tenant_id: uuid.UUID
-    contact_id: uuid.UUID
+    contact_id: uuid.UUID | None = None
     number: str | None = None
     issue_date: date
     due_date: date
@@ -793,7 +827,7 @@ class BillLineCreate(BaseModel):
 class BillBase(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    contact_id: uuid.UUID
+    contact_id: uuid.UUID | None = None
     issue_date: date
     due_date: date
     notes: str | None = None
@@ -831,7 +865,7 @@ class BillOut(BaseModel):
     id: uuid.UUID
     company_id: uuid.UUID
     tenant_id: uuid.UUID
-    contact_id: uuid.UUID
+    contact_id: uuid.UUID | None = None
     number: str | None = None
     supplier_reference: str | None = None
     issue_date: date
@@ -1085,12 +1119,17 @@ class CreditNoteConflictBody(BaseModel):
 
 
 class BankAccountCreate(BaseModel):
-    """POST body for creating a new bank account."""
+    """POST body for creating a new bank-side account (bank/card/loan/cash)."""
 
     code: str = Field(min_length=1, max_length=32)
     name: str = Field(min_length=1, max_length=255)
-    bsb: str = Field(min_length=6, max_length=7, description="BSB formatted 'xxx-xxx'")
-    bank_account_number: str | None = Field(default=None, max_length=9)
+    account_kind: str = Field(
+        default="BANK_CHECKING",
+        description="One of BANK_CHECKING / BANK_SAVINGS / CREDIT_CARD / BANK_LOAN / CASH / OTHER",
+    )
+    bsb: str | None = Field(default=None, min_length=6, max_length=7,
+        description="BSB formatted 'xxx-xxx' — required for BANK_* kinds, ignored otherwise")
+    bank_account_number: str | None = Field(default=None, max_length=32)
     bank_account_title: str | None = Field(default=None, max_length=32)
     apca_user_id: str | None = Field(default=None, max_length=6)
     bank_abbreviation: str | None = Field(default=None, max_length=3)
@@ -1104,6 +1143,8 @@ class BankAccountUpdate(BaseModel):
 
     code: str | None = Field(default=None, min_length=1, max_length=32)
     name: str | None = Field(default=None, min_length=1, max_length=255)
+    account_kind: str | None = Field(default=None,
+        description="Re-classify between BANK_*/CREDIT_CARD/BANK_LOAN/CASH/OTHER")
     bsb: str | None = Field(default=None, min_length=6, max_length=7)
     bank_account_number: str | None = None
     bank_account_title: str | None = None
@@ -1122,6 +1163,8 @@ class BankAccountOut(BaseModel):
     tenant_id: uuid.UUID
     code: str
     name: str
+    account_kind: str | None = None
+    account_type: str | None = None
     bsb: str | None = None
     bank_account_number: str | None = None
     bank_account_title: str | None = None
@@ -2919,3 +2962,447 @@ class QuoteConvertOut(BaseModel):
 
     quote: QuoteOut
     invoice_id: uuid.UUID
+
+
+# ---------------------------------------------------------------------------
+# Expenses — paid-at-checkout sibling of bills
+# ---------------------------------------------------------------------------
+
+
+class ExpenseLineOut(BaseModel):
+    """One line of an expense (nested in ExpenseOut)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    line_no: int
+    description: str
+    account_id: uuid.UUID
+    tax_code_id: uuid.UUID | None = None
+    quantity: Decimal
+    unit_price: Decimal
+    discount_pct: Decimal
+    line_subtotal: Decimal
+    line_tax: Decimal
+    line_total: Decimal
+    project_id: uuid.UUID | None = None
+
+
+class ExpenseLineCreate(BaseModel):
+    """One line in a POST/PATCH payload."""
+
+    description: str = Field(min_length=1)
+    account_id: uuid.UUID
+    tax_code_id: uuid.UUID | None = None
+    quantity: Decimal = Decimal("1")
+    unit_price: Decimal = Decimal("0")
+    discount_pct: Decimal = Decimal("0")
+    project_id: uuid.UUID | None = None
+
+
+class ExpenseBase(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    payment_account_id: uuid.UUID
+    expense_date: date
+    contact_id: uuid.UUID | None = None
+    reference: str | None = None
+    notes: str | None = None
+    currency: str = Field(default="AUD", min_length=3, max_length=3)
+    fx_rate: Decimal = Field(default=Decimal("1"), gt=Decimal("0"))
+
+
+class ExpenseCreate(ExpenseBase):
+    """POST body."""
+
+    lines: list[ExpenseLineCreate] = Field(default_factory=list)
+
+
+class ExpenseUpdate(BaseModel):
+    """PATCH body — every field optional."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    payment_account_id: uuid.UUID | None = None
+    contact_id: uuid.UUID | None = None
+    expense_date: date | None = None
+    notes: str | None = None
+    reference: str | None = None
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    fx_rate: Decimal | None = Field(default=None, gt=Decimal("0"))
+    lines: list[ExpenseLineCreate] | None = None
+
+
+class ExpenseOut(BaseModel):
+    """Full expense response — includes nested lines, tenant_id, version."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    tenant_id: uuid.UUID
+    contact_id: uuid.UUID | None = None
+    payment_account_id: uuid.UUID
+    number: str | None = None
+    reference: str | None = None
+    expense_date: date
+    status: str
+    subtotal: Decimal
+    tax_total: Decimal
+    total: Decimal
+    currency: str
+    fx_rate: Decimal
+    notes: str | None = None
+    journal_entry_id: uuid.UUID | None = None
+    void_journal_entry_id: uuid.UUID | None = None
+    posted_at: datetime | None = None
+    posted_by: str | None = None
+    version: int
+    created_at: datetime
+    updated_at: datetime
+    archived_at: datetime | None = None
+    lines: list[ExpenseLineOut] = Field(default_factory=list)
+
+
+class ExpenseListOut(BaseModel):
+    items: list[ExpenseOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class ExpenseConflictBody(BaseModel):
+    detail: str
+    current: ExpenseOut
+
+
+# ---------------------------------------------------------------------------
+# Time entries (v1 — standalone, ahead of the future ``employees`` table)
+# ---------------------------------------------------------------------------
+
+
+class TimeEntryBase(BaseModel):
+    """Shared fields between create / update / out shapes."""
+
+    work_date: date
+    hours: Decimal = Field(gt=Decimal("0"))
+    start_time: time | None = None
+    end_time: time | None = None
+    break_minutes: int = Field(default=0, ge=0)
+    description: str = ""
+    project_id: uuid.UUID | None = None
+    department_id: uuid.UUID | None = None
+    cost_centre_id: uuid.UUID | None = None
+    contact_id: uuid.UUID | None = None
+    billable: bool = False
+    rate: Decimal | None = None
+
+
+class TimeEntryCreate(TimeEntryBase):
+    """POST /api/v1/time-entries body."""
+
+    # Default = logged-in user. Explicit override allowed for admins
+    # logging hours on behalf of another worker.
+    user_id: uuid.UUID | None = None
+
+
+class TimeEntryUpdate(BaseModel):
+    """PATCH /api/v1/time-entries/{id} — every field optional."""
+
+    work_date: date | None = None
+    hours: Decimal | None = Field(default=None, gt=Decimal("0"))
+    start_time: time | None = None
+    end_time: time | None = None
+    break_minutes: int | None = Field(default=None, ge=0)
+    description: str | None = None
+    project_id: uuid.UUID | None = None
+    department_id: uuid.UUID | None = None
+    cost_centre_id: uuid.UUID | None = None
+    contact_id: uuid.UUID | None = None
+    billable: bool | None = None
+    rate: Decimal | None = None
+
+
+class TimeEntryOut(BaseModel):
+    """Full time entry as returned by the API."""
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    user_id: uuid.UUID
+    contact_id: uuid.UUID | None = None
+    work_date: date
+    hours: Decimal
+    start_time: time | None = None
+    end_time: time | None = None
+    break_minutes: int
+    description: str
+    project_id: uuid.UUID | None = None
+    department_id: uuid.UUID | None = None
+    cost_centre_id: uuid.UUID | None = None
+    billable: bool
+    rate: Decimal | None = None
+    invoice_line_id: uuid.UUID | None = None
+    approval_status: str
+    submitted_at: datetime | None = None
+    approved_at: datetime | None = None
+    approved_by: uuid.UUID | None = None
+    rejection_reason: str | None = None
+    version: int
+    created_at: datetime
+    updated_at: datetime
+    archived_at: datetime | None = None
+
+
+class TimeEntryListOut(BaseModel):
+    items: list[TimeEntryOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class TimeEntryConvertToInvoiceLineRequest(BaseModel):
+    """Body for POST /api/v1/time-entries/convert-to-invoice."""
+
+    # Either append to an existing draft invoice ...
+    invoice_id: uuid.UUID | None = None
+    # ... OR create a new draft against this contact.
+    contact_id: uuid.UUID | None = None
+    # IDs to convert. Service refuses if any are non-billable, already
+    # converted, archived, or LOCKED.
+    entry_ids: list[uuid.UUID] = Field(min_length=1)
+
+
+class TimeEntryConvertToInvoiceLineResponse(BaseModel):
+    invoice_id: uuid.UUID
+    invoice_line_id: uuid.UUID
+    converted_entry_ids: list[uuid.UUID]
+    total_hours: Decimal
+    total_amount: Decimal
+
+
+# ---------------------------------------------------------------------------
+# Super funds (Phase 1A — payroll foundation)
+# ---------------------------------------------------------------------------
+
+
+class SuperFundBase(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    is_smsf: bool = False
+    usi: str | None = Field(default=None, min_length=11, max_length=11)
+    employer_abn: str | None = None
+    esa: str | None = None
+    smsf_bsb: str | None = None
+    smsf_account_number: str | None = None
+    smsf_account_name: str | None = None
+
+
+class SuperFundCreate(SuperFundBase):
+    is_default: bool = False
+
+
+class SuperFundUpdate(BaseModel):
+    name: str | None = None
+    usi: str | None = None
+    employer_abn: str | None = None
+    esa: str | None = None
+    smsf_bsb: str | None = None
+    smsf_account_number: str | None = None
+    smsf_account_name: str | None = None
+
+
+class SuperFundOut(BaseModel):
+    id: uuid.UUID
+    company_id: uuid.UUID
+    name: str
+    usi: str | None = None
+    spin: str | None = None
+    is_smsf: bool
+    employer_abn: str | None = None
+    esa: str | None = None
+    # SMSF bank fields are masked in the default response. Clients with
+    # super_fund.edit + the explicit /reveal-bank endpoint get plaintext.
+    has_smsf_bank: bool = False
+    is_default: bool
+    version: int
+    created_at: datetime
+    updated_at: datetime
+    archived_at: datetime | None = None
+
+
+class SuperFundListOut(BaseModel):
+    items: list[SuperFundOut]
+    total: int
+    limit: int
+    offset: int
+
+
+# ---------------------------------------------------------------------------
+# Employees
+# ---------------------------------------------------------------------------
+
+
+class EmployeeBase(BaseModel):
+    """Shared shape for create / update."""
+
+    contact_id: uuid.UUID
+    start_date: date
+    employment_basis: str = Field(
+        description="STP2 single-letter code: F/P/C/L/V/N",
+    )
+    base_rate: Decimal = Field(ge=Decimal("0"))
+
+    # All optional below — sensible defaults applied server-side.
+    employee_number: str | None = None
+    dob: date | None = None
+    address_line1: str | None = None
+    address_line2: str | None = None
+    suburb: str | None = None
+    state: str | None = None
+    postcode: str | None = None
+    country_code: str = "AU"
+    tax_treatment_code: str | None = None
+    claims_tax_free_threshold: bool = False
+    is_australian_resident: bool = True
+    study_training_support_loan: bool = False
+    working_holiday_maker: bool = False
+    whm_country_code: str | None = None
+    income_stream_type: str = "SAW"
+    payg_branch_code: str | None = None
+    super_fund_id: uuid.UUID | None = None
+    super_member_number: str | None = None
+    payslip_email: str | None = None
+    payslip_delivery: str = "EMAIL"
+    pay_frequency: str = "WEEKLY"
+    pay_basis: str = "HOURLY"
+    weekly_hours: Decimal = Decimal("38.00")
+    notes: str | None = None
+
+
+class EmployeeCreate(EmployeeBase):
+    """POST /api/v1/employees body. TFN + bank are write-only — never echoed back."""
+
+    tfn: str | None = None
+    tfn_status: str = "NOT_PROVIDED"
+    bsb: str | None = None
+    account_number: str | None = None
+    account_name: str | None = None
+
+
+class EmployeeUpdate(BaseModel):
+    """PATCH /api/v1/employees/{id} — every field optional. To clear a
+    sensitive field, send the empty string explicitly; to leave it
+    untouched, omit the key.
+    """
+
+    employee_number: str | None = None
+    contact_id: uuid.UUID | None = None
+    start_date: date | None = None
+    dob: date | None = None
+    address_line1: str | None = None
+    address_line2: str | None = None
+    suburb: str | None = None
+    state: str | None = None
+    postcode: str | None = None
+    country_code: str | None = None
+    employment_basis: str | None = None
+    tax_treatment_code: str | None = None
+    claims_tax_free_threshold: bool | None = None
+    is_australian_resident: bool | None = None
+    study_training_support_loan: bool | None = None
+    working_holiday_maker: bool | None = None
+    whm_country_code: str | None = None
+    income_stream_type: str | None = None
+    payg_branch_code: str | None = None
+    super_fund_id: uuid.UUID | None = None
+    super_member_number: str | None = None
+    payslip_email: str | None = None
+    payslip_delivery: str | None = None
+    pay_frequency: str | None = None
+    pay_basis: str | None = None
+    base_rate: Decimal | None = None
+    weekly_hours: Decimal | None = None
+    tfn_status: str | None = None
+    notes: str | None = None
+    # Sensitive write paths
+    tfn: str | None = None
+    bsb: str | None = None
+    account_number: str | None = None
+    account_name: str | None = None
+
+
+class EmployeeOut(BaseModel):
+    """Default API response. TFN + bank are MASKED.
+
+    Privileged callers (with employee.tfn_view) hit /employees/{id}/tfn
+    for plaintext; bank decryption flows through the pay-run service
+    when issuing ABA disbursements.
+    """
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    contact_id: uuid.UUID
+    employee_number: str
+    payee_id_bms: uuid.UUID
+    previous_payee_id: str | None = None
+
+    # Sensitive — masked in this DTO.
+    tfn_masked: str | None = None
+    tfn_status: str
+    has_bank: bool = False
+
+    dob: date | None = None
+    start_date: date
+    end_date: date | None = None
+    termination_reason: str | None = None
+
+    address_line1: str | None = None
+    address_line2: str | None = None
+    suburb: str | None = None
+    state: str | None = None
+    postcode: str | None = None
+    country_code: str
+
+    employment_basis: str
+    tax_treatment_code: str | None = None
+    claims_tax_free_threshold: bool
+    is_australian_resident: bool
+    study_training_support_loan: bool
+    working_holiday_maker: bool
+    whm_country_code: str | None = None
+    income_stream_type: str
+    payg_branch_code: str | None = None
+
+    super_fund_id: uuid.UUID | None = None
+    super_member_number: str | None = None
+
+    payslip_email: str | None = None
+    payslip_delivery: str
+    pay_frequency: str
+    pay_basis: str
+    base_rate: Decimal
+    weekly_hours: Decimal
+
+    notes: str | None = None
+    version: int
+    created_at: datetime
+    updated_at: datetime
+    archived_at: datetime | None = None
+
+
+class EmployeeListOut(BaseModel):
+    items: list[EmployeeOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class EmployeeTerminateRequest(BaseModel):
+    end_date: date
+    reason: str = Field(description="STP2 code: V/I/D/R/F/C/T")
+
+
+class EmployeeTfnRevealOut(BaseModel):
+    """Returned by /employees/{id}/tfn when the caller has employee.tfn_view."""
+
+    employee_id: uuid.UUID
+    tfn: str
