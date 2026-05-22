@@ -1,0 +1,29 @@
+#!/bin/bash
+# Wrap a command so it sees SAEBOOKS_CC_TOKEN + sibling vars.
+#
+# Cron lines and other non-interactive contexts get a stripped env that
+# doesn't inherit ~/.bashrc's auto-export. Wrap the target instead:
+#
+#   13 5,10,15,20 * * *  $HOME/bin/with-saebooks-env  $HOME/bin/saebooks-continue.sh
+#
+# Sources the canonical secret file at $HOME/.claude/secrets/
+# saebooks-claude-code.env (mode 600). All KEY=value pairs are auto-
+# exported via `set -a` so the child process inherits them as env vars
+# (not just shell-local variables).
+#
+# Exits non-zero if the secret file is missing.
+
+set -eu
+
+ENV_FILE="${HOME}/.claude/secrets/saebooks-claude-code.env"
+if [ ! -r "$ENV_FILE" ]; then
+    echo "with-saebooks-env: $ENV_FILE missing or unreadable" >&2
+    exit 1
+fi
+
+set -a
+# shellcheck disable=SC1090
+. "$ENV_FILE"
+set +a
+
+exec "$@"
