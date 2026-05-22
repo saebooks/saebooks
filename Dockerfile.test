@@ -1,16 +1,125 @@
-# Test image — extends production image with dev deps so pytest can run.
-# Built one-off; not used by docker-compose.yml. Production image stays slim.
-FROM saebooks-api:latest
-USER root
-RUN pip install --no-cache-dir \
-        'pytest>=8.3' \
-        'pytest-asyncio>=0.24' \
-        'httpx>=0.27' \
-        'hypothesis>=6.112' \
-        'ruff>=0.7' \
-        'mypy>=1.13' \
-        'respx>=0.22'
-# Pick up the patched entrypoint.sh that supports one-shot args.
+# SAE Books — test image
+#
+# Builds on the production multi-stage Dockerfile.  The "test" target
+# re-uses the builder stage (compiled venv) and the runtime stage
+# (slim OS layer), then adds:
+#   - dev extras  (pytest, pytest-asyncio, httpx, hypothesis, ruff,
+#                  mypy, respx)
+#   - tests/      directory baked in
+#   - ENV vars    for isolated test mode
+#
+# This file is intentionally separate from Dockerfile so the prod build
+# path is never touched.  It references the same build args so the two
+# files stay in lockstep on Python version.
+
+ARG PYTHON_VERSION=3.12
+
+# -----------------------------------------------------------------------
+# Stage 1: builder — identical to prod, produces /opt/venv with runtime deps
+# -----------------------------------------------------------------------
+FROM python:${PYTHON_VERSION}-slim AS builder
+
+ARG TARGETPLATFORM
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:$PATH"
+
+ARG CONNECPY_VERSION=2.3.0
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       gcc g++ libpq-dev curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN ARCH="$(uname -m)" \
+    && case "$ARCH" in \
+         x86_64) PLUGIN_ARCH=amd64 ;; \
+         aarch64) PLUGIN_ARCH=arm64 ;; \
+         *) echo "unsupported arch for protoc-gen-connecpy: $ARCH" >&2; exit 1 ;; \
+       esac \
+    && curl -fsSL -o /tmp/protoc-gen-connecpy.tgz \
+        "https://github.com/i2y/connecpy/releases/download/v${CONNECPY_VERSION}/protoc-gen-connecpy_${CONNECPY_VERSION}_linux_${PLUGIN_ARCH}.tar.gz" \
+    && tar -C /usr/local/bin -xzf /tmp/protoc-gen-connecpy.tgz protoc-gen-connecpy \
+    && chmod +x /usr/local/bin/protoc-gen-connecpy \
+    && rm /tmp/protoc-gen-connecpy.tgz
+
+RUN python -m venv "${VIRTUAL_ENV}"
+
+WORKDIR /build
+
+COPY pyproject.toml README.md ./
+
+# Install runtime deps + [dev] extras in one shot so hypothesis/pytest
+# etc. are available at test-collection time.
+RUN pip install --upgrade pip setuptools wheel \
+    && pip install ".[dev]"
+
+COPY saebooks/ ./saebooks/
+COPY alembic.ini ./
+COPY alembic/ ./alembic/
+
+RUN mkdir -p saebooks/grpc_gen \
+    && touch saebooks/grpc_gen/__init__.py \
+    && python -m grpc_tools.protoc \
+        -I saebooks/proto \
+        --python_out=saebooks/grpc_gen \
+        --grpc_python_out=saebooks/grpc_gen \
+        --connecpy_out=saebooks/grpc_gen \
+        saebooks/proto/saebooks.proto \
+    && sed -i 's/^import saebooks_pb2/from saebooks.grpc_gen import saebooks_pb2/' \
+        saebooks/grpc_gen/saebooks_pb2_grpc.py \
+    && sed -i 's/^import saebooks_pb2/from saebooks.grpc_gen import saebooks_pb2/' \
+        saebooks/grpc_gen/saebooks_connecpy.py
+
+RUN pip install --no-deps .
+
+# -----------------------------------------------------------------------
+# Stage 2: test runtime — slim OS + venv (with dev deps) + test files
+# -----------------------------------------------------------------------
+FROM python:${PYTHON_VERSION}-slim AS test
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:$PATH" \
+    # Test-mode env — consumed by saebooks.config and conftest.py
+    SAEBOOKS_ENV=test \
+    SAEBOOKS_MAIL_OUTBOX_DIR=/tmp/saebooks-mail-outbox \
+    SAEBOOKS_TEST_TRUSTED_USER_HEADER=1
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libpq5 curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --system saebooks \
+    && useradd --system --gid saebooks --no-create-home saebooks
+
+WORKDIR /app
+
+# Venv carries runtime deps + dev extras compiled against the slim OS.
+COPY --from=builder /opt/venv /opt/venv
+
+# Application source
+COPY --chown=saebooks:saebooks saebooks/ ./saebooks/
+COPY --from=builder --chown=saebooks:saebooks /build/saebooks/grpc_gen/ ./saebooks/grpc_gen/
+COPY --chown=saebooks:saebooks pyproject.toml ./
+COPY --chown=saebooks:saebooks alembic.ini ./
+COPY --chown=saebooks:saebooks alembic/ ./alembic/
 COPY --chown=saebooks:saebooks entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
+
+# Test suite — this is the only substantive addition over the prod image.
+COPY --chown=saebooks:saebooks tests/ ./tests/
+
+# /tmp/saebooks-mail-outbox must be writable by the saebooks user.
+RUN mkdir -p /tmp/saebooks-mail-outbox \
+    && chown saebooks:saebooks /tmp/saebooks-mail-outbox
+
 USER saebooks
+
+# Default command for the test compose service — run migrations then pytest.
+# docker-compose.test.yml overrides this to run migrations first via entrypoint.
+CMD ["python", "-m", "pytest", "-q", "tests/"]
