@@ -1,13 +1,28 @@
 """Append-only write log — Phase 0 scaffolding.
 
-Every write through the ``saebooks.api.v1`` surface (and every
+Every write through the saebooks.api.v1 surface (and every
 legacy-Jinja write routed through the shared service layer) drops a
-row into ``change_log`` so offline desktop clients can replay
+row into change_log so offline desktop clients can replay
 server-side changes since a known cursor.
 
-Rows are never mutated after insert. ``ChangeLog.id`` is the cursor —
+Rows are never mutated after insert. ChangeLog.id is the cursor —
 monotonic BIGSERIAL, clients poll with
-``GET /api/v1/changes?since=<id>`` and advance.
+GET /api/v1/changes?since=<id> and advance.
+
+Tenant isolation
+----------------
+Each row now carries tenant_id so RLS and the app-layer filter
+both scope reads to the caller's tenant. The append() signature
+accepts tenant_id as a keyword-only argument; every call site
+that goes through saebooks.api.v1 already has the tenant on the
+session (set by deps.get_session), and passes it here explicitly
+for defence-in-depth.
+
+Legacy call sites that were written before the tenant column existed
+default to the placeholder UUID 00000000-0000-0000-0000-000000000001
+which matches the backfill applied by migration 0118. They should be
+updated to pass a real tenant when each service gains multi-tenant
+awareness.
 """
 from __future__ import annotations
 
@@ -21,6 +36,8 @@ from saebooks.models.change_log import ChangeLog
 
 ChangeOp = Literal["create", "update", "archive"]
 
+_DEFAULT_TENANT = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
 
 async def append(
     session: AsyncSession,
@@ -31,13 +48,20 @@ async def append(
     actor: str,
     payload: dict[str, Any],
     version: int,
+    tenant_id: uuid.UUID = _DEFAULT_TENANT,
 ) -> ChangeLog:
     """Record one write. Does NOT commit — caller owns the transaction.
 
-    Flushes so ``ChangeLog.id`` is populated on return (the API builds
-    ``X-Cursor-Next`` from it).
+    Flushes so ChangeLog.id is populated on return (the API builds
+    X-Cursor-Next from it).
+
+    tenant_id must be the caller's tenant so RLS and the app-layer
+    filter in since() both scope reads correctly. Defaults to the
+    placeholder so legacy call sites keep working until they are
+    updated.
     """
     row = ChangeLog(
+        tenant_id=tenant_id,
         entity=entity,
         entity_id=entity_id,
         op=op,
@@ -56,9 +80,18 @@ async def since(
     cursor: int,
     limit: int,
     entity: str | None = None,
+    tenant_id: uuid.UUID | None = None,
 ) -> list[ChangeLog]:
-    """Return rows with ``id > cursor`` in ascending id order."""
+    """Return rows with id > cursor in ascending id order.
+
+    When tenant_id is supplied, filters to rows owned by that
+    tenant (app-layer defence-in-depth on top of RLS). When omitted,
+    relies on RLS alone — which is sufficient for authenticated
+    requests via deps.get_session but less readable for tests.
+    """
     stmt = select(ChangeLog).where(ChangeLog.id > cursor)
+    if tenant_id is not None:
+        stmt = stmt.where(ChangeLog.tenant_id == tenant_id)
     if entity is not None:
         stmt = stmt.where(ChangeLog.entity == entity)
     stmt = stmt.order_by(ChangeLog.id).limit(limit)

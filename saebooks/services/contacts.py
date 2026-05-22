@@ -76,6 +76,8 @@ _CONTACT_COLUMNS: tuple[str, ...] = (
     "created_at",
     "updated_at",
     "archived_at",
+    "is_tpar_supplier",
+    "is_one_off",
     "version",
 )
 
@@ -187,6 +189,7 @@ async def create(
     share_percentage: object = None,
     default_income_classification: str | None = None,
     is_tpar_supplier: bool = False,
+    is_one_off: bool = False,
 ) -> Contact:
     """Create a new contact. Validate ABN format if provided (11 digits)."""
     if abn is not None:
@@ -214,6 +217,7 @@ async def create(
         share_percentage=share_percentage,
         default_income_classification=default_income_classification,
         is_tpar_supplier=is_tpar_supplier,
+        is_one_off=is_one_off,
         version=1,
     )
     session.add(contact)
@@ -229,6 +233,7 @@ async def create(
         actor=actor,
         payload=_serialise(contact),
         version=contact.version,
+        tenant_id=tenant_id,
     )
     await session.commit()
     return contact
@@ -272,7 +277,7 @@ async def update(
         "country", "notes", "default_account_id", "default_tax_code",
         "currency_code",
         "tfn", "share_percentage", "default_income_classification",
-        "is_tpar_supplier",
+        "is_tpar_supplier", "is_one_off",
     }
 
     before = audit_svc.capture(contact)
@@ -300,6 +305,7 @@ async def update(
         actor=actor or performed_by or "web",
         payload=_serialise(contact),
         version=contact.version,
+        tenant_id=contact.tenant_id,
     )
     await session.commit()
     return contact
@@ -342,6 +348,7 @@ async def archive(
         actor=actor or performed_by or "web",
         payload=_serialise(contact),
         version=contact.version,
+        tenant_id=contact.tenant_id,
     )
     await session.commit()
     return contact
