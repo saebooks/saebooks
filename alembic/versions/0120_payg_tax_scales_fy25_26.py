@@ -44,10 +44,12 @@ Verification report
   ~/.claude/plans/payg-verification-2026-05-23.md
   All payg_tax_scales a/b values are transcribed verbatim from the
   ATO NAT 1004 HTML coefficient table (fetched 2026-05-23).
-  stsl_coefficients a/b values are ESTIMATED from the Schedule 8
-  breakpoint thresholds + dollar-impact examples in the verification
-  report; they require explicit verification against NAT 3539 before
-  this migration is applied. See inline comments on each STSL band.
+  stsl_coefficients a/b values: ATO-verified 2026-05-23 against NAT 3539
+  Schedule 8 HTML. URL: https://www.ato.gov.au/tax-rates-and-codes/schedule-8-
+  statement-of-formulas-for-calculating-study-and-training-support-loans-
+  components — prior agent estimates corrected (band3 a 0.30→0.17, band4
+  a 0.50→0.10, band2 b 193.1485→193.2692). See inline comments in
+  _STSL_TFT_WEEKLY for detail.
 
 down_revision note
   This migration targets 0119_account_kind as down_revision, which is
@@ -136,9 +138,10 @@ _SRC_NAT1004_WHM = (
     "Design decision outstanding: see verification report."
 )
 _SRC_NAT3539 = (
-    "NAT 3539 Schedule 8 effective 2025-09-24 — breakpoints from ATO; "
-    "a/b ESTIMATED from verification report dollar-impact examples; "
-    "VERIFY against NAT 3539 before applying."
+    "NAT 3539 Schedule 8 effective 2025-09-24 — ATO Schedule 8 verbatim, "
+    "fetched 2026-05-23. URL: https://www.ato.gov.au/tax-rates-and-codes/"
+    "schedule-8-statement-of-formulas-for-calculating-study-and-training-"
+    "support-loans-components"
 )
 
 _FY25_26_START = date(2025, 7, 1)
@@ -291,35 +294,34 @@ _SCALE_SOURCE: dict[int, str] = {
 #   TFT/FR: $1,288 / $2,403 / $3,447                                  #
 #   No TFT: $938 / $2,053 / $2,597 (NOT SEEDED — schema gap)          #
 #                                                                       #
-# a/b values: ESTIMATED from the verification report's dollar-impact    #
-# examples ($32/wk at $1,500 and $107/wk at $2,000 for TFT variant).  #
-# Derivation (linear system):                                           #
-#   32  = a * 1500.99 - b  (x = floor(1500) + 0.99)                   #
-#   107 = a * 2000.99 - b  (x = floor(2000) + 0.99)                   #
-#   Solving: a = 75/500 = 0.150000, b = 0.15*1500.99-32 = 193.1485    #
-# This gives an implied repayment rate of 15% in band 2, which is      #
-# higher than the old 1%-10% system but consistent with the ATO's      #
-# published move to steeper marginal repayment rates.                  #
-# Bands 3 and 4 are extrapolated on the same marginal logic.           #
-# ALL STSL COEFFICIENTS MUST BE VERIFIED AGAINST NAT 3539 BEFORE       #
-# alembic upgrade head IS RUN.                                          #
+# a/b values: ATO-verified 2026-05-23. Verbatim from NAT 3539 Schedule 8. #
+# Source: https://www.ato.gov.au/tax-rates-and-codes/schedule-8-statement- #
+# of-formulas-for-calculating-study-and-training-support-loans-components  #
+# Prior agent derivation (a=0.15/0.30/0.50) was WRONG — ATO uses          #
+# a=0.15/0.17/0.10. Band 4 drops to a flat 10% HELP repayment cap.        #
+# Verification cross-check: ATO Example 1 ($2,608.36 TFT): x=2608.99,     #
+# y = 0.17*2608.99 - 241.3462 = 202.18 -> $202. Confirmed.                #
 # --------------------------------------------------------------------- #
 
-# TFT-claimed / foreign-resident variant (4 bands).
-# Band 1 nil = earnings below the $1,288/wk ($67,000/yr) repayment threshold.
-# Band 2: $1,288–$2,403/wk. Estimated: a=0.15, b=193.1485.
-# Band 3: $2,403–$3,447/wk. Extrapolated from 15%→30% marginal step.
-#   At floor $2,403: carry-forward = 0.15*2403.99-193.1485 ≈ 167.46.
-#   With a=0.30: b = 0.30*2403.99 - 167.46 = 721.20 - 167.46 = 553.74.
-# Band 4: $3,447+/wk. Extrapolated from 30%→50% marginal step.
-#   At floor $3,447: carry-forward = 0.30*3447.99-553.74 ≈ 480.66.
-#   With a=0.50: b = 0.50*3447.99 - 480.66 = 1724.00 - 480.66 = 1243.34.
+# TFT-claimed / foreign-resident variant (4 bands). ATO-verified 2026-05-23.
+# Band 1: nil (< $1,288/wk, below repayment threshold). a=0.00, b=0.0000.
+# Band 2: $1,288-$2,403/wk. a=0.15, b=193.2692. ATO NAT 3539 verbatim.
+# Band 3: $2,403-$3,447/wk. a=0.17, b=241.3462. ATO NAT 3539 verbatim.
+# Band 4: $3,447+/wk. a=0.10, b=0.0000. Flat 10% HELP repayment cap.
+#   NOTE: Band 4 drops from 17% to 10% -- this is NOT a rising marginal
+#   rate system. The ATO caps HELP repayment at 10% of weekly earnings
+#   above $3,447/wk (roughly $179k/yr). Confirmed via ATO Example 1.
 _STSL_TFT_WEEKLY = [
     # floor,    ceil,      a,          b
-    ("0.00",    "1288.00", "0.000000", "0.000000"),    # nil band
-    ("1288.00", "2403.00", "0.150000", "193.148500"),  # ESTIMATED
-    ("2403.00", "3447.00", "0.300000", "553.740000"),  # EXTRAPOLATED
-    ("3447.00", None,      "0.500000", "1243.340000"), # EXTRAPOLATED
+    # Verbatim from ATO NAT 3539 Schedule 8 (effective 2025-09-24),
+    # ATO-verified 2026-05-23 against:
+    # https://www.ato.gov.au/tax-rates-and-codes/schedule-8-statement-of-formulas-for-calculating-study-and-training-support-loans-components
+    # Prior agent estimated a=0.15/0.30/0.50 for bands 2-4; ATO actual is 0.15/0.17/0.10.
+    # Band 4 drops to 0.10 (flat HELP repayment cap), NOT a rising marginal step.
+    ("0.00",    "1288.00", "0.000000", "0.000000"),    # nil band (below repayment threshold)
+    ("1288.00", "2403.00", "0.150000", "193.269200"),  # ATO-verified 2026-05-23
+    ("2403.00", "3447.00", "0.170000", "241.346200"),  # ATO-verified 2026-05-23
+    ("3447.00", None,      "0.100000", "0.000000"),    # ATO-verified 2026-05-23
 ]
 
 
