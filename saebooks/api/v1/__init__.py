@@ -24,6 +24,7 @@ from fastapi import APIRouter
 from saebooks.api.v1.account_ranges import router as account_ranges_router
 from saebooks.api.v1.accounts import router as accounts_router
 from saebooks.api.v1.admin import router as admin_router
+from saebooks.api.v1.api_tokens import router as api_tokens_router
 from saebooks.api.v1.ai_extraction import router as ai_extraction_router
 from saebooks.api.v1.allocations import router as allocations_router
 from saebooks.api.v1.attachments import router as attachments_router
@@ -156,6 +157,7 @@ router.include_router(allocations_router)
 router.include_router(attachments_router)
 # Cat-C (W5): admin audit-log + SQL tool (FLAG_SQL_TOOL Pro+).
 router.include_router(admin_router)
+router.include_router(api_tokens_router)
 # Cat-C: multi-step import wizard (bank CSV/OFX community; QBO Pro+)
 router.include_router(imports_router)
 # Cat-C (W6): integrations -- Stripe Connect, Paperless, LEI, CH, ATO.

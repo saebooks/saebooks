@@ -22,6 +22,7 @@ from saebooks.middleware.active_company import ActiveCompanyMiddleware
 from saebooks.middleware.auth import ForwardAuthMiddleware
 from saebooks.middleware.request_id import RequestIdMiddleware
 from saebooks.routers import (
+    account_tokens,
     accounts,
     auth,
     assets,
@@ -136,6 +137,8 @@ def create_app() -> FastAPI:
     app.include_router(items.router)
     app.include_router(assets.router)
     app.include_router(bank_rules.router)
+    # Self-serve API token management at /admin/api-tokens.
+    app.include_router(account_tokens.router)
     # Global search + /help/shortcuts. No prefix; exposes /search and
     # /help/shortcuts at the top level so the Cmd-K palette fetch call
     # can stay short.

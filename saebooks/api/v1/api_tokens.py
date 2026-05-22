@@ -17,12 +17,20 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from saebooks.api.v1.auth import BearerDep
+from saebooks.api.v1.auth import require_bearer
 from saebooks.api.v1.deps import get_session
 from saebooks.services import active_company as active_company_svc
 from saebooks.services import api_tokens as token_svc
 
-router = APIRouter(prefix="/api-tokens", tags=["api-tokens"])
+# Router-level dep so require_bearer stamps request.state.jwt_claims
+# BEFORE get_session's resolve_tenant_id reads it. Without this, the
+# per-handler (Depends(get_session), _: str = BearerDep) ordering caused
+# resolve_tenant_id to run first and 401 with "JWT missing tenant_id".
+router = APIRouter(
+    prefix="/api-tokens",
+    tags=["api-tokens"],
+    dependencies=[Depends(require_bearer)],
+)
 
 
 class CreateApiTokenRequest(BaseModel):
@@ -56,7 +64,6 @@ async def create_api_token(
     body: CreateApiTokenRequest,
     request: Request,
     session: AsyncSession = Depends(get_session),
-    _: str = BearerDep,
 ) -> dict[str, Any]:
     user_id = _require_authenticated_user(request)
     company_id = await _active_company_id(session, request)
@@ -77,7 +84,6 @@ async def list_api_tokens(
     request: Request,
     session: AsyncSession = Depends(get_session),
     include_revoked: bool = False,
-    _: str = BearerDep,
 ) -> list[dict[str, Any]]:
     user_id = _require_authenticated_user(request)
     company_id = await _active_company_id(session, request)
@@ -95,7 +101,6 @@ async def revoke_api_token(
     token_id: uuid.UUID,
     request: Request,
     session: AsyncSession = Depends(get_session),
-    _: str = BearerDep,
 ) -> dict[str, Any]:
     user_id = _require_authenticated_user(request)
     ok = await token_svc.revoke(session, token_id=token_id, user_id=user_id)
