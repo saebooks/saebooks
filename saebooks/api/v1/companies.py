@@ -280,8 +280,9 @@ async def _company_ref_counts(
     """Return non-zero ref counts per table for a candidate company hard-delete."""
     counts: dict[str, int] = {}
     for table in _COMPANY_REF_TABLES:
+        assert table in _COMPANY_REF_TABLES, f"table {table!r} not in allowed list"  # noqa: S101
         result = await session.execute(
-            text(f"SELECT count(*) FROM {table} WHERE company_id = :cid"),
+            text("SELECT count(*) FROM " + table + " WHERE company_id = :cid"),  # noqa: S608
             {"cid": str(company_id)},
         )
         n = int(result.scalar() or 0)
