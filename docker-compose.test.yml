@@ -1,0 +1,60 @@
+# SAE Books — isolated test stack
+#
+# Run via scripts/run-tests.sh (which always passes -p saebooks-test).
+# Never run against a live DB. Volumes are ephemeral (-v on down nukes them).
+#
+# Project name is NOT set here with `name:` because docker compose v2 reads
+# it from the -p flag passed by run-tests.sh, keeping isolation explicit.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: saebooks_test
+      POSTGRES_PASSWORD: saebooks_test_pw
+      POSTGRES_DB: saebooks_test
+    volumes:
+      # Named volume scoped to this compose project (saebooks-test_testdb).
+      # Completely separate from the production saebooks_db volume.
+      - testdb:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U saebooks_test -d saebooks_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    networks:
+      - testnet
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+      target: test
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://saebooks_test:saebooks_test_pw@db:5432/saebooks_test"
+      SAEBOOKS_ENV: "test"
+      SAEBOOKS_MAIL_OUTBOX_DIR: "/tmp/saebooks-mail-outbox"
+      SAEBOOKS_TEST_TRUSTED_USER_HEADER: "1"
+      # Disable Sentry in test runs — no noise in the DSN project.
+      SENTRY_DSN: ""
+      # Prevent any accidental outbound mail relay.
+      SAEBOOKS_MAIL_HOST: ""
+    # entrypoint.sh with args execs them directly (no uvicorn).
+    # We run alembic upgrade head first, then pytest.
+    # bash -c is passed as the single arg so entrypoint execs it.
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - "alembic upgrade head && python -m pytest -q tests/"
+    # No published ports — test network is internal only.
+    networks:
+      - testnet
+
+networks:
+  testnet:
+    driver: bridge
+
+volumes:
+  testdb:
