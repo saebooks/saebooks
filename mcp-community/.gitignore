@@ -1,0 +1,10 @@
+# Keep secrets out of the repo
+.env
+.env.*
+!.env.example
+
+# Python artefacts
+__pycache__/
+*.pyc
+*.pyo
+.venv/
