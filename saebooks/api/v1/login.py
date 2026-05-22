@@ -35,7 +35,7 @@ from sqlalchemy import select
 
 from saebooks.db import AsyncSessionLocal, LoginSessionLocal
 from saebooks.models.user import User
-from saebooks.services.jwt_tokens import JWTError, create_access_token, decode_access_token
+from saebooks.services.jwt_tokens import JWTError, decode_access_token, make_access_token
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -123,14 +123,13 @@ async def _user_by_id(
 
 
 def _make_token(user: User) -> TokenResponse:
-    token = create_access_token(
-        {
-            "sub": str(user.id),
-            "tenant_id": str(user.tenant_id),
-            "role": user.role,
-        },
-        expires_in_seconds=_ACCESS_TOKEN_TTL,
-    )
+    # Use the canonical helper from services.jwt_tokens so the JWT
+    # carries every claim require_bearer expects — in particular the
+    # ``pwv`` (password-version) claim. Building the payload dict by
+    # hand here used to miss ``pwv``, so every freshly-issued token
+    # 401'd the moment ``user.password_version`` was > 0 (i.e. for
+    # any user who had ever reset their password). One global fix.
+    token = make_access_token(user, expires_in_seconds=_ACCESS_TOKEN_TTL)
     return TokenResponse(
         access_token=token,
         token_type="bearer",
