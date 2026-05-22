@@ -31,7 +31,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 # Jinja2 setup for templates
 template_dir = "saebooks/templates"
-jinja_env = Environment(loader=FileSystemLoader(template_dir))
+jinja_env = Environment(loader=FileSystemLoader(template_dir), autoescape=True)
 
 # JWT token TTL: 7 days in seconds
 JWT_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60
