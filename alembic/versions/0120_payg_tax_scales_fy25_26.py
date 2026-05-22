@@ -109,6 +109,7 @@ Revises: 0119_account_kind
 Create Date: 2026-05-23
 """
 from collections.abc import Sequence
+from datetime import date
 from decimal import Decimal
 
 import sqlalchemy as sa
@@ -140,9 +141,9 @@ _SRC_NAT3539 = (
     "VERIFY against NAT 3539 before applying."
 )
 
-_FY25_26_START = "2025-07-01"
-_FY25_26_END = "2026-06-30"
-_STSL_START = "2025-09-24"   # new marginal formula effective date
+_FY25_26_START = date(2025, 7, 1)
+_FY25_26_END = date(2026, 6, 30)
+_STSL_START = date(2025, 9, 24)   # new marginal formula effective date
 
 
 # --------------------------------------------------------------------- #
