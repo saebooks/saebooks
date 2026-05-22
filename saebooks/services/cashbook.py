@@ -765,6 +765,15 @@ async def upgrade_cashbook_to_full(
             "nothing to upgrade."
         )
 
+    # Backfill A/R-on-issue JEs for any invoices that were issued in
+    # cashbook mode and are still OPEN (amount_paid < total). Paid
+    # invoices need no backfill: the cashbook payment posted Dr Bank /
+    # Cr Income / Cr GST, which is net-equivalent to the full-mode pair.
+    from saebooks.services import edition as edition_svc
+    await edition_svc.backfill_invoice_journals(
+        db, company.id, actor=actor
+    )
+
     company.bookkeeping_mode = "full"
     # Leave cashbook_default_bank_account_id in place — it's still a
     # valid bank account; the next cashbook entry recorded against this

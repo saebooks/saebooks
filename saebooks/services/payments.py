@@ -403,6 +403,81 @@ async def _get_fx_accounts(
     return gain.scalar_one_or_none(), loss.scalar_one_or_none()
 
 
+
+async def _build_cashbook_receipt_lines(
+    session: AsyncSession,
+    pay: Payment,
+    bank_acct: Account,
+) -> list[dict[str, object]]:
+    """For INCOMING payments in cashbook mode: build per-invoice-line
+    Cr Income (with GST auto-poster) lines. No A/R hop.
+
+    Each allocation is split across its invoice's lines proportional to
+    each line's ex-GST subtotal. The GST auto-poster in
+    ``services/journal.py`` will append the matching Cr GST Collected
+    when ``gst_amount`` + ``tax_code_id`` are present on an INCOME line.
+
+    Cashbook mode is AUD-only — invoice/payment fx_rate is treated as 1.
+    Unallocated remainder is refused (caller must fully allocate in
+    cashbook mode — no "on account" receipts).
+    """
+    lines: list[dict[str, object]] = [
+        {
+            "account_id": bank_acct.id,
+            "description": f"Receipt {pay.number}",
+            "debit": Decimal(str(pay.base_amount or pay.amount)),
+            "credit": Decimal("0"),
+        },
+    ]
+
+    allocated = Decimal("0")
+    for a in pay.allocations:
+        if a.invoice_id is None:
+            raise PaymentError(
+                "Cashbook-mode receipts must allocate to an invoice — "
+                "on-account receipts are not supported. Upgrade to full "
+                "mode to accept on-account."
+            )
+        inv = (
+            await session.execute(
+                select(Invoice)
+                .options(selectinload(Invoice.lines))
+                .where(Invoice.id == a.invoice_id)
+            )
+        ).scalar_one_or_none()
+        if inv is None:
+            continue
+        allocated += Decimal(str(a.amount))
+        if inv.total == Decimal("0"):
+            continue
+        ratio = Decimal(str(a.amount)) / Decimal(str(inv.total))
+        for ln in inv.lines:
+            line_subtotal = Decimal(str(ln.line_subtotal or 0))
+            line_tax = Decimal(str(ln.line_tax or 0))
+            cr_amount = _q2(line_subtotal * ratio)
+            cr_tax = _q2(line_tax * ratio) if line_tax > 0 else None
+            if cr_amount <= Decimal("0"):
+                continue
+            lines.append(
+                {
+                    "account_id": ln.account_id,
+                    "description": f"{inv.number}: {ln.description}",
+                    "debit": Decimal("0"),
+                    "credit": cr_amount,
+                    "tax_code_id": ln.tax_code_id,
+                    "gst_amount": cr_tax,
+                    "project_id": ln.project_id,
+                }
+            )
+
+    if allocated != Decimal(str(pay.amount)):
+        raise PaymentError(
+            "Cashbook-mode receipts must be fully allocated to invoices. "
+            f"Allocated {allocated} of {pay.amount}."
+        )
+    return lines
+
+
 async def post_payment(
     session: AsyncSession,
     payment_id: uuid.UUID,
@@ -433,21 +508,30 @@ async def post_payment(
     fx_delta = bank_base - control_base  # Dr - Cr (INCOMING perspective)
 
     if pay.direction == PaymentDirection.INCOMING:
-        control = await _get_control_account(session, pay.company_id, _AR_CODE)
-        lines: list[dict[str, object]] = [
-            {
-                "account_id": bank_acct.id,
-                "description": f"Receipt {pay.number}",
-                "debit": bank_base,
-                "credit": Decimal("0"),
-            },
-            {
-                "account_id": control.id,
-                "description": f"Receipt {pay.number}",
-                "debit": Decimal("0"),
-                "credit": control_base,
-            },
-        ]
+        from saebooks.services import edition as edition_svc
+        if await edition_svc.is_cashbook_mode(session, pay.company_id):
+            # Single-entry receipt: Dr Bank / Cr Income (+ GST auto).
+            # No A/R hop, no FX (cashbook is AUD-only).
+            lines = await _build_cashbook_receipt_lines(
+                session, pay, bank_acct
+            )
+            fx_delta = Decimal("0")
+        else:
+            control = await _get_control_account(session, pay.company_id, _AR_CODE)
+            lines: list[dict[str, object]] = [
+                {
+                    "account_id": bank_acct.id,
+                    "description": f"Receipt {pay.number}",
+                    "debit": bank_base,
+                    "credit": Decimal("0"),
+                },
+                {
+                    "account_id": control.id,
+                    "description": f"Receipt {pay.number}",
+                    "debit": Decimal("0"),
+                    "credit": control_base,
+                },
+            ]
     else:
         control = await _get_control_account(session, pay.company_id, _AP_CODE)
         lines = [

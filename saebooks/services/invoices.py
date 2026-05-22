@@ -541,6 +541,39 @@ async def post_invoice(
             session, inv.company_id, "invoice"
         )
 
+    # ------------------------------------------------------------------ #
+    # Cashbook mode: invoice is a document only, no JE on issue.
+    # Income is recognised on payment (Dr Bank / Cr Income / Cr GST in
+    # ``payments.post_payment``). Cash-basis sole-trader treatment.
+    # Inventory / retention / deferred / trade-in are full-edition only.
+    # ------------------------------------------------------------------ #
+    from saebooks.services import edition as edition_svc
+    if await edition_svc.is_cashbook_mode(session, inv.company_id):
+        for line in inv.lines:
+            if line.item_id is not None:
+                raise InvoiceError(
+                    "Cashbook-mode invoices cannot have inventory items. "
+                    "Use a plain income-account line, or upgrade to full mode."
+                )
+            if getattr(line, "is_trade_in", False):
+                raise InvoiceError(
+                    "Cashbook-mode invoices cannot have trade-in lines. "
+                    "Upgrade to full mode for trade-in accounting."
+                )
+            ret = getattr(line, "retention_pct", None)
+            if ret is not None and Decimal(str(ret)) > Decimal("0"):
+                raise InvoiceError(
+                    "Cashbook-mode invoices cannot have retention. "
+                    "Upgrade to full mode for retention accounting."
+                )
+        inv.status = InvoiceStatus.POSTED
+        inv.posted_at = datetime.now(UTC)
+        inv.posted_by = posted_by
+        # journal_entry_id stays NULL — backfilled if/when the company
+        # flips to full mode and the invoice is still open.
+        await session.commit()
+        return await get(session, inv.id)
+
     ar_account = await _get_ar_account(session, inv.company_id)
 
     # Deferred-revenue: look up Unearned Income (2-1760) and GST Collected
@@ -759,7 +792,12 @@ async def void_invoice(
             "unallocate before voiding."
         )
     if inv.journal_entry_id is None:
-        raise InvoiceError(f"Posted invoice {inv.id} has no journal entry id")
+        # Cashbook-mode invoices have no JE on issue — just flip status.
+        # (If a payment had landed, amount_paid > 0 would already have
+        # blocked us above.)
+        inv.status = InvoiceStatus.VOIDED
+        await session.commit()
+        return inv
 
     reversal = await journal_svc.reverse(
         session,
