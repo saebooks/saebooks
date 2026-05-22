@@ -238,6 +238,43 @@ async def require_bearer(
     except JWTError:
         pass
 
+    # Machine API token branch — ``saebk_<64hex>``. Cleanly separated
+    # from the JWT path so an invalid JWT doesn't accidentally match
+    # the prefix and skip ahead. Used by the CLI, MCP server, and any
+    # third-party automation. See ``services/api_tokens.py``.
+    from saebooks.services.api_tokens import (  # noqa: PLC0415
+        TOKEN_PREFIX_HEADER,
+        TokenVerifyError,
+        verify as verify_api_token,
+    )
+    if presented.startswith(TOKEN_PREFIX_HEADER):
+        from saebooks.db import AsyncSessionLocal  # noqa: PLC0415
+        try:
+            async with AsyncSessionLocal() as session:
+                token_row = await verify_api_token(session, presented)
+                await session.commit()
+        except TokenVerifyError as exc:
+            logger.info("api token rejected: %s", exc)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid API token",
+                headers={"WWW-Authenticate": "Bearer"},
+            ) from exc
+
+        # Stamp request.state so downstream handlers see the same
+        # shape as the JWT path: jwt_claims (for tenant resolution),
+        # user (for role gates), role (string), username.
+        request.state.jwt_claims = {
+            "sub": str(token_row.user_id),
+            "tenant_id": str(token_row.tenant_id),
+            "company_id": str(token_row.company_id),
+            "api_token": True,
+        }
+        request.state.user = token_row.user
+        request.state.role = getattr(token_row.user, "role", None)
+        request.state.username = getattr(token_row.user, "username", None)
+        return presented
+
     # Fall back to static dev token (scripts, tests, direct API access).
     expected = current_token()
     if not secrets.compare_digest(presented, expected):

@@ -9,10 +9,12 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
+from typing import Any
+
 from sqlalchemy import (
     Date, DateTime, ForeignKey, Integer, Numeric, String, Text, func,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from saebooks.db import Base
@@ -87,9 +89,12 @@ class PayRunLine(Base):
         ForeignKey("pay_runs.id", ondelete="CASCADE"),
         nullable=False,
     )
+    # FK retarget: from 0112_pay_run_lines_extension onwards this points
+    # at employees.id (Phase 1A added the employees table). Old rows
+    # were already empty across all 5 live stacks at migration time.
     employee_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("contacts.id", ondelete="RESTRICT"),
+        ForeignKey("employees.id", ondelete="RESTRICT"),
         nullable=False,
     )
     gross: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
@@ -100,6 +105,54 @@ class PayRunLine(Base):
         Numeric(14, 2), nullable=False, default=Decimal("0")
     )
     net: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+
+    # --- Phase 1B extension (0112_pay_run_lines_extension) ----------------- #
+    ordinary_hours: Mapped[Decimal] = mapped_column(
+        Numeric(8, 2), nullable=False, default=Decimal("0"), server_default="0"
+    )
+    overtime_hours: Mapped[Decimal] = mapped_column(
+        Numeric(8, 2), nullable=False, default=Decimal("0"), server_default="0"
+    )
+    leave_hours_paid_annual: Mapped[Decimal] = mapped_column(
+        Numeric(8, 2), nullable=False, default=Decimal("0"), server_default="0"
+    )
+    leave_hours_paid_personal: Mapped[Decimal] = mapped_column(
+        Numeric(8, 2), nullable=False, default=Decimal("0"), server_default="0"
+    )
+    leave_hours_unpaid: Mapped[Decimal] = mapped_column(
+        Numeric(8, 2), nullable=False, default=Decimal("0"), server_default="0"
+    )
+    allowances: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
+    deductions: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
+    paid_leave_lines: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
+    lump_sums: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
+    )
+    reportable_fringe_benefits: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
+    )
+    extra_pay: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=Decimal("0"), server_default="0"
+    )
+    ytd_gross: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=Decimal("0"), server_default="0"
+    )
+    ytd_tax: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=Decimal("0"), server_default="0"
+    )
+    ytd_super: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=Decimal("0"), server_default="0"
+    )
+    payg_scale_used: Mapped[str | None] = mapped_column(String(32))
+    payg_breakdown: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # ---------------------------------------------------------------------- #
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

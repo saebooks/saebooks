@@ -24,6 +24,7 @@ from fastapi import APIRouter
 from saebooks.api.v1.account_ranges import router as account_ranges_router
 from saebooks.api.v1.accounts import router as accounts_router
 from saebooks.api.v1.admin import router as admin_router
+from saebooks.api.v1.api_tokens import router as api_tokens_router
 from saebooks.api.v1.ai_extraction import router as ai_extraction_router
 from saebooks.api.v1.allocations import router as allocations_router
 from saebooks.api.v1.attachments import router as attachments_router
@@ -34,6 +35,12 @@ from saebooks.api.v1.bank_rules import router as bank_rules_router
 from saebooks.api.v1.bank_statement_lines import router as bank_statement_lines_router
 from saebooks.api.v1.billing import router as billing_router
 from saebooks.api.v1.bills import router as bills_router
+from saebooks.api.v1.employees import router as employees_router
+from saebooks.api.v1.expenses import router as expenses_router
+from saebooks.api.v1.leave import router as leave_router
+from saebooks.api.v1.stp import router as stp_router
+from saebooks.api.v1.super_funds import router as super_funds_router
+from saebooks.api.v1.time_entries import router as time_entries_router
 from saebooks.api.v1.budgets import router as budgets_router
 from saebooks.api.v1.cashbook import router as cashbook_router
 from saebooks.api.v1.changes import router as changes_router
@@ -115,6 +122,15 @@ router.include_router(journal_entries_router)
 router.include_router(invoices_router)
 router.include_router(journal_templates_router)
 router.include_router(bills_router)
+router.include_router(expenses_router)
+router.include_router(time_entries_router)
+# Payroll Phase 1A foundations
+router.include_router(super_funds_router)
+router.include_router(employees_router)
+# Payroll Phase 3 — STP Phase 2 submission storage (no live submit yet)
+router.include_router(stp_router)
+# Payroll Phase 4 — leave balances + adjust
+router.include_router(leave_router)
 router.include_router(purchase_orders_router)
 router.include_router(quotes_router)
 router.include_router(payments_router)
@@ -141,6 +157,7 @@ router.include_router(allocations_router)
 router.include_router(attachments_router)
 # Cat-C (W5): admin audit-log + SQL tool (FLAG_SQL_TOOL Pro+).
 router.include_router(admin_router)
+router.include_router(api_tokens_router)
 # Cat-C: multi-step import wizard (bank CSV/OFX community; QBO Pro+)
 router.include_router(imports_router)
 # Cat-C (W6): integrations -- Stripe Connect, Paperless, LEI, CH, ATO.
@@ -152,5 +169,7 @@ router.include_router(pay_run_router)
 # Cashbook edition (single-entry UI over double-entry storage) — see
 # docs/cashbook-edition-design.md and saebooks.services.cashbook.
 router.include_router(cashbook_router)
+# Self-serve Personal Access Tokens — list/create/revoke own tokens.
+# See saebooks/services/pat_tokens.py and migration 0111.
 
 __all__ = ["router"]

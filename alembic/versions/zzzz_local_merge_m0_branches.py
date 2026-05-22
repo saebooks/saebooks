@@ -3,7 +3,7 @@ head into the M0 chain so the dev DB can upgrade. NOT TRACKED IN GIT."""
 from collections.abc import Sequence
 
 revision: str = "zzzz_local_merge_m0_branches"
-down_revision = "0104_journal_lines_tax_treatment"
+down_revision = "0110_api_tokens"
 branch_labels: Sequence[str] | None = None
 depends_on: Sequence[str] | None = None
 

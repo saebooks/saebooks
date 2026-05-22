@@ -1,0 +1,6 @@
+version: v2
+plugins:
+  - remote: buf.build/protocolbuffers/go:v1.34.1
+    out: gen
+  - remote: buf.build/connectrpc/go:v1.16.2
+    out: gen

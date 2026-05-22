@@ -1,0 +1,38 @@
+name: saebooks-mcp-community
+
+# Community edition of the SAE Books MCP server.
+#
+# Uses the same image as saebooks-mcp but sets
+# SAEBOOKS_MCP_MAX_SAFETY=void, which skips registration of the
+# 13 "destructive" tools (hard_delete_*, reverse_journal_entry,
+# lodge_bas, call_api, delete_company, delete_bank_statement_line).
+#
+# Listens on a separate port so both editions can run side-by-side
+# on the same host. Most public deployments should point Claude at
+# THIS one and reserve the full saebooks-mcp for the operator.
+
+services:
+  mcp:
+    image: saebooks-mcp:0.1
+    container_name: saebooks-mcp-community
+    restart: unless-stopped
+    ports:
+      - "10.0.2.1:18316:8000"
+    environment:
+      SAEBOOKS_API_URL: http://saebooks-sauer-api-1:8000
+      SAEBOOKS_MCP_TRANSPORT: sse
+      SAEBOOKS_MCP_LOG_LEVEL: INFO
+      SAEBOOKS_MCP_MAX_SAFETY: void
+      SAEBOOKS_API_TOKEN: ${SAEBOOKS_API_TOKEN:-}
+    networks:
+      - saebooks-sauer_default
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/sse', timeout=2).status < 500 else 1)\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  saebooks-sauer_default:
+    external: true
+    name: saebooks-sauer_default

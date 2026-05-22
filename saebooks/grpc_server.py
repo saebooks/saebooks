@@ -50,13 +50,66 @@ from sqlalchemy import select
 
 logger = logging.getLogger("saebooks.grpc_server")
 
+
+# ---------------------------------------------------------------------------
+# Per-request auth context (set by BearerAuthInterceptor, read by handlers)
+# ---------------------------------------------------------------------------
+#
+# Kept here rather than imported from connect_app to avoid the circular
+# dependency: connect_app already imports the in-memory presence/lock
+# stores from this module. Mirrors the connect_app contextvars one-for-one.
+
+import contextvars as _contextvars  # noqa: E402
+
+_DEFAULT_TENANT = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+_current_user_id: _contextvars.ContextVar[uuid.UUID | None] = _contextvars.ContextVar(
+    "saebooks_grpc_user_id", default=None
+)
+_current_tenant_id: _contextvars.ContextVar[uuid.UUID] = _contextvars.ContextVar(
+    "saebooks_grpc_tenant_id", default=_DEFAULT_TENANT
+)
+_current_company_id: _contextvars.ContextVar[uuid.UUID | None] = _contextvars.ContextVar(
+    "saebooks_grpc_company_id", default=None
+)
+
+
+async def _bind_request_tenant(session: Any) -> None:
+    """Bind ``app.current_tenant`` so RLS-scoped queries return rows.
+
+    Reads the contextvar stamped by BearerAuthInterceptor on auth
+    success; falls back to the default tenant for the bearer-less
+    Heartbeat path."""
+    from sqlalchemy import text  # noqa: PLC0415
+
+    await session.execute(
+        text(f"SET LOCAL app.current_tenant = '{_current_tenant_id.get()}'")
+    )
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
 async def _first_company_id(session: Any) -> uuid.UUID:
-    """Community edition: single-company — pick the first active company."""
+    """Resolve the active company for the current grpcio request.
+
+    Order:
+      1. Company stamped by the auth interceptor (saebk_ token row's
+         company_id, or JWT claim — when wired)
+      2. First active company under the request's tenant (single-company
+         fallback for community edition)
+
+    Always binds the tenant on the session first or RLS-scoped tables
+    return zero rows. The grpc-web path needs this same binding because
+    it tunnels through the same interceptor + handlers.
+    """
+    await _bind_request_tenant(session)
+
+    stamped = _current_company_id.get()
+    if stamped is not None:
+        return stamped
+
     result = await session.execute(
         select(Company)
         .where(Company.archived_at.is_(None))
@@ -825,21 +878,170 @@ class SAEBooksServicer(saebooks_pb2_grpc.SAEBooksServicer):
 
 
 # ---------------------------------------------------------------------------
+# Bearer-auth interceptor
+# ---------------------------------------------------------------------------
+#
+# Mirrors ``saebooks.connect_app.BearerAuthInterceptor`` for the grpcio
+# transport. Without this, the :50051 server (and the grpc-web proxy
+# in front of it) accept every request — fine when :50051 was internal
+# to the bosun network, not fine once a grpc-web port is exposed.
+#
+# Heartbeat is exempt so uptime probes don't need a token. Everything
+# else requires either a valid JWT, a ``saebk_*`` token, or the
+# static dev bearer (``SAEBOOKS_DEV_API_TOKEN``).
+
+
+class BearerAuthInterceptor(aio.ServerInterceptor):
+    """grpc.aio ServerInterceptor that bearer-gates every RPC.
+
+    Verify logic mirrors ``api/v1/auth.require_bearer`` and the
+    connecpy interceptor — see saebooks/connect_app.py docstring.
+
+    Implementation note: grpc.aio interceptors run BEFORE the handler
+    is dispatched. To abort, we return a substitute handler that
+    immediately calls ``context.abort(UNAUTHENTICATED, msg)``. The
+    handler shape (unary-unary vs unary-stream) must match the
+    original method's signature, or the framework raises an
+    ``UNIMPLEMENTED`` instead of our intended UNAUTHENTICATED — so we
+    inspect ``handler_call_details`` and the original handler to pick
+    the right substitution.
+    """
+
+    _OPEN_METHODS: frozenset[str] = frozenset({"Heartbeat"})
+
+    async def intercept_service(
+        self,
+        continuation: Any,
+        handler_call_details: aio.HandlerCallDetails,
+    ) -> Any:
+        method_name = handler_call_details.method.rsplit("/", 1)[-1]
+        if method_name in self._OPEN_METHODS:
+            return await continuation(handler_call_details)
+
+        metadata = dict(handler_call_details.invocation_metadata or [])
+        auth = metadata.get("authorization") or metadata.get("Authorization") or ""
+        if not auth.lower().startswith("bearer "):
+            return self._abort_handler(
+                continuation, handler_call_details, "missing bearer token"
+            )
+
+        bearer = auth.split(None, 1)[1].strip()
+
+        # 1. JWT
+        from saebooks.services.jwt_tokens import (  # noqa: PLC0415
+            JWTError,
+            decode_access_token,
+        )
+        try:
+            decode_access_token(bearer)
+            return await continuation(handler_call_details)
+        except JWTError:
+            pass
+
+        # 2. saebk_
+        from saebooks.services.api_tokens import (  # noqa: PLC0415
+            TOKEN_PREFIX_HEADER,
+            TokenVerifyError,
+            verify as verify_api_token,
+        )
+        if bearer.startswith(TOKEN_PREFIX_HEADER):
+            try:
+                async with AsyncSessionLocal() as session:
+                    token_row = await verify_api_token(session, bearer)
+                    await session.commit()
+                _current_user_id.set(token_row.user_id)
+                _current_tenant_id.set(token_row.tenant_id)
+                _current_company_id.set(token_row.company_id)
+                return await continuation(handler_call_details)
+            except TokenVerifyError as exc:
+                logger.info("grpcio api_token rejected: %s", exc)
+                return self._abort_handler(
+                    continuation, handler_call_details, "invalid api token"
+                )
+
+        # 3. Dev static bearer
+        import os  # noqa: PLC0415
+        import secrets as _secrets  # noqa: PLC0415
+
+        dev_token = os.environ.get("SAEBOOKS_DEV_API_TOKEN", "").strip()
+        if dev_token and _secrets.compare_digest(bearer, dev_token):
+            return await continuation(handler_call_details)
+
+        return self._abort_handler(
+            continuation, handler_call_details, "invalid bearer token"
+        )
+
+    @staticmethod
+    def _abort_handler(
+        continuation: Any,
+        handler_call_details: aio.HandlerCallDetails,
+        message: str,
+    ) -> Any:
+        """Return a handler that, when invoked, aborts with UNAUTHENTICATED.
+
+        We have to match the original method's request/response shape
+        (unary-unary, unary-stream, stream-unary, stream-stream) or
+        grpc.aio raises UNIMPLEMENTED for the *interceptor's* misshapen
+        handler, which obscures our intended UNAUTHENTICATED status.
+        """
+
+        async def abort_unary(request: Any, context: Any) -> Any:
+            await context.abort(grpc.StatusCode.UNAUTHENTICATED, message)
+
+        async def abort_stream(request: Any, context: Any) -> Any:
+            await context.abort(grpc.StatusCode.UNAUTHENTICATED, message)
+            yield  # pragma: no cover — abort raises before reaching here
+
+        async def abort_client_stream(request_iter: Any, context: Any) -> Any:
+            await context.abort(grpc.StatusCode.UNAUTHENTICATED, message)
+
+        async def abort_bidi(request_iter: Any, context: Any) -> Any:
+            await context.abort(grpc.StatusCode.UNAUTHENTICATED, message)
+            yield  # pragma: no cover
+
+        # ``continuation`` is the next layer in the interceptor chain;
+        # invoking it gives us the real handler. We don't want to RUN
+        # the real handler (we're rejecting), but we need its shape to
+        # build a matching abort handler. Easiest path: read the
+        # incoming method type from the handler call details.
+
+        method = handler_call_details.method
+        # Streaming methods declared in saebooks.proto. Keep this
+        # narrow — adding entries when new streaming RPCs land.
+        server_streaming = {
+            "/saebooks.SAEBooks/WatchChanges",
+            "/saebooks.SAEBooks/WatchPresence",
+        }
+        if method in server_streaming:
+            return grpc.unary_stream_rpc_method_handler(
+                abort_stream,
+                request_deserializer=lambda b: b,
+                response_serializer=lambda r: r if isinstance(r, bytes) else b"",
+            )
+        return grpc.unary_unary_rpc_method_handler(
+            abort_unary,
+            request_deserializer=lambda b: b,
+            response_serializer=lambda r: r if isinstance(r, bytes) else b"",
+        )
+
+
+# ---------------------------------------------------------------------------
 # Server lifecycle
 # ---------------------------------------------------------------------------
 
 
 async def serve(port: int = 50051) -> aio.Server:
-    """Create and start the async gRPC server.
+    """Create and start the async gRPC server with the bearer-auth
+    interceptor wired in.
 
     Returns the server instance so the caller can await ``server.wait_for_termination()``.
     """
-    server = aio.server()
+    server = aio.server(interceptors=[BearerAuthInterceptor()])
     saebooks_pb2_grpc.add_SAEBooksServicer_to_server(SAEBooksServicer(), server)
     listen_addr = f"[::]:{port}"
     server.add_insecure_port(listen_addr)
     await server.start()
-    logger.info("gRPC server listening on %s", listen_addr)
+    logger.info("gRPC server listening on %s (with bearer auth)", listen_addr)
     return server
 
 

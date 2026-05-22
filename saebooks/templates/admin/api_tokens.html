@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}API tokens — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>API tokens</h1>
+  <div class="meta">{{ edition }}</div>
+</div>
+
+<p>
+  API tokens authenticate the SAE Books v1 API, MCP server, and
+  <code>sae books</code> CLI for the active company
+  <strong>{{ company.name }}</strong>. Pass the token in the
+  <code>Authorization: Bearer …</code> header.
+</p>
+<p>
+  Tokens are scoped to one company. To mint a token for a different
+  company, switch the active company first and come back here.
+</p>
+<p>
+  Tokens are shown <strong>exactly once</strong> at creation. If you
+  lose a token, revoke it and create a new one — there is no recovery.
+</p>
+
+{% if new_token %}
+<div class="callout callout-success" role="alert">
+  <h2 style="margin-top:0">New token: <code>{{ new_name }}</code></h2>
+  <p>
+    Copy this now. Once you leave this page the secret is gone — only
+    its prefix remains visible.
+  </p>
+  <div class="token-reveal">
+    <input
+      type="text"
+      readonly
+      value="{{ new_token }}"
+      id="new-token-value"
+      style="width:100%; font-family:monospace; font-size:1.05em; padding:.5em">
+    <button type="button"
+            onclick="navigator.clipboard.writeText(document.getElementById('new-token-value').value); this.textContent='Copied'"
+            style="margin-top:.5em">
+      Copy to clipboard
+    </button>
+  </div>
+</div>
+{% endif %}
+
+<h2>Generate a new token</h2>
+<form method="post" action="/admin/api-tokens" class="form-row">
+  <label>
+    Name
+    <input type="text" name="name" required maxlength="200"
+           placeholder="e.g. n8n QBO sync" autocomplete="off">
+  </label>
+  <label>
+    Expires in (days)
+    <input type="number" name="ttl_days" min="1" max="3650"
+           placeholder="blank = never">
+  </label>
+  <label>
+    Scopes (comma-separated)
+    <input type="text" name="scopes"
+           placeholder="optional, e.g. read,invoices.write" autocomplete="off">
+  </label>
+  <button type="submit">Generate</button>
+</form>
+
+<h2 style="margin-top:2em">
+  Tokens for {{ company.name }}
+  <small style="font-weight:normal; font-size:.7em">
+    {% if include_revoked %}
+      <a href="/admin/api-tokens">hide revoked</a>
+    {% else %}
+      <a href="/admin/api-tokens?include_revoked=1">include revoked</a>
+    {% endif %}
+  </small>
+</h2>
+<table class="tokens">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Prefix</th>
+      <th>Scopes</th>
+      <th>Created</th>
+      <th>Last used</th>
+      <th>Expires</th>
+      <th>Status</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for t in tokens %}
+    <tr{% if t.revoked_at %} class="archived"{% endif %}>
+      <td>{{ t.name }}</td>
+      <td><code>saebk_{{ t.token_prefix }}…</code></td>
+      <td>{{ ", ".join(t.scopes) if t.scopes else "—" }}</td>
+      <td>{{ t.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+      <td>{{ t.last_used_at.strftime("%Y-%m-%d %H:%M") if t.last_used_at else "—" }}</td>
+      <td>{{ t.expires_at.strftime("%Y-%m-%d") if t.expires_at else "never" }}</td>
+      <td>
+        {% if t.revoked_at %}
+        <span class="badge badge-archived">revoked</span>
+        {% elif t.expires_at and t.expires_at < now %}
+        <span class="badge badge-archived">expired</span>
+        {% else %}
+        <span class="badge badge-active">active</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if not t.revoked_at %}
+        <form method="post" action="/admin/api-tokens/{{ t.id }}/revoke"
+              onsubmit="return confirm('Revoke {{ t.name }}? Anything using this token will start getting 401 immediately.');"
+              style="display:inline">
+          <button type="submit" class="danger">Revoke</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    {% if not tokens %}
+    <tr><td colspan="8"><em>No tokens for this company yet. Generate one above.</em></td></tr>
+    {% endif %}
+  </tbody>
+</table>
+{% endblock %}
