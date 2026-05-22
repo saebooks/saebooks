@@ -13,6 +13,10 @@ from saebooks.api.errors import register_handlers
 from saebooks.api.v1 import router as api_v1_router
 from saebooks.api.webhooks.stripe import router as _stripe_webhook_router
 from saebooks.config import settings
+from saebooks.connect_app import (
+    ConnectDispatchMiddleware,
+    build_connect_app,
+)
 from saebooks.grpc_server import serve as grpc_serve
 from saebooks.middleware.active_company import ActiveCompanyMiddleware
 from saebooks.middleware.auth import ForwardAuthMiddleware
@@ -198,4 +202,11 @@ async def _assert_single_company() -> None:
         logger.debug("Skipping single-company check: %s", exc)
 
 
-app = create_app()
+_fastapi_app = create_app()
+# Wrap the FastAPI app with a dispatch middleware that routes
+# ``/saebooks.SAEBooks/*`` paths to the Connect-RPC ASGI app and falls
+# through to FastAPI for everything else. The Connect server speaks
+# gRPC + gRPC-Web + Connect HTTP+JSON from a single handler, sharing
+# the same Python process / DB session / observability stack as the
+# REST API. See saebooks/connect_app.py.
+app = ConnectDispatchMiddleware(_fastapi_app, build_connect_app())

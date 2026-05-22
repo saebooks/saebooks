@@ -32,10 +32,30 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 #   gcc, g++   — required by grpcio (C++ extension), cryptography (Rust + C shims)
 #   libpq-dev  — asyncpg links against libpq at build time
 #   curl       — used only in healthcheck in runtime stage; installed there separately
+# protoc-gen-connecpy: Go binary distributed via GitHub releases — needed
+# by build-time codegen below. Pinned to the runtime connecpy lib version
+# in pyproject.toml so the generated stubs match the runtime API.
+ARG CONNECPY_VERSION=2.3.0
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       gcc g++ libpq-dev \
+       gcc g++ libpq-dev curl \
     && rm -rf /var/lib/apt/lists/*
+
+# Fetch the connecpy protoc plugin (Go binary distributed via GitHub
+# releases, static linux/amd64 + linux/arm64 archives). Used by the
+# build-time codegen below. The Python connecpy runtime lib in
+# pyproject.toml is the same pinned version.
+RUN ARCH="$(uname -m)" \
+    && case "$ARCH" in \
+         x86_64) PLUGIN_ARCH=amd64 ;; \
+         aarch64) PLUGIN_ARCH=arm64 ;; \
+         *) echo "unsupported arch for protoc-gen-connecpy: $ARCH" >&2; exit 1 ;; \
+       esac \
+    && curl -fsSL -o /tmp/protoc-gen-connecpy.tgz \
+        "https://github.com/i2y/connecpy/releases/download/v${CONNECPY_VERSION}/protoc-gen-connecpy_${CONNECPY_VERSION}_linux_${PLUGIN_ARCH}.tar.gz" \
+    && tar -C /usr/local/bin -xzf /tmp/protoc-gen-connecpy.tgz protoc-gen-connecpy \
+    && chmod +x /usr/local/bin/protoc-gen-connecpy \
+    && rm /tmp/protoc-gen-connecpy.tgz
 
 RUN python -m venv "${VIRTUAL_ENV}"
 
@@ -64,9 +84,12 @@ RUN mkdir -p saebooks/grpc_gen \
         -I saebooks/proto \
         --python_out=saebooks/grpc_gen \
         --grpc_python_out=saebooks/grpc_gen \
+        --connecpy_out=saebooks/grpc_gen \
         saebooks/proto/saebooks.proto \
     && sed -i 's/^import saebooks_pb2/from saebooks.grpc_gen import saebooks_pb2/' \
-        saebooks/grpc_gen/saebooks_pb2_grpc.py
+        saebooks/grpc_gen/saebooks_pb2_grpc.py \
+    && sed -i 's/^import saebooks_pb2/from saebooks.grpc_gen import saebooks_pb2/' \
+        saebooks/grpc_gen/saebooks_connecpy.py
 
 # Re-install in editable-equivalent mode so package metadata is registered.
 # We copy the egg-info directory to the venv so importlib.metadata can find

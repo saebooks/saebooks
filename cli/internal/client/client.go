@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"os"
 
-	"connectrpc.com/connect"
-
 	"github.com/saebooks/saebooks/cli/gen/saebooksconnect"
 	"github.com/saebooks/saebooks/cli/internal/config"
 )
@@ -52,7 +50,9 @@ func New(profile config.Profile, opts Options) (saebooksconnect.SAEBooksClient, 
 	c := saebooksconnect.NewSAEBooksClient(
 		httpClient,
 		profile.Endpoint,
-		connect.WithGRPCWeb(), // grpc-web works with plain HTTP/1.1 proxies
+		// Default Connect protocol (HTTP+proto, fallback HTTP+JSON) — works
+		// over plain HTTP/1.1 and is what the connecpy backend supports.
+		// (connecpy 2.x does NOT speak grpc-web yet.)
 	)
 	return c, nil
 }
@@ -60,7 +60,7 @@ func New(profile config.Profile, opts Options) (saebooksconnect.SAEBooksClient, 
 // NewUnauthenticated returns a client with no auth — used only for Heartbeat
 // during initial auth-login where we validate the endpoint first.
 func NewUnauthenticated(endpoint string) saebooksconnect.SAEBooksClient {
-	return saebooksconnect.NewSAEBooksClient(http.DefaultClient, endpoint, connect.WithGRPCWeb())
+	return saebooksconnect.NewSAEBooksClient(http.DefaultClient, endpoint)
 }
 
 func resolveToken(profile config.Profile, opts Options) string {

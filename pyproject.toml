@@ -25,6 +25,7 @@ dependencies = [
     "python-json-logger>=2.0",
     "cryptography>=43.0",
     "bcrypt>=4.2",
+    "connecpy>=2.3",
     "grpcio>=1.62",
     "grpcio-tools>=1.62",
     "openai>=1.0",
