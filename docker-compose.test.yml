@@ -17,6 +17,9 @@ services:
       # Named volume scoped to this compose project (saebooks-test_testdb).
       # Completely separate from the production saebooks_db volume.
       - testdb:/var/lib/postgresql/data
+      # Init scripts: create the saebooks + saebooks_app roles that
+      # migrations reference by name. Runs once on first DB init.
+      - ./docker/test-initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U saebooks_test -d saebooks_test"]
       interval: 3s
@@ -42,6 +45,10 @@ services:
       SENTRY_DSN: ""
       # Prevent any accidental outbound mail relay.
       SAEBOOKS_MAIL_HOST: ""
+      # Migration 0087 creates the saebooks_sql_ro role and requires a
+      # password. Use a throwaway credential — the role has no access
+      # outside this ephemeral network.
+      SAEBOOKS_SQL_RO_PASSWORD: "saebooks_sql_ro_test_pw"
     # entrypoint.sh with args execs them directly (no uvicorn).
     # We run alembic upgrade head first, then pytest.
     # bash -c is passed as the single arg so entrypoint execs it.
