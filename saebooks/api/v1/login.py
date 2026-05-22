@@ -33,7 +33,7 @@ from fastapi import APIRouter, Header, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from saebooks.db import AsyncSessionLocal
+from saebooks.db import AsyncSessionLocal, LoginSessionLocal
 from saebooks.models.user import User
 from saebooks.services.jwt_tokens import JWTError, create_access_token, decode_access_token
 
@@ -87,7 +87,10 @@ def _extract_bearer(authorization: str | None) -> str | None:
 
 
 async def _user_by_email(email: str) -> User | None:
-    async with AsyncSessionLocal() as session:
+    # Pre-auth lookup — we don't know the tenant yet, so this must
+    # bypass FORCE-RLS on ``users``. Uses ``LoginSessionLocal`` which
+    # connects via the BYPASSRLS owner role. See db.py for rationale.
+    async with LoginSessionLocal() as session:
         result = await session.execute(
             select(User).where(User.email == email)
         )

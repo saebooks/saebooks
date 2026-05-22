@@ -39,7 +39,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 
-from saebooks.db import AsyncSessionLocal
+from saebooks.db import LoginSessionLocal as AsyncSessionLocal
 from saebooks.middleware.rate_limit import rate_limit
 from saebooks.models.tenant import Tenant
 from saebooks.models.user import User

@@ -76,6 +76,35 @@ AppSessionLocal: async_sessionmaker[AsyncSession] | None = (
 )
 
 
+# ---------------------------------------------------------------------- #
+# Pre-auth lookup engine (BYPASSRLS)                                     #
+# ---------------------------------------------------------------------- #
+# ``LoginSessionLocal`` is used ONLY for pre-authentication lookups that
+# happen before we know which tenant the request belongs to:
+#
+#   * POST /auth/login                — resolve user by email to verify pw
+#   * POST /auth/signup               — uniqueness check on email
+#   * POST /auth/verify-email,
+#     /reset-password, /magic-link    — token/email-based lookups
+#
+# These lookups MUST hit the BYPASSRLS owner role because the runtime
+# ``saebooks_app`` role is subject to FORCE-RLS on the ``users`` table,
+# whose ``tenant_isolation`` policy reads ``app.current_tenant`` — which
+# is unset at login time. Without BYPASSRLS the SELECT silently returns
+# zero rows and every login flow 401s with "Invalid credentials"
+# regardless of the password.
+#
+# The owner-role URL is ``DATABASE_URL``, the same one ``saebooks.cli``
+# and Alembic use for schema work.
+_owner_role_engine = create_async_engine(
+    settings.database_url, echo=False, future=True, poolclass=NullPool
+)
+
+LoginSessionLocal: async_sessionmaker[AsyncSession] = async_sessionmaker(
+    _owner_role_engine, expire_on_commit=False, class_=AsyncSession
+)
+
+
 class Base(DeclarativeBase):
     pass
 
