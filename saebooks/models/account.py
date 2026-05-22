@@ -82,6 +82,13 @@ class Account(CompanyScoped, Base):
     bank_abbreviation: Mapped[str | None] = mapped_column(
         String(3), comment="3-letter ABA bank code — CBA, ANZ, NAB, WBC, …"
     )
+    # account_kind classifies bank-side accounts so credit cards,
+    # loans, and cash all appear in the /bank-accounts list and on
+    # the dashboard. NULL for non-bank ledger accounts.
+    account_kind: Mapped[str | None] = mapped_column(
+        String(32),
+        comment="One of BANK_CHECKING / BANK_SAVINGS / CREDIT_CARD / BANK_LOAN / CASH / OTHER",
+    )
     extra: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # Optimistic-locking version — bumped on every write through the API.
     # Jinja routes that call the service layer without expected_version skip
