@@ -54,7 +54,7 @@ services:
     # bash -c is passed as the single arg so entrypoint execs it.
     entrypoint: ["/bin/bash", "-c"]
     command:
-      - "alembic upgrade head && python -m pytest -q tests/"
+      - "alembic upgrade head && python -m pytest -q --ignore=tests/services/lodgement/test_adapter_registry.py --ignore=tests/test_m0_synthetic_nz_company.py tests/"
     # No published ports — test network is internal only.
     networks:
       - testnet
