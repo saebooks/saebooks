@@ -524,12 +524,37 @@ class JournalLineOut(BaseModel):
     id: uuid.UUID
     line_no: int
     account_id: uuid.UUID
+    account_code: str | None = None
+    account_name: str | None = None
     description: str | None = None
     debit: Decimal
     credit: Decimal
     tax_code_id: uuid.UUID | None = None
     gst_amount: Decimal | None = None
     project_id: uuid.UUID | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _extract_account_fields(cls, v: object) -> object:
+        """Populate account_code/account_name from the loaded account relationship."""
+        if hasattr(v, "account") and v.account is not None:  # type: ignore[union-attr]
+            acct = v.account  # type: ignore[union-attr]
+            # Return a dict so subsequent field validators see the data.
+            data = {
+                "id": v.id,  # type: ignore[union-attr]
+                "line_no": v.line_no,  # type: ignore[union-attr]
+                "account_id": v.account_id,  # type: ignore[union-attr]
+                "account_code": getattr(acct, "code", None),
+                "account_name": getattr(acct, "name", None),
+                "description": v.description,  # type: ignore[union-attr]
+                "debit": v.debit,  # type: ignore[union-attr]
+                "credit": v.credit,  # type: ignore[union-attr]
+                "tax_code_id": v.tax_code_id,  # type: ignore[union-attr]
+                "gst_amount": v.gst_amount,  # type: ignore[union-attr]
+                "project_id": v.project_id,  # type: ignore[union-attr]
+            }
+            return data
+        return v
 
 
 class JournalLineCreate(BaseModel):
@@ -614,6 +639,11 @@ class JournalEntryOut(BaseModel):
     posted_by: str | None = None
     reversal_of_id: uuid.UUID | None = None
     override_reason: str | None = None
+    # Source document back-link (#27). Populated by the get-by-id handler
+    # via get_source_doc(); not stored on the JE row — computed from the
+    # reverse FK on invoices/bills/credit_notes/expenses/payments.
+    source_type: str | None = None
+    source_id: uuid.UUID | None = None
     version: int
     created_at: datetime
     updated_at: datetime

@@ -2,7 +2,10 @@ import enum
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from saebooks.models.account import Account
 
 from sqlalchemy import (
     Date,
@@ -123,6 +126,11 @@ class JournalLine(Base):
     franking_credit_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
 
     entry: Mapped[JournalEntry] = relationship(back_populates="lines")
+    account: Mapped["Account"] = relationship(
+        "Account",
+        foreign_keys=[account_id],
+        lazy="raise",
+    )
 
 
 class PeriodLock(CompanyScoped, Base):

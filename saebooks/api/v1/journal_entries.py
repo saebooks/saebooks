@@ -141,7 +141,16 @@ async def get_journal_entry(
     entry = await svc.get(session, entry_id, tenant_id=tenant_id)
     if entry is None:
         raise HTTPException(404, "Journal entry not found")
-    return JournalEntryOut.model_validate(entry)
+    # Populate source_type/source_id by reverse-lookup (#27, approach b).
+    # One extra query per GET; the durable (a) approach would store these
+    # on the JE row but requires touching invoices/bills/payments write
+    # paths owned by other agents. Documented choice — approach (b).
+    src = await svc.get_source_doc(session, entry_id, tenant_id=tenant_id)
+    out = JournalEntryOut.model_validate(entry)
+    if src is not None:
+        out.source_type = src["type"]
+        out.source_id = src["id"]
+    return out
 
 
 @router.get('/{entry_id}/source')
