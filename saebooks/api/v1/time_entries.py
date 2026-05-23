@@ -22,6 +22,7 @@ from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Requ
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_active_company_id, get_session
 from saebooks.api.v1.schemas import (
@@ -264,13 +265,24 @@ async def update_time_entry(
 @router.delete("/{entry_id}", status_code=204)
 async def archive_time_entry(
     entry_id: uuid.UUID,
+    request: Request,
     if_match: str | None = Header(default=None, alias="If-Match"),
     session: AsyncSession = Depends(get_session),
     company_id: uuid.UUID = Depends(get_active_company_id),
+    hard: bool = Depends(hard_delete_admin_gate),
 ) -> Response:
     entry = await svc.get(session, company_id=company_id, entry_id=entry_id)
     if entry is None:
         raise HTTPException(404, "time entry not found")
+    if hard:
+        # Developer-tier hard delete — bypass the state-machine archive rules
+        # entirely; remove the row + cascade dependents via the audit helper.
+        from saebooks.services.hard_delete import hard_delete_with_audit
+        await hard_delete_with_audit(
+            session, entry, "time_entries", getattr(request.state, "user", None)
+        )
+        await session.commit()
+        return Response(status_code=204)
     expected_version = _parse_if_match(if_match)
     if expected_version is not None and entry.version != expected_version:
         raise HTTPException(412, "version mismatch")
