@@ -1,5 +1,27 @@
 # saebooks-mcp
 
+> **For new deployments: use the in-tree mount.** Every SAE Books
+> instance now serves the same 145-tool MCP surface directly on the
+> FastAPI app at `https://books.<your-tenant>/mcp/` — no separate
+> container required. See ``saebooks/mcp/server.py`` and the mount
+> in ``saebooks/main.py``. Configure your MCP client with:
+>
+> ```json
+> "mcpServers": {
+>   "saebooks": {
+>     "transport": "streamable-http",
+>     "url": "https://books.<your-tenant>/mcp/",
+>     "headers": { "Authorization": "Bearer saebk_..." }
+>   }
+> }
+> ```
+>
+> This standalone container is **retained as a shim only**, for
+> air-gapped operator workstations or compose stacks that prefer a
+> separate process boundary. The Sauer reference deployment retired
+> its `saebooks-mcp` + `saebooks-mcp-community` containers on
+> 2026-05-23 in favour of the in-tree mount.
+
 HTTP MCP server for SAE Books. Exposes the SAE Books REST API as
 native AI-agent tools so Claude Code (and any other MCP client) can
 interact with invoices, bills, expenses, journals, contacts, bank
