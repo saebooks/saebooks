@@ -25,6 +25,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_active_company_id, get_session
+from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
+from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.api.v1.schemas import (
     EmployeeCreate,
     EmployeeListOut,
@@ -260,15 +262,23 @@ async def update_employee(
 @router.delete("/{employee_id}", status_code=204)
 async def archive_employee(
     employee_id: uuid.UUID,
+    request: Request,
     if_match: str | None = Header(default=None, alias="If-Match"),
     session: AsyncSession = Depends(get_session),
     company_id: uuid.UUID = Depends(get_active_company_id),
+    hard: bool = Depends(hard_delete_admin_gate),
 ) -> Response:
     employee = await svc.get(
         session, company_id=company_id, employee_id=employee_id
     )
     if employee is None:
         raise HTTPException(404, "employee not found")
+    if hard:
+        await hard_delete_with_audit(
+            session, employee, "employees", getattr(request.state, "user", None)
+        )
+        await session.commit()
+        return Response(status_code=204)
     expected_version = _parse_if_match(if_match)
     if expected_version is not None and employee.version != expected_version:
         raise HTTPException(412, "version mismatch")
