@@ -484,6 +484,7 @@ async def post_expense(
     entry = await journal_svc.create_draft(
         session,
         company_id=expense.company_id,
+        tenant_id=expense.tenant_id,
         entry_date=expense.expense_date,
         description=f"Expense {expense.number} ({ref})",
         lines=journal_lines,
@@ -522,6 +523,7 @@ async def void_expense(
         expense.journal_entry_id,
         posted_by=posted_by,
         override_reason=override_reason or f"Void expense {expense.number}",
+        tenant_id=expense.tenant_id,
     )
     expense.status = ExpenseStatus.VOIDED
     expense.void_journal_entry_id = reversal.id

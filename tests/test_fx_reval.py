@@ -23,6 +23,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
 
+from saebooks.api.v1.auth import DEFAULT_TENANT_ID
 from saebooks.db import AsyncSessionLocal, Base
 from saebooks.main import app
 from saebooks.models.account import Account
@@ -593,6 +594,7 @@ async def test_revalue_company_posts_adjusting_and_reversing_pair() -> None:
         result = await fx_reval.revalue_company(
             session,
             company_id=cid,
+            tenant_id=DEFAULT_TENANT_ID,
             through_date=through,
             source="fake_reval",
             posted_by="test",
@@ -636,6 +638,7 @@ async def test_revalue_company_journals_balance() -> None:
         await fx_reval.revalue_company(
             session,
             company_id=cid,
+            tenant_id=DEFAULT_TENANT_ID,
             through_date=through,
             source="fake_reval",
             posted_by="test",
@@ -674,6 +677,7 @@ async def test_revalue_company_is_idempotent() -> None:
         first = await fx_reval.revalue_company(
             session,
             company_id=cid,
+            tenant_id=DEFAULT_TENANT_ID,
             through_date=through,
             source="fake_reval",
             posted_by="test",
@@ -684,6 +688,7 @@ async def test_revalue_company_is_idempotent() -> None:
         second = await fx_reval.revalue_company(
             session,
             company_id=cid,
+            tenant_id=DEFAULT_TENANT_ID,
             through_date=through,
             source="fake_reval",
             posted_by="test",
@@ -712,6 +717,7 @@ async def test_revalue_company_zero_delta_emits_nothing() -> None:
         result = await fx_reval.revalue_company(
             session,
             company_id=cid,
+            tenant_id=DEFAULT_TENANT_ID,
             through_date=through,
             source="fake_reval",
             posted_by="test",
@@ -735,6 +741,7 @@ async def test_revalue_company_no_foreign_docs_no_op() -> None:
         result = await fx_reval.revalue_company(
             session,
             company_id=cid,
+            tenant_id=DEFAULT_TENANT_ID,
             through_date=through,
             source="fake_reval",
             # No fetcher registered — but only fires if there are open

@@ -18,6 +18,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 
+from saebooks.api.v1.auth import DEFAULT_TENANT_ID
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
@@ -86,6 +87,7 @@ async def _post_entry(
         entry = await journal_svc.create_draft(
             session,
             company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
             entry_date=entry_date,
             description=description,
             lines=[

@@ -421,6 +421,7 @@ async def _post_reval_pair(
     session: AsyncSession,
     *,
     company_id: uuid.UUID,
+    tenant_id: uuid.UUID,
     reval: CurrencyReval,
     through_date: date,
     ar_account: Account,
@@ -449,6 +450,7 @@ async def _post_reval_pair(
     adjustment = await journal_svc.create_draft(
         session,
         company_id=company_id,
+        tenant_id=tenant_id,
         entry_date=through_date,
         description=(
             f"FX revaluation {reval.currency} @ {reval.new_rate} "
@@ -475,6 +477,7 @@ async def _post_reval_pair(
     reversal = await journal_svc.create_draft(
         session,
         company_id=company_id,
+        tenant_id=tenant_id,
         entry_date=rev_date,
         description=(
             f"FX revaluation {reval.currency} reversal of "
@@ -551,6 +554,7 @@ async def revalue_company(
     session: AsyncSession,
     *,
     company_id: uuid.UUID,
+    tenant_id: uuid.UUID,
     through_date: date,
     source: str = "rba",
     base_currency: str = "AUD",
@@ -607,6 +611,7 @@ async def revalue_company(
         adj_id, rev_id = await _post_reval_pair(
             session,
             company_id=company_id,
+            tenant_id=tenant_id,
             reval=reval,
             through_date=through_date,
             ar_account=ar_account,
@@ -661,6 +666,7 @@ async def revalue_all_companies(
             out[company.id] = await revalue_company(
                 session,
                 company_id=company.id,
+                tenant_id=company.tenant_id,
                 through_date=through_date,
                 source=source,
                 base_currency=base_currency,

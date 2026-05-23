@@ -756,6 +756,7 @@ async def post_invoice(
     entry = await journal_svc.create_draft(
         session,
         company_id=inv.company_id,
+        tenant_id=inv.tenant_id,
         entry_date=gl_entry_date,
         description=f"Invoice {inv.number}",
         lines=journal_lines,
@@ -804,6 +805,7 @@ async def void_invoice(
         inv.journal_entry_id,
         posted_by=posted_by,
         override_reason=override_reason or f"Void invoice {inv.number}",
+        tenant_id=inv.tenant_id,
     )
     inv.status = InvoiceStatus.VOIDED
     inv.void_journal_entry_id = reversal.id

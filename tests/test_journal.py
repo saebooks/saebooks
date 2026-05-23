@@ -6,6 +6,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
+from saebooks.api.v1.auth import DEFAULT_TENANT_ID
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
@@ -37,6 +38,7 @@ async def test_create_draft_auto_ref() -> None:
         entry = await svc.create_draft(
             session,
             company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
             entry_date=date(2026, 4, 1),
             description="Test entry",
             lines=[
@@ -47,6 +49,62 @@ async def test_create_draft_auto_ref() -> None:
         assert entry.ref.startswith("JE-")
         assert entry.status == EntryStatus.DRAFT
         assert len(entry.lines) == 2
+        # Tenant must come from the caller — never silently fall back
+        # to the legacy ``00000000`` default that the model column would
+        # otherwise supply if the constructor was called bare.
+        assert entry.tenant_id == DEFAULT_TENANT_ID
+
+
+async def test_create_draft_rejects_missing_tenant_id() -> None:
+    """Regression: passing ``tenant_id=None`` (or omitting it via **kwargs)
+    must raise rather than silently fall through to the model server-default
+    tenant ``00000000-0000-0000-0000-000000000001`` and leak the JE out of
+    the caller's tenant scope. See the EX1237 / EX1263 BAS-refund leak
+    that prompted this guard.
+    """
+    company_id, acct_a, acct_b = await _ctx()
+    async with AsyncSessionLocal() as session:
+        with pytest.raises(PostingError, match="create_draft requires tenant_id"):
+            await svc.create_draft(
+                session,
+                company_id=company_id,
+                tenant_id=None,  # type: ignore[arg-type]
+                entry_date=date(2026, 4, 1),
+                lines=[
+                    {"account_id": acct_a, "debit": 1, "credit": 0},
+                    {"account_id": acct_b, "debit": 0, "credit": 1},
+                ],
+            )
+
+
+async def test_reverse_inherits_tenant_id_from_original() -> None:
+    """Regression: the reversal JE must land under the original's tenant_id,
+    not the request tenant (in case admin in a different tenant drives the
+    reverse) and definitely not the model default. Pre-fix ``reverse``
+    omitted ``tenant_id`` from the constructor and any reversal silently
+    landed under tenant ``00000000``.
+    """
+    company_id, acct_a, acct_b = await _ctx()
+    async with AsyncSessionLocal() as session:
+        entry = await svc.create_draft(
+            session,
+            company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
+            entry_date=date(2026, 4, 4),
+            lines=[
+                {"account_id": acct_a, "debit": 250, "credit": 0},
+                {"account_id": acct_b, "debit": 0, "credit": 250},
+            ],
+        )
+        await svc.post(session, entry.id)
+
+        reversal = await svc.reverse(session, entry.id, posted_by="test")
+        assert reversal.tenant_id == DEFAULT_TENANT_ID
+        # Pair must be atomic w.r.t. tenant — the original is REVERSED,
+        # they must share tenant_id so any tenant-scoped reader sees both
+        # or neither.
+        original = await svc.get(session, entry.id)
+        assert original.tenant_id == reversal.tenant_id
 
 
 async def test_post_balanced_entry() -> None:
@@ -55,6 +113,7 @@ async def test_post_balanced_entry() -> None:
         entry = await svc.create_draft(
             session,
             company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
             entry_date=date(2026, 4, 1),
             lines=[
                 {"account_id": acct_a, "debit": Decimal("250.75"), "credit": 0},
@@ -72,6 +131,7 @@ async def test_post_unbalanced_rejected() -> None:
         entry = await svc.create_draft(
             session,
             company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
             entry_date=date(2026, 4, 2),
             lines=[
                 {"account_id": acct_a, "debit": 100, "credit": 0},
@@ -86,7 +146,7 @@ async def test_post_empty_entry_rejected() -> None:
     company_id, _acct_a, _acct_b = await _ctx()
     async with AsyncSessionLocal() as session:
         entry = await svc.create_draft(
-            session, company_id=company_id, entry_date=date(2026, 4, 2)
+            session, company_id=company_id, tenant_id=DEFAULT_TENANT_ID, entry_date=date(2026, 4, 2)
         )
         with pytest.raises(PostingError, match="no lines"):
             await svc.post(session, entry.id)
@@ -98,6 +158,7 @@ async def test_reverse_creates_mirror_entry() -> None:
         entry = await svc.create_draft(
             session,
             company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
             entry_date=date(2026, 4, 3),
             lines=[
                 {"account_id": acct_a, "debit": 500, "credit": 0},
@@ -130,6 +191,7 @@ async def test_period_lock_blocks_post() -> None:
         entry = await svc.create_draft(
             session,
             company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
             entry_date=date(2026, 3, 15),
             lines=[
                 {"account_id": acct_a, "debit": 100, "credit": 0},
@@ -147,6 +209,7 @@ async def test_period_lock_override_with_reason() -> None:
         entry = await svc.create_draft(
             session,
             company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
             entry_date=date(2026, 3, 20),
             lines=[
                 {"account_id": acct_a, "debit": 75, "credit": 0},
@@ -166,6 +229,7 @@ async def test_cannot_reverse_draft() -> None:
         entry = await svc.create_draft(
             session,
             company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
             entry_date=date(2026, 4, 4),
             lines=[
                 {"account_id": acct_a, "debit": 10, "credit": 0},
@@ -182,6 +246,7 @@ async def test_gst_amount_on_lines() -> None:
         entry = await svc.create_draft(
             session,
             company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
             entry_date=date(2026, 4, 5),
             lines=[
                 {
@@ -236,6 +301,7 @@ async def test_trust_commingling_blocked_on_post() -> None:
         entry = await svc.create_draft(
             session,
             company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
             entry_date=date(2026, 4, 28),
             description="RLES28-Comingle",
             lines=[
@@ -281,6 +347,7 @@ async def test_trust_to_trust_transfer_allowed() -> None:
         entry = await svc.create_draft(
             session,
             company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
             entry_date=date(2026, 4, 28),
             lines=[
                 {"account_id": t1_id, "debit": 1000, "credit": 0},
@@ -324,6 +391,7 @@ async def test_trust_payment_to_expense_allowed() -> None:
         entry = await svc.create_draft(
             session,
             company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
             entry_date=date(2026, 4, 28),
             lines=[
                 {"account_id": ex_id, "debit": 500, "credit": 0},
@@ -371,6 +439,7 @@ async def test_trust_debit_to_revenue_blocked() -> None:
         entry = await svc.create_draft(
             session,
             company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
             entry_date=date(2026, 4, 28),
             description="RLES2-RentToRevenue",
             lines=[
@@ -418,6 +487,7 @@ async def test_trust_debit_to_liability_allowed() -> None:
         entry = await svc.create_draft(
             session,
             company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
             entry_date=date(2026, 4, 28),
             description="RLES2-RentToTrustLiability",
             lines=[
@@ -438,6 +508,7 @@ async def test_ref_too_long_on_create_draft_raises_422() -> None:
             await svc.create_draft(
                 session,
                 company_id=company_id,
+                tenant_id=DEFAULT_TENANT_ID,
                 entry_date=date(2026, 4, 28),
                 ref=long_ref,
                 lines=[
@@ -454,6 +525,7 @@ async def test_ref_too_long_on_update_draft_raises_422() -> None:
         entry = await svc.create_draft(
             session,
             company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
             entry_date=date(2026, 4, 28),
             lines=[
                 {"account_id": acct_a, "debit": 50, "credit": 0},
@@ -500,8 +572,8 @@ async def test_cross_tenant_account_rejected_on_create_draft() -> None:
             await svc.create_draft(
                 session,
                 company_id=company_id,
-                entry_date=date(2026, 4, 10),
                 tenant_id=home_tenant_id,
+                entry_date=date(2026, 4, 10),
                 lines=[
                     {"account_id": acct_a, "debit": 100, "credit": 0},
                     {"account_id": foreign_acct_id, "debit": 0, "credit": 100},
@@ -576,6 +648,7 @@ async def test_psi_spouse_wages_blocked_on_post() -> None:
         entry = await svc.create_draft(
             session,
             company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
             entry_date=date(2026, 4, 29),
             description="Wages payment to spouse $2,000",
             lines=[
@@ -595,6 +668,7 @@ async def test_psi_related_party_line_description_blocked() -> None:
         entry = await svc.create_draft(
             session,
             company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
             entry_date=date(2026, 4, 29),
             lines=[
                 {"account_id": wages_id, "debit": 1500, "credit": 0,
@@ -614,6 +688,7 @@ async def test_psi_override_reason_allows_post() -> None:
         entry = await svc.create_draft(
             session,
             company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
             entry_date=date(2026, 4, 29),
             description="Wages — spouse, PAYG-W withheld as per STP",
             lines=[
@@ -637,6 +712,7 @@ async def test_psi_unrelated_contractor_wages_allowed() -> None:
         entry = await svc.create_draft(
             session,
             company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
             entry_date=date(2026, 4, 29),
             description="Consulting fee — Dr Wages / Cr Bank $500 to Consultant Name",
             lines=[
@@ -656,6 +732,7 @@ async def test_psi_non_wages_account_not_flagged() -> None:
         entry = await svc.create_draft(
             session,
             company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
             entry_date=date(2026, 4, 29),
             description="Transfer to spouse bank account — personal",
             lines=[

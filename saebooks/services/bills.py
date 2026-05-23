@@ -507,6 +507,7 @@ async def post_bill(
     entry = await journal_svc.create_draft(
         session,
         company_id=bill.company_id,
+        tenant_id=bill.tenant_id,
         entry_date=bill.issue_date,
         description=f"Bill {bill.number} ({ref})",
         lines=journal_lines,
@@ -570,6 +571,7 @@ async def void_bill(
         bill.journal_entry_id,
         posted_by=posted_by,
         override_reason=override_reason or f"Void bill {bill.number}",
+        tenant_id=bill.tenant_id,
     )
     bill.status = BillStatus.VOIDED
     bill.void_journal_entry_id = reversal.id

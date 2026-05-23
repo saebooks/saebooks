@@ -166,6 +166,7 @@ async def settle_bas(
     session: AsyncSession,
     company_id: uuid.UUID,
     *,
+    tenant_id: uuid.UUID,
     settlement_date: date,
     from_date: date | None = None,
     to_date: date | None = None,
@@ -264,6 +265,7 @@ async def settle_bas(
     entry = await journal_svc.create_draft(
         session,
         company_id=company_id,
+        tenant_id=tenant_id,
         entry_date=settlement_date,
         description=f"BAS settlement{period_label}",
         lines=lines,

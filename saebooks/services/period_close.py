@@ -180,6 +180,7 @@ async def close_year(
     session: AsyncSession,
     company_id: uuid.UUID,
     *,
+    tenant_id: uuid.UUID,
     through_date: date,
     retained_earnings_account_id: uuid.UUID,
     posted_by: str | None = None,
@@ -214,6 +215,7 @@ async def close_year(
     draft = await journal_svc.create_draft(
         session,
         company_id=company_id,
+        tenant_id=tenant_id,
         entry_date=through_date,
         description=description,
         lines=preview.lines,

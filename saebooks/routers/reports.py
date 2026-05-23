@@ -22,6 +22,7 @@ from saebooks.services.fx import rates as fx_rates_svc
 from saebooks.services.fx import reval as fx_reval_svc
 from saebooks.web import templates
 from saebooks.services import active_company as active_svc
+from saebooks.api.v1.auth import resolve_tenant_id
 
 router = APIRouter(prefix="/reports")
 
@@ -291,10 +292,13 @@ async def close_year_submit(request: Request) -> RedirectResponse:
         )
     posted_by = request.headers.get("remote-user") or None
 
+    tenant_id = resolve_tenant_id(request)
+
     async with AsyncSessionLocal() as session:
         entry = await period_close_svc.close_year(
             session,
             company.id,
+            tenant_id=tenant_id,
             through_date=through_date,
             retained_earnings_account_id=retained_id,
             posted_by=posted_by,
@@ -528,11 +532,14 @@ async def fx_revalue_submit(request: Request) -> RedirectResponse:
         raise HTTPException(400, "'through' date is required")
     posted_by = request.headers.get("remote-user") or None
 
+    tenant_id = resolve_tenant_id(request)
+
     try:
         async with AsyncSessionLocal() as session:
             result = await fx_reval_svc.revalue_company(
                 session,
                 company_id=company.id,
+                tenant_id=tenant_id,
                 through_date=through_date,
                 posted_by=posted_by,
             )
@@ -637,10 +644,13 @@ async def bas_settle(request: Request) -> RedirectResponse:
         from datetime import date as date_cls
         settlement_date = date_cls.today()
 
+    tenant_id = resolve_tenant_id(request)
+
     async with AsyncSessionLocal() as session:
         entry = await gst_svc.settle_bas(
             session,
             company.id,
+            tenant_id=tenant_id,
             settlement_date=settlement_date,
             from_date=from_date,
             to_date=to_date,

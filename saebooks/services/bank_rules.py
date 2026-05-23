@@ -336,6 +336,7 @@ async def apply_rule_to_line(
     entry = await journal_svc.create_draft(
         session,
         company_id=line.company_id,
+        tenant_id=line.tenant_id,
         entry_date=line.txn_date,
         description=f"[Rule: {rule.name}] {desc}",
         lines=lines,

@@ -23,6 +23,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 
+from saebooks.api.v1.auth import DEFAULT_TENANT_ID
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account
 from saebooks.models.company import Company
@@ -118,6 +119,7 @@ async def _post_income(
         draft = await journal_svc.create_draft(
             session,
             company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
             entry_date=entry_date,
             description=f"period_close_test_{tag}",
             lines=[
@@ -146,6 +148,7 @@ async def _post_expense(
         draft = await journal_svc.create_draft(
             session,
             company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
             entry_date=entry_date,
             description=f"period_close_test_{tag}",
             lines=[
@@ -292,6 +295,7 @@ async def test_close_year_posts_balanced_journal_and_locks() -> None:
         entry = await svc.close_year(
             session,
             ctx["company_id"],
+            tenant_id=DEFAULT_TENANT_ID,
             through_date=through_d,
             retained_earnings_account_id=ctx["retained_id"],
             posted_by="tests",
@@ -336,6 +340,7 @@ async def test_close_year_is_idempotent_on_second_run() -> None:
         first = await svc.close_year(
             session,
             ctx["company_id"],
+            tenant_id=DEFAULT_TENANT_ID,
             through_date=through_d,
             retained_earnings_account_id=ctx["retained_id"],
             posted_by="tests",
@@ -351,6 +356,7 @@ async def test_close_year_is_idempotent_on_second_run() -> None:
         second = await svc.close_year(
             session,
             ctx["company_id"],
+            tenant_id=DEFAULT_TENANT_ID,
             through_date=through_d,
             retained_earnings_account_id=ctx["retained_id"],
             posted_by="tests",
@@ -396,6 +402,7 @@ async def test_close_year_does_not_touch_later_periods() -> None:
         entry = await svc.close_year(
             session,
             ctx["company_id"],
+            tenant_id=DEFAULT_TENANT_ID,
             through_date=h1_through,
             retained_earnings_account_id=ctx["retained_id"],
             posted_by="tests",

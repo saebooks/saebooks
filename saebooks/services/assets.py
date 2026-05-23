@@ -501,6 +501,7 @@ async def post_depreciation(
     entry = await journal_svc.create_draft(
         session,
         company_id=asset.company_id,
+        tenant_id=asset.tenant_id,
         entry_date=through,
         description=f"Depreciation: {asset.code} {asset.name} through {through}",
         lines=[
@@ -652,6 +653,7 @@ async def dispose_asset(
     entry = await journal_svc.create_draft(
         session,
         company_id=asset.company_id,
+        tenant_id=asset.tenant_id,
         entry_date=disposal_date,
         description=f"Disposal: {asset.code} {asset.name}",
         lines=lines,
@@ -753,6 +755,7 @@ async def convert_to_inventory(
     entry = await journal_svc.create_draft(
         session,
         company_id=asset.company_id,
+        tenant_id=asset.tenant_id,
         entry_date=conversion_date,
         description=f"FA→Inventory conversion: {asset.code} {asset.name}",
         lines=lines,

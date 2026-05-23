@@ -23,6 +23,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from saebooks.api.v1.auth import DEFAULT_TENANT_ID
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account
 from saebooks.models.company import Company
@@ -263,7 +264,7 @@ async def test_recognize_deferred_revenue_correct_monthly_amount() -> None:
     # Recognize for April 2026
     async with AsyncSessionLocal() as session:
         await dr_svc.recognize_deferred_revenue(
-            session, cid, date(2026, 4, 15), posted_by="test"
+            session, cid, date(2026, 4, 15), posted_by="test", tenant_id=DEFAULT_TENANT_ID
         )
 
     # Find the recognition JE (the most recent JE for this company with the
@@ -326,7 +327,7 @@ async def test_recognize_deferred_revenue_idempotent() -> None:
     # First recognition
     async with AsyncSessionLocal() as session:
         await dr_svc.recognize_deferred_revenue(
-            session, cid, date(2026, 4, 1), posted_by="test"
+            session, cid, date(2026, 4, 1), posted_by="test", tenant_id=DEFAULT_TENANT_ID
         )
 
     # Count JEs before second call
@@ -343,7 +344,7 @@ async def test_recognize_deferred_revenue_idempotent() -> None:
     # Second recognition call for same period — should not post another JE
     async with AsyncSessionLocal() as session:
         await dr_svc.recognize_deferred_revenue(
-            session, cid, date(2026, 4, 20), posted_by="test"
+            session, cid, date(2026, 4, 20), posted_by="test", tenant_id=DEFAULT_TENANT_ID
         )
 
     async with AsyncSessionLocal() as session:
@@ -401,7 +402,7 @@ async def test_recognize_last_month_absorbs_rounding() -> None:
     for period in months:
         async with AsyncSessionLocal() as session:
             await dr_svc.recognize_deferred_revenue(
-                session, cid, period, posted_by="test"
+                session, cid, period, posted_by="test", tenant_id=DEFAULT_TENANT_ID
             )
 
     # Total recognized for this invoice line should be $1,200

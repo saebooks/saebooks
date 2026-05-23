@@ -638,6 +638,7 @@ async def post_payment(
     entry = await journal_svc.create_draft(
         session,
         company_id=pay.company_id,
+        tenant_id=pay.tenant_id,
         entry_date=pay.payment_date,
         description=f"{pay.direction.value} payment {pay.number}",
         lines=lines,
@@ -689,6 +690,7 @@ async def void_payment(
         pay.journal_entry_id,
         posted_by=posted_by,
         override_reason=override_reason or f"Void payment {pay.number}",
+        tenant_id=pay.tenant_id,
     )
     pay.status = PaymentStatus.VOIDED
     pay.void_journal_entry_id = reversal.id

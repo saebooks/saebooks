@@ -362,10 +362,19 @@ async def _fx_revalue(company_id: str | None, through: str | None) -> int:
     try:
         async with AsyncSessionLocal() as session:
             if cid is not None:
+                # CLI is single-tenant — look up the company's tenant
+                # rather than threading a flag through the argv parser.
+                from saebooks.models.company import Company
+
+                co = await session.get(Company, cid)
+                if co is None:
+                    logger.error("fx-revalue: company %s not found", cid)
+                    return 1
                 results: dict[uuid.UUID, fx_reval.RevalResult] = {
                     cid: await fx_reval.revalue_company(
                         session,
                         company_id=cid,
+                        tenant_id=co.tenant_id,
                         through_date=through_date,
                     )
                 }

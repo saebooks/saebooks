@@ -16,6 +16,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
+from saebooks.api.v1.auth import DEFAULT_TENANT_ID
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account
 from saebooks.models.audit_snapshot import AuditSnapshot
@@ -51,6 +52,7 @@ async def test_delete_snapshots_lines_and_header() -> None:
         entry = await svc.create_draft(
             session,
             company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
             entry_date=date(2026, 5, 10),
             description="Audit M5 cascade-snapshot test",
             lines=[

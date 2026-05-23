@@ -371,6 +371,7 @@ async def post_credit_note(
     entry = await journal_svc.create_draft(
         session,
         company_id=cn.company_id,
+        tenant_id=cn.tenant_id,
         entry_date=cn.issue_date,
         description=f"Credit note {cn.number}",
         lines=lines,
@@ -413,6 +414,7 @@ async def void_credit_note(
         cn.journal_entry_id,
         posted_by=posted_by,
         override_reason=override_reason or f"Void credit note {cn.number}",
+        tenant_id=cn.tenant_id,
     )
     cn.status = CreditNoteStatus.VOIDED
     cn.void_journal_entry_id = reversal.id

@@ -202,6 +202,7 @@ async def post_journal_entry(
     entry = await journal_svc.create_draft(
         session,
         company_id=dist.company_id,
+        tenant_id=dist.tenant_id,
         entry_date=dist.distribution_date,
         description=description,
         lines=lines,

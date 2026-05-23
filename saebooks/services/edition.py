@@ -153,6 +153,7 @@ async def backfill_invoice_journals(
         entry = await journal_svc.create_draft(
             session,
             company_id=inv.company_id,
+            tenant_id=inv.tenant_id,
             entry_date=inv.issue_date,
             description=f"Invoice {inv.number} (backfill from cashbook)",
             lines=je_lines,

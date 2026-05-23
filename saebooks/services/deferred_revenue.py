@@ -180,6 +180,7 @@ async def recognize_deferred_revenue(
     company_id: uuid.UUID,
     period_date: date,
     *,
+    tenant_id: uuid.UUID,
     posted_by: str | None = None,
     override_reason: str | None = None,
 ) -> None:
@@ -239,6 +240,7 @@ async def recognize_deferred_revenue(
     draft = await journal_svc.create_draft(
         session,
         company_id=company_id,
+        tenant_id=tenant_id,
         entry_date=pf,
         description=f"Deferred revenue recognition — {pf.strftime('%B %Y')}",
         lines=je_lines,

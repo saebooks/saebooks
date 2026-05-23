@@ -222,6 +222,7 @@ async def recognize_deferred_revenue(
             session,
             company_id,
             payload.period_date,
+            tenant_id=resolve_tenant_id(request),
             posted_by=f"api:{bearer[:8]}…",
             override_reason=payload.override_reason,
         )

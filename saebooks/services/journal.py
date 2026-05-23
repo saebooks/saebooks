@@ -67,11 +67,23 @@ async def create_draft(
     *,
     company_id: uuid.UUID,
     entry_date: date,
+    tenant_id: uuid.UUID,
     description: str | None = None,
     ref: str | None = None,
     lines: list[dict[str, object]] | None = None,
-    tenant_id: uuid.UUID | None = None,
 ) -> JournalEntry:
+    # tenant_id is REQUIRED. Without it the JournalEntry server-default
+    # (00000000-0000-0000-0000-000000000001, the legacy dev tenant) fires
+    # and the row lands invisible to any tenant-scoped reader. The
+    # superuser DATABASE_URL bypasses the RLS WITH CHECK that would
+    # otherwise catch this at insert time, so the only thing standing
+    # between callers and a silent cross-tenant leak is this argument.
+    if tenant_id is None:  # caller passed None explicitly
+        raise PostingError(
+            "create_draft requires tenant_id — never let it default to "
+            "the legacy 00000000 tenant. Resolve it from the request via "
+            "saebooks.routers.deps.resolve_tenant_id and thread it through."
+        )
     if not ref:
         ref = await next_ref(session)
 
@@ -82,6 +94,7 @@ async def create_draft(
 
     entry = JournalEntry(
         company_id=company_id,
+        tenant_id=tenant_id,
         ref=ref,
         entry_date=entry_date,
         description=description,
@@ -477,6 +490,12 @@ async def reverse(
 
     reversal = JournalEntry(
         company_id=original.company_id,
+        # Inherit tenant from the original entry — a reversal logically
+        # belongs to the same tenant. Don't trust the request tenant_id
+        # here: ``get()`` above already enforces tenant access to the
+        # original, and using original.tenant_id keeps the pair atomic
+        # if an admin in a different tenant ever drives a reversal.
+        tenant_id=original.tenant_id,
         ref=rev_ref,
         entry_date=rev_date,
         description=f"Reversal of {original.ref}: {original.description or ''}".strip(),
