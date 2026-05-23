@@ -172,6 +172,10 @@ async def test_bas_taxable_sale(
     gst_id = tax_codes["taxable"]
 
     amount = "1000.00"
+    # Round-2 audit fix #6: 1A is now derived from the actual
+    # gst_amount stamped on each line (matching how the invoice
+    # posting service marks tax in production), not from g1 × 10%.
+    # Test JEs must carry gst_amount to drive 1A.
     await _create_and_post_je(
         api_client,
         "2027-01-15",
@@ -186,6 +190,7 @@ async def test_bas_taxable_sale(
                 "debit": "0",
                 "credit": amount,
                 "tax_code_id": gst_id,
+                "gst_amount": "100.00",
             },
         ],
     )
@@ -198,7 +203,7 @@ async def test_bas_taxable_sale(
     body = r.json()
 
     assert body["g1_total_sales"] >= 1000.0, f"Expected g1 >= 1000, got {body['g1_total_sales']}"
-    # 1A = G1 × 10%; for exactly 1000 that's 100.00
+    # 1A = sum of gst_amount on income lines (post-fix #6).
     assert body["label_1a_gst_on_sales"] >= 100.0, (
         f"Expected 1a >= 100, got {body['label_1a_gst_on_sales']}"
     )
@@ -244,11 +249,10 @@ async def test_bas_gst_free_sale(
     assert body["g3_other_gst_free_sales"] >= 500.0, (
         f"Expected g3 >= 500, got {body['g3_other_gst_free_sales']}"
     )
-    # GST-free sales contribute nothing to 1A via this code
-    # (no taxable line in this JE so g1 and 1a should be unchanged from empty)
-    assert body["label_1a_gst_on_sales"] == pytest.approx(
-        body["g1_total_sales"] * 0.10, abs=0.02
-    ), "1A should always equal G1 × 10%"
+    # GST-free sales contribute nothing to 1A by design — they don't
+    # carry a gst_amount.  Round-2 audit fix #6: 1A is now sum of
+    # gst_amount on income lines, not g1*10%. Asserting "1A==G1*10%"
+    # would re-encode the bug.
 
 
 async def test_bas_expense(
@@ -262,6 +266,8 @@ async def test_bas_expense(
     gst_id = tax_codes["taxable"]
 
     amount = "1100.00"
+    # Round-2 audit fix #6: 1B is now sum of gst_amount on purchase
+    # lines, not g11/11. Test must stamp gst_amount explicitly.
     await _create_and_post_je(
         api_client,
         "2027-03-05",
@@ -271,6 +277,7 @@ async def test_bas_expense(
                 "debit": amount,
                 "credit": "0",
                 "tax_code_id": gst_id,
+                "gst_amount": "100.00",
             },
             {
                 "account_id": asset_id,
@@ -290,7 +297,7 @@ async def test_bas_expense(
     assert body["g11_other_acquisitions"] >= 1100.0, (
         f"Expected g11 >= 1100, got {body['g11_other_acquisitions']}"
     )
-    # 1B = G11 × 1/11; for exactly 1100 that's 100.00
+    # 1B = sum of gst_amount on expense lines (post-fix #6).
     assert body["label_1b_gst_on_purchases"] >= 100.0, (
         f"Expected 1b >= 100, got {body['label_1b_gst_on_purchases']}"
     )
@@ -307,7 +314,7 @@ async def test_bas_net_gst_remit(
     asset_id = gl_accounts[AccountType.ASSET.value]
     gst_id = tax_codes["taxable"]
 
-    # Large taxable sale
+    # Large taxable sale — gst_amount stamped to drive 1A (fix #6).
     await _create_and_post_je(
         api_client,
         "2027-04-15",
@@ -318,10 +325,11 @@ async def test_bas_net_gst_remit(
                 "debit": "0",
                 "credit": "5000.00",
                 "tax_code_id": gst_id,
+                "gst_amount": "500.00",
             },
         ],
     )
-    # Small taxable expense
+    # Small taxable expense — gst_amount stamped to drive 1B (fix #6).
     await _create_and_post_je(
         api_client,
         "2027-04-20",
@@ -331,6 +339,7 @@ async def test_bas_net_gst_remit(
                 "debit": "110.00",
                 "credit": "0",
                 "tax_code_id": gst_id,
+                "gst_amount": "10.00",
             },
             {"account_id": asset_id, "debit": "0", "credit": "110.00"},
         ],
@@ -371,6 +380,7 @@ async def test_bas_tenant_isolation(
                 "debit": "0",
                 "credit": "7777.00",
                 "tax_code_id": gst_id,
+                "gst_amount": "777.70",
             },
         ],
     )
@@ -421,7 +431,9 @@ async def test_bas_mid_quarter_registration_split(
     asset_id = gl_accounts[AccountType.ASSET.value]
     gst_id = tax_codes["taxable"]
 
-    # Pre-registration sale (2027-07-15)
+    # Pre-registration sale (2027-07-15). gst_amount stamped because
+    # the line still books GST in the ledger — only the BAS 1A label
+    # excludes pre-reg GST (per ATO mid-period registration rules).
     await _create_and_post_je(
         api_client,
         "2027-07-15",
@@ -432,6 +444,7 @@ async def test_bas_mid_quarter_registration_split(
                 "debit": "0",
                 "credit": "2000.00",
                 "tax_code_id": gst_id,
+                "gst_amount": "200.00",
             },
         ],
     )
@@ -447,6 +460,7 @@ async def test_bas_mid_quarter_registration_split(
                 "debit": "0",
                 "credit": "3000.00",
                 "tax_code_id": gst_id,
+                "gst_amount": "300.00",
             },
         ],
     )
@@ -476,6 +490,120 @@ async def test_bas_mid_quarter_registration_split(
     ), f"1A should be post-reg G1 x 10%, got {body['label_1a_gst_on_sales']}"
     assert body["label_1a_gst_on_sales"] < body["g1_total_sales"] * 0.10, (
         "1A must be less than it would be if all sales were taxable"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Round-2 audit fix #6: 1A/1B derive from journal_lines.gst_amount,
+# not g1/10 or g11/11. Critics 07 + 19 reported $141.82 understated 1B
+# in a scenario where g11/11 reverse-calculated GST diverged from the
+# actual GST Paid control account. This guard pins the new behaviour.
+# ---------------------------------------------------------------------------
+
+
+async def test_bas_1b_matches_actual_gst_on_purchases_not_g11_div_11(
+    api_client: AsyncClient,
+    gl_accounts: dict[str, str],
+    tax_codes: dict[str, str],
+) -> None:
+    """A $1000 ex-GST expense with $100 of actual GST must drive
+    1B = $100, NOT (g11 = 1100) / 11 = $100.
+
+    Test scenario explicitly designed to expose drift: book a $1000
+    ex-GST + $100 GST expense as a journal entry. Confirm:
+
+      g11 = 1100 (ex-GST + GST = inclusive purchase total)
+      1B  = 100  (actual GST stamped on the expense line)
+
+    In the bug shape, 1B would still be (1100 / 11).quantize = 100.00
+    by coincidence — so this test alone doesn't catch the bug. The
+    follow-up ``test_bas_1b_matches_when_g11_diverges_from_gst`` posts
+    a JE where the GST is intentionally different from g11/11, which
+    exercises the drift path the critics found.
+    """
+    expense_id = gl_accounts[AccountType.EXPENSE.value]
+    asset_id = gl_accounts[AccountType.ASSET.value]
+    gst_id = tax_codes["taxable"]
+
+    await _create_and_post_je(
+        api_client,
+        "2028-01-15",
+        lines=[
+            {
+                "account_id": expense_id,
+                "debit": "1100.00",
+                "credit": "0",
+                "tax_code_id": gst_id,
+                "gst_amount": "100.00",
+            },
+            {"account_id": asset_id, "debit": "0", "credit": "1100.00"},
+        ],
+    )
+
+    r = await api_client.get(
+        "/api/v1/reports/bas_summary",
+        params={"from_date": "2028-01-01", "to_date": "2028-01-31"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    # 1B equals the gst_amount we stamped, full stop. Not g11/11.
+    assert body["label_1b_gst_on_purchases"] == pytest.approx(100.00, abs=0.01), (
+        f"Expected 1B=100.00 from ledger gst_amount, got "
+        f"{body['label_1b_gst_on_purchases']}"
+    )
+
+
+async def test_bas_1b_matches_when_g11_diverges_from_gst(
+    api_client: AsyncClient,
+    gl_accounts: dict[str, str],
+    tax_codes: dict[str, str],
+) -> None:
+    """Critical fix #6 scenario: when the expense total and the actual
+    GST stamped on the line don't satisfy ``gst = total/11`` (because
+    of a margin scheme, manual adjustment, or partial-GST line), 1B
+    must still come from the ledger.
+
+    JE: $1000 ex-GST expense + $50 GST (margin scheme — only 5% of
+    total is GST, not 10%). Pre-fix: 1B = $1050/11 = $95.45 (WRONG).
+    Post-fix: 1B = $50 (from gst_amount). This is the exact bug critics
+    07 + 19 found.
+    """
+    expense_id = gl_accounts[AccountType.EXPENSE.value]
+    asset_id = gl_accounts[AccountType.ASSET.value]
+    gst_id = tax_codes["taxable"]
+
+    await _create_and_post_je(
+        api_client,
+        "2028-02-15",
+        lines=[
+            {
+                "account_id": expense_id,
+                "debit": "1050.00",
+                "credit": "0",
+                "tax_code_id": gst_id,
+                "gst_amount": "50.00",
+            },
+            {"account_id": asset_id, "debit": "0", "credit": "1050.00"},
+        ],
+    )
+
+    r = await api_client.get(
+        "/api/v1/reports/bas_summary",
+        params={"from_date": "2028-02-01", "to_date": "2028-02-28"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    # 1B is what the ledger says, NOT g11/11.
+    assert body["label_1b_gst_on_purchases"] == pytest.approx(50.00, abs=0.01), (
+        f"Pre-fix bug: 1B was g11/11 = 95.45. Post-fix #6: 1B must "
+        f"equal the stamped gst_amount of 50.00. Got "
+        f"{body['label_1b_gst_on_purchases']}"
+    )
+    # g11/11 for sanity — the bug path would have returned 1050/11 = 95.45.
+    assert body["label_1b_gst_on_purchases"] != pytest.approx(95.45, abs=0.05), (
+        "1B is still being reverse-calculated from g11/11 — fix #6 regressed."
     )
 
 

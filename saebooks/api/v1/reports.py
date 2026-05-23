@@ -732,6 +732,101 @@ async def _bas_aggregate(
     return g1, g3, g11
 
 
+async def _bas_gst_amounts(
+    session: AsyncSession,
+    company_id: UUID,
+    tenant_id: UUID,
+    from_date: date,
+    to_date: date,
+) -> tuple[Decimal, Decimal]:
+    """Compute (gst_on_sales, gst_on_purchases) directly from the GST
+    control accounts.
+
+    Round-2 audit fix #6: 1A/1B previously derived from G1/G11 via
+    rate multiplication (g1*10%, g11/11). Reverse-calculation drifts
+    from the ledger every time an invoice has a mixed-line discount,
+    a manual rounding adjustment, a partial GST-free line, or a margin
+    scheme — and the user files the wrong GST credits with the ATO.
+
+    Source of truth:
+
+    * 1A = net Cr - Dr on the configured ``gst_collected_account_code``
+      (typically ``2-1310 GST Collected``) for POSTED entries in scope.
+      A Cr on the liability is GST collected; a Dr is a refund/reversal.
+    * 1B = net Dr - Cr on the configured ``gst_paid_account_code``
+      (typically ``2-1330 GST Paid``) for POSTED entries in scope.
+      A Dr is an input-tax credit accrued; a Cr is a reversal/refund.
+
+    This approach is the same number a human BAS preparer derives — pull
+    the GST Collected and GST Paid GL totals for the period — so it
+    automatically handles reversed bills, journal corrections, and
+    multi-line GST splits. Versus summing ``gst_amount`` on the
+    income/expense legs, it nets reversals correctly (the reversal
+    posts to the GST account but does not copy gst_amount onto its
+    expense leg — see ``services/journal.py`` reverse path).
+
+    If either setting is unset (small-business mode without GST
+    registration), returns (0, 0) — callers should fall back to G1/G11
+    only when no GST accounts exist at all.
+    """
+    from saebooks.services import settings as settings_svc
+
+    collected_code = await settings_svc.get(
+        session, "gst_collected_account_code", ""
+    )
+    paid_code = await settings_svc.get(
+        session, "gst_paid_account_code", ""
+    )
+
+    # Strip JSON quoting if the setting was stored as a JSON string.
+    if isinstance(collected_code, str):
+        collected_code = collected_code.strip('"')
+    if isinstance(paid_code, str):
+        paid_code = paid_code.strip('"')
+
+    gst_on_sales = Decimal("0")
+    gst_on_purchases = Decimal("0")
+
+    if not collected_code and not paid_code:
+        return gst_on_sales, gst_on_purchases
+
+    # One query handles both control accounts at once.
+    stmt = (
+        select(
+            Account.code,
+            func.sum(JournalLine.debit).label("total_debit"),
+            func.sum(JournalLine.credit).label("total_credit"),
+        )
+        .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+        .join(Account, JournalLine.account_id == Account.id)
+        .where(
+            and_(
+                JournalEntry.company_id == company_id,
+                JournalEntry.tenant_id == tenant_id,
+                JournalEntry.status == EntryStatus.POSTED,
+                JournalEntry.archived_at.is_(None),
+                JournalEntry.entry_date >= from_date,
+                JournalEntry.entry_date <= to_date,
+                Account.code.in_([c for c in (collected_code, paid_code) if c]),
+            )
+        )
+        .group_by(Account.code)
+    )
+
+    rows = (await session.execute(stmt)).all()
+    for code, total_debit, total_credit in rows:
+        dr = Decimal(str(total_debit or "0"))
+        cr = Decimal(str(total_credit or "0"))
+        if code == collected_code:
+            # Liability account: credit-normal. 1A = net credit.
+            gst_on_sales += cr - dr
+        elif code == paid_code:
+            # Asset/contra-liability account: debit-normal. 1B = net debit.
+            gst_on_purchases += dr - cr
+
+    return gst_on_sales, gst_on_purchases
+
+
 @router.get("/bas_summary", response_model=BASSummary)
 async def bas_summary(
     request: Request,
@@ -787,18 +882,34 @@ async def bas_summary(
         g1 = g1_pre + g1_post
         g3 = g3_pre + g3_post
         g11 = g11_post  # ITCs only claimable from registration date
+        # 1A/1B come from the actual gst_amount on the ledger lines —
+        # only the post-registration slice is in scope for 1A; 1B is
+        # post-only too because input-tax-credit eligibility starts on
+        # the registration date.
+        gst_sales, gst_purchases = await _bas_gst_amounts(
+            session, company_id, tenant_id, registration_effective_date, to_date
+        )
     else:
         g1, g3, g11 = await _bas_aggregate(
             session, company_id, tenant_id, from_date, to_date
         )
         g1_post = g1
+        gst_sales, gst_purchases = await _bas_gst_amounts(
+            session, company_id, tenant_id, from_date, to_date
+        )
 
-    # 1A: GST collected on taxable sales (10% of GST-exclusive base).
-    # Only post-registration sales attract GST when a split applies.
-    label_1a = (g1_post * _GST_RATE).quantize(Decimal("0.01"))
+    # 1A: GST collected on sales — sum of gst_amount on POSTED INCOME lines
+    # in scope. Round-2 audit fix #6: previously derived as g1 * 10% which
+    # reverse-calculates GST and drifts from the actual ledger when an
+    # invoice has GST-free lines, manual rounding adjustments, or any
+    # mixed-treatment line.
+    label_1a = gst_sales.quantize(Decimal("0.01"))
 
-    # 1B: GST credits on taxable purchases (1/11 of GST-inclusive amount).
-    label_1b = (g11 * _GST_INCLUSIVE_FRACTION).quantize(Decimal("0.01"))
+    # 1B: GST credits on purchases — sum of gst_amount on POSTED purchase
+    # lines (EXPENSE/COST_OF_SALES/OTHER_EXPENSE/ASSET) in scope. Round-2
+    # audit fix #6: previously derived as g11 * 1/11 which is the bug
+    # critics 07 + 19 found ($141.82 off in their scenarios).
+    label_1b = gst_purchases.quantize(Decimal("0.01"))
 
     net_gst = label_1a - label_1b
 
