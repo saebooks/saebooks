@@ -348,7 +348,9 @@ async def commit_wizard(
     else:
         raise HTTPException(422, f"Unknown import kind: {kind!r}")
 
-    # Write a change_log entry for the commit.
+    # Write a change_log entry for the commit. tenant_id is required
+    # because change_log has FORCE RLS (migration 0118) — the placeholder
+    # default would be rejected by the tenant_isolation policy.
     await change_log_svc.append(
         session,
         entity="import_wizard",
@@ -357,6 +359,7 @@ async def commit_wizard(
         actor=f"api:{bearer[:8]}...",
         payload={"kind": kind, "result": result},
         version=1,
+        tenant_id=tenant_id,
     )
 
     await session.commit()
