@@ -524,3 +524,49 @@ async def test_invoice_create_rejects_cross_company_contact(
     r = await api_client.post("/api/v1/invoices", json=payload)
     assert r.status_code == 422, r.text
     assert "contact_company_mismatch" in r.text
+
+
+# ---------------------------------------------------------------------------
+# Fix #28 -- Negative-total invoice rejected at schema layer (Lane 1 P2)
+# ---------------------------------------------------------------------------
+
+
+async def test_invoice_create_rejects_negative_total(
+    api_client: AsyncClient, invoice_deps: dict[str, str]
+) -> None:
+    """POST /invoices with a line that produces a negative total must return 422."""
+    payload = _invoice_payload(
+        invoice_deps,
+        lines=[
+            {
+                "description": "Negative line",
+                "account_id": invoice_deps["income_account_id"],
+                "quantity": "1",
+                "unit_price": "-100.00",
+                "discount_pct": "0",
+            }
+        ],
+    )
+    r = await api_client.post("/api/v1/invoices", json=payload)
+    assert r.status_code == 422, r.text
+    assert "invoice_negative_total" in r.text
+
+
+async def test_invoice_create_zero_total_allowed(
+    api_client: AsyncClient, invoice_deps: dict[str, str]
+) -> None:
+    """POST /invoices with a zero total (e.g. fully discounted) must succeed."""
+    payload = _invoice_payload(
+        invoice_deps,
+        lines=[
+            {
+                "description": "Zero-value line",
+                "account_id": invoice_deps["income_account_id"],
+                "quantity": "1",
+                "unit_price": "0.00",
+                "discount_pct": "0",
+            }
+        ],
+    )
+    r = await api_client.post("/api/v1/invoices", json=payload)
+    assert r.status_code == 201, r.text

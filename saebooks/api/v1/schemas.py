@@ -729,6 +729,27 @@ class InvoiceCreate(InvoiceBase):
 
     lines: list[InvoiceLineCreate] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def _total_must_be_non_negative(self) -> "InvoiceCreate":
+        """Reject invoices whose computed gross total would be negative.
+
+        Negative totals must go through the credit-note path instead
+        (Lane 1 P2 / overnight critic finding #28).
+        """
+        if not self.lines:
+            return self
+        from decimal import Decimal as _D
+        total = sum(
+            ln.unit_price * ln.quantity * (_D("1") - ln.discount_pct / _D("100"))
+            for ln in self.lines
+        )
+        if total < _D("0"):
+            raise ValueError(
+                "invoice_negative_total: invoice total cannot be negative; "
+                "use a credit note for refunds or adjustments"
+            )
+        return self
+
 
 class InvoiceUpdate(BaseModel):
     """PATCH body — every field optional."""
