@@ -19,6 +19,7 @@ from saebooks.connect_app import (
 )
 from saebooks.grpc_server import serve as grpc_serve
 from saebooks.middleware.active_company import ActiveCompanyMiddleware
+from saebooks.middleware.skip_audit import SkipAuditMiddleware
 from saebooks.middleware.auth import ForwardAuthMiddleware
 from saebooks.middleware.request_id import RequestIdMiddleware
 from saebooks.routers import (
@@ -105,6 +106,9 @@ def create_app() -> FastAPI:
     # _first_company() helper resolves to the cookie-selected company
     # rather than the legacy first-by-created-at fallback (P0-5).
     app.add_middleware(ActiveCompanyMiddleware)
+    # SkipAuditMiddleware honours X-Dev-Skip-Audit on developer-tier
+    # admin requests; short-circuits change_log writes for that request.
+    app.add_middleware(SkipAuditMiddleware)
 
     @app.get("/")
     async def root() -> RedirectResponse:

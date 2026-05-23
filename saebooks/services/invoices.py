@@ -1175,6 +1175,7 @@ async def api_update(
     invoice_id: uuid.UUID,
     actor: str,
     expected_version: int,
+    force: bool = False,
     *,
     contact_id: uuid.UUID | None = None,
     issue_date: date | None = None,

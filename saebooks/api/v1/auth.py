@@ -166,6 +166,33 @@ def resolve_tenant_id(request: Request | None = None) -> uuid.UUID:
     Raises ``HTTPException(401)`` outside dev/test if neither the JWT
     nor a request-state claim is present.
     """
+    # FLAG_TENANT_SWITCHER override — when the developer-tier flag is active
+    # AND the caller is admin AND the X-Active-Tenant header is set, use that
+    # tenant id instead of the JWT claim. Lets the operator switch tenants in
+    # the UI without re-authenticating. Gated triply so non-developer
+    # instances ignore the header entirely.
+    if request is not None:
+        x_tenant = request.headers.get("x-active-tenant", "").strip()
+        if x_tenant:
+            try:
+                from saebooks.services.features import (
+                    FLAG_TENANT_SWITCHER, is_enabled as _flag_enabled,
+                )
+                from saebooks.models.user import UserRole, has_at_least
+                from saebooks.config import settings as _s
+                if _flag_enabled(FLAG_TENANT_SWITCHER, settings=_s):
+                    role = getattr(request.state, "role", None)
+                    if not role:
+                        u = getattr(request.state, "user", None)
+                        role = getattr(u, "role", None) if u else None
+                    if role and has_at_least(role, UserRole.ADMIN.value):
+                        try:
+                            return uuid.UUID(x_tenant)
+                        except ValueError:
+                            pass
+            except Exception:
+                pass
+
     if request is not None:
         claims = getattr(request.state, "jwt_claims", None)
         if claims and "tenant_id" in claims:

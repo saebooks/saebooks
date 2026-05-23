@@ -336,6 +336,7 @@ async def update(
     entry_id: uuid.UUID,
     actor: str,
     expected_version: int,
+    force: bool = False,
     *,
     entry_date: date | None = None,
     narration: str | None = None,

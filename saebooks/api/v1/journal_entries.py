@@ -44,6 +44,7 @@ from saebooks.api.v1.schemas import (
     JournalEntryUpdate,
 )
 from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
+from saebooks.api.v1.edit_force_gate import edit_force_admin_gate
 from saebooks.models.journal import EntryStatus
 from saebooks.services import journal_entries as svc
 from saebooks.services.hard_delete import hard_delete_with_audit
@@ -216,6 +217,7 @@ async def update_journal_entry(
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    force: bool = Depends(edit_force_admin_gate),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
@@ -236,6 +238,7 @@ async def update_journal_entry(
             entry_id,
             actor=f"api:{bearer[:8]}…",
             expected_version=expected,
+            force=force,
             entry_date=payload.entry_date,
             narration=payload.narration,
             reference=payload.reference,

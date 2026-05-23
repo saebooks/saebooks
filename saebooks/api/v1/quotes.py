@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_active_company_id, get_session
 from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
+from saebooks.api.v1.edit_force_gate import edit_force_admin_gate
 from saebooks.api.v1.schemas import (
     QuoteConflictBody,
     QuoteConvertOut,
@@ -461,6 +462,7 @@ async def update_quote(
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    force: bool = Depends(edit_force_admin_gate),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
@@ -483,6 +485,7 @@ async def update_quote(
             quote_id,
             actor=f"api:{bearer[:8]}…",
             expected_version=expected,
+            force=force,
             customer_id=payload.customer_id,
             issue_date=payload.issue_date,
             expiry_date=payload.expiry_date,

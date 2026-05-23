@@ -194,9 +194,10 @@ async def update(
     *,
     entry: TimeEntry,
     expected_version: int | None = None,
+    force: bool = False,
     **fields: object,
 ) -> TimeEntry:
-    if not _is_editable(entry):
+    if not force and not _is_editable(entry):
         raise TimeEntryError(
             f"entry is {entry.approval_status} — only DRAFT/REJECTED entries can be edited",
             code="not_editable",

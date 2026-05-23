@@ -457,6 +457,7 @@ async def api_update(
     quote_id: uuid.UUID,
     actor: str,
     expected_version: int,
+    force: bool = False,
     *,
     customer_id: uuid.UUID | None = None,
     issue_date: date | None = None,
@@ -484,7 +485,7 @@ async def api_update(
         raise QuoteError(f"Quote {quote_id} not found")
     if quote.version != expected_version:
         raise VersionConflict(quote)
-    if quote.status in (
+    if not force and quote.status in (
         QuoteStatus.ACCEPTED,
         QuoteStatus.DECLINED,
         QuoteStatus.ARCHIVED,

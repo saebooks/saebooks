@@ -24,6 +24,8 @@ from fastapi import APIRouter
 from saebooks.api.v1.account_ranges import router as account_ranges_router
 from saebooks.api.v1.accounts import router as accounts_router
 from saebooks.api.v1.admin import router as admin_router
+from saebooks.api.v1.admin_inspect import router as admin_inspect_router
+from saebooks.api.v1.admin_tenants import router as admin_tenants_router
 from saebooks.api.v1.api_tokens import router as api_tokens_router
 from saebooks.api.v1.ai_extraction import router as ai_extraction_router
 from saebooks.api.v1.allocations import router as allocations_router
@@ -69,6 +71,7 @@ from saebooks.api.v1.projects import router as projects_router
 from saebooks.api.v1.proration import router as proration_router
 from saebooks.api.v1.purchase_orders import router as purchase_orders_router
 from saebooks.api.v1.email_log import router as email_log_router
+from saebooks.api.v1.webhooks_resend import router as webhooks_resend_router
 from saebooks.api.v1.quotes import router as quotes_router
 from saebooks.api.v1.reconciliation import router as reconciliation_router
 from saebooks.api.v1.recurring_invoices import router as recurring_invoices_router
@@ -135,6 +138,9 @@ router.include_router(leave_router)
 router.include_router(purchase_orders_router)
 router.include_router(quotes_router)
 router.include_router(email_log_router)
+# Resend webhook — unauthenticated (signature-verified instead) so it mounts
+# alongside the other webhook receivers.
+router.include_router(webhooks_resend_router)
 router.include_router(payments_router)
 router.include_router(credit_notes_router)
 router.include_router(projects_router)
@@ -159,6 +165,10 @@ router.include_router(allocations_router)
 router.include_router(attachments_router)
 # Cat-C (W5): admin audit-log + SQL tool (FLAG_SQL_TOOL Pro+).
 router.include_router(admin_router)
+# FLAG_RAW_JSON_INSPECTOR — developer-tier-only raw-row + change_log debug endpoint.
+router.include_router(admin_inspect_router)
+# FLAG_TENANT_SWITCHER — list tenants on the instance for the switcher.
+router.include_router(admin_tenants_router)
 router.include_router(api_tokens_router)
 # Cat-C: multi-step import wizard (bank CSV/OFX community; QBO Pro+)
 router.include_router(imports_router)

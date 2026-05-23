@@ -538,6 +538,7 @@ async def api_update(
     po_id: uuid.UUID,
     actor: str,
     expected_version: int,
+    force: bool = False,
     *,
     contact_id: uuid.UUID | None = None,
     issue_date: date | None = None,
@@ -568,7 +569,7 @@ async def api_update(
         raise PurchaseOrderError(f"PurchaseOrder {po_id} not found")
     if po.version != expected_version:
         raise VersionConflict(po)
-    if po.status in (
+    if not force and po.status in (
         PurchaseOrderStatus.RECEIVED,
         PurchaseOrderStatus.CLOSED,
         PurchaseOrderStatus.CANCELLED,

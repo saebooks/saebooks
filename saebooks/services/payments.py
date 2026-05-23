@@ -1059,6 +1059,7 @@ async def api_update(
     payment_id: uuid.UUID,
     actor: str,
     expected_version: int,
+    force: bool = False,
     *,
     contact_id: uuid.UUID | None = None,
     bank_account_id: uuid.UUID | None = None,

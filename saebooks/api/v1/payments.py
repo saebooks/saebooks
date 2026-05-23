@@ -38,6 +38,7 @@ from saebooks.api.v1.schemas import (
     PaymentUpdate,
 )
 from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
+from saebooks.api.v1.edit_force_gate import edit_force_admin_gate
 from saebooks.models.company import Company
 from saebooks.models.payment import PaymentDirection, PaymentMethod
 from saebooks.services import payments as svc
@@ -249,6 +250,7 @@ async def update_payment(
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    force: bool = Depends(edit_force_admin_gate),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
@@ -283,6 +285,7 @@ async def update_payment(
             payment_id,
             actor=f"api:{bearer[:8]}…",
             expected_version=expected,
+            force=force,
             contact_id=payload.contact_id,
             bank_account_id=payload.bank_account_id,
             payment_date=payload.payment_date,

@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_active_company_id, get_session
 from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
+from saebooks.api.v1.edit_force_gate import edit_force_admin_gate
 from saebooks.api.v1.schemas import (
     ExpenseConflictBody,
     ExpenseCreate,
@@ -212,6 +213,7 @@ async def update_expense(
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    force: bool = Depends(edit_force_admin_gate),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
@@ -232,6 +234,7 @@ async def update_expense(
             expense_id,
             actor=f"api:{bearer[:8]}…",
             expected_version=expected,
+            force=force,
             payment_account_id=payload.payment_account_id,
             contact_id=payload.contact_id,
             expense_date=payload.expense_date,

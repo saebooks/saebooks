@@ -40,6 +40,7 @@ from saebooks.api.v1.schemas import (
     BillUpdate,
 )
 from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
+from saebooks.api.v1.edit_force_gate import edit_force_admin_gate
 from saebooks.models.bill import BillStatus
 from saebooks.services import bills as svc
 from saebooks.services.hard_delete import hard_delete_with_audit
@@ -223,6 +224,7 @@ async def update_bill(
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    force: bool = Depends(edit_force_admin_gate),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
@@ -243,6 +245,7 @@ async def update_bill(
             bill_id,
             actor=f"api:{bearer[:8]}…",
             expected_version=expected,
+            force=force,
             contact_id=payload.contact_id,
             issue_date=payload.issue_date,
             due_date=payload.due_date,

@@ -41,6 +41,7 @@ from saebooks.api.v1.schemas import (
 )
 from saebooks.config import settings
 from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
+from saebooks.api.v1.edit_force_gate import edit_force_admin_gate
 from saebooks.models.invoice import InvoiceStatus
 from saebooks.services import invoices as svc
 from saebooks.services.features import FLAG_STRIPE_INTEGRATION, require_feature
@@ -227,6 +228,7 @@ async def update_invoice(
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    force: bool = Depends(edit_force_admin_gate),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
@@ -248,6 +250,7 @@ async def update_invoice(
             invoice_id,
             actor=f"api:{bearer[:8]}…",
             expected_version=expected,
+            force=force,
             contact_id=payload.contact_id,
             issue_date=payload.issue_date,
             due_date=payload.due_date,

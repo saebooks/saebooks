@@ -23,6 +23,7 @@ from fastapi.responses import JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
+from saebooks.api.v1.edit_force_gate import edit_force_admin_gate
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_active_company_id, get_session
 from saebooks.api.v1.schemas import (
@@ -234,6 +235,7 @@ async def update_time_entry(
     if_match: str | None = Header(default=None, alias="If-Match"),
     session: AsyncSession = Depends(get_session),
     company_id: uuid.UUID = Depends(get_active_company_id),
+    force: bool = Depends(edit_force_admin_gate),
 ) -> JSONResponse:
     entry = await svc.get(session, company_id=company_id, entry_id=entry_id)
     if entry is None:
@@ -250,6 +252,7 @@ async def update_time_entry(
             session,
             entry=entry,
             expected_version=expected_version,
+            force=force,
             **fields,
         )
         await session.commit()

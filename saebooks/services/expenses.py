@@ -720,6 +720,7 @@ async def api_update(
     expense_id: uuid.UUID,
     actor: str,
     expected_version: int,
+    force: bool = False,
     *,
     payment_account_id: uuid.UUID | None = None,
     contact_id: uuid.UUID | None = None,
@@ -735,7 +736,7 @@ async def api_update(
         raise ExpenseError(f"Expense {expense_id} not found")
     if expense.version != expected_version:
         raise VersionConflict(expense)
-    if expense.status != ExpenseStatus.DRAFT:
+    if not force and expense.status != ExpenseStatus.DRAFT:
         raise ExpenseError(
             f"Cannot edit expense {expense.id} in state {expense.status.value}; "
             "void the existing expense and raise a new one instead."

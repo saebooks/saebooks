@@ -60,6 +60,19 @@ async def append(
     placeholder so legacy call sites keep working until they are
     updated.
     """
+    # X-Dev-Skip-Audit short-circuit — see middleware/skip_audit.py.
+    # Returns a no-op ChangeLog-like object the caller can ignore.
+    from saebooks.services.dev_context import skip_audit_active
+    if skip_audit_active():
+        return ChangeLog(
+            tenant_id=tenant_id,
+            entity=entity,
+            entity_id=entity_id,
+            op=op,
+            actor=actor + " [skip-audit]",
+            payload={"note": "skip_audit_active"},
+            version=version,
+        )
     row = ChangeLog(
         tenant_id=tenant_id,
         entity=entity,

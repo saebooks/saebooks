@@ -31,6 +31,7 @@ from saebooks.api.v1.schemas import (
     CreditNoteUpdate,
 )
 from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
+from saebooks.api.v1.edit_force_gate import edit_force_admin_gate
 from saebooks.models.company import Company
 from saebooks.models.credit_note import CreditNoteStatus
 from saebooks.services import credit_notes as svc
@@ -231,6 +232,7 @@ async def update_credit_note(
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    force: bool = Depends(edit_force_admin_gate),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
@@ -251,6 +253,7 @@ async def update_credit_note(
             credit_note_id,
             actor=f"api:{bearer[:8]}…",
             expected_version=expected,
+            force=force,
             contact_id=payload.contact_id,
             issue_date=payload.issue_date,
             lines=lines_data,
