@@ -113,14 +113,41 @@ FLAG_ALLOCATION_RULES = "allocation_rules"
 #   enforce for ATO retention compliance).
 FLAG_HARD_DELETE = "hard_delete"
 
-# FLAG_DEV_TOOLS — exposes developer affordances in the UI: edit-anything
-#   override on frozen-state entities (APPROVED time entries, POSTED
-#   journals, etc.), raw-JSON entity inspectors, internal endpoints.
+# FLAG_DEV_TOOLS — historical umbrella flag, retained for back-compat.
+# Specific dev affordances now sit behind dedicated flags below.
 FLAG_DEV_TOOLS = "dev_tools"
+
+# FLAG_EDIT_FROZEN_STATE — admin can edit/patch entities that are
+# normally read-only because they have reached a frozen workflow state
+# (APPROVED time-entries, POSTED journal entries, PAID/VOIDED invoices,
+# etc.). Bypasses the service-layer _is_editable / state-machine guards
+# via a ``force=True`` kwarg threaded from the API ``?force=true`` gate.
+FLAG_EDIT_FROZEN_STATE = "edit_frozen_state"
+
+# FLAG_RAW_JSON_INSPECTOR — exposes the GET /admin/inspect/{entity}/{id}
+# endpoint and the "View raw" button on every detail page. Returns the
+# unredacted row payload + the most recent change_log rows for the entity.
+FLAG_RAW_JSON_INSPECTOR = "raw_json_inspector"
+
+# FLAG_TENANT_SWITCHER — exposes the active-tenant dropdown in the nav
+# bar (admin only). Lets the operator switch which tenant the session
+# scopes to without re-authenticating.
+FLAG_TENANT_SWITCHER = "tenant_switcher"
+
+# FLAG_SKIP_AUDIT_TRAIL — opt-in per-request via the X-Dev-Skip-Audit
+# header. When the flag is active AND the header is present AND the
+# caller is admin, change_log_svc.append() short-circuits — useful for
+# heavy Claude-driven dev sessions that would otherwise flood the
+# audit log with throwaway updates.
+FLAG_SKIP_AUDIT_TRAIL = "skip_audit_trail"
 
 ALL_FLAGS: tuple[str, ...] = (
     FLAG_HARD_DELETE,
     FLAG_DEV_TOOLS,
+    FLAG_EDIT_FROZEN_STATE,
+    FLAG_RAW_JSON_INSPECTOR,
+    FLAG_TENANT_SWITCHER,
+    FLAG_SKIP_AUDIT_TRAIL,
     FLAG_BANK_FEEDS,
     FLAG_ABR_LOOKUP,
     FLAG_LEI_LOOKUP,
@@ -204,6 +231,10 @@ _ENTERPRISE_FLAGS: frozenset[str] = _PRO_FLAGS | frozenset({
 _DEVELOPER_FLAGS: frozenset[str] = _ENTERPRISE_FLAGS | frozenset({
     FLAG_HARD_DELETE,
     FLAG_DEV_TOOLS,
+    FLAG_EDIT_FROZEN_STATE,
+    FLAG_RAW_JSON_INSPECTOR,
+    FLAG_TENANT_SWITCHER,
+    FLAG_SKIP_AUDIT_TRAIL,
 })
 
 _TIER_FLAGS: dict[str, frozenset[str]] = {
