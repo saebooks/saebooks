@@ -155,6 +155,191 @@ async def get_account(
 
 
 # ---------------------------------------------------------------------------
+# Ledger (per-account GL transactions)
+# ---------------------------------------------------------------------------
+
+
+_CREDIT_NORMAL = frozenset({
+    AccountType.LIABILITY,
+    AccountType.EQUITY,
+    AccountType.INCOME,
+    AccountType.OTHER_INCOME,
+})
+
+
+@router.get("/{account_id}/ledger")
+async def get_account_ledger(
+    account_id: UUID,
+    request: Request,
+    date_from: str | None = Query(default=None, description="ISO date (YYYY-MM-DD)"),
+    date_to: str | None = Query(default=None, description="ISO date (YYYY-MM-DD)"),
+    limit: int = Query(default=200, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_session),
+) -> JSONResponse:
+    """Return posted journal lines for this account with running balance.
+
+    ``opening_balance`` reflects everything before ``date_from`` (zero
+    if no date floor). Running balance follows debit/credit normality
+    (credit-normal: LIABILITY/EQUITY/INCOME accumulates credit-debit;
+    everything else accumulates debit-credit).
+    """
+    from datetime import date as _date
+    from decimal import Decimal
+
+    from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
+
+    def _parse(s: str | None) -> _date | None:
+        if not s:
+            return None
+        try:
+            return _date.fromisoformat(s)
+        except ValueError as exc:
+            raise HTTPException(400, f"Invalid date {s!r}: expected YYYY-MM-DD") from exc
+
+    parsed_from = _parse(date_from)
+    parsed_to = _parse(date_to)
+
+    tenant_id = resolve_tenant_id(request)
+    account = await svc.get(session, account_id, tenant_id=tenant_id)
+    if account is None:
+        raise HTTPException(404, "Account not found")
+
+    credit_normal = account.account_type in _CREDIT_NORMAL
+
+    opening_balance = Decimal("0")
+    if parsed_from:
+        ob_stmt = (
+            select(
+                func.coalesce(func.sum(JournalLine.debit), Decimal("0")).label("tot_dr"),
+                func.coalesce(func.sum(JournalLine.credit), Decimal("0")).label("tot_cr"),
+            )
+            .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+            .where(
+                JournalLine.account_id == account_id,
+                JournalEntry.status == EntryStatus.POSTED,
+                JournalEntry.entry_date < parsed_from,
+            )
+        )
+        ob_row = (await session.execute(ob_stmt)).one()
+        opening_balance = (
+            ob_row.tot_cr - ob_row.tot_dr if credit_normal else ob_row.tot_dr - ob_row.tot_cr
+        )
+
+    # Count for pagination
+    count_stmt = (
+        select(func.count())
+        .select_from(JournalLine)
+        .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+        .where(
+            JournalLine.account_id == account_id,
+            JournalEntry.status == EntryStatus.POSTED,
+        )
+    )
+    if parsed_from:
+        count_stmt = count_stmt.where(JournalEntry.entry_date >= parsed_from)
+    if parsed_to:
+        count_stmt = count_stmt.where(JournalEntry.entry_date <= parsed_to)
+    total = (await session.execute(count_stmt)).scalar_one()
+
+    stmt = (
+        select(JournalLine, JournalEntry)
+        .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+        .where(
+            JournalLine.account_id == account_id,
+            JournalEntry.status == EntryStatus.POSTED,
+        )
+        .order_by(
+            JournalEntry.entry_date.asc(),
+            JournalEntry.id.asc(),
+            JournalLine.line_no.asc(),
+        )
+    )
+    if parsed_from:
+        stmt = stmt.where(JournalEntry.entry_date >= parsed_from)
+    if parsed_to:
+        stmt = stmt.where(JournalEntry.entry_date <= parsed_to)
+    stmt = stmt.limit(limit).offset(offset)
+
+    rows = (await session.execute(stmt)).all()
+
+    # When the page is offset > 0 we need the running balance to start
+    # from the cumulative balance up to (but not including) this page.
+    running = opening_balance
+    if offset > 0:
+        pre_stmt = (
+            select(
+                func.coalesce(func.sum(JournalLine.debit), Decimal("0")).label("tot_dr"),
+                func.coalesce(func.sum(JournalLine.credit), Decimal("0")).label("tot_cr"),
+            )
+            .select_from(JournalLine)
+            .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+            .where(
+                JournalLine.account_id == account_id,
+                JournalEntry.status == EntryStatus.POSTED,
+            )
+        )
+        if parsed_from:
+            pre_stmt = pre_stmt.where(JournalEntry.entry_date >= parsed_from)
+        if parsed_to:
+            pre_stmt = pre_stmt.where(JournalEntry.entry_date <= parsed_to)
+        # Subselect of all line ids in the same order, take the first `offset`.
+        pre_id_stmt = (
+            select(JournalLine.id)
+            .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+            .where(
+                JournalLine.account_id == account_id,
+                JournalEntry.status == EntryStatus.POSTED,
+            )
+            .order_by(
+                JournalEntry.entry_date.asc(),
+                JournalEntry.id.asc(),
+                JournalLine.line_no.asc(),
+            )
+            .limit(offset)
+        )
+        if parsed_from:
+            pre_id_stmt = pre_id_stmt.where(JournalEntry.entry_date >= parsed_from)
+        if parsed_to:
+            pre_id_stmt = pre_id_stmt.where(JournalEntry.entry_date <= parsed_to)
+        pre_stmt = pre_stmt.where(JournalLine.id.in_(pre_id_stmt.subquery().select()))
+        pr = (await session.execute(pre_stmt)).one()
+        running += (pr.tot_cr - pr.tot_dr) if credit_normal else (pr.tot_dr - pr.tot_cr)
+
+    items: list[dict[str, Any]] = []
+    total_debit = Decimal("0")
+    total_credit = Decimal("0")
+    for jl, je in rows:
+        total_debit += jl.debit
+        total_credit += jl.credit
+        if credit_normal:
+            running += jl.credit - jl.debit
+        else:
+            running += jl.debit - jl.credit
+        items.append({
+            "entry_id": str(je.id),
+            "entry_date": je.entry_date.isoformat(),
+            "ref": je.ref,
+            "description": jl.description or je.description or "",
+            "debit": str(jl.debit),
+            "credit": str(jl.credit),
+            "balance": str(running),
+        })
+
+    body = {
+        "items": items,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "opening_balance": str(opening_balance),
+        "total_debit": str(total_debit),
+        "total_credit": str(total_credit),
+        "credit_normal": credit_normal,
+    }
+    return JSONResponse(body)
+
+
+# ---------------------------------------------------------------------------
 # Create
 # ---------------------------------------------------------------------------
 
