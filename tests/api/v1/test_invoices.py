@@ -432,3 +432,54 @@ async def test_invoices_change_log_full_sequence(
     assert [row.op for row in rows] == ["create", "update", "archive"]
     assert [row.version for row in rows] == [1, 2, 3]
     assert rows[0].entity == "invoice"
+
+
+# ---------------------------------------------------------------------------
+# Fix #1 — POSTED invoice mutation lock (Lane 2 P0-1)
+# ---------------------------------------------------------------------------
+
+
+async def test_patch_posted_invoice_returns_422(
+    api_client: AsyncClient, invoice_deps: dict[str, str]
+) -> None:
+    """PATCH on a POSTED invoice must return 422 with invoice_not_draft in body."""
+    # Create
+    r = await api_client.post("/api/v1/invoices", json=_invoice_payload(invoice_deps))
+    assert r.status_code == 201, r.text
+    invoice_id = r.json()["id"]
+    v = r.json()["version"]
+
+    # Post it (transition DRAFT -> POSTED)
+    r2 = await api_client.post(
+        f"/api/v1/invoices/{invoice_id}/post",
+        headers={"If-Match": str(v)},
+    )
+    assert r2.status_code == 200, r2.text
+    posted_v = r2.json()["version"]
+    assert r2.json()["status"] == "POSTED"
+
+    # PATCH a POSTED invoice -- must be rejected
+    r3 = await api_client.patch(
+        f"/api/v1/invoices/{invoice_id}",
+        json={"notes": "illegal mutation"},
+        headers={"If-Match": str(posted_v)},
+    )
+    assert r3.status_code == 422, r3.text
+    assert "invoice_not_draft" in r3.text
+
+
+async def test_patch_draft_invoice_still_works(
+    api_client: AsyncClient, invoice_deps: dict[str, str]
+) -> None:
+    """PATCH on a DRAFT invoice must still succeed (regression guard)."""
+    r = await api_client.post("/api/v1/invoices", json=_invoice_payload(invoice_deps))
+    assert r.status_code == 201
+    invoice_id = r.json()["id"]
+    v = r.json()["version"]
+
+    r2 = await api_client.patch(
+        f"/api/v1/invoices/{invoice_id}",
+        json={"notes": "draft update ok"},
+        headers={"If-Match": str(v)},
+    )
+    assert r2.status_code == 200, r2.text

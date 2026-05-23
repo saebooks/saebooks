@@ -956,6 +956,11 @@ async def api_update(
         raise BillError(f"Bill {bill_id} not found")
     if bill.version != expected_version:
         raise VersionConflict(bill)
+    if bill.status != BillStatus.DRAFT:
+        raise BillError(
+            f"bill_not_draft: cannot edit bill {bill.id} in state "
+            f"{bill.status.value}; void the existing bill and raise a new one instead."
+        )
 
     if contact_id is not None:
         await _validate_contact_tenant(session, contact_id, bill.tenant_id)

@@ -1199,6 +1199,11 @@ async def api_update(
         raise InvoiceError(f"Invoice {invoice_id} not found")
     if inv.version != expected_version:
         raise VersionConflict(inv)
+    if inv.status != InvoiceStatus.DRAFT:
+        raise InvoiceError(
+            f"invoice_not_draft: cannot edit invoice {inv.id} in state "
+            f"{inv.status.value}; void the existing invoice and raise a new one instead."
+        )
 
     if contact_id is not None:
         await _validate_contact_tenant(session, contact_id, inv.tenant_id)

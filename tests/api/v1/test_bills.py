@@ -432,3 +432,54 @@ async def test_bills_change_log_full_sequence(
     assert [row.op for row in rows] == ["create", "update", "archive"]
     assert [row.version for row in rows] == [1, 2, 3]
     assert rows[0].entity == "bill"
+
+
+# ---------------------------------------------------------------------------
+# Fix #1 -- POSTED bill mutation lock (Lane 2 P0-1)
+# ---------------------------------------------------------------------------
+
+
+async def test_patch_posted_bill_returns_422(
+    api_client: AsyncClient, bill_deps: dict[str, str]
+) -> None:
+    """PATCH on a POSTED bill must return 422 with bill_not_draft in body."""
+    # Create
+    r = await api_client.post("/api/v1/bills", json=_bill_payload(bill_deps))
+    assert r.status_code == 201, r.text
+    bill_id = r.json()["id"]
+    v = r.json()["version"]
+
+    # Post it (transition DRAFT -> POSTED)
+    r2 = await api_client.post(
+        f"/api/v1/bills/{bill_id}/post",
+        headers={"If-Match": str(v)},
+    )
+    assert r2.status_code == 200, r2.text
+    posted_v = r2.json()["version"]
+    assert r2.json()["status"] == "POSTED"
+
+    # PATCH a POSTED bill -- must be rejected
+    r3 = await api_client.patch(
+        f"/api/v1/bills/{bill_id}",
+        json={"notes": "illegal mutation"},
+        headers={"If-Match": str(posted_v)},
+    )
+    assert r3.status_code == 422, r3.text
+    assert "bill_not_draft" in r3.text
+
+
+async def test_patch_draft_bill_still_works(
+    api_client: AsyncClient, bill_deps: dict[str, str]
+) -> None:
+    """PATCH on a DRAFT bill must still succeed (regression guard)."""
+    r = await api_client.post("/api/v1/bills", json=_bill_payload(bill_deps))
+    assert r.status_code == 201
+    bill_id = r.json()["id"]
+    v = r.json()["version"]
+
+    r2 = await api_client.patch(
+        f"/api/v1/bills/{bill_id}",
+        json={"notes": "draft update ok"},
+        headers={"If-Match": str(v)},
+    )
+    assert r2.status_code == 200, r2.text
