@@ -143,6 +143,28 @@ async def get_journal_entry(
     return JournalEntryOut.model_validate(entry)
 
 
+@router.get('/{entry_id}/source')
+async def get_journal_entry_source(
+    entry_id: UUID,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, str | None]:
+    """Return the source document linked to this JE, or nulls.
+
+    The five candidate tables (invoices, bills, credit_notes, expenses,
+    payments) each hold a journal_entry_id FK; the first hit (by table
+    priority order) is returned.
+    """
+    tenant_id = resolve_tenant_id(request)
+    entry = await svc.get(session, entry_id, tenant_id=tenant_id)
+    if entry is None:
+        raise HTTPException(404, 'Journal entry not found')
+    src = await svc.get_source_doc(session, entry_id, tenant_id=tenant_id)
+    if src is None:
+        return {'type': None, 'id': None, 'ref': None}
+    return src
+
+
 # ---------------------------------------------------------------------------
 # Create
 # ---------------------------------------------------------------------------

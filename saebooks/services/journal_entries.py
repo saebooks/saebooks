@@ -563,3 +563,61 @@ async def api_reverse(
 
     await session.commit()
     return await _get_with_lines(session, reversal.id)  # type: ignore[return-value]
+
+
+# ---------------------------------------------------------------------------
+# Source-document back-link
+# ---------------------------------------------------------------------------
+
+
+async def get_source_doc(
+    session: AsyncSession,
+    entry_id: Any,
+    *,
+    tenant_id: Any,
+) -> dict[str, Any] | None:
+    """Return the source document that posted this journal entry, or None.
+
+    Five candidate tables hold a journal_entry_id FK pointing at the JE:
+    invoices, bills, credit_notes, expenses, payments. Tenant isolation is
+    enforced by the RLS policy on each table; we also pass tenant_id
+    explicitly so callers without RLS context still get safe results.
+
+    Returns a dict like {'type': 'invoice', 'id': '<uuid>', 'ref': 'INV3901'}
+    or None when no source document is linked.
+    """
+    from sqlalchemy import text
+
+    sql = text(
+        """
+        SELECT type, id, ref FROM (
+            SELECT 'invoice'::text AS type, id, number AS ref, 1 AS prio
+                FROM invoices
+                WHERE journal_entry_id = :eid AND tenant_id = :tid AND archived_at IS NULL
+            UNION ALL
+            SELECT 'bill', id, number, 2
+                FROM bills
+                WHERE journal_entry_id = :eid AND tenant_id = :tid AND archived_at IS NULL
+            UNION ALL
+            SELECT 'credit_note', id, number, 3
+                FROM credit_notes
+                WHERE journal_entry_id = :eid AND tenant_id = :tid AND archived_at IS NULL
+            UNION ALL
+            SELECT 'expense', id, COALESCE(NULLIF(reference, ''), NULLIF(number, ''), id::text), 4
+                FROM expenses
+                WHERE journal_entry_id = :eid AND tenant_id = :tid AND archived_at IS NULL
+            UNION ALL
+            SELECT 'payment', id, COALESCE(NULLIF(reference, ''), NULLIF(number, ''), 'Payment ' || left(id::text, 8)), 5
+                FROM payments
+                WHERE journal_entry_id = :eid AND tenant_id = :tid AND archived_at IS NULL
+        ) src
+        ORDER BY prio
+        LIMIT 1
+        """
+    )
+    row = (
+        await session.execute(sql, {"eid": str(entry_id), "tid": str(tenant_id)})
+    ).first()
+    if row is None:
+        return None
+    return {"type": row.type, "id": str(row.id), "ref": row.ref}
