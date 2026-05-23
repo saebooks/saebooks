@@ -483,3 +483,44 @@ async def test_patch_draft_invoice_still_works(
         headers={"If-Match": str(v)},
     )
     assert r2.status_code == 200, r2.text
+
+
+# ---------------------------------------------------------------------------
+# Fix #4 -- Cross-company contact on invoice create (Lane 1/2 P0-3)
+# ---------------------------------------------------------------------------
+
+
+async def test_invoice_create_rejects_cross_company_contact(
+    api_client: AsyncClient, invoice_deps: dict[str, str]
+) -> None:
+    """POST /invoices with a contact from a different company must return 422."""
+    from saebooks.api.v1.auth import DEFAULT_TENANT_ID
+    from saebooks.db import AsyncSessionLocal
+    from saebooks.models.contact import Contact, ContactType
+    from saebooks.models.company import Company
+    import uuid as _uuid
+
+    # Create a second company + contact in the same tenant but a different company
+    async with AsyncSessionLocal() as session:
+        other_company = Company(
+            tenant_id=DEFAULT_TENANT_ID,
+            name=f"Other Company {_uuid.uuid4().hex[:6]}",
+            base_currency="AUD",
+            fin_year_start_month=7,
+        )
+        session.add(other_company)
+        await session.flush()
+        other_contact = Contact(
+            tenant_id=DEFAULT_TENANT_ID,
+            company_id=other_company.id,
+            name="Cross-Company Contact",
+            contact_type=ContactType.BOTH,
+        )
+        session.add(other_contact)
+        await session.commit()
+        other_contact_id = str(other_contact.id)
+
+    payload = _invoice_payload(invoice_deps, contact_id=other_contact_id)
+    r = await api_client.post("/api/v1/invoices", json=payload)
+    assert r.status_code == 422, r.text
+    assert "contact_company_mismatch" in r.text
