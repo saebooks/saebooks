@@ -379,3 +379,114 @@ async def gst_backdate_preview(
             "invoice_count": invoice_count,
         }
     )
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/companies/{id}/bookkeeping-mode — Round-2 audit fix #10
+#
+# Bidirectional cashbook ↔ full per [[cashbook-upgrade-downgrade-policy]].
+# Picks upgrade or downgrade based on the current and target modes:
+#
+#   current=cashbook + target=full      → upgrade_cashbook_to_full
+#   current=full     + target=cashbook  → downgrade_full_to_cashbook
+#   current==target                     → no-op, returns current state
+#
+# Memory states the policy: this is a first-class feature, not "you
+# cannot go back". The downgrade path enforces the AR=0 invariant so
+# the cashbook UI never has to handle a non-zero AR control.
+# ---------------------------------------------------------------------------
+
+
+from pydantic import BaseModel as _BaseModel
+from pydantic import Field as _Field
+
+
+class BookkeepingModeChange(_BaseModel):
+    """POST body for ``/companies/{id}/bookkeeping-mode``."""
+
+    mode: str = _Field(pattern="^(cashbook|full)$")
+    # Required only when current is 'full' and target is 'cashbook' AND
+    # the company has no pre-existing cashbook_default_bank_account_id.
+    # Ignored on upgrade-to-full.
+    bank_account_id: UUID | None = None
+
+
+class BookkeepingModeOut(_BaseModel):
+    company_id: UUID
+    bookkeeping_mode: str
+    cashbook_default_bank_account_id: UUID | None
+    version: int
+
+
+@router.post(
+    "/{company_id}/bookkeeping-mode",
+    response_model=BookkeepingModeOut,
+)
+async def set_bookkeeping_mode(
+    company_id: UUID,
+    payload: BookkeepingModeChange,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> BookkeepingModeOut:
+    """Flip a company between cashbook and full bookkeeping modes.
+
+    Round-2 audit fix #10. Bidirectional per
+    [[cashbook-upgrade-downgrade-policy]] — *no* "you cannot go back".
+
+    * cashbook → full: lossless (cashbook entries are real journals).
+    * full → cashbook: refused if AR > 0 (schema invariant — list of
+      offending invoices in the error body). Historical journal
+      entries are preserved; the user's cashbook view starts from the
+      flip date.
+    """
+    from saebooks.services import cashbook as cashbook_svc
+
+    tenant_id = resolve_tenant_id(request)
+    existing = await svc.get(session, company_id)
+    if existing is None or existing.archived_at is not None or existing.tenant_id != tenant_id:
+        raise HTTPException(404, "Company not found")
+
+    actor = getattr(request.state, "actor", None) or "api"
+
+    target = payload.mode
+    current = existing.bookkeeping_mode or "full"
+
+    if current == target:
+        # No-op — return current state with a 200 so clients can call
+        # this idempotently.
+        return BookkeepingModeOut(
+            company_id=existing.id,
+            bookkeeping_mode=current,
+            cashbook_default_bank_account_id=existing.cashbook_default_bank_account_id,
+            version=existing.version,
+        )
+
+    try:
+        if target == "full":
+            # cashbook → full
+            company = await cashbook_svc.upgrade_cashbook_to_full(
+                db=session,
+                tenant_id=tenant_id,
+                company_id=company_id,
+                actor=str(actor),
+            )
+        else:
+            # full → cashbook
+            company = await cashbook_svc.downgrade_full_to_cashbook(
+                db=session,
+                tenant_id=tenant_id,
+                company_id=company_id,
+                bank_account_id=payload.bank_account_id,
+                actor=str(actor),
+            )
+    except cashbook_svc.CashbookSetupError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except cashbook_svc.CashbookError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+    return BookkeepingModeOut(
+        company_id=company.id,
+        bookkeeping_mode=company.bookkeeping_mode,
+        cashbook_default_bank_account_id=company.cashbook_default_bank_account_id,
+        version=company.version,
+    )

@@ -708,19 +708,153 @@ async def setup_cashbook_mode(
             "chart of accounts."
         )
 
-    # full → cashbook is only allowed on a fresh company. The design
-    # explicitly rules out "downgrade" mid-life; check for any JE first.
+    # full → cashbook flip: Round-2 audit fix #10 makes this a
+    # first-class downgrade per ``[[cashbook-upgrade-downgrade-policy]]``.
+    # Delegate to downgrade_full_to_cashbook for the AR-balance check
+    # so the policy is enforced consistently regardless of entry point.
+    # (Previously this raised "switching mid-life is not supported".)
     if company.bookkeeping_mode != "cashbook":
-        je_stmt = select(JournalEntry.id).where(
-            JournalEntry.company_id == company_id
-        ).limit(1)
-        existing = (await db.execute(je_stmt)).scalar_one_or_none()
-        if existing is not None:
-            raise CashbookSetupError(
-                "Company already has journal entries — switching to "
-                "cashbook mode mid-life is not supported. Cashbook "
-                "onboarding is for new companies only."
-            )
+        # downgrade does its own commit + flips the mode; pass through
+        # the resolved bank_id so the caller-supplied account is
+        # respected even when an old cashbook_default_bank_account_id
+        # exists from a prior phase.
+        return await downgrade_full_to_cashbook(
+            db=db,
+            tenant_id=tenant_id,
+            company_id=company_id,
+            bank_account_id=bank_id,
+            actor=actor,
+        )
+
+    company.bookkeeping_mode = "cashbook"
+    company.cashbook_default_bank_account_id = bank_id
+    company.version = (company.version or 1) + 1
+    await db.commit()
+    await db.refresh(company)
+    return company
+
+
+async def _ar_outstanding_invoice_ids(
+    db: AsyncSession, company_id: uuid.UUID
+) -> list[tuple[uuid.UUID, str | None, Decimal]]:
+    """Return [(invoice_id, number, balance)] for invoices with
+    non-zero AR balance on this company.
+
+    Used by ``downgrade_full_to_cashbook`` to refuse the mode flip
+    when AR > 0 — the schema invariant (``[[cashbook-upgrade-downgrade-policy]]``)
+    is that no AR balances exist in cashbook mode.
+    """
+    from saebooks.models.invoice import Invoice, InvoiceStatus
+    stmt = (
+        select(Invoice.id, Invoice.number, Invoice.total, Invoice.amount_paid)
+        .where(
+            Invoice.company_id == company_id,
+            Invoice.status == InvoiceStatus.POSTED,
+            Invoice.archived_at.is_(None),
+        )
+    )
+    rows = (await db.execute(stmt)).all()
+    out: list[tuple[uuid.UUID, str | None, Decimal]] = []
+    for inv_id, number, total, paid in rows:
+        balance = Decimal(str(total)) - Decimal(str(paid or "0"))
+        if balance > Decimal("0"):
+            out.append((inv_id, number, balance))
+    return out
+
+
+async def downgrade_full_to_cashbook(
+    *,
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    company_id: uuid.UUID,
+    bank_account_id: uuid.UUID | None = None,
+    actor: str | None = None,
+) -> Company:
+    """Flip ``bookkeeping_mode='full'`` → ``'cashbook'`` (Round-2 audit
+    fix #10 — bidirectional bookkeeping_mode).
+
+    Schema invariant (per ``[[cashbook-upgrade-downgrade-policy]]``):
+    no AR balances + cashbook mode. So this function refuses the flip
+    when any POSTED invoice still has an unpaid balance. The error
+    body lists the offending invoice IDs + numbers so the user can
+    chase them down (or write them off via a credit note + AR clear).
+
+    The journal entries themselves are NOT collapsed. Issue-time
+    Dr AR / Cr Income / Cr GST JEs stay in the ledger, alongside the
+    receipt-time Dr Bank / Cr AR JEs — their NET effect is the same
+    as a cashbook-mode Dr Bank / Cr Income / Cr GST, and the ledger
+    round-trips cleanly per the memory rule "the ledger must round-trip
+    cleanly — if downgrade would drop a journal entry, that's a bug
+    in the strict-subset invariant".
+
+    ``bank_account_id``:
+        Required if the company doesn't already have
+        ``cashbook_default_bank_account_id`` set (i.e. was never in
+        cashbook mode before). If the company has an existing pointer
+        from a prior cashbook phase, that's reused unless this arg
+        overrides it.
+
+    Raises
+    ------
+    CashbookError:
+        Company not found / wrong tenant.
+    CashbookSetupError:
+        AR > 0 (with invoice list in the message);
+        company already in cashbook mode (use ``setup_cashbook_mode``
+        for the idempotent bank-account update);
+        bank_account_id required but not provided.
+    """
+    company_stmt = select(Company).where(
+        Company.id == company_id,
+        Company.tenant_id == tenant_id,
+    )
+    company = (await db.execute(company_stmt)).scalar_one_or_none()
+    if company is None:
+        raise CashbookError(f"Company {company_id} not found in tenant")
+
+    if company.bookkeeping_mode == "cashbook":
+        raise CashbookSetupError(
+            "Company is already in cashbook mode — no downgrade needed."
+        )
+
+    # Schema invariant: no open AR in cashbook mode.
+    outstanding = await _ar_outstanding_invoice_ids(db, company.id)
+    if outstanding:
+        sample = ", ".join(
+            f"{num or 'unnumbered'}={bal}"
+            for _id, num, bal in outstanding[:10]
+        )
+        more = (
+            f" (and {len(outstanding) - 10} more)"
+            if len(outstanding) > 10
+            else ""
+        )
+        raise CashbookSetupError(
+            "Cannot downgrade to cashbook with open AR balances. "
+            f"{len(outstanding)} invoice(s) have an outstanding balance: "
+            f"{sample}{more}. Receive or write off each one (via credit "
+            "note + allocation) before downgrading."
+        )
+
+    # Resolve bank account: caller override → existing pointer → error.
+    target_bank_id = bank_account_id or company.cashbook_default_bank_account_id
+    if target_bank_id is None:
+        raise CashbookSetupError(
+            "Cashbook mode requires a default bank account. Pass "
+            "bank_account_id or call setup_cashbook_mode first."
+        )
+
+    # Verify the bank account belongs to this company.
+    bank_stmt = select(Account.id).where(
+        Account.id == target_bank_id,
+        Account.company_id == company_id,
+    )
+    bank_id = (await db.execute(bank_stmt)).scalar_one_or_none()
+    if bank_id is None:
+        raise CashbookSetupError(
+            f"Bank account {target_bank_id} is not in this company's "
+            "chart of accounts."
+        )
 
     company.bookkeeping_mode = "cashbook"
     company.cashbook_default_bank_account_id = bank_id
@@ -797,5 +931,6 @@ __all__ = [
     "void_cashbook_entry",
     "replace_cashbook_entry",
     "setup_cashbook_mode",
+    "downgrade_full_to_cashbook",
     "upgrade_cashbook_to_full",
 ]

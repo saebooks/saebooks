@@ -25,7 +25,8 @@ Phase C scope (added below)
 ---------------------------
 * ``POST /setup`` — onboarding endpoint: flip a fresh company into
   cashbook mode, pin a default bank account.
-* ``POST /upgrade-to-full`` — one-way migration off cashbook.
+* ``POST /upgrade-to-full`` — migration off cashbook. (Reverse via
+  ``POST /api/v1/companies/{id}/bookkeeping-mode`` since fix #10.)
 
 Out of Phase B / B.5 / C
 ------------------------
@@ -696,10 +697,14 @@ async def upgrade_to_full(
 ) -> CashbookModeOut:
     """Flip the active company from cashbook → full edition.
 
-    One-way: cashbook entries are real journal entries, so the upgrade
-    is purely a UX flag flip. The reverse (full → cashbook) is
-    deliberately unsupported — see ``setup_cashbook`` and the design
-    doc §8.
+    Cashbook entries are real journal entries, so the upgrade is
+    purely a UX flag flip — no data migration runs.
+
+    Round-2 audit fix #10: the reverse direction (full → cashbook)
+    *is* supported now via
+    ``POST /api/v1/companies/{id}/bookkeeping-mode`` per
+    ``[[cashbook-upgrade-downgrade-policy]]``. Downgrade refuses
+    when AR > 0 and lists the offending invoices.
 
     Returns 409 if the company is already in 'full' mode.
     """

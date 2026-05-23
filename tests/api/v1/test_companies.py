@@ -401,3 +401,133 @@ async def test_gst_backdate_preview_too_far_past_rejected(api_client: AsyncClien
         params={"effective_date": five_years_ago},
     )
     assert r.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Round-2 audit fix #10: POST /companies/{id}/bookkeeping-mode
+# Bidirectional cashbook <-> full per [[cashbook-upgrade-downgrade-policy]].
+# ---------------------------------------------------------------------------
+
+
+async def test_set_bookkeeping_mode_idempotent_when_already_target(
+    api_client: AsyncClient,
+) -> None:
+    """current == target → 200 + current state unchanged."""
+    company_id, _version = await _get_seed_company()
+    # Seed company starts in 'full'. Pinging 'full' is a no-op.
+    r = await api_client.post(
+        f"/api/v1/companies/{company_id}/bookkeeping-mode",
+        json={"mode": "full"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["bookkeeping_mode"] == "full"
+    assert str(body["company_id"]) == company_id
+
+
+async def test_set_bookkeeping_mode_downgrade_refused_with_ar(
+    api_client: AsyncClient,
+) -> None:
+    """A full-mode company with open AR cannot downgrade — error
+    must list offending invoices."""
+    from datetime import date as _date
+    from decimal import Decimal as _Dec
+    from sqlalchemy import select
+
+    from saebooks.models.account import Account, AccountType
+    from saebooks.models.contact import Contact, ContactType
+    from saebooks.models.tax_code import TaxCode
+    from saebooks.services import invoices as inv_svc
+
+    company_id, _version = await _get_seed_company()
+
+    # Create a posted invoice with amount_paid = 0 → open AR balance.
+    async with AsyncSessionLocal() as session:
+        income = (
+            await session.execute(
+                select(Account).where(
+                    Account.company_id == uuid.UUID(company_id),
+                    Account.account_type == AccountType.INCOME,
+                    Account.is_header.is_(False),
+                )
+            )
+        ).scalars().first()
+        gst = (
+            await session.execute(
+                select(TaxCode).where(
+                    TaxCode.company_id == uuid.UUID(company_id),
+                    TaxCode.code == "GST",
+                )
+            )
+        ).scalar_one()
+        existing = (
+            await session.execute(
+                select(Contact).where(
+                    Contact.company_id == uuid.UUID(company_id),
+                    Contact.name == "Test Downgrade Co",
+                )
+            )
+        ).scalars().first()
+        if existing is None:
+            contact = Contact(
+                company_id=uuid.UUID(company_id),
+                name="Test Downgrade Co",
+                contact_type=ContactType.CUSTOMER,
+            )
+            session.add(contact)
+            await session.commit()
+            await session.refresh(contact)
+        else:
+            contact = existing
+
+        bank = (
+            await session.execute(
+                select(Account).where(
+                    Account.company_id == uuid.UUID(company_id),
+                    Account.code == "1-1110",
+                )
+            )
+        ).scalar_one()
+
+        inv = await inv_svc.create_draft(
+            session,
+            company_id=uuid.UUID(company_id),
+            contact_id=contact.id,
+            issue_date=_date(2026, 6, 1),
+            due_date=_date(2026, 6, 30),
+            lines=[
+                {
+                    "description": "Open AR test",
+                    "account_id": income.id,
+                    "tax_code_id": gst.id,
+                    "quantity": _Dec("1"),
+                    "unit_price": _Dec("200.00"),
+                    "discount_pct": _Dec("0"),
+                }
+            ],
+        )
+    async with AsyncSessionLocal() as session:
+        await inv_svc.post_invoice(session, inv.id, posted_by="test")
+
+    r = await api_client.post(
+        f"/api/v1/companies/{company_id}/bookkeeping-mode",
+        json={"mode": "cashbook", "bank_account_id": str(bank.id)},
+    )
+    assert r.status_code == 422, r.text
+    body = r.json()
+    detail = body.get("detail") or body.get("message") or str(body)
+    assert "open AR" in detail or "outstanding" in detail, (
+        f"Expected an AR-balance error, got: {detail}"
+    )
+
+
+async def test_set_bookkeeping_mode_rejects_unknown_mode(
+    api_client: AsyncClient,
+) -> None:
+    """POST with mode='banana' is rejected by pydantic pattern."""
+    company_id, _ = await _get_seed_company()
+    r = await api_client.post(
+        f"/api/v1/companies/{company_id}/bookkeeping-mode",
+        json={"mode": "banana"},
+    )
+    assert r.status_code in (422, 400), r.text
