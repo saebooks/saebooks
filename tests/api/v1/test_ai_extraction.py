@@ -29,7 +29,10 @@ from saebooks.main import app
 # Fixtures                                                                #
 # ---------------------------------------------------------------------- #
 
-_LITELLM_URL = "https://litellm.sauer.com.au/v1/chat/completions"
+# Read from settings so the mock matches whatever LITELLM_BASE_URL is
+# configured in the test environment (default: https://api.openai.com/v1).
+from saebooks.config import settings as _ai_settings  # noqa: E402
+_LITELLM_URL = _ai_settings.litellm_base_url.rstrip("/") + "/chat/completions"
 
 
 @pytest.fixture
