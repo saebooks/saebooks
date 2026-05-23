@@ -165,6 +165,7 @@ async def create_bank_account(
             actor=f"api:{bearer[:8]}…",
             code=payload.code,
             name=payload.name,
+            account_kind=payload.account_kind,
             bsb=payload.bsb,
             bank_account_number=payload.bank_account_number,
             bank_account_title=payload.bank_account_title,

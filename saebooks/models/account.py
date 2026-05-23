@@ -82,6 +82,32 @@ class Account(CompanyScoped, Base):
     bank_abbreviation: Mapped[str | None] = mapped_column(
         String(3), comment="3-letter ABA bank code — CBA, ANZ, NAB, WBC, …"
     )
+    # account_kind classifies bank-side accounts so credit cards,
+    # loans, and cash all appear in the /bank-accounts list and on
+    # the dashboard. NULL for non-bank ledger accounts.
+    #
+    # Backed by the Postgres enum type ``account_kind_enum`` (created
+    # by an earlier deploy on 2026-05-20 and re-asserted by alembic
+    # 0119 idempotently). ``create_type=False`` tells SQLAlchemy not
+    # to try to CREATE TYPE on metadata.create_all() — the type
+    # already exists; we just need the SELECT/WHERE/INSERT bind
+    # parameters to typecast to the enum so Postgres doesn't reject
+    # them with ``operator does not exist: account_kind_enum = varchar``.
+    account_kind: Mapped[str | None] = mapped_column(
+        Enum(
+            "BANK_CHECKING",
+            "BANK_SAVINGS",
+            "CREDIT_CARD",
+            "BANK_LOAN",
+            "CASH",
+            "OTHER",
+            name="account_kind_enum",
+            create_type=False,
+            native_enum=True,
+        ),
+        nullable=True,
+        comment="One of BANK_CHECKING / BANK_SAVINGS / CREDIT_CARD / BANK_LOAN / CASH / OTHER",
+    )
     extra: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # Optimistic-locking version — bumped on every write through the API.
     # Jinja routes that call the service layer without expected_version skip

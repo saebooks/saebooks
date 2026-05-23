@@ -1,11 +1,15 @@
-"""Bank-account service — view over ``accounts`` where ``bsb IS NOT NULL``.
+"""Bank-account service — view over ``accounts`` whose ``account_kind`` is bank-side.
 
 Design (a): bank accounts are not a separate table.  They are ``Account``
-rows with ``account_type=ASSET`` and a non-null ``bsb`` field.  This
-service provides API-oriented CRUD that delegates most logic to
-``saebooks.services.accounts`` while enforcing the bank-account
-invariant (bsb must be present on create, and the account_type is
-fixed to ASSET).
+rows whose ``account_kind`` is one of BANK_CHECKING / BANK_SAVINGS /
+CREDIT_CARD / BANK_LOAN / CASH.  ``account_type`` is derived from the
+kind: ASSET for BANK_* and CASH (debit-normal), LIABILITY for
+CREDIT_CARD and BANK_LOAN (credit-normal).
+
+Pre-0119 this service filtered on ``bsb IS NOT NULL``, which silently
+excluded credit cards (no BSB), loans, and pure-cash accounts.  After
+0119, ``account_kind`` is the canonical bank-side signal and BSB is
+optional (only banks have one).
 
 Optimistic locking, change_log, and tenant scoping follow the same
 conventions as every other API-tier service.
@@ -25,6 +29,25 @@ from saebooks.services import change_log as change_log_svc
 
 _DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
+# Allowlist of account_kind values that classify an Account row as bank-side.
+_BANK_KINDS: tuple[str, ...] = (
+    "BANK_CHECKING",
+    "BANK_SAVINGS",
+    "CREDIT_CARD",
+    "BANK_LOAN",
+    "CASH",
+)
+
+# Kinds whose natural account_type is LIABILITY (credit-normal); all
+# other bank kinds default to ASSET (debit-normal).
+_LIABILITY_KINDS: frozenset[str] = frozenset({"CREDIT_CARD", "BANK_LOAN"})
+
+
+def _kind_to_account_type(kind: str) -> AccountType:
+    """Map account_kind → AccountType (debit/credit-normal classification)."""
+    return AccountType.LIABILITY if kind in _LIABILITY_KINDS else AccountType.ASSET
+
+
 # Columns written to change_log.payload for bank-account operations.
 _BA_COLUMNS: tuple[str, ...] = (
     "id",
@@ -33,6 +56,7 @@ _BA_COLUMNS: tuple[str, ...] = (
     "code",
     "name",
     "account_type",
+    "account_kind",
     "bsb",
     "bank_account_number",
     "bank_account_title",
@@ -71,8 +95,8 @@ class VersionConflict(Exception):
 
 
 def _is_bank_account(account: Account) -> bool:
-    """True if this account has been configured as a bank account."""
-    return account.bsb is not None
+    """True if this account has been classified as a bank-side account."""
+    return account.account_kind in _BANK_KINDS
 
 
 def _serialise(account: Account) -> dict[str, Any]:
@@ -95,7 +119,7 @@ def _bank_account_filter(company_id: uuid.UUID):
     return [
         Account.company_id == company_id,
         Account.archived_at.is_(None),
-        Account.bsb.isnot(None),
+        Account.account_kind.in_(_BANK_KINDS),
     ]
 
 
@@ -168,14 +192,31 @@ async def api_create(
     *,
     code: str,
     name: str,
-    bsb: str,
+    account_kind: str = "BANK_CHECKING",
+    bsb: str | None = None,
     bank_account_number: str | None = None,
     bank_account_title: str | None = None,
     apca_user_id: str | None = None,
     bank_abbreviation: str | None = None,
     is_trust_account: bool = False,
 ) -> Account:
-    """Create a new bank-account row (account_type=ASSET, bsb required)."""
+    """Create a new bank-side account row.
+
+    ``account_kind`` controls both the classification and the derived
+    ``account_type`` (LIABILITY for CREDIT_CARD/BANK_LOAN, ASSET for the
+    rest).  ``bsb`` is required for BANK_CHECKING / BANK_SAVINGS — every
+    other kind treats it as optional.
+    """
+    if account_kind not in _BANK_KINDS:
+        raise BankAccountError(
+            f"Invalid account_kind '{account_kind}'. "
+            f"Must be one of: {', '.join(_BANK_KINDS)}"
+        )
+    if account_kind in ("BANK_CHECKING", "BANK_SAVINGS") and not bsb:
+        raise BankAccountError(
+            f"BSB is required when account_kind is {account_kind}"
+        )
+
     # Import here to avoid circular imports at module level
     from saebooks.services import accounts as accounts_svc
 
@@ -184,7 +225,7 @@ async def api_create(
         company_id,
         code=code,
         name=name,
-        account_type=AccountType.ASSET,
+        account_type=_kind_to_account_type(account_kind),
         reconcile=True,
         is_trust_account=is_trust_account,
         tenant_id=tenant_id,
@@ -192,6 +233,7 @@ async def api_create(
         skip_validation=True,
     )
     # Patch the bank-specific fields the accounts.create() doesn't expose
+    account.account_kind = account_kind
     account.bsb = bsb
     account.bank_account_number = bank_account_number
     account.bank_account_title = bank_account_title
@@ -225,6 +267,7 @@ async def api_update(
     *,
     code: str | None = None,
     name: str | None = None,
+    account_kind: str | None = None,
     bsb: str | None = None,
     bank_account_number: str | None = None,
     bank_account_title: str | None = None,
@@ -243,6 +286,15 @@ async def api_update(
         account.code = code.strip()
     if name is not None:
         account.name = name.strip()
+    if account_kind is not None:
+        if account_kind not in _BANK_KINDS:
+            raise BankAccountError(
+                f"Invalid account_kind '{account_kind}'. "
+                f"Must be one of: {', '.join(_BANK_KINDS)}"
+            )
+        account.account_kind = account_kind
+        # Keep account_type aligned with the kind's debit/credit normality.
+        account.account_type = _kind_to_account_type(account_kind)
     if bsb is not None:
         account.bsb = bsb
     if bank_account_number is not None:
