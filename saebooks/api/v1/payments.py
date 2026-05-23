@@ -25,11 +25,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
-from saebooks.api.v1.deps import get_session
+from saebooks.api.v1.deps import get_active_company_id, get_session
 from saebooks.api.v1.schemas import (
     PaymentConflictBody,
     PaymentCreate,
@@ -39,7 +38,6 @@ from saebooks.api.v1.schemas import (
 )
 from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.api.v1.edit_force_gate import edit_force_admin_gate
-from saebooks.models.company import Company
 from saebooks.models.payment import PaymentDirection, PaymentMethod
 from saebooks.services import payments as svc
 from saebooks.services.hard_delete import hard_delete_with_audit
@@ -55,22 +53,6 @@ router = APIRouter(
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
-
-
-async def _first_company_id(session: AsyncSession, tenant_id: UUID) -> UUID:
-    """Return the first active company for the request tenant."""
-    result = await session.execute(
-        select(Company)
-        .where(
-            Company.tenant_id == tenant_id,
-            Company.archived_at.is_(None),
-        )
-        .order_by(Company.created_at)
-    )
-    company = result.scalars().first()
-    if company is None:
-        raise HTTPException(404, "No active company for tenant")
-    return company.id
 
 
 def _parse_if_match(header: str | None) -> int | None:
@@ -109,6 +91,7 @@ async def list_payments(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> PaymentListOut:
     offset = (page - 1) * page_size
     direction_enum: PaymentDirection | None = None
@@ -119,7 +102,6 @@ async def list_payments(
             raise HTTPException(400, f"Invalid direction '{direction}'") from exc
 
     tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
     payments, total = await svc.list_active(
         session,
         company_id,
@@ -169,6 +151,7 @@ async def create_payment(
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
     key = _parse_idempotency_key(idempotency_key)
@@ -194,7 +177,6 @@ async def create_payment(
                 status_code=claim.response_status or 201,
             )
 
-    company_id = await _first_company_id(session, tenant_id)
     try:
         direction_enum = PaymentDirection(payload.direction.upper())
     except ValueError as exc:

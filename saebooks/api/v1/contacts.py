@@ -16,8 +16,9 @@ This router is the leak's epicentre and the first to migrate to the
 shared ``get_session`` dep — see ``saebooks.api.v1.deps``. Behaviour
 changes:
 
-* ``_first_company_id`` now scopes by the request tenant, not "the
-  oldest active company in the entire DB".
+* The active company is resolved by the shared ``get_active_company_id``
+  dep — callers may pin a specific company via ``X-Company-Id``;
+  otherwise the first active company for the tenant is used.
 * ``get_contact`` now passes the request tenant to ``svc.get`` so a
   detail lookup for a foreign-tenant UUID returns 404 even if the
   caller knows the UUID.
@@ -46,7 +47,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
-from saebooks.api.v1.deps import get_session
+from saebooks.api.v1.deps import get_active_company_id, get_session
 from saebooks.api.v1.schemas import (
     ConflictBody,
     ContactCreate,
@@ -56,7 +57,6 @@ from saebooks.api.v1.schemas import (
     OneOffBulkTagRequest,
 )
 from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
-from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
 from saebooks.services import contacts as svc
 from saebooks.services.hard_delete import hard_delete_with_audit
@@ -72,28 +72,6 @@ router = APIRouter(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-async def _first_company_id(session: AsyncSession, tenant_id: UUID) -> UUID:
-    """Resolve the active company for the request tenant.
-
-    Pre-fix this took no tenant input and returned the oldest active
-    company in the entire DB — leaking every authenticated request
-    into Default Company. Now scoped by ``tenant_id``: returns the
-    oldest active company that belongs to the caller's tenant.
-    """
-    result = await session.execute(
-        select(Company)
-        .where(
-            Company.tenant_id == tenant_id,
-            Company.archived_at.is_(None),
-        )
-        .order_by(Company.created_at)
-    )
-    company = result.scalars().first()
-    if company is None:
-        raise HTTPException(404, "No active company for tenant")
-    return company.id
 
 
 def _parse_if_match(header: str | None) -> int | None:
@@ -126,15 +104,13 @@ def _dump(contact: Contact) -> dict[str, Any]:
 
 @router.get("", response_model=ContactListOut)
 async def list_contacts(
-    request: Request,
     contact_type: ContactType | None = Query(default=None, alias="type"),  # noqa: B008
     search: str | None = Query(default=None, alias="q"),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> ContactListOut:
-    tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
     # Count (matches filter minus limit/offset).
     count_stmt = (
         select(func.count())
@@ -199,6 +175,7 @@ async def create_contact(
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
     key = _parse_idempotency_key(idempotency_key)
@@ -225,7 +202,6 @@ async def create_contact(
             )
         # CLAIMED — fall through to write
 
-    company_id = await _first_company_id(session, tenant_id)
     try:
         contact = await svc.create(
             session,
