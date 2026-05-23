@@ -1075,3 +1075,85 @@ async def test_fitc4_period_lock_gate_and_override(
         assert r_post_after.status_code == 200, (
             f"FITC-4: post after lock boundary must succeed, got {r_post_after.status_code}: {r_post_after.text}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Fix #11 — /source endpoint graceful when expenses table absent
+# Fix #26 — JE lines have account_code and account_name populated
+# Fix #27 — JE get-by-id returns source_type/source_id for invoice-derived JE
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_je_lines_have_account_code_and_name(
+    api_client: AsyncClient, account_ids: dict[str, str]
+) -> None:
+    """#26 — GET /journal_entries/{id} must return non-null account_code and
+    account_name on every line.
+
+    Before the fix, the account relationship was not eager-loaded and
+    JournalLineOut did not include those fields; both came back as null.
+    """
+    r = await api_client.post("/api/v1/journal_entries", json=_entry_payload(account_ids))
+    assert r.status_code == 201, r.text
+    entry_id = r.json()["id"]
+
+    r2 = await api_client.get(f"/api/v1/journal_entries/{entry_id}")
+    assert r2.status_code == 200, r2.text
+    body = r2.json()
+    assert "lines" in body
+    assert len(body["lines"]) > 0, "JE must have at least one line"
+    for line in body["lines"]:
+        assert line.get("account_code") is not None, (
+            f"line {line['line_no']}: account_code is null — fix #26 regression"
+        )
+        assert line.get("account_name") is not None, (
+            f"line {line['line_no']}: account_name is null — fix #26 regression"
+        )
+
+
+@pytest.mark.asyncio
+async def test_je_source_endpoint_returns_200_for_je_without_source(
+    api_client: AsyncClient, account_ids: dict[str, str]
+) -> None:
+    """#11 — GET /journal_entries/{id}/source must return 200 (not 500) even
+    when the expenses table does not exist in the test DB.
+
+    The test DB is a fresh schema; expenses is an undeployed module. Before
+    the fix, get_source_doc() raised UndefinedTableError on every call.
+    """
+    r = await api_client.post("/api/v1/journal_entries", json=_entry_payload(account_ids))
+    assert r.status_code == 201, r.text
+    entry_id = r.json()["id"]
+
+    r2 = await api_client.get(f"/api/v1/journal_entries/{entry_id}/source")
+    assert r2.status_code == 200, (
+        f"/source returned {r2.status_code} — fix #11 regression: {r2.text}"
+    )
+    body = r2.json()
+    # A manually-created JE has no source document — nulls are correct here.
+    assert "type" in body
+    assert "id" in body
+
+
+@pytest.mark.asyncio
+async def test_je_get_by_id_has_source_fields(
+    api_client: AsyncClient, account_ids: dict[str, str]
+) -> None:
+    """#27 — GET /journal_entries/{id} must include source_type and source_id
+    fields in the response (even if both are null for a manually-created JE).
+
+    This asserts the fields exist on the schema; a separate integration test
+    (requiring invoice fixtures) would assert non-null values for an
+    invoice-derived JE.
+    """
+    r = await api_client.post("/api/v1/journal_entries", json=_entry_payload(account_ids))
+    assert r.status_code == 201, r.text
+    entry_id = r.json()["id"]
+
+    r2 = await api_client.get(f"/api/v1/journal_entries/{entry_id}")
+    assert r2.status_code == 200, r2.text
+    body = r2.json()
+    # Fields must exist in the response (null is correct for a direct JE).
+    assert "source_type" in body, "#27: source_type missing from JE response"
+    assert "source_id" in body, "#27: source_id missing from JE response"
