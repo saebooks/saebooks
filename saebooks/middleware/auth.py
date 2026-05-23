@@ -82,6 +82,13 @@ OPEN_PATH_PREFIXES: tuple[str, ...] = (
     # (``saebooks.api.v1.auth.require_bearer``); doesn't need this
     # middleware to run on every JSON call.
     "/api/",
+    # MCP transport — the Streamable-HTTP MCP server mounted at /mcp
+    # carries its own ``Authorization: Bearer saebk_*`` header that is
+    # forwarded by the tools to the loopback REST API, where
+    # ``require_bearer`` resolves it. Skipping here avoids
+    # ForwardAuthMiddleware rejecting these requests for not carrying
+    # a session JWT.
+    "/mcp",
 )
 
 

@@ -13,7 +13,7 @@ name: saebooks-mcp-community
 
 services:
   mcp:
-    image: saebooks-mcp:0.1
+    image: saebooks-mcp:0.3
     container_name: saebooks-mcp-community
     restart: unless-stopped
     ports:

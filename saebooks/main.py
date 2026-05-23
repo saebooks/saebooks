@@ -80,7 +80,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Port env vars: SAEBOOKS_REST_PORT (default 8042), SAEBOOKS_GRPC_PORT (default 50051).
     grpc_port = int(os.getenv("SAEBOOKS_GRPC_PORT", "50051"))
     grpc_server = await grpc_serve(grpc_port)
-    yield
+
+    # MCP streamable-HTTP session manager — must run inside an async
+    # context so its anyio task group is initialised. Without this the
+    # mounted /mcp endpoint 500s with "Task group is not initialized."
+    # Only enter the context when the mount is enabled, so the dep
+    # never fires on stripped-down deployments.
+    if os.getenv("SAEBOOKS_MCP_ENABLED", "1") == "1":
+        try:
+            from saebooks.mcp.server import mcp as _mcp
+            async with _mcp.session_manager.run():
+                yield
+        except Exception as exc:  # pragma: no cover — fall back to non-MCP
+            logger.warning("MCP session manager unavailable: %s", exc)
+            yield
+    else:
+        yield
     await grpc_server.stop(grace=5)
 
 
@@ -158,6 +173,25 @@ def create_app() -> FastAPI:
     app.include_router(api_v1_router)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+    # Native MCP endpoint at /mcp — every SAE Books instance speaks
+    # the Model Context Protocol so Claude / ChatGPT / n8n can drive
+    # the ledger without a separate container. Auth is the same
+    # ``saebk_*`` Bearer used by the REST API (issued at
+    # ``/admin/api-tokens``). Tool calls loop back to the local REST
+    # listener so ``require_bearer`` resolves the token, hydrates
+    # user + tenant_id, and binds RLS on the session. See
+    # ``saebooks/mcp/server.py`` for the 145-tool registry.
+    #
+    # ForwardAuthMiddleware skips /mcp (see OPEN_PATH_PREFIXES) so the
+    # MCP transport's Authorization header isn't double-handled.
+    if os.getenv("SAEBOOKS_MCP_ENABLED", "1") == "1":
+        try:
+            from saebooks.mcp.server import streamable_http_asgi_app
+            app.mount("/mcp", streamable_http_asgi_app())
+            logger.info("MCP endpoint mounted at /mcp")
+        except Exception as exc:  # pragma: no cover — don't crash boot
+            logger.warning("MCP endpoint unavailable: %s", exc)
+
     # Override the OpenAPI schema generator to strip /admin/* paths from
     # the published spec.  The routes still exist and are enforced by
     # require_staff() / require_role() — they just don't advertise
@@ -169,7 +203,11 @@ def create_app() -> FastAPI:
         schema["paths"] = {
             path: item
             for path, item in schema.get("paths", {}).items()
-            if not (path.startswith("/admin/") or path.startswith("/api/v1/admin/"))
+            if not (
+                path.startswith("/admin/")
+                or path.startswith("/api/v1/admin/")
+                or path.startswith("/mcp")
+            )
         }
         return schema
 

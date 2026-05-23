@@ -3,8 +3,12 @@ name: saebooks-mcp
 services:
   mcp:
     build:
-      context: /home/sauer/projects/saebooks/mcp
-    image: saebooks-mcp:0.1
+      # Build context is the repo root because the standalone MCP
+      # now installs the saebooks package (one source of truth with
+      # the in-tree mount at /mcp). Dockerfile sits in mcp/.
+      context: /home/sauer/projects/saebooks
+      dockerfile: mcp/Dockerfile
+    image: saebooks-mcp:0.3
     container_name: saebooks-mcp
     restart: unless-stopped
     ports:
