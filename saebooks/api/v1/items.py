@@ -6,7 +6,9 @@ Phase 1 tier-2 entity. Follows the tax_codes / accounts pattern:
 * Optimistic locking via ``If-Match: <version>`` on update/delete.
 * Every write appends a row to ``change_log`` (handled by the service layer).
 * Jinja ``/items`` routes remain untouched — same service layer.
-* Item is CompanyScoped — uses ``_first_company_id`` helper.
+* Item is CompanyScoped — list/create resolve company via the shared
+  ``get_active_company_id`` dep (honours ``X-Company-Id``; falls back
+  to first active company for tenant).
 * Extra endpoint: ``GET /api/v1/items/{id}/stock`` — returns stock levels
   for inventory-type items; 404 for service-type items.
 """
@@ -23,7 +25,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
-from saebooks.api.v1.deps import get_session
+from saebooks.api.v1.deps import get_active_company_id, get_session
 from saebooks.api.v1.schemas import (
     ItemConflictBody,
     ItemCreate,
@@ -33,7 +35,6 @@ from saebooks.api.v1.schemas import (
     StockOut,
 )
 from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
-from saebooks.models.company import Company
 from saebooks.models.item import Item, ItemType
 from saebooks.services import items as svc
 from saebooks.services.hard_delete import hard_delete_with_audit
@@ -48,22 +49,6 @@ router = APIRouter(
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
-
-
-async def _first_company_id(session: AsyncSession, tenant_id: UUID) -> UUID:
-    """Return the first active company for the request tenant."""
-    result = await session.execute(
-        select(Company)
-        .where(
-            Company.tenant_id == tenant_id,
-            Company.archived_at.is_(None),
-        )
-        .order_by(Company.created_at)
-    )
-    company = result.scalars().first()
-    if company is None:
-        raise HTTPException(404, "No active company for tenant")
-    return company.id
 
 
 def _parse_if_match(header: str | None) -> int | None:
@@ -87,14 +72,12 @@ def _dump(item: Item) -> dict[str, Any]:
 
 @router.get("", response_model=ItemListOut)
 async def list_items(
-    request: Request,
     item_type: str | None = Query(default=None),
     limit: int = Query(default=200, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> ItemListOut:
-    tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
     count_stmt = (
         select(func.count())
         .select_from(Item)
@@ -151,9 +134,9 @@ async def create_item(
     payload: ItemCreate,
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
     try:
         item = await svc.create_for_api(
             session,

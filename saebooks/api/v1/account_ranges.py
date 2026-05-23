@@ -19,12 +19,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
-from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
-from saebooks.api.v1.deps import get_session
+from saebooks.api.v1.auth import require_bearer
+from saebooks.api.v1.deps import get_active_company_id, get_session
 from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.api.v1.schemas import (
@@ -36,7 +35,6 @@ from saebooks.api.v1.schemas import (
     PrefixModeUpdate,
 )
 from saebooks.models.account_range import AccountRange
-from saebooks.models.company import Company
 from saebooks.services import accounts as account_svc
 from saebooks.services import settings as settings_svc
 
@@ -50,22 +48,6 @@ router = APIRouter(
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
-
-
-async def _first_company_id(session: AsyncSession, tenant_id: UUID) -> UUID:
-    """Return the first active company for the request tenant."""
-    result = await session.execute(
-        select(Company)
-        .where(
-            Company.tenant_id == tenant_id,
-            Company.archived_at.is_(None),
-        )
-        .order_by(Company.created_at)
-    )
-    company = result.scalars().first()
-    if company is None:
-        raise HTTPException(404, "No active company for tenant")
-    return company.id
 
 
 def _dump(rng: AccountRange) -> dict[str, Any]:
@@ -117,11 +99,9 @@ async def update_prefix_mode(
 
 @router.get("", response_model=AccountRangeListOut)
 async def list_account_ranges(
-    request: Request,
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> AccountRangeListOut:
-    tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
     ranges = await account_svc.get_ranges(session, company_id)
 
     return AccountRangeListOut(
@@ -137,13 +117,11 @@ async def list_account_ranges(
 
 @router.post("", response_model=AccountRangeOut, status_code=201)
 async def create_account_range(
-    request: Request,
     payload: AccountRangeCreate,
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
-    tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
     try:
         rng = await account_svc.create_range(
             session,
@@ -169,15 +147,12 @@ async def create_account_range(
 
 @router.patch("/{range_id}", response_model=AccountRangeOut)
 async def update_account_range(
-    request: Request,
     range_id: UUID,
     payload: AccountRangeUpdate,
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
-    tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
-
     rng = await session.get(AccountRange, range_id)
     if rng is None or rng.company_id != company_id:
         raise HTTPException(404, "Account range not found")
@@ -209,10 +184,8 @@ async def delete_account_range(
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
     hard: bool = Depends(hard_delete_admin_gate),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
-    tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
-
     rng = await session.get(AccountRange, range_id)
     if rng is None or rng.company_id != company_id:
         raise HTTPException(404, "Account range not found")
