@@ -13,9 +13,11 @@ P0 cross-tenant leak fix
 All handlers now share a single ``Depends(get_session)`` session per
 request. ``app.current_tenant`` is bound at the connection level by
 ``get_session``; all queries within the request are gated by the
-``tenant_isolation`` RLS policy from migration 0055.
-``_first_company_id`` is scoped by the request tenant. Existence
-checks pass ``tenant_id`` to ``svc.api_get`` so a foreign-tenant UUID
+``tenant_isolation`` RLS policy from migration 0055. The active
+company is resolved by the shared ``get_active_company_id`` dep —
+callers may pin a specific company via ``X-Company-Id``; otherwise
+the first active company for the tenant is used. Existence checks
+pass ``tenant_id`` to ``svc.api_get`` so a foreign-tenant UUID
 returns 404 even if the caller knows the id.
 """
 from __future__ import annotations

@@ -20,11 +20,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
-from saebooks.api.v1.deps import get_session
+from saebooks.api.v1.deps import get_active_company_id, get_session
 from saebooks.api.v1.schemas import (
     ProjectConflictBody,
     ProjectCreate,
@@ -33,7 +32,6 @@ from saebooks.api.v1.schemas import (
     ProjectUpdate,
 )
 from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
-from saebooks.models.company import Company
 from saebooks.services import projects as svc
 from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
@@ -48,22 +46,6 @@ router = APIRouter(
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
-
-
-async def _first_company_id(session: AsyncSession, tenant_id: UUID) -> UUID:
-    """Return the first active company for the request tenant."""
-    result = await session.execute(
-        select(Company)
-        .where(
-            Company.tenant_id == tenant_id,
-            Company.archived_at.is_(None),
-        )
-        .order_by(Company.created_at)
-    )
-    company = result.scalars().first()
-    if company is None:
-        raise HTTPException(404, "No active company for tenant")
-    return company.id
 
 
 def _parse_if_match(header: str | None) -> int | None:
@@ -102,10 +84,10 @@ async def list_projects(
     status: str | None = Query(default=None),
     archived: bool = Query(default=False),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> ProjectListOut:
     offset = (page - 1) * page_size
     tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
     items, total = await svc.list_projects(
         session,
         company_id,
@@ -153,6 +135,7 @@ async def create_project(
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     key = _parse_idempotency_key(idempotency_key)
     tenant_id = resolve_tenant_id(request)
@@ -178,7 +161,6 @@ async def create_project(
                 status_code=claim.response_status or 201,
             )
 
-    company_id = await _first_company_id(session, tenant_id)
     try:
         project = await svc.api_create(
             session,
