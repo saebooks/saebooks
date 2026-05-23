@@ -43,8 +43,12 @@ class SkipAuditMiddleware(BaseHTTPMiddleware):
         role: str | None = getattr(request.state, "role", None)
         if user is not None and role is None:
             role = getattr(user, "role", None)
-        if not role or not has_at_least(role, UserRole.ADMIN.value):
-            return await call_next(request)
+        is_admin = bool(role and has_at_least(role, UserRole.ADMIN.value))
+        if not is_admin:
+            # Dev-token path doesn't set request.state.user — fall back to
+            # X-Admin: true (same pattern as hard_delete_admin_gate).
+            if request.headers.get("x-admin", "").strip().lower() != "true":
+                return await call_next(request)
 
         token = set_skip_audit(True)
         try:
