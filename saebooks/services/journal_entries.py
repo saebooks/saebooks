@@ -134,10 +134,24 @@ async def list_active(
     date_from: date | None = None,
     date_to: date | None = None,
     status: EntryStatus | None = None,
+    ref: str | None = None,
+    description: str | None = None,
+    posted_by: str | None = None,
+    account_id: uuid.UUID | None = None,
+    account_code: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[JournalEntry], int]:
-    """Return (entries, total_count) — excludes archived/voided entries."""
+    """Return (entries, total_count) — excludes archived/voided entries.
+
+    Filters (all optional, combined as AND):
+      * date_from / date_to — inclusive on entry_date
+      * status — EntryStatus enum
+      * ref / description / posted_by — case-insensitive substring (ILIKE %x%)
+      * account_id — only entries with at least one line on this account
+      * account_code — convenience: resolved to account_id via Account.code
+        (tenant-gated); if no matching account, returns (empty, 0).
+    """
     base_where = [
         JournalEntry.company_id == company_id,
         JournalEntry.archived_at.is_(None),
@@ -148,6 +162,37 @@ async def list_active(
         base_where.append(JournalEntry.entry_date <= date_to)
     if status is not None:
         base_where.append(JournalEntry.status == status)
+    if ref:
+        base_where.append(JournalEntry.ref.ilike(f"%{ref}%"))
+    if description:
+        base_where.append(JournalEntry.description.ilike(f"%{description}%"))
+    if posted_by:
+        base_where.append(JournalEntry.posted_by.ilike(f"%{posted_by}%"))
+
+    if account_code and account_id is None:
+        # Resolve code → id. RLS gates the lookup to current tenant.
+        resolved = (await session.execute(
+            select(Account.id).where(
+                Account.company_id == company_id,
+                Account.code == account_code,
+            )
+        )).scalar_one_or_none()
+        if resolved is None:
+            return [], 0
+        account_id = resolved
+
+    if account_id is not None:
+        # Correlated EXISTS on journal_lines. journal_lines has no tenant_id
+        # column, but the entry_id correlation ties it to the RLS-gated
+        # parent — no cross-tenant leak possible.
+        base_where.append(
+            select(JournalLine.id)
+            .where(
+                JournalLine.entry_id == JournalEntry.id,
+                JournalLine.account_id == account_id,
+            )
+            .exists()
+        )
 
     count_stmt = (
         select(func.count())

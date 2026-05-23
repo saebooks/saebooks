@@ -157,6 +157,143 @@ async def test_journal_entries_list_filter_by_status(
         assert item["status"] == "DRAFT"
 
 
+async def test_journal_entries_list_filter_by_ref(
+    api_client: AsyncClient, account_ids: dict[str, str]
+) -> None:
+    needle = f"FILTERTEST-{uuid.uuid4().hex[:6].upper()}"
+    payload = _entry_payload(account_ids, reference=needle)
+    r = await api_client.post("/api/v1/journal_entries", json=payload)
+    assert r.status_code == 201
+
+    # Case-insensitive substring on ref.
+    r2 = await api_client.get(
+        "/api/v1/journal_entries", params={"ref": needle.lower()[:8]}
+    )
+    assert r2.status_code == 200
+    body = r2.json()
+    assert body["total"] >= 1
+    # Every returned entry's ref contains the needle (case-insensitive).
+    for item in body["items"]:
+        assert needle.lower()[:8] in (item.get("ref") or "").lower()
+
+    # A guaranteed-miss substring returns 0.
+    miss = await api_client.get(
+        "/api/v1/journal_entries", params={"ref": uuid.uuid4().hex}
+    )
+    assert miss.status_code == 200
+    assert miss.json()["total"] == 0
+
+
+async def test_journal_entries_list_filter_by_description(
+    api_client: AsyncClient, account_ids: dict[str, str]
+) -> None:
+    needle = f"haystack-{uuid.uuid4().hex[:8]}"
+    payload = _entry_payload(account_ids, narration=f"prefix {needle} suffix")
+    r = await api_client.post("/api/v1/journal_entries", json=payload)
+    assert r.status_code == 201
+
+    r2 = await api_client.get(
+        "/api/v1/journal_entries", params={"description": needle.upper()}
+    )
+    assert r2.status_code == 200
+    body = r2.json()
+    assert body["total"] >= 1
+    for item in body["items"]:
+        assert needle in (item.get("description") or "")
+
+
+async def test_journal_entries_list_filter_by_account_id(
+    api_client: AsyncClient, account_ids: dict[str, str]
+) -> None:
+    r = await api_client.post("/api/v1/journal_entries", json=_entry_payload(account_ids))
+    assert r.status_code == 201
+    created_id = r.json()["id"]
+
+    r2 = await api_client.get(
+        "/api/v1/journal_entries",
+        params={"account_id": account_ids["asset_id"]},
+    )
+    assert r2.status_code == 200
+    body = r2.json()
+    assert body["total"] >= 1
+    # Our just-created entry must be in the result set.
+    assert any(item["id"] == created_id for item in body["items"])
+    # Every returned entry has at least one line on the asset account.
+    for item in body["items"]:
+        assert any(
+            line["account_id"] == account_ids["asset_id"] for line in item["lines"]
+        )
+
+    # Filtering by a UUID with no lines returns nothing.
+    miss = await api_client.get(
+        "/api/v1/journal_entries", params={"account_id": str(uuid.uuid4())}
+    )
+    assert miss.status_code == 200
+    assert miss.json()["total"] == 0
+
+
+async def test_journal_entries_list_filter_by_account_code(
+    api_client: AsyncClient, account_ids: dict[str, str]
+) -> None:
+    # Look up the asset account's code so we can filter by it.
+    from saebooks.models.account import Account as _Account
+
+    async with AsyncSessionLocal() as session:
+        asset = (
+            await session.execute(
+                select(_Account).where(_Account.id == uuid.UUID(account_ids["asset_id"]))
+            )
+        ).scalars().first()
+    assert asset is not None
+    code = asset.code
+
+    r = await api_client.post("/api/v1/journal_entries", json=_entry_payload(account_ids))
+    assert r.status_code == 201
+
+    r2 = await api_client.get(
+        "/api/v1/journal_entries", params={"account_code": code}
+    )
+    assert r2.status_code == 200
+    assert r2.json()["total"] >= 1
+
+    # Unknown code returns empty (no 404 — silent zero match).
+    miss = await api_client.get(
+        "/api/v1/journal_entries",
+        params={"account_code": f"NONEXISTENT-{uuid.uuid4().hex[:8]}"},
+    )
+    assert miss.status_code == 200
+    assert miss.json()["total"] == 0
+
+
+async def test_journal_entries_list_filter_by_posted_by(
+    api_client: AsyncClient, account_ids: dict[str, str]
+) -> None:
+    # Create + post an entry so posted_by is populated.
+    r = await api_client.post("/api/v1/journal_entries", json=_entry_payload(account_ids))
+    assert r.status_code == 201
+    entry_id = r.json()["id"]
+    version = r.json()["version"]
+
+    post_resp = await api_client.post(
+        f"/api/v1/journal_entries/{entry_id}/post",
+        headers={"If-Match": str(version)},
+    )
+    assert post_resp.status_code == 200
+    posted_by = post_resp.json().get("posted_by") or ""
+    assert posted_by, "posted_by must be set after /post transition"
+
+    # First few chars of posted_by — should match case-insensitively.
+    needle = posted_by[:4]
+    r2 = await api_client.get(
+        "/api/v1/journal_entries", params={"posted_by": needle.upper()}
+    )
+    assert r2.status_code == 200
+    body = r2.json()
+    assert body["total"] >= 1
+    for item in body["items"]:
+        assert needle.lower() in (item.get("posted_by") or "").lower()
+
+
 # ---------------------------------------------------------------------------
 # Get one
 # ---------------------------------------------------------------------------

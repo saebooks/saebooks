@@ -94,6 +94,11 @@ async def list_journal_entries(
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
     status: str | None = Query(default=None),
+    ref: str | None = Query(default=None, description="Case-insensitive substring on journal_entries.ref"),
+    description: str | None = Query(default=None, description="Case-insensitive substring on description"),
+    posted_by: str | None = Query(default=None, description="Case-insensitive substring on posted_by"),
+    account_id: UUID | None = Query(default=None, description="Only entries with a line on this account"),
+    account_code: str | None = Query(default=None, description="Convenience: resolves to account_id by Account.code"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
     session: AsyncSession = Depends(get_session),
@@ -115,6 +120,11 @@ async def list_journal_entries(
         date_from=date_from,
         date_to=date_to,
         status=status_enum,
+        ref=ref,
+        description=description,
+        posted_by=posted_by,
+        account_id=account_id,
+        account_code=account_code,
         limit=page_size,
         offset=offset,
     )
@@ -124,6 +134,62 @@ async def list_journal_entries(
         limit=page_size,
         offset=offset,
     )
+
+
+# ---------------------------------------------------------------------------
+# Filter options — populates dropdowns on the web list page
+# ---------------------------------------------------------------------------
+
+
+@router.get("/_filter_options")
+async def journal_entry_filter_options(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> dict[str, list[str]]:
+    """Return values for populating the JE list filter dropdowns.
+
+    * ``posted_by`` — distinct non-null posted_by values, alphabetical
+    * ``ref_prefixes`` — distinct ref prefixes (chars before first digit run),
+      top 30 by frequency, then alphabetical
+
+    All results are RLS-gated via the existing tenant binding on the
+    session connection.
+    """
+    from sqlalchemy import text
+
+    posted_by_rows = (await session.execute(
+        text(
+            "SELECT DISTINCT posted_by FROM journal_entries "
+            "WHERE company_id = :cid AND archived_at IS NULL "
+            "AND posted_by IS NOT NULL AND posted_by <> '' "
+            "ORDER BY posted_by"
+        ),
+        {"cid": str(company_id)},
+    )).all()
+
+    # Top 30 ref prefixes by occurrence — strip leading alpha/punct sequence
+    # up to the first digit run. e.g. CLEANUP-1110-0001 → CLEANUP-, EX1268 → EX,
+    # auto-fxfee-2026-05-23 → auto-fxfee-, JRN7030 → JRN.
+    prefix_rows = (await session.execute(
+        text(
+            "SELECT prefix FROM ("
+            "  SELECT regexp_replace(ref, '\\d.*$', '') AS prefix, count(*) AS c "
+            "  FROM journal_entries "
+            "  WHERE company_id = :cid AND archived_at IS NULL "
+            "  GROUP BY prefix "
+            "  HAVING regexp_replace(ref, '\\d.*$', '') <> '' "
+            "  ORDER BY c DESC, prefix ASC "
+            "  LIMIT 30"
+            ") sub ORDER BY prefix"
+        ),
+        {"cid": str(company_id)},
+    )).all()
+
+    return {
+        "posted_by": [r[0] for r in posted_by_rows],
+        "ref_prefixes": [r[0] for r in prefix_rows],
+    }
 
 
 # ---------------------------------------------------------------------------
