@@ -59,6 +59,54 @@ def seed_coa() -> None:
     asyncio.run(_setup())
 
 
+@pytest.fixture(scope="session", autouse=True)
+def seed_default_contact(seed_coa: None) -> None:
+    """Ensure the seed company has at least one Contact in DEFAULT_TENANT_ID.
+
+    Many tests (bills, attachments, bill-vehicle-tracking, reports/aged,
+    reports/fx, recurring-invoice-transitions, stripe-payment-link, etc.)
+    query for an existing Contact in the default tenant and assert it's
+    not None. Historically this contact was created as a side-effect of
+    other fixtures; with the cross-tenant cleanup it no longer is, so
+    we explicitly insert one idempotently here.
+    """
+    import uuid as _uu
+
+    from sqlalchemy import select
+
+    from saebooks.db import AsyncSessionLocal
+    from saebooks.models.contact import Contact, ContactType
+    from saebooks.services.companies import ensure_seed_company
+
+    _DEFAULT_TENANT_ID = _uu.UUID("00000000-0000-0000-0000-000000000001")
+    _CONTACT_NAME = "Pytest Default Contact"
+
+    async def _setup() -> None:
+        async with AsyncSessionLocal() as session:
+            company = await ensure_seed_company(session)
+            existing = (
+                await session.execute(
+                    select(Contact).where(
+                        Contact.tenant_id == _DEFAULT_TENANT_ID,
+                        Contact.company_id == company.id,
+                        Contact.archived_at.is_(None),
+                    ).limit(1)
+                )
+            ).scalars().first()
+            if existing is None:
+                session.add(
+                    Contact(
+                        tenant_id=_DEFAULT_TENANT_ID,
+                        company_id=company.id,
+                        name=_CONTACT_NAME,
+                        contact_type=ContactType.BOTH,
+                    )
+                )
+                await session.commit()
+
+    asyncio.run(_setup())
+
+
 @pytest.fixture
 async def client() -> AsyncClient:
     async with AsyncClient(

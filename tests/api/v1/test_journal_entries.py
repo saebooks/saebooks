@@ -632,11 +632,12 @@ async def test_create_unbalanced_je_returns_422(
         f"Expected 422 for unbalanced JE, got {r.status_code}: {r.text}"
     )
     body = r.json()
-    # FastAPI wraps Pydantic validation errors as a list under "detail"
-    detail = body.get("detail", "")
-    detail_str = str(detail).lower()
-    assert "unbalanced" in detail_str or "debit" in detail_str or "credit" in detail_str, (
-        f"Expected error message to mention balance, got: {detail}"
+    # Per saebooks 422 handler, Pydantic errors land under body["errors"]
+    # (the model_validator message) while body["detail"] holds only the
+    # generic problem-summary. Search the whole body for the keywords.
+    body_str = str(body).lower()
+    assert "unbalanced" in body_str or "debit" in body_str or "credit" in body_str, (
+        f"Expected error message to mention balance, got: {body}"
     )
 
 

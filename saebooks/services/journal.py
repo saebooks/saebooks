@@ -528,13 +528,27 @@ async def delete(
     performed_by: str | None = None,
     tenant_id: uuid.UUID | None = None,
 ) -> None:
-    """Delete a journal entry and its lines. Any status — MYOB-style."""
+    """Delete a journal entry and its lines. Any status — MYOB-style.
+
+    Audit M5 guarantee: BEFORE the SQLAlchemy cascade nukes the line
+    rows, snapshot each one to audit_snapshots so the GL detail
+    survives the delete. Without this loop only the header is
+    captured and the line-level meaning is lost.
+    """
     entry = await get(session, entry_id, tenant_id=tenant_id)
     await audit_svc.snapshot_row(
         session, entry,
         action="delete",
         performed_by=performed_by,
+        reason=f"cascade-parent-of journal_entry {entry.id}",
     )
+    for line in list(entry.lines):
+        await audit_svc.snapshot_row(
+            session, line,
+            action="delete",
+            performed_by=performed_by,
+            reason=f"cascade-from journal_entry {entry.id}",
+        )
     await session.delete(entry)
     await session.commit()
 

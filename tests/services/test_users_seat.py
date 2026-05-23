@@ -18,8 +18,7 @@ def test_seat_class_for_non_admin_is_employee() -> None:
     for role in (
         UserRole.ACCOUNTANT.value,
         UserRole.BOOKKEEPER.value,
-        UserRole.READONLY.value,
-        UserRole.CLIENT.value,
+        UserRole.VIEWER.value,
     ):
         assert users_svc.seat_class_for(role) == "employee"
 
@@ -38,7 +37,7 @@ async def test_count_seats_excludes_archived_and_tracks_promotion() -> None:
 
             emp = User(
                 username=f"SEAT_emp_{tag}",
-                role=UserRole.READONLY.value,
+                role=UserRole.VIEWER.value,
             )
             adm = User(
                 username=f"SEAT_adm_{tag}",

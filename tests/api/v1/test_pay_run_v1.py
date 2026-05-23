@@ -176,7 +176,7 @@ async def _ensure_employee(company_id: uuid.UUID) -> Contact:
         emp = Contact(
             company_id=company_id,
             name="Jane Employee",
-            contact_type=ContactType.EMPLOYEE,
+            contact_type=ContactType.BENEFICIARY,
             bank_bsb="062-001",
             bank_account_number="987654321",
             bank_account_title="Jane Employee",

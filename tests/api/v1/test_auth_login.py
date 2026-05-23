@@ -90,7 +90,7 @@ async def _make_user(
             tenant_id=_DEFAULT_TENANT,
             username=username,
             email=email,
-            role="readonly",
+            role="viewer",
             password_hash=pw_hash,
             version=1,
         )
@@ -192,7 +192,7 @@ async def test_login_token_has_correct_claims(client: AsyncClient) -> None:
     payload = _decode_payload(token)
 
     assert payload["sub"] == str(user.id)
-    assert payload["role"] == "readonly"
+    assert payload["role"] == "viewer"
     assert payload["tenant_id"] == str(_DEFAULT_TENANT)
     # exp should be ~8 hours from now (allow ±60s for test execution time)
     expected_exp = int(time.time()) + 8 * 3600
@@ -221,7 +221,7 @@ async def test_me_with_valid_token_200(client: AsyncClient) -> None:
     body = r.json()
     assert body["id"] == str(user.id)
     assert body["email"] == "me_ok@test.com"
-    assert body["role"] == "readonly"
+    assert body["role"] == "viewer"
     assert body["tenant_id"] == str(_DEFAULT_TENANT)
     # P0 regression — must include username so saebooks-web can match the
     # SAE_STAFF_USERNAMES allowlist (Taylor Riverside Round 1, Probe C).
@@ -279,7 +279,7 @@ async def test_refresh_with_expired_token_401(client: AsyncClient) -> None:
     user = await _make_user(email="refresh_exp@test.com", password="pw")
     # Craft a token that expired in the past.
     expired_token = create_access_token(
-        {"sub": str(user.id), "tenant_id": str(_DEFAULT_TENANT), "role": "readonly"},
+        {"sub": str(user.id), "tenant_id": str(_DEFAULT_TENANT), "role": "viewer"},
         expires_in_seconds=-1,
     )
     r = await client.post(
