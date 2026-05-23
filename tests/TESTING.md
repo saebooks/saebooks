@@ -37,15 +37,26 @@ dependencies.
 
 ## Suite state — 2026-05-23
 
-After the cleanup sweep (commits `9f98800` → `d908bbe` on
-`main`), the suite stands at:
+Two verified snapshots, both run via `scripts/run-tests.sh`
+against the isolated `saebooks-test` stack:
 
-```
-~79 failed, 2275 passed, 13 skipped, 2 errors  (≈96% pass)
-```
+| Commit | Failed | Passed | Skipped | Errors | Pass rate |
+|--------|-------:|-------:|--------:|-------:|----------:|
+| `b788fc2` (pre-cleanup baseline) | 116 | 2201 | 8 | 48 | 93.0% |
+| `70fa10f` (after 6 cleanup commits) | 79 | 2275 | 13 | 6 | 95.8% |
 
-Down from `116 failed + 48 errors` (~93% pass) — the cleanup
-closed ~83 of 164 pre-existing reds by fixing fixture-level issues
+The subsequent commit `d908bbe` (added `tests/test_grpc/conftest.py`
+with `db_session` / `seeded_company` / `seeded_user` fixtures)
+was only verified against the `tests/test_grpc/test_api_tokens.py`
+subset, not the full suite. On that subset, 4 of the 6 pre-existing
+`db_session not found` ERRORs now pass, 1 became a real FAIL
+(test exercises behaviour now seen for the first time), and 1
+remained ERRORed. So the projected post-`d908bbe` full-suite
+state is approximately **80 failed, 1 error** — **not full-suite
+re-verified**; re-run `scripts/run-tests.sh` to refresh.
+
+The cleanup closed roughly 90 of the 164 pre-existing reds (across
+`b788fc2` → `d908bbe`), mostly by fixing fixture-level issues
 that cascaded into dozens of false failures. The remainder are
 scattered single-file regressions that need case-by-case judgment.
 
