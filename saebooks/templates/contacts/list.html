@@ -7,27 +7,52 @@
   <a href="/contacts/new" class="btn">+ New</a>
 </div>
 
+{% macro qs(extra) -%}
+  {%- set parts = [] -%}
+  {%- if type_filter and type_filter != 'all' -%}{%- set _ = parts.append('type=' ~ type_filter) -%}{%- endif -%}
+  {%- if search_q -%}{%- set _ = parts.append('q=' ~ search_q) -%}{%- endif -%}
+  {%- if extra -%}{%- set _ = parts.append(extra) -%}{%- endif -%}
+  {%- if parts -%}?{{ parts | join('&') }}{%- endif -%}
+{%- endmacro %}
+
 <div class="contact-filter">
   <div class="status-filter">
-    <a href="/contacts" class="{{ 'active' if type_filter == 'all' }}">All</a>
-    <a href="/contacts?type=CUSTOMER" class="{{ 'active' if type_filter == 'CUSTOMER' }}">Customers</a>
-    <a href="/contacts?type=SUPPLIER" class="{{ 'active' if type_filter == 'SUPPLIER' }}">Suppliers</a>
-    <a href="/contacts?type=BENEFICIARY" class="{{ 'active' if type_filter == 'BENEFICIARY' }}">Beneficiaries</a>
+    <a href="/contacts{{ qs(one_off_filter != 'all' and ('one_off=' ~ one_off_filter) or '') }}" class="{{ 'active' if type_filter == 'all' }}">All</a>
+    <a href="/contacts?type=CUSTOMER{% if one_off_filter and one_off_filter != 'all' %}&one_off={{ one_off_filter }}{% endif %}{% if search_q %}&q={{ search_q }}{% endif %}" class="{{ 'active' if type_filter == 'CUSTOMER' }}">Customers</a>
+    <a href="/contacts?type=SUPPLIER{% if one_off_filter and one_off_filter != 'all' %}&one_off={{ one_off_filter }}{% endif %}{% if search_q %}&q={{ search_q }}{% endif %}" class="{{ 'active' if type_filter == 'SUPPLIER' }}">Suppliers</a>
+    <a href="/contacts?type=BENEFICIARY{% if one_off_filter and one_off_filter != 'all' %}&one_off={{ one_off_filter }}{% endif %}{% if search_q %}&q={{ search_q }}{% endif %}" class="{{ 'active' if type_filter == 'BENEFICIARY' }}">Beneficiaries</a>
     <a href="/beneficiaries">Register</a>
+  </div>
+  <div class="status-filter" style="margin-top:0.4rem">
+    <span class="dim" style="margin-right:0.4rem">One-off:</span>
+    <a href="/contacts{% if type_filter and type_filter != 'all' %}?type={{ type_filter }}{% if search_q %}&q={{ search_q }}{% endif %}{% elif search_q %}?q={{ search_q }}{% endif %}" class="{{ 'active' if not one_off_filter or one_off_filter == 'all' }}">All</a>
+    <a href="/contacts?one_off=false{% if type_filter and type_filter != 'all' %}&type={{ type_filter }}{% endif %}{% if search_q %}&q={{ search_q }}{% endif %}" class="{{ 'active' if one_off_filter == 'false' }}">Hide one-offs</a>
+    <a href="/contacts?one_off=true{% if type_filter and type_filter != 'all' %}&type={{ type_filter }}{% endif %}{% if search_q %}&q={{ search_q }}{% endif %}" class="{{ 'active' if one_off_filter == 'true' }}">One-offs only</a>
   </div>
   <form method="get" action="/contacts" style="display:inline">
     {% if type_filter != 'all' %}<input type="hidden" name="type" value="{{ type_filter }}">{% endif %}
+    {% if one_off_filter and one_off_filter != 'all' %}<input type="hidden" name="one_off" value="{{ one_off_filter }}">{% endif %}
     <input type="text" name="q" value="{{ search_q }}" placeholder="Search name or email..." style="font:14px/1.2 inherit;padding:0.3rem 0.4rem;border:1px solid var(--rule);width:16rem">
     <button type="submit" class="btn-secondary">Search</button>
   </form>
 </div>
 
 {% if contacts %}
+{% set _return_to = '/contacts' ~ ('?type=' ~ type_filter if type_filter and type_filter != 'all' else '') ~ ('&' if type_filter and type_filter != 'all' and one_off_filter and one_off_filter != 'all' else ('?' if one_off_filter and one_off_filter != 'all' else '')) ~ ('one_off=' ~ one_off_filter if one_off_filter and one_off_filter != 'all' else '') %}
+<form method="post" action="/contacts/bulk-tag-one-off" id="bulk-form">
+  <input type="hidden" name="return_to" value="{{ _return_to }}">
+  <div class="bulk-bar" style="margin:0.5rem 0;display:flex;gap:0.5rem;align-items:center">
+    <span class="dim" id="bulk-count">0 selected</span>
+    <button type="submit" name="is_one_off" value="true" class="btn-secondary" disabled data-bulk-btn>Mark as one-off</button>
+    <button type="submit" name="is_one_off" value="false" class="btn-secondary" disabled data-bulk-btn>Un-mark</button>
+  </div>
 <table class="acct-table">
   <thead>
     <tr>
+      <th style="width:1.5rem"><input type="checkbox" id="bulk-all" aria-label="Select all"></th>
       <th>Name</th>
       <th>Type</th>
+      <th>One-off</th>
       <th>Email</th>
       <th>Phone</th>
       <th class="actions"></th>
@@ -36,8 +61,10 @@
   <tbody>
     {% for c in contacts %}
     <tr>
+      <td><input type="checkbox" name="contact_ids" value="{{ c.id }}" class="bulk-check" aria-label="Select {{ c.name }}"></td>
       <td><a href="/contacts/{{ c.id }}">{{ c.name }}</a></td>
       <td><span class="contact-type {{ c.contact_type.value|lower }}">{{ c.contact_type.value|lower|title }}</span></td>
+      <td class="dim">{% if c.is_one_off %}<span title="One-off / walk-in">●</span>{% endif %}</td>
       <td class="dim">{{ c.email or '' }}</td>
       <td class="dim">{{ c.phone or '' }}</td>
       <td class="actions">
@@ -47,6 +74,27 @@
     {% endfor %}
   </tbody>
 </table>
+</form>
+<script>
+(function () {
+  var all = document.getElementById('bulk-all');
+  var checks = document.querySelectorAll('.bulk-check');
+  var count = document.getElementById('bulk-count');
+  var btns = document.querySelectorAll('[data-bulk-btn]');
+  function refresh() {
+    var n = 0;
+    checks.forEach(function (c) { if (c.checked) n++; });
+    count.textContent = n + ' selected';
+    btns.forEach(function (b) { b.disabled = (n === 0); });
+  }
+  if (all) all.addEventListener('change', function () {
+    checks.forEach(function (c) { c.checked = all.checked; });
+    refresh();
+  });
+  checks.forEach(function (c) { c.addEventListener('change', refresh); });
+  refresh();
+})();
+</script>
 {% else %}
 <p class="dim">No contacts found.</p>
 {% endif %}

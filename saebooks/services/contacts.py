@@ -110,16 +110,24 @@ async def list_active(
     *,
     contact_type: ContactType | None = None,
     search: str | None = None,
+    is_one_off: bool | None = None,
     limit: int = 200,
     offset: int = 0,
 ) -> list[Contact]:
-    """List active contacts, optionally filtered by type or search term (name/email)."""
+    """List active contacts, optionally filtered by type, search term, or one-off flag.
+
+    ``is_one_off=None`` (default) returns rows regardless of the flag —
+    keeps existing API/grpc callers unchanged. The Jinja UI passes
+    ``True`` to show only one-offs and ``False`` to hide them.
+    """
     stmt = (
         select(Contact)
         .where(Contact.company_id == company_id, Contact.archived_at.is_(None))
     )
     if contact_type is not None:
         stmt = stmt.where(Contact.contact_type == contact_type)
+    if is_one_off is not None:
+        stmt = stmt.where(Contact.is_one_off.is_(is_one_off))
     if search:
         pattern = f"%{search}%"
         stmt = stmt.where(

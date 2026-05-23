@@ -134,11 +134,20 @@ async def contacts_list(
     request: Request,
     type: str | None = Query(None),
     q: str | None = Query(None),
+    one_off: str | None = Query(None),
 ) -> HTMLResponse:
     company = await _first_company()
     contact_type = None
     if type and type in ("CUSTOMER", "SUPPLIER", "BOTH", "BENEFICIARY"):
         contact_type = ContactType(type)
+
+    one_off_filter: bool | None
+    if one_off == "true":
+        one_off_filter = True
+    elif one_off == "false":
+        one_off_filter = False
+    else:
+        one_off_filter = None  # "all" — show everything (back-compat default)
 
     async with AsyncSessionLocal() as session:
         contacts = await svc.list_active(
@@ -146,6 +155,7 @@ async def contacts_list(
             company.id,
             contact_type=contact_type,
             search=q or None,
+            is_one_off=one_off_filter,
         )
 
     return templates.TemplateResponse(
@@ -158,6 +168,7 @@ async def contacts_list(
             "contacts": contacts,
             "type_filter": type or "all",
             "search_q": q or "",
+            "one_off_filter": one_off or "all",
         },
     )
 
@@ -258,6 +269,56 @@ async def contacts_search(
         for c in results
     )
     return HTMLResponse(f"<ul class='ac-results'>{items}</ul>" if items else "")
+
+
+# ---------------------------------------------------------------------------
+# Bulk-tag one-off (Jinja-side, cookie-authed). Registered ABOVE /{contact_id}
+# so FastAPI matches the literal path first.
+# ---------------------------------------------------------------------------
+
+
+@router.post("/bulk-tag-one-off")
+async def contacts_bulk_tag_one_off(
+    request: Request,
+) -> RedirectResponse:
+    """Flip ``is_one_off`` on the selected contacts and redirect back to the list.
+
+    Form fields: ``contact_ids`` (multiple), ``is_one_off`` (``true``/``false``),
+    optional ``return_to`` so the user lands back on the same filtered view.
+    """
+    form = await request.form()
+    raw_ids = form.getlist("contact_ids")
+    flag_raw = (form.get("is_one_off") or "true").lower()
+    is_one_off = flag_raw == "true"
+    return_to = form.get("return_to") or "/contacts"
+
+    tenant_id = resolve_tenant_id(request)
+    parsed_ids: list[UUID] = []
+    for raw in raw_ids:
+        try:
+            parsed_ids.append(UUID(raw))
+        except (ValueError, TypeError):
+            continue
+
+    async with AsyncSessionLocal() as session:
+        for cid in parsed_ids:
+            existing = await svc.get(session, cid, tenant_id=tenant_id)
+            if existing is None or existing.archived_at is not None:
+                continue
+            if existing.is_one_off == is_one_off:
+                continue
+            try:
+                await svc.update(
+                    session,
+                    cid,
+                    actor="web",
+                    tenant_id=tenant_id,
+                    is_one_off=is_one_off,
+                )
+            except (ValueError, svc.VersionConflict):
+                continue
+
+    return RedirectResponse(return_to, status_code=303)
 
 
 # ---------------------------------------------------------------------------

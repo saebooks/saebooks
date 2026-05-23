@@ -8,22 +8,40 @@
 
 <div class="toolbar">
   <a href="/contacts/new" class="btn btn-primary">+ New contact <span class="dim">(F2)</span></a>
-  <a href="/contacts" class="btn btn-sm {{ 'btn-primary' if type_filter == 'all' }}">All</a>
-  <a href="/contacts?type=CUSTOMER" class="btn btn-sm {{ 'btn-primary' if type_filter == 'CUSTOMER' }}">Customers</a>
-  <a href="/contacts?type=SUPPLIER" class="btn btn-sm {{ 'btn-primary' if type_filter == 'SUPPLIER' }}">Suppliers</a>
+  <a href="/contacts{% if one_off_filter and one_off_filter != 'all' %}?one_off={{ one_off_filter }}{% endif %}" class="btn btn-sm {{ 'btn-primary' if type_filter == 'all' }}">All</a>
+  <a href="/contacts?type=CUSTOMER{% if one_off_filter and one_off_filter != 'all' %}&one_off={{ one_off_filter }}{% endif %}" class="btn btn-sm {{ 'btn-primary' if type_filter == 'CUSTOMER' }}">Customers</a>
+  <a href="/contacts?type=SUPPLIER{% if one_off_filter and one_off_filter != 'all' %}&one_off={{ one_off_filter }}{% endif %}" class="btn btn-sm {{ 'btn-primary' if type_filter == 'SUPPLIER' }}">Suppliers</a>
   <form method="get" action="/contacts" class="inline">
     {% if type_filter != 'all' %}<input type="hidden" name="type" value="{{ type_filter }}">{% endif %}
+    {% if one_off_filter and one_off_filter != 'all' %}<input type="hidden" name="one_off" value="{{ one_off_filter }}">{% endif %}
     <label>Search <input name="q" value="{{ search_q }}" placeholder="name or email"></label>
     <button type="submit" class="btn btn-sm">Filter</button>
   </form>
 </div>
 
+<div class="toolbar" style="margin-top:0.3rem">
+  <span class="dim">One-off:</span>
+  <a href="/contacts{% if type_filter and type_filter != 'all' %}?type={{ type_filter }}{% if search_q %}&q={{ search_q }}{% endif %}{% elif search_q %}?q={{ search_q }}{% endif %}" class="btn btn-sm {{ 'btn-primary' if not one_off_filter or one_off_filter == 'all' }}">All</a>
+  <a href="/contacts?one_off=false{% if type_filter and type_filter != 'all' %}&type={{ type_filter }}{% endif %}{% if search_q %}&q={{ search_q }}{% endif %}" class="btn btn-sm {{ 'btn-primary' if one_off_filter == 'false' }}">Hide one-offs</a>
+  <a href="/contacts?one_off=true{% if type_filter and type_filter != 'all' %}&type={{ type_filter }}{% endif %}{% if search_q %}&q={{ search_q }}{% endif %}" class="btn btn-sm {{ 'btn-primary' if one_off_filter == 'true' }}">One-offs only</a>
+</div>
+
 {% if contacts %}
+{% set _return_to = '/contacts' ~ ('?type=' ~ type_filter if type_filter and type_filter != 'all' else '') ~ ('&' if type_filter and type_filter != 'all' and one_off_filter and one_off_filter != 'all' else ('?' if one_off_filter and one_off_filter != 'all' else '')) ~ ('one_off=' ~ one_off_filter if one_off_filter and one_off_filter != 'all' else '') %}
+<form method="post" action="/contacts/bulk-tag-one-off" id="bulk-form-classic">
+  <input type="hidden" name="return_to" value="{{ _return_to }}">
+  <div class="toolbar" style="margin-top:0.5rem">
+    <span class="dim" id="bulk-count-classic">0 selected</span>
+    <button type="submit" name="is_one_off" value="true" class="btn btn-sm" disabled data-bulk-btn-classic>Mark as one-off</button>
+    <button type="submit" name="is_one_off" value="false" class="btn btn-sm" disabled data-bulk-btn-classic>Un-mark</button>
+  </div>
 <table class="classic-grid">
   <thead>
     <tr>
+      <th style="width:1.5rem"><input type="checkbox" id="bulk-all-classic" aria-label="Select all"></th>
       <th>Name</th>
       <th>Type</th>
+      <th>One-off</th>
       <th>Email</th>
       <th>Phone</th>
       <th class="right">Actions</th>
@@ -32,8 +50,10 @@
   <tbody>
     {% for c in contacts %}
     <tr>
+      <td><input type="checkbox" name="contact_ids" value="{{ c.id }}" class="bulk-check-classic" aria-label="Select {{ c.name }}"></td>
       <td><a href="/contacts/{{ c.id }}">{{ c.name }}</a></td>
       <td>{{ c.contact_type.value|lower|title }}</td>
+      <td class="dim">{% if c.is_one_off %}●{% endif %}</td>
       <td class="dim">{{ c.email or '' }}</td>
       <td class="dim">{{ c.phone or '' }}</td>
       <td class="right"><a href="/contacts/{{ c.id }}/edit">edit</a></td>
@@ -41,6 +61,27 @@
     {% endfor %}
   </tbody>
 </table>
+</form>
+<script>
+(function () {
+  var all = document.getElementById('bulk-all-classic');
+  var checks = document.querySelectorAll('.bulk-check-classic');
+  var count = document.getElementById('bulk-count-classic');
+  var btns = document.querySelectorAll('[data-bulk-btn-classic]');
+  function refresh() {
+    var n = 0;
+    checks.forEach(function (c) { if (c.checked) n++; });
+    count.textContent = n + ' selected';
+    btns.forEach(function (b) { b.disabled = (n === 0); });
+  }
+  if (all) all.addEventListener('change', function () {
+    checks.forEach(function (c) { c.checked = all.checked; });
+    refresh();
+  });
+  checks.forEach(function (c) { c.addEventListener('change', refresh); });
+  refresh();
+})();
+</script>
 {% else %}
 <p class="dim">No contacts. <kbd>F2</kbd> to create one.</p>
 {% endif %}
