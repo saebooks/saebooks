@@ -103,7 +103,7 @@ async def list_bank_statement_lines(
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
     sort: str = Query(default="date", description="One of: date, description, amount, balance, status, reference"),
-    order: str = Query(default="desc", regex="^(asc|desc)$"),
+    direction: str = Query(default="desc", regex="^(asc|desc)$"),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
@@ -122,7 +122,7 @@ async def list_bank_statement_lines(
         date_from=date_from,
         date_to=date_to,
         sort=sort,
-        order=order,
+        direction=direction,
         limit=limit,
         offset=offset,
     )

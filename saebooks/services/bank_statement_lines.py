@@ -147,7 +147,7 @@ async def list_active(
     date_from: date | None = None,
     date_to: date | None = None,
     sort: str = "date",
-    order: str = "desc",
+    direction: str = "desc",
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[BankStatementLine], int]:
@@ -166,11 +166,11 @@ async def list_active(
     total = (await session.execute(count_stmt)).scalar_one()
 
     sort_col = _SORT_COLUMNS.get(sort, BankStatementLine.txn_date)
-    primary = sort_col.asc() if order == "asc" else sort_col.desc()
+    primary = sort_col.asc() if direction == "asc" else sort_col.desc()
     # created_at tie-breaker keeps the order stable when the primary
     # column has duplicates (e.g. same txn_date).
     tiebreak = (
-        BankStatementLine.created_at.asc() if order == "asc"
+        BankStatementLine.created_at.asc() if direction == "asc"
         else BankStatementLine.created_at.desc()
     )
 

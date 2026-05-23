@@ -212,7 +212,7 @@ async def get_account_ledger(
     date_from: str | None = Query(default=None, description="ISO date (YYYY-MM-DD)"),
     date_to: str | None = Query(default=None, description="ISO date (YYYY-MM-DD)"),
     sort: str = Query(default="date", description="One of: date, ref, description, debit, credit"),
-    order: str = Query(default="desc", regex="^(asc|desc)$"),
+    direction: str = Query(default="desc", regex="^(asc|desc)$"),
     limit: int = Query(default=200, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
@@ -300,10 +300,10 @@ async def get_account_ledger(
         "credit":      JournalLine.credit,
     }
     primary_col = _sort_map[sort]
-    primary = primary_col.asc() if order == "asc" else primary_col.desc()
+    primary = primary_col.asc() if direction == "asc" else primary_col.desc()
     # Always tie-break on (entry_date, entry_id, line_no) to keep order
     # stable. When sort=date asc, that's also the natural ledger order.
-    tie_date = JournalEntry.entry_date.asc() if order == "asc" else JournalEntry.entry_date.desc()
+    tie_date = JournalEntry.entry_date.asc() if direction == "asc" else JournalEntry.entry_date.desc()
 
     stmt = (
         select(JournalLine, JournalEntry)
@@ -330,7 +330,7 @@ async def get_account_ledger(
     # Running balance only makes sense when sorting by date ascending.
     # For everything else, leave balance null and totals are still useful.
     running = opening_balance
-    if show_balance and order == "asc" and offset > 0:
+    if show_balance and direction == "asc" and offset > 0:
         pre_stmt = (
             select(
                 func.coalesce(func.sum(JournalLine.debit), Decimal("0")).label("tot_dr"),
@@ -373,7 +373,7 @@ async def get_account_ledger(
     items: list[dict[str, Any]] = []
     total_debit = Decimal("0")
     total_credit = Decimal("0")
-    show_running = show_balance and order == "asc"
+    show_running = show_balance and direction == "asc"
     for jl, je in rows:
         total_debit += jl.debit
         total_credit += jl.credit
@@ -405,7 +405,7 @@ async def get_account_ledger(
         "total_credit": str(total_credit),
         "credit_normal": credit_normal,
         "sort": sort,
-        "order": order,
+        "direction": direction,
     }
     return JSONResponse(body)
 
