@@ -112,9 +112,15 @@ class OneOffCandidatesOut(BaseModel):
 
 
 class OneOffBulkTagRequest(BaseModel):
-    """POST body for /api/v1/contacts/bulk-tag-one-off."""
+    """POST body for /api/v1/contacts/bulk-tag-one-off.
+
+    Flips ``is_one_off`` on all listed contacts. Default ``True`` retains
+    the original mark these as one-offs semantics; pass ``False`` to
+    move contacts back to the main pool.
+    """
 
     contact_ids: list[uuid.UUID] = Field(min_length=1)
+    is_one_off: bool = True
 
 
 class OneOffBulkTagOut(BaseModel):
@@ -2884,6 +2890,7 @@ class QuoteBase(BaseModel):
     deposit_pct: Decimal = Decimal("50")
     late_fee_pct_per_month: Decimal = Decimal("2.5")
     is_supply_only: bool = False
+    title: str | None = Field(default=None, max_length=255)
     notes: str | None = None
     terms: str | None = None
 
@@ -2907,6 +2914,7 @@ class QuoteUpdate(BaseModel):
     deposit_pct: Decimal | None = None
     late_fee_pct_per_month: Decimal | None = None
     is_supply_only: bool | None = None
+    title: str | None = Field(default=None, max_length=255)
     notes: str | None = None
     terms: str | None = None
     lines: list[QuoteLineCreate] | None = None
@@ -2933,6 +2941,7 @@ class QuoteOut(BaseModel):
     deposit_pct: Decimal
     late_fee_pct_per_month: Decimal
     is_supply_only: bool
+    title: str | None = None
     notes: str | None = None
     terms: str | None = None
     accepted_at: datetime | None = None

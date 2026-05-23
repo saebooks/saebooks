@@ -53,6 +53,7 @@ from saebooks.api.v1.schemas import (
     ContactListOut,
     ContactOut,
     ContactUpdate,
+    OneOffBulkTagRequest,
 )
 from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.models.company import Company
@@ -417,3 +418,55 @@ async def archive_contact(
         await store_response(session, key, 204, archived_body)
         await session.commit()
     return Response(status_code=204)
+
+# ---------------------------------------------------------------------------
+# Bulk-tag one-off — flip ``is_one_off`` on many contacts in one call.
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/bulk-tag-one-off",
+    response_model=None,
+)
+async def bulk_tag_one_off(
+    payload: OneOffBulkTagRequest,
+    request: Request,
+    bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
+) -> JSONResponse:
+    """Set ``is_one_off`` on a list of contacts in one transaction.
+
+    Body: ``{"contact_ids": [...], "is_one_off": true|false}``.
+
+    Each contact is fetched (tenant-scoped, archived rows skipped), its
+    ``is_one_off`` flag updated to the requested value if it differs,
+    a change_log row appended, and the version bumped. Already-correct
+    rows are skipped silently. Foreign-tenant ids (or non-existent ids)
+    are silently skipped — same shape as the existing per-row update
+    would yield a 404 individually.
+
+    Returns ``{"flipped": <count>}`` — number of rows whose flag actually
+    changed.
+    """
+    tenant_id = resolve_tenant_id(request)
+    flipped = 0
+    for cid in payload.contact_ids:
+        existing = await svc.get(session, cid, tenant_id=tenant_id)
+        if existing is None or existing.archived_at is not None:
+            continue
+        if existing.is_one_off == payload.is_one_off:
+            continue
+        try:
+            await svc.update(
+                session,
+                cid,
+                actor=f"api:{bearer[:8]}…",
+                tenant_id=tenant_id,
+                is_one_off=payload.is_one_off,
+            )
+        except (ValueError, svc.VersionConflict):
+            # Skip a bad/conflicting row; the rest of the batch still proceeds.
+            continue
+        flipped += 1
+    return JSONResponse({"flipped": flipped}, status_code=200)
+
