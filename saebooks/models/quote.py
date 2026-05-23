@@ -172,6 +172,7 @@ class Quote(CompanyScoped, Base):
     )
 
     # Text fields
+    title: Mapped[str | None] = mapped_column(String(255))
     notes: Mapped[str | None] = mapped_column(Text)
     terms: Mapped[str | None] = mapped_column(Text)
 

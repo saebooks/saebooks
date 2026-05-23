@@ -246,6 +246,7 @@ _QUOTE_COLUMNS: tuple[str, ...] = (
     "deposit_pct",
     "late_fee_pct_per_month",
     "is_supply_only",
+    "title",
     "notes",
     "terms",
     "accepted_at",
@@ -371,6 +372,7 @@ async def api_create(
     issue_date: date,
     expiry_date: date | None = None,
     lines: list[dict] | None = None,
+    title: str | None = None,
     notes: str | None = None,
     terms: str | None = None,
     currency: str = "AUD",
@@ -393,6 +395,7 @@ async def api_create(
         customer_id=customer_id,
         issue_date=issue_date,
         expiry_date=expiry_date,
+        title=title,
         notes=notes,
         terms=terms,
         status=QuoteStatus.DRAFT,
@@ -443,6 +446,7 @@ async def api_update(
     customer_id: uuid.UUID | None = None,
     issue_date: date | None = None,
     expiry_date: date | None = None,
+    title: str | None = None,
     notes: str | None = None,
     terms: str | None = None,
     currency: str | None = None,
@@ -481,6 +485,8 @@ async def api_update(
         quote.issue_date = issue_date
     if expiry_date is not None:
         quote.expiry_date = expiry_date
+    if title is not None:
+        quote.title = title
     if notes is not None:
         quote.notes = notes
     if terms is not None:
