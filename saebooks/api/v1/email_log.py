@@ -20,8 +20,11 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+import csv
+import io
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -189,6 +192,111 @@ async def list_email_log_for_doc(
         {"tenant_id": str(tenant_id), "doc_type": doc_type, "doc_id": str(doc_id)},
     )
     return {"items": [_row_to_dict(r) for r in rows]}
+
+
+# ---------------------------------------------------------------------------
+# CSV export — compliance / handover
+# Must be registered BEFORE /{log_id} (catch-all UUID match) — explicit
+# literal paths first.
+# ---------------------------------------------------------------------------
+
+_CSV_COLUMNS = [
+    "id", "sent_at", "doc_type", "doc_id", "doc_version",
+    "from_addr", "to_addrs", "cc_addrs", "bcc_addrs", "subject",
+    "resend_status", "resend_message_id", "resend_error",
+    "kill_switch_reason",
+    "attachment_filenames", "attachment_sha256",
+    "delivered_at", "bounced_at", "bounce_reason",
+    "opened_at", "opened_count", "clicked_at", "clicked_count",
+    "complained_at",
+    "sent_by_user_id",
+]
+
+
+def _csv_row(row: Any) -> list[str]:
+    def fmt(v: Any) -> str:
+        if v is None:
+            return ""
+        if isinstance(v, (list, tuple)):
+            return ";".join(str(x) for x in v)
+        if hasattr(v, "isoformat"):
+            return v.isoformat()
+        return str(v)
+
+    return [fmt(getattr(row, col, None)) for col in _CSV_COLUMNS]
+
+
+@router.get("/export.csv")
+async def export_email_log_csv(
+    request: Request,
+    bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
+    doc_type: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    since: datetime | None = Query(default=None),
+    until: datetime | None = Query(default=None),
+) -> StreamingResponse:
+    """Stream the audit log as CSV for compliance / handover.
+
+    Tenant-scoped. Optional filters mirror the list endpoint. NO row
+    limit — exports everything matching the filter. At SAE's volume
+    (10-100 sends/month) this is trivial; if it ever isn't, switch to
+    paginated cursor + server-side gzip.
+    """
+    tenant_id = resolve_tenant_id(request)
+
+    where_clauses = ["tenant_id = :tenant_id"]
+    params: dict[str, Any] = {"tenant_id": str(tenant_id)}
+    if doc_type:
+        where_clauses.append("doc_type = :doc_type")
+        params["doc_type"] = doc_type
+    if status:
+        if status not in _VALID_STATUSES:
+            raise HTTPException(422, f"invalid status {status!r}")
+        where_clauses.append("resend_status = :status")
+        params["status"] = status
+    if since:
+        where_clauses.append("sent_at >= :since")
+        params["since"] = since
+    if until:
+        where_clauses.append("sent_at <= :until")
+        params["until"] = until
+
+    where = " AND ".join(where_clauses)
+    # Exclude attachment_bytes from CSV — too large; sha256 stands in.
+    rows = await session.execute(
+        text(f"""
+            SELECT id, sent_at, doc_type, doc_id, doc_version,
+                   from_addr, to_addrs, cc_addrs, bcc_addrs, subject,
+                   resend_status, resend_message_id, resend_error,
+                   kill_switch_reason,
+                   attachment_filenames, attachment_sha256,
+                   delivered_at, bounced_at, bounce_reason,
+                   opened_at, opened_count, clicked_at, clicked_count,
+                   complained_at, sent_by_user_id
+            FROM email_send_log
+            WHERE {where}
+            ORDER BY sent_at ASC
+        """),
+        params,
+    )
+
+    buf = io.StringIO()
+    writer = csv.writer(buf, quoting=csv.QUOTE_MINIMAL)
+    writer.writerow(_CSV_COLUMNS)
+    for r in rows:
+        writer.writerow(_csv_row(r))
+
+    csv_bytes = buf.getvalue().encode("utf-8")
+    filename = f"email_send_log_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+    return StreamingResponse(
+        io.BytesIO(csv_bytes),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control":       "no-store",
+        },
+    )
 
 
 @router.get("/{log_id}")
