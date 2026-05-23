@@ -140,6 +140,23 @@ class Settings(BaseSettings):
     )
 
     # ---------------------------------------------------------------- #
+    # Customer-facing email pipeline (Resend) — KILL SWITCH            #
+    # ---------------------------------------------------------------- #
+    # Two-key gate (BOTH must be true for a real Resend network call):
+    #   1. customer_email_send_enabled = true   (this env var)
+    #   2. tenants.outbound_email_enabled = true (per-tenant DB column)
+    # Default for both is false; flipping either alone does nothing.
+    # When blocked, customer_email writes the email + attachment to the
+    # outbox dir and logs to email_send_log with resend_status='blocked'.
+    customer_email_send_enabled: bool = Field(
+        default=False, alias="SAEBOOKS_EMAIL_SEND_ENABLED"
+    )
+    resend_api_key: str = Field(default="", alias="RESEND_API_KEY")
+    resend_api_url: str = Field(
+        default="https://api.resend.com", alias="RESEND_API_URL"
+    )
+
+    # ---------------------------------------------------------------- #
     # Observability (Batch Z)                                          #
     # ---------------------------------------------------------------- #
     sentry_dsn: str = Field(default="", alias="SENTRY_DSN")

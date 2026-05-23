@@ -84,6 +84,10 @@ class _LineInput:
     unit_price: Decimal
     tax_code_id: uuid.UUID | None
     account_id: uuid.UUID | None
+    section_label: str | None = None
+    material: str | None = None
+    length_note: str | None = None
+    drawing_ref: str | None = None
 
 
 async def _resolve_tax_rate(
@@ -184,6 +188,10 @@ async def _replace_lines(
             unit_price=Decimal(str(raw.get("unit_price", 0))),
             tax_code_id=tax_code_id if isinstance(tax_code_id, uuid.UUID) else None,
             account_id=account_id if isinstance(account_id, uuid.UUID) else None,
+            section_label=(str(raw["section_label"]) if raw.get("section_label") else None),
+            material=(str(raw["material"]) if raw.get("material") else None),
+            length_note=(str(raw["length_note"]) if raw.get("length_note") else None),
+            drawing_ref=(str(raw["drawing_ref"]) if raw.get("drawing_ref") else None),
         )
 
         tax_rate = await _resolve_tax_rate(session, line_input.tax_code_id, company_id)
@@ -202,6 +210,10 @@ async def _replace_lines(
                 tax_code_id=line_input.tax_code_id,
                 line_total=line_total,
                 account_id=line_input.account_id,
+                section_label=line_input.section_label,
+                material=line_input.material,
+                length_note=line_input.length_note,
+                drawing_ref=line_input.drawing_ref,
             )
         )
     await session.flush()
@@ -247,6 +259,7 @@ _QUOTE_COLUMNS: tuple[str, ...] = (
     "late_fee_pct_per_month",
     "is_supply_only",
     "title",
+    "scope",
     "notes",
     "terms",
     "accepted_at",
@@ -373,6 +386,7 @@ async def api_create(
     expiry_date: date | None = None,
     lines: list[dict] | None = None,
     title: str | None = None,
+    scope: str | None = None,
     notes: str | None = None,
     terms: str | None = None,
     currency: str = "AUD",
@@ -396,6 +410,7 @@ async def api_create(
         issue_date=issue_date,
         expiry_date=expiry_date,
         title=title,
+        scope=scope,
         notes=notes,
         terms=terms,
         status=QuoteStatus.DRAFT,
@@ -447,6 +462,7 @@ async def api_update(
     issue_date: date | None = None,
     expiry_date: date | None = None,
     title: str | None = None,
+    scope: str | None = None,
     notes: str | None = None,
     terms: str | None = None,
     currency: str | None = None,
@@ -487,6 +503,8 @@ async def api_update(
         quote.expiry_date = expiry_date
     if title is not None:
         quote.title = title
+    if scope is not None:
+        quote.scope = scope
     if notes is not None:
         quote.notes = notes
     if terms is not None:

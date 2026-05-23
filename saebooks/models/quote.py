@@ -173,6 +173,7 @@ class Quote(CompanyScoped, Base):
 
     # Text fields
     title: Mapped[str | None] = mapped_column(String(255))
+    scope: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
     terms: Mapped[str | None] = mapped_column(Text)
 
@@ -252,5 +253,12 @@ class QuoteLine(Base):
         UUID(as_uuid=True),
         ForeignKey("accounts.id", ondelete="SET NULL"),
     )
+
+    # Engineering-quote structured fields (mirrors the 6-col Overleaf table).
+    # NULL on lines that don't need them (lump-sum items, subtotal rows).
+    section_label: Mapped[str | None] = mapped_column(String(255))
+    material: Mapped[str | None] = mapped_column(String(255))
+    length_note: Mapped[str | None] = mapped_column(String(255))
+    drawing_ref: Mapped[str | None] = mapped_column(String(255))
 
     quote: Mapped[Quote] = relationship(back_populates="lines")

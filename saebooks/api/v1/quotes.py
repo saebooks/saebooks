@@ -157,6 +157,206 @@ async def get_quote(
 
 
 # ---------------------------------------------------------------------------
+# PDF render — preview only (does not send; never persists; regenerated on every call)
+# ---------------------------------------------------------------------------
+
+@router.get("/{quote_id}/pdf")
+async def get_quote_pdf(
+    quote_id: UUID,
+    request: Request,
+    bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Render a quote as PDF — engineering-style ESTIMATE matching the Overleaf template.
+
+    Always regenerated from current quote state; never stored. The "send" flow
+    (Phase 1) will snapshot bytes from this same renderer into saebooks-vault.
+    """
+    from saebooks.services.pdf import render_quote_pdf
+    from saebooks.models.contact import Contact
+    from sqlalchemy import select as sa_select
+
+    tenant_id = resolve_tenant_id(request)
+    q = await svc.api_get(session, quote_id, tenant_id=tenant_id)
+    if q is None:
+        raise HTTPException(404, "Quote not found")
+
+    customer = (
+        await session.execute(sa_select(Contact).where(Contact.id == q.customer_id))
+    ).scalars().first()
+    customer_ctx: dict[str, Any] = {}
+    if customer is not None:
+        customer_ctx = {
+            "name":    customer.name,
+            "email":   customer.email or "",
+            "phone":   customer.phone or "",
+            "mobile":  "",
+            "contact": "",
+        }
+
+    ctx: dict[str, Any] = {
+        "number":      q.number or str(q.id)[:8],
+        "title":       q.title or "",
+        "scope":       q.scope or "",
+        "issue_date":  q.issue_date.isoformat() if q.issue_date else "",
+        "expiry_date": q.expiry_date.isoformat() if q.expiry_date else "",
+        "validity_days":  q.validity_days,
+        "deposit_pct":    str(q.deposit_pct),
+        "subtotal":       str(q.subtotal),
+        "total":          str(q.total),
+        "customer":       customer_ctx,
+        "lines": [
+            {
+                "line_no":       ln.line_no,
+                "description":   ln.description,
+                "quantity":      str(ln.quantity),
+                "line_total":    str(ln.line_total),
+                "section_label": ln.section_label,
+                "material":      ln.material,
+                "length_note":   ln.length_note,
+                "drawing_ref":   ln.drawing_ref,
+            }
+            for ln in q.lines
+        ],
+    }
+
+    pdf_bytes = render_quote_pdf(ctx)
+    filename = f"SAE-2026-{ctx['number']}-{(ctx['title'] or 'quote').replace(' ', '-')[:40]}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Send-email — composer submit. Gated by the two-key kill switch in
+# saebooks.services.customer_email. NEVER bypasses the gate.
+# ---------------------------------------------------------------------------
+
+@router.post("/{quote_id}/send-email")
+async def post_quote_send_email(
+    quote_id: UUID,
+    request: Request,
+    bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Render the quote PDF + send (or block) via customer_email.
+
+    Request JSON body:
+        {
+            "from_addr": "admin@saee.com.au",
+            "to":   ["customer@example.com"],
+            "cc":   ["other@example.com"],          // optional
+            "bcc":  ["accounts@saee.com.au"],       // optional
+            "subject": "Estimate SAE-2026-1019 — ...",
+            "body_html": "<p>Please find attached…</p>"
+        }
+
+    Response: { mode, log_id, message_id?, reason?, outbox_path? }
+    """
+    from saebooks.services.pdf import render_quote_pdf
+    from saebooks.services.customer_email import (
+        send_customer_email, CustomerEmailAttachment, CustomerEmailError,
+    )
+    from saebooks.models.contact import Contact
+    from sqlalchemy import select as sa_select
+
+    tenant_id = resolve_tenant_id(request)
+    payload = await request.json()
+
+    try:
+        from_addr = str(payload["from_addr"]).strip()
+        to = [x.strip() for x in (payload.get("to") or []) if x and str(x).strip()]
+        cc = [x.strip() for x in (payload.get("cc") or []) if x and str(x).strip()]
+        bcc = [x.strip() for x in (payload.get("bcc") or []) if x and str(x).strip()]
+        subject = str(payload["subject"]).strip()
+        body_html = str(payload["body_html"]).strip()
+    except (KeyError, TypeError) as exc:
+        raise HTTPException(422, f"missing field: {exc}")
+
+    if not from_addr or not to or not subject or not body_html:
+        raise HTTPException(422, "from_addr, to, subject, and body_html are all required")
+
+    q = await svc.api_get(session, quote_id, tenant_id=tenant_id)
+    if q is None:
+        raise HTTPException(404, "Quote not found")
+
+    # Build the same ctx as the GET /pdf endpoint so we send the EXACT PDF
+    # the user previewed.
+    customer = (
+        await session.execute(sa_select(Contact).where(Contact.id == q.customer_id))
+    ).scalars().first()
+    customer_ctx: dict[str, Any] = {}
+    if customer is not None:
+        customer_ctx = {
+            "name":   customer.name,
+            "email":  customer.email or "",
+            "phone":  customer.phone or "",
+            "mobile": "",
+            "contact": "",
+        }
+    ctx: dict[str, Any] = {
+        "number":      q.number or str(q.id)[:8],
+        "title":       q.title or "",
+        "scope":       q.scope or "",
+        "issue_date":  q.issue_date.isoformat() if q.issue_date else "",
+        "expiry_date": q.expiry_date.isoformat() if q.expiry_date else "",
+        "validity_days":  q.validity_days,
+        "deposit_pct":    str(q.deposit_pct),
+        "subtotal":       str(q.subtotal),
+        "total":          str(q.total),
+        "customer":       customer_ctx,
+        "lines": [
+            {
+                "line_no":       ln.line_no,
+                "description":   ln.description,
+                "quantity":      str(ln.quantity),
+                "line_total":    str(ln.line_total),
+                "section_label": ln.section_label,
+                "material":      ln.material,
+                "length_note":   ln.length_note,
+                "drawing_ref":   ln.drawing_ref,
+            }
+            for ln in q.lines
+        ],
+    }
+    pdf_bytes = render_quote_pdf(ctx)
+    pdf_filename = f"SAE-2026-{ctx['number']}-{(ctx['title'] or 'quote').replace(' ', '-')[:40]}.pdf"
+
+    try:
+        result = await send_customer_email(
+            session,
+            tenant_id=tenant_id,
+            doc_type="quote",
+            doc_id=q.id,
+            doc_version=q.version,
+            sent_by_user_id=None,
+            from_addr=from_addr,
+            to=to,
+            cc=cc,
+            bcc=bcc,
+            subject=subject,
+            body_html=body_html,
+            attachments=[CustomerEmailAttachment(
+                filename=pdf_filename, content=pdf_bytes, content_type="application/pdf",
+            )],
+        )
+    except CustomerEmailError as exc:
+        raise HTTPException(422, str(exc))
+
+    await session.commit()
+
+    return JSONResponse({
+        "mode":        result.mode,
+        "log_id":      str(result.log_id),
+        "message_id":  result.message_id,
+        "reason":      result.reason,
+        "outbox_path": result.outbox_path,
+    }, status_code=200)
+
+
+# ---------------------------------------------------------------------------
 # Create
 # ---------------------------------------------------------------------------
 
@@ -213,6 +413,7 @@ async def create_quote(
             expiry_date=payload.expiry_date,
             lines=[ln.model_dump() for ln in payload.lines],
             title=payload.title,
+            scope=payload.scope,
             notes=payload.notes,
             terms=payload.terms,
             currency=payload.currency,
@@ -276,6 +477,7 @@ async def update_quote(
             issue_date=payload.issue_date,
             expiry_date=payload.expiry_date,
             title=payload.title,
+            scope=payload.scope,
             notes=payload.notes,
             terms=payload.terms,
             currency=payload.currency,

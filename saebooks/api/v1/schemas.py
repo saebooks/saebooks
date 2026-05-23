@@ -2867,6 +2867,10 @@ class QuoteLineOut(BaseModel):
     line_total: Decimal
     tax_code_id: uuid.UUID | None = None
     account_id: uuid.UUID | None = None
+    section_label: str | None = None
+    material: str | None = None
+    length_note: str | None = None
+    drawing_ref: str | None = None
 
 
 class QuoteLineCreate(BaseModel):
@@ -2877,6 +2881,10 @@ class QuoteLineCreate(BaseModel):
     unit_price: Decimal = Decimal("0")
     tax_code_id: uuid.UUID | None = None
     account_id: uuid.UUID | None = None
+    section_label: str | None = Field(default=None, max_length=255)
+    material: str | None = Field(default=None, max_length=255)
+    length_note: str | None = Field(default=None, max_length=255)
+    drawing_ref: str | None = Field(default=None, max_length=255)
 
 
 class QuoteBase(BaseModel):
@@ -2891,6 +2899,7 @@ class QuoteBase(BaseModel):
     late_fee_pct_per_month: Decimal = Decimal("2.5")
     is_supply_only: bool = False
     title: str | None = Field(default=None, max_length=255)
+    scope: str | None = None
     notes: str | None = None
     terms: str | None = None
 
@@ -2915,6 +2924,7 @@ class QuoteUpdate(BaseModel):
     late_fee_pct_per_month: Decimal | None = None
     is_supply_only: bool | None = None
     title: str | None = Field(default=None, max_length=255)
+    scope: str | None = None
     notes: str | None = None
     terms: str | None = None
     lines: list[QuoteLineCreate] | None = None
@@ -2942,6 +2952,7 @@ class QuoteOut(BaseModel):
     late_fee_pct_per_month: Decimal
     is_supply_only: bool
     title: str | None = None
+    scope: str | None = None
     notes: str | None = None
     terms: str | None = None
     accepted_at: datetime | None = None
