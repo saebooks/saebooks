@@ -104,6 +104,7 @@ async def list_accounts(
     request: Request,
     account_type: AccountType | None = Query(default=None),  # noqa: B008
     include_balance: bool = Query(default=False, description="Include current balance per account (POSTED journal lines)."),
+    include_archived: bool = Query(default=False, description="Include accounts whose archived_at is set (historical lookups)."),
     limit: int = Query(default=200, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
@@ -117,19 +118,23 @@ async def list_accounts(
     count_stmt = (
         select(func.count())
         .select_from(Account)
-        .where(Account.company_id == company_id, Account.archived_at.is_(None))
+        .where(Account.company_id == company_id)
     )
+    if not include_archived:
+        count_stmt = count_stmt.where(Account.archived_at.is_(None))
     if account_type is not None:
         count_stmt = count_stmt.where(Account.account_type == account_type)
     total = (await session.execute(count_stmt)).scalar_one()
 
     stmt = (
         select(Account)
-        .where(Account.company_id == company_id, Account.archived_at.is_(None))
+        .where(Account.company_id == company_id)
         .order_by(Account.code)
         .offset(offset)
         .limit(limit)
     )
+    if not include_archived:
+        stmt = stmt.where(Account.archived_at.is_(None))
     if account_type is not None:
         stmt = stmt.where(Account.account_type == account_type)
     items = list((await session.execute(stmt)).scalars().all())
