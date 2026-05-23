@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy import select
 
 from saebooks.db import AsyncSessionLocal
+from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.services import dashboard as svc
 
@@ -110,14 +111,77 @@ async def test_bank_balances_returns_list_of_reconcile_accounts() -> None:
         balances = await svc.bank_balances(session, cid)
     # Must be a list (possibly empty on minimal installs, but the AU
     # seed marks at least one cash-at-bank account reconcilable). The
-    # query is AccountType.ASSET + reconcile=True — code prefix is a
-    # seed convention we don't hard-assert against because things
+    # query is (ASSET OR LIABILITY) + reconcile=True — code prefix is
+    # a seed convention we don't hard-assert against because things
     # like BAS Receivable legitimately carry a "2-" code despite
     # being an asset for reconciliation.
     assert isinstance(balances, list)
     for b in balances:
         assert isinstance(b.code, str) and b.code
         assert isinstance(b.balance, Decimal)
+        assert b.account_type in (AccountType.ASSET, AccountType.LIABILITY)
+
+
+@pytest.mark.asyncio
+async def test_bank_balances_includes_liability_credit_cards() -> None:
+    """Credit cards (LIABILITY + reconcile=True) must surface alongside
+    bank accounts so the dashboard widget can show them. Pre-fix the
+    widget filtered on ASSET-only and silently dropped credit cards.
+    """
+    tag = uuid.uuid4().hex[:8]
+    async with AsyncSessionLocal() as session:
+        company = Company(name=f"BankBalTest-{tag}")
+        session.add(company)
+        await session.flush()
+        cid = company.id
+
+        bank = Account(
+            company_id=cid,
+            code=f"1-{tag[:5]}",
+            name="Scratch Bank",
+            account_type=AccountType.ASSET,
+            reconcile=True,
+        )
+        card = Account(
+            company_id=cid,
+            code=f"2-{tag[:5]}",
+            name="Scratch Visa",
+            account_type=AccountType.LIABILITY,
+            reconcile=True,
+        )
+        # Control accounts that must NOT appear in the result.
+        other_asset = Account(
+            company_id=cid,
+            code=f"1-{tag[:5]}X",
+            name="Scratch Non-Recon Asset",
+            account_type=AccountType.ASSET,
+            reconcile=False,
+        )
+        other_liab = Account(
+            company_id=cid,
+            code=f"2-{tag[:5]}X",
+            name="Scratch Non-Recon Liability",
+            account_type=AccountType.LIABILITY,
+            reconcile=False,
+        )
+        for a in (bank, card, other_asset, other_liab):
+            session.add(a)
+        await session.commit()
+
+    async with AsyncSessionLocal() as session:
+        balances = await svc.bank_balances(session, cid)
+
+    by_id = {b.account_id: b for b in balances}
+    assert bank.id in by_id, "ASSET + reconcile=True must appear"
+    assert card.id in by_id, "LIABILITY + reconcile=True must appear (CC)"
+    assert other_asset.id not in by_id, "ASSET without reconcile must NOT appear"
+    assert other_liab.id not in by_id, "LIABILITY without reconcile must NOT appear"
+    assert by_id[bank.id].account_type == AccountType.ASSET
+    assert by_id[card.id].account_type == AccountType.LIABILITY
+    # Brand-new accounts with no journal lines read as zero — empty-state
+    # friendly, no NULLs leaking.
+    assert by_id[bank.id].balance == Decimal("0")
+    assert by_id[card.id].balance == Decimal("0")
 
 
 # ---------------------------------------------------------------------- #

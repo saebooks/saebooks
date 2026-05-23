@@ -48,12 +48,18 @@ _MATCH_TOLERANCE = Decimal("0.02")
 async def bank_accounts(
     session: AsyncSession, company_id: uuid.UUID
 ) -> list[Account]:
-    """Return bank/cash accounts (asset type with reconcile=True)."""
+    """Return reconcilable bank/cash/credit-card accounts.
+
+    Includes ASSET (cheque/savings/cash/undeposited-funds) and LIABILITY
+    (credit cards) with ``reconcile=True`` and not archived. Credit cards
+    are reconciled against statement lines the same way bank accounts
+    are; the sign on the GL just runs the other way.
+    """
     stmt = (
         select(Account)
         .where(
             Account.company_id == company_id,
-            Account.account_type == AccountType.ASSET,
+            Account.account_type.in_((AccountType.ASSET, AccountType.LIABILITY)),
             Account.reconcile.is_(True),
             Account.archived_at.is_(None),
         )

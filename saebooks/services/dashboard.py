@@ -39,7 +39,8 @@ class BankBalance:
     account_id: uuid.UUID
     code: str
     name: str
-    balance: Decimal  # GL debit - credit (cash accounts are debit-normal)
+    account_type: AccountType
+    balance: Decimal  # GL debit - credit; negative on a LIABILITY card = owed to bank
 
 
 async def bank_balances(
@@ -48,12 +49,14 @@ async def bank_balances(
     *,
     as_of: date | None = None,
 ) -> list[BankBalance]:
-    """GL balance per reconcilable bank/cash account.
+    """GL balance per reconcilable bank/cash/credit-card account.
 
     A "bank account" here is the same definition used by the
-    reconciliation service: ``AccountType.ASSET`` + ``reconcile=True``
-    + not archived. Balance is cumulative POSTED journal lines up to
-    ``as_of`` (default today).
+    reconciliation service: ``account_type IN (ASSET, LIABILITY)`` +
+    ``reconcile=True`` + not archived. ASSET covers cheque/savings/cash/
+    undeposited-funds; LIABILITY covers credit cards. Balance is
+    cumulative POSTED journal lines (debit − credit) up to ``as_of``
+    (default today), so a credit card with money owed reads negative.
     """
     cutoff = as_of or date.today()
 
@@ -62,6 +65,7 @@ async def bank_balances(
             Account.id,
             Account.code,
             Account.name,
+            Account.account_type,
             func.coalesce(func.sum(JournalLine.debit), 0),
             func.coalesce(func.sum(JournalLine.credit), 0),
         )
@@ -77,17 +81,17 @@ async def bank_balances(
         )
         .where(
             Account.company_id == company_id,
-            Account.account_type == AccountType.ASSET,
+            Account.account_type.in_((AccountType.ASSET, AccountType.LIABILITY)),
             Account.reconcile.is_(True),
             Account.archived_at.is_(None),
         )
-        .group_by(Account.id, Account.code, Account.name)
+        .group_by(Account.id, Account.code, Account.name, Account.account_type)
         .order_by(Account.code)
     )
 
     rows = (await session.execute(stmt)).all()
     balances: list[BankBalance] = []
-    for acct_id, code, name, dr, cr in rows:
+    for acct_id, code, name, acct_type, dr, cr in rows:
         # Filter on JournalEntry.status lands in the outer-join
         # condition so unposted/voided entries don't contribute.
         # Rows with no matched journal lines still appear with
@@ -97,6 +101,7 @@ async def bank_balances(
                 account_id=acct_id,
                 code=code,
                 name=name,
+                account_type=acct_type,
                 balance=Decimal(dr) - Decimal(cr),
             )
         )
