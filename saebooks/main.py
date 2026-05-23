@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from saebooks.api.errors import register_handlers
 from saebooks.api.v1 import router as api_v1_router
 from saebooks.api.webhooks.stripe import router as _stripe_webhook_router
+from saebooks import __version__
 from saebooks.config import settings
 from saebooks.connect_app import (
     ConnectDispatchMiddleware,
@@ -102,7 +103,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="SAE Books",
-        version="0.0.1",
+        version=__version__,
         description="Self-hosted double-entry accounting",
         lifespan=lifespan,
     )
