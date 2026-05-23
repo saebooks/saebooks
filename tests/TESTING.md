@@ -44,21 +44,16 @@ against the isolated `saebooks-test` stack:
 |--------|-------:|-------:|--------:|-------:|----------:|
 | `b788fc2` (pre-cleanup baseline) | 116 | 2201 | 8 | 48 | 93.0% |
 | `70fa10f` (after 6 cleanup commits) | 79 | 2275 | 13 | 6 | 95.8% |
+| `ad6ac6b` (after grpc conftest + doc fix) | 80 | 2279 | 13 | 1 | 96.6% |
 
-The subsequent commit `d908bbe` (added `tests/test_grpc/conftest.py`
-with `db_session` / `seeded_company` / `seeded_user` fixtures)
-was only verified against the `tests/test_grpc/test_api_tokens.py`
-subset, not the full suite. On that subset, 4 of the 6 pre-existing
-`db_session not found` ERRORs now pass, 1 became a real FAIL
-(test exercises behaviour now seen for the first time), and 1
-remained ERRORed. So the projected post-`d908bbe` full-suite
-state is approximately **80 failed, 1 error** — **not full-suite
-re-verified**; re-run `scripts/run-tests.sh` to refresh.
+(The 80-vs-79 jump between rows 2 and 3 is the grpc `test_list_excludes_revoked_by_default`
+test, which was ERROR-at-setup in row 2 and now reaches the test body
+and FAILs on a real assertion. Net of the grpc commit: 5 ERRORs cleared, 1 new FAIL.)
 
-The cleanup closed roughly 90 of the 164 pre-existing reds (across
-`b788fc2` → `d908bbe`), mostly by fixing fixture-level issues
-that cascaded into dozens of false failures. The remainder are
-scattered single-file regressions that need case-by-case judgment.
+The cleanup closed **83 of 164 pre-existing reds** (165 → 81 total),
+mostly by fixing fixture-level issues that cascaded into dozens of
+false failures. The remainder are scattered single-file regressions
+that need case-by-case judgment.
 
 ### What was fixed (post-cleanup)
 
