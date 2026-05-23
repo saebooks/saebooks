@@ -21,6 +21,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,7 +37,26 @@ _VALID_STATUSES = {"sent", "failed", "blocked", "queued"}
 
 
 def _row_to_dict(row: Any) -> dict[str, Any]:
-    """Convert a SQLAlchemy row to a JSON-safe dict."""
+    """Convert a SQLAlchemy row to a JSON-safe dict.
+
+    Excludes the heavy attachment_bytes field — caller should hit the
+    /attachment/{idx} endpoint for the actual blob.
+    """
+    filenames = list(row.attachment_filenames) if row.attachment_filenames else []
+    shas      = list(row.attachment_sha256) if getattr(row, "attachment_sha256", None) else []
+    cts       = list(row.attachment_content_types) if getattr(row, "attachment_content_types", None) else []
+    sizes: list[int] = []
+    if getattr(row, "attachment_bytes", None):
+        sizes = [len(b) for b in row.attachment_bytes]
+    attachments_meta = []
+    for i, fn in enumerate(filenames):
+        attachments_meta.append({
+            "index":        i,
+            "filename":     fn,
+            "sha256":       shas[i] if i < len(shas) else None,
+            "content_type": cts[i] if i < len(cts) else None,
+            "size_bytes":   sizes[i] if i < len(sizes) else None,
+        })
     return {
         "id":                   str(row.id),
         "tenant_id":            str(row.tenant_id),
@@ -49,12 +69,22 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
         "cc_addrs":             list(row.cc_addrs) if row.cc_addrs else [],
         "bcc_addrs":            list(row.bcc_addrs) if row.bcc_addrs else [],
         "subject":              row.subject,
-        "attachment_filenames": list(row.attachment_filenames) if row.attachment_filenames else [],
+        "attachment_filenames": filenames,
+        "attachments":          attachments_meta,
         "resend_message_id":    row.resend_message_id,
         "resend_status":        row.resend_status,
         "resend_error":         row.resend_error,
         "kill_switch_reason":   row.kill_switch_reason,
         "sent_at":              row.sent_at.isoformat() if row.sent_at else None,
+        # Phase C — delivery events
+        "delivered_at":   row.delivered_at.isoformat()  if getattr(row, "delivered_at",  None) else None,
+        "bounced_at":     row.bounced_at.isoformat()    if getattr(row, "bounced_at",    None) else None,
+        "bounce_reason":  getattr(row, "bounce_reason", None),
+        "opened_at":      row.opened_at.isoformat()     if getattr(row, "opened_at",     None) else None,
+        "opened_count":   getattr(row, "opened_count",  0),
+        "clicked_at":     row.clicked_at.isoformat()    if getattr(row, "clicked_at",    None) else None,
+        "clicked_count":  getattr(row, "clicked_count", 0),
+        "complained_at":  row.complained_at.isoformat() if getattr(row, "complained_at", None) else None,
     }
 
 
@@ -108,8 +138,12 @@ async def list_email_log(
             SELECT id, tenant_id, doc_type, doc_id, doc_version,
                    sent_by_user_id, from_addr, to_addrs, cc_addrs, bcc_addrs,
                    subject, attachment_filenames,
+                   attachment_bytes, attachment_sha256, attachment_content_types,
                    resend_message_id, resend_status, resend_error,
-                   kill_switch_reason, sent_at
+                   kill_switch_reason, sent_at,
+                   delivered_at, bounced_at, bounce_reason,
+                   opened_at, opened_count, clicked_at, clicked_count,
+                   complained_at
             FROM email_send_log
             WHERE {where}
             ORDER BY sent_at DESC
@@ -142,8 +176,12 @@ async def list_email_log_for_doc(
             SELECT id, tenant_id, doc_type, doc_id, doc_version,
                    sent_by_user_id, from_addr, to_addrs, cc_addrs, bcc_addrs,
                    subject, attachment_filenames,
+                   attachment_bytes, attachment_sha256, attachment_content_types,
                    resend_message_id, resend_status, resend_error,
-                   kill_switch_reason, sent_at
+                   kill_switch_reason, sent_at,
+                   delivered_at, bounced_at, bounce_reason,
+                   opened_at, opened_count, clicked_at, clicked_count,
+                   complained_at
             FROM email_send_log
             WHERE tenant_id = :tenant_id AND doc_type = :doc_type AND doc_id = :doc_id
             ORDER BY sent_at DESC
@@ -166,9 +204,14 @@ async def get_email_log_entry(
         text("""
             SELECT id, tenant_id, doc_type, doc_id, doc_version,
                    sent_by_user_id, from_addr, to_addrs, cc_addrs, bcc_addrs,
-                   subject, body_html, body_text, attachment_filenames,
+                   subject, body_html, body_text,
+                   attachment_filenames, attachment_bytes,
+                   attachment_sha256, attachment_content_types,
                    resend_message_id, resend_status, resend_error,
-                   kill_switch_reason, sent_at
+                   kill_switch_reason, sent_at,
+                   delivered_at, bounced_at, bounce_reason,
+                   opened_at, opened_count, clicked_at, clicked_count,
+                   complained_at, webhook_events
             FROM email_send_log
             WHERE id = :log_id AND tenant_id = :tenant_id
         """),
@@ -180,4 +223,58 @@ async def get_email_log_entry(
     out = _row_to_dict(row)
     out["body_html"] = row.body_html
     out["body_text"] = row.body_text
+    # webhook_events is a JSONB column — already a list of dicts from asyncpg
+    out["webhook_events"] = list(row.webhook_events) if row.webhook_events else []
     return out
+
+
+# ---------------------------------------------------------------------------
+# Attachment download — the IMMUTABLE PDF that was attached at send time
+# ---------------------------------------------------------------------------
+
+@router.get("/{log_id}/attachment/{idx}")
+async def download_email_log_attachment(
+    log_id: UUID,
+    idx: int,
+    request: Request,
+    bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Stream the exact attachment bytes that were sent (or would have been).
+
+    Tenant-scoped via the WHERE clause + RLS. The PDF is stored in the same
+    transaction as the audit row, so this answers "what exact attachment
+    went out on {sent_at}?" — even years later, even after the source quote
+    is re-rendered or edited.
+    """
+    tenant_id = resolve_tenant_id(request)
+    row = (await session.execute(
+        text("""
+            SELECT attachment_filenames, attachment_bytes,
+                   attachment_content_types
+            FROM email_send_log
+            WHERE id = :log_id AND tenant_id = :tenant_id
+        """),
+        {"log_id": str(log_id), "tenant_id": str(tenant_id)},
+    )).first()
+    if row is None:
+        raise HTTPException(404, "log entry not found")
+    if not row.attachment_bytes or idx < 0 or idx >= len(row.attachment_bytes):
+        raise HTTPException(404, "attachment index out of range")
+
+    blob: bytes = bytes(row.attachment_bytes[idx])
+    filename = row.attachment_filenames[idx] if idx < len(row.attachment_filenames) else f"attachment-{idx}"
+    content_type = (
+        row.attachment_content_types[idx]
+        if idx < len(row.attachment_content_types) and row.attachment_content_types[idx]
+        else "application/octet-stream"
+    )
+
+    return Response(
+        content=blob,
+        media_type=content_type,
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Cache-Control":       "private, max-age=0, must-revalidate",
+        },
+    )

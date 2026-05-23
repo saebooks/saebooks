@@ -47,6 +47,7 @@ allowlisted FROM for tenant".
 from __future__ import annotations
 
 import base64
+import hashlib
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -166,12 +167,20 @@ async def _record_send_log(
     body_html: str,
     body_text: str | None,
     attachment_filenames: list[str],
+    attachment_bytes: list[bytes],
+    attachment_sha256: list[str],
+    attachment_content_types: list[str],
     resend_message_id: str | None,
     resend_status: str,
     resend_error: str | None,
     kill_switch_reason: str | None,
 ) -> uuid.UUID:
-    """Insert the audit row and return its id."""
+    """Insert the audit row and return its id.
+
+    Captures attachment bytes + sha256 + content_type as parallel arrays so
+    "what exact PDF went out at this moment in time" is answerable from the
+    audit row alone, with no external service dependency.
+    """
     from sqlalchemy import text
     new_id = uuid.uuid4()
     await session.execute(
@@ -179,12 +188,16 @@ async def _record_send_log(
             INSERT INTO email_send_log (
                 id, tenant_id, doc_type, doc_id, doc_version,
                 sent_by_user_id, from_addr, to_addrs, cc_addrs, bcc_addrs,
-                subject, body_html, body_text, attachment_filenames,
+                subject, body_html, body_text,
+                attachment_filenames, attachment_bytes,
+                attachment_sha256, attachment_content_types,
                 resend_message_id, resend_status, resend_error, kill_switch_reason
             ) VALUES (
                 :id, :tenant_id, :doc_type, :doc_id, :doc_version,
                 :sent_by_user_id, :from_addr, :to_addrs, :cc_addrs, :bcc_addrs,
-                :subject, :body_html, :body_text, :attachment_filenames,
+                :subject, :body_html, :body_text,
+                :attachment_filenames, :attachment_bytes,
+                :attachment_sha256, :attachment_content_types,
                 :resend_message_id, :resend_status, :resend_error, :kill_switch_reason
             )
         """),
@@ -203,6 +216,9 @@ async def _record_send_log(
             "body_html": body_html,
             "body_text": body_text,
             "attachment_filenames": attachment_filenames,
+            "attachment_bytes": attachment_bytes,
+            "attachment_sha256": attachment_sha256,
+            "attachment_content_types": attachment_content_types,
             "resend_message_id": resend_message_id,
             "resend_status": resend_status,
             "resend_error": resend_error,
@@ -301,6 +317,9 @@ async def send_customer_email(
         raise CustomerEmailError("body_html required")
 
     attachment_filenames = [att.filename for att in attachments]
+    attachment_bytes_list = [att.content for att in attachments]
+    attachment_sha256_list = [hashlib.sha256(att.content).hexdigest() for att in attachments]
+    attachment_content_types = [att.content_type for att in attachments]
     message_id = uuid.uuid4().hex
     eml_bytes = _build_eml(
         from_addr=from_addr, to=to, cc=cc, bcc=bcc,
@@ -350,6 +369,9 @@ async def send_customer_email(
             from_addr=from_addr, to=to, cc=cc, bcc=bcc,
             subject=subject, body_html=body_html, body_text=body_text,
             attachment_filenames=attachment_filenames,
+            attachment_bytes=attachment_bytes_list,
+            attachment_sha256=attachment_sha256_list,
+            attachment_content_types=attachment_content_types,
             resend_message_id=None,
             resend_status="blocked",
             resend_error=None,
@@ -368,6 +390,9 @@ async def send_customer_email(
             from_addr=from_addr, to=to, cc=cc, bcc=bcc,
             subject=subject, body_html=body_html, body_text=body_text,
             attachment_filenames=attachment_filenames,
+            attachment_bytes=attachment_bytes_list,
+            attachment_sha256=attachment_sha256_list,
+            attachment_content_types=attachment_content_types,
             resend_message_id=None,
             resend_status="blocked",
             resend_error=None,
@@ -394,6 +419,9 @@ async def send_customer_email(
         from_addr=from_addr, to=to, cc=cc, bcc=bcc,
         subject=subject, body_html=body_html, body_text=body_text,
         attachment_filenames=attachment_filenames,
+        attachment_bytes=attachment_bytes_list,
+        attachment_sha256=attachment_sha256_list,
+        attachment_content_types=attachment_content_types,
         resend_message_id=resend_message_id,
         resend_status=status,
         resend_error=resend_error,

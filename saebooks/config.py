@@ -155,6 +155,10 @@ class Settings(BaseSettings):
     resend_api_url: str = Field(
         default="https://api.resend.com", alias="RESEND_API_URL"
     )
+    # Svix-format webhook signing secret from Resend Dashboard → Webhooks.
+    # Format: ``whsec_<base64-encoded-bytes>``. Empty = webhook receiver
+    # refuses everything (fail closed).
+    resend_webhook_secret: str = Field(default="", alias="RESEND_WEBHOOK_SECRET")
 
     # ---------------------------------------------------------------- #
     # Observability (Batch Z)                                          #
