@@ -126,6 +126,17 @@ def _base_filter(
 # ---------------------------------------------------------------------------
 
 
+# Sortable columns: API string → SQLAlchemy column.
+_SORT_COLUMNS = {
+    "date": BankStatementLine.txn_date,
+    "description": BankStatementLine.description,
+    "amount": BankStatementLine.amount,
+    "balance": BankStatementLine.balance,
+    "status": BankStatementLine.status,
+    "reference": BankStatementLine.reference,
+}
+
+
 async def list_active(
     session: AsyncSession,
     company_id: uuid.UUID,
@@ -135,6 +146,8 @@ async def list_active(
     status: StatementLineStatus | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
+    sort: str = "date",
+    order: str = "desc",
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[BankStatementLine], int]:
@@ -152,10 +165,19 @@ async def list_active(
     )
     total = (await session.execute(count_stmt)).scalar_one()
 
+    sort_col = _SORT_COLUMNS.get(sort, BankStatementLine.txn_date)
+    primary = sort_col.asc() if order == "asc" else sort_col.desc()
+    # created_at tie-breaker keeps the order stable when the primary
+    # column has duplicates (e.g. same txn_date).
+    tiebreak = (
+        BankStatementLine.created_at.asc() if order == "asc"
+        else BankStatementLine.created_at.desc()
+    )
+
     stmt = (
         select(BankStatementLine)
         .where(*where)
-        .order_by(BankStatementLine.txn_date.desc(), BankStatementLine.created_at.desc())
+        .order_by(primary, tiebreak)
         .limit(limit)
         .offset(offset)
     )

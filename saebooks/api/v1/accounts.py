@@ -103,10 +103,15 @@ def _dump(account: Account) -> dict[str, Any]:
 async def list_accounts(
     request: Request,
     account_type: AccountType | None = Query(default=None),  # noqa: B008
+    include_balance: bool = Query(default=False, description="Include current balance per account (POSTED journal lines)."),
     limit: int = Query(default=200, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
-) -> AccountListOut:
+) -> JSONResponse:
+    from decimal import Decimal as _Decimal
+
+    from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
+
     tenant_id = resolve_tenant_id(request)
     company_id = await _first_company_id(session, tenant_id)
     count_stmt = (
@@ -128,12 +133,45 @@ async def list_accounts(
     if account_type is not None:
         stmt = stmt.where(Account.account_type == account_type)
     items = list((await session.execute(stmt)).scalars().all())
-    return AccountListOut(
-        items=[AccountOut.model_validate(a) for a in items],
-        total=total,
-        limit=limit,
-        offset=offset,
-    )
+
+    out_items: list[dict[str, Any]] = [
+        AccountOut.model_validate(a).model_dump(mode="json") for a in items
+    ]
+
+    if include_balance and items:
+        # One aggregate query over journal_lines + journal_entries scoped to
+        # company + POSTED. credit_normal accounts (LIAB/EQUITY/INCOME)
+        # accumulate (credit - debit); everything else (debit - credit).
+        bal_stmt = (
+            select(
+                JournalLine.account_id,
+                func.coalesce(func.sum(JournalLine.debit), _Decimal("0")).label("dr"),
+                func.coalesce(func.sum(JournalLine.credit), _Decimal("0")).label("cr"),
+            )
+            .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+            .where(
+                JournalEntry.company_id == company_id,
+                JournalEntry.status == EntryStatus.POSTED,
+            )
+            .group_by(JournalLine.account_id)
+        )
+        rows = (await session.execute(bal_stmt)).all()
+        bal_by_id: dict[str, tuple[_Decimal, _Decimal]] = {
+            str(r.account_id): (r.dr, r.cr) for r in rows
+        }
+        for item in out_items:
+            dr, cr = bal_by_id.get(item["id"], (_Decimal("0"), _Decimal("0")))
+            atype = item.get("account_type")
+            credit_normal = atype in ("LIABILITY", "EQUITY", "INCOME", "OTHER_INCOME")
+            bal = (cr - dr) if credit_normal else (dr - cr)
+            item["balance"] = str(bal)
+
+    return JSONResponse({
+        "items": out_items,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +211,8 @@ async def get_account_ledger(
     request: Request,
     date_from: str | None = Query(default=None, description="ISO date (YYYY-MM-DD)"),
     date_to: str | None = Query(default=None, description="ISO date (YYYY-MM-DD)"),
+    sort: str = Query(default="date", description="One of: date, ref, description, debit, credit"),
+    order: str = Query(default="desc", regex="^(asc|desc)$"),
     limit: int = Query(default=200, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
@@ -183,6 +223,10 @@ async def get_account_ledger(
     if no date floor). Running balance follows debit/credit normality
     (credit-normal: LIABILITY/EQUITY/INCOME accumulates credit-debit;
     everything else accumulates debit-credit).
+
+    When ``sort`` is anything other than ``date``, the running ``balance``
+    field is set to ``null`` on every row — it only carries meaning when
+    rows are ordered chronologically.
     """
     from datetime import date as _date
     from decimal import Decimal
@@ -199,6 +243,11 @@ async def get_account_ledger(
 
     parsed_from = _parse(date_from)
     parsed_to = _parse(date_to)
+
+    _VALID_SORTS = {"date", "ref", "description", "debit", "credit"}
+    if sort not in _VALID_SORTS:
+        raise HTTPException(400, f"Invalid sort {sort!r}. Valid: {sorted(_VALID_SORTS)}")
+    show_balance = (sort == "date")
 
     tenant_id = resolve_tenant_id(request)
     account = await svc.get(session, account_id, tenant_id=tenant_id)
@@ -242,6 +291,20 @@ async def get_account_ledger(
         count_stmt = count_stmt.where(JournalEntry.entry_date <= parsed_to)
     total = (await session.execute(count_stmt)).scalar_one()
 
+    # Map sort param to (primary, tiebreak) SQLAlchemy expressions.
+    _sort_map = {
+        "date":        JournalEntry.entry_date,
+        "ref":         JournalEntry.ref,
+        "description": JournalLine.description,
+        "debit":       JournalLine.debit,
+        "credit":      JournalLine.credit,
+    }
+    primary_col = _sort_map[sort]
+    primary = primary_col.asc() if order == "asc" else primary_col.desc()
+    # Always tie-break on (entry_date, entry_id, line_no) to keep order
+    # stable. When sort=date asc, that's also the natural ledger order.
+    tie_date = JournalEntry.entry_date.asc() if order == "asc" else JournalEntry.entry_date.desc()
+
     stmt = (
         select(JournalLine, JournalEntry)
         .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
@@ -250,7 +313,8 @@ async def get_account_ledger(
             JournalEntry.status == EntryStatus.POSTED,
         )
         .order_by(
-            JournalEntry.entry_date.asc(),
+            primary,
+            tie_date,
             JournalEntry.id.asc(),
             JournalLine.line_no.asc(),
         )
@@ -263,10 +327,10 @@ async def get_account_ledger(
 
     rows = (await session.execute(stmt)).all()
 
-    # When the page is offset > 0 we need the running balance to start
-    # from the cumulative balance up to (but not including) this page.
+    # Running balance only makes sense when sorting by date ascending.
+    # For everything else, leave balance null and totals are still useful.
     running = opening_balance
-    if offset > 0:
+    if show_balance and order == "asc" and offset > 0:
         pre_stmt = (
             select(
                 func.coalesce(func.sum(JournalLine.debit), Decimal("0")).label("tot_dr"),
@@ -309,13 +373,18 @@ async def get_account_ledger(
     items: list[dict[str, Any]] = []
     total_debit = Decimal("0")
     total_credit = Decimal("0")
+    show_running = show_balance and order == "asc"
     for jl, je in rows:
         total_debit += jl.debit
         total_credit += jl.credit
-        if credit_normal:
-            running += jl.credit - jl.debit
+        if show_running:
+            if credit_normal:
+                running += jl.credit - jl.debit
+            else:
+                running += jl.debit - jl.credit
+            balance_str: str | None = str(running)
         else:
-            running += jl.debit - jl.credit
+            balance_str = None
         items.append({
             "entry_id": str(je.id),
             "entry_date": je.entry_date.isoformat(),
@@ -323,7 +392,7 @@ async def get_account_ledger(
             "description": jl.description or je.description or "",
             "debit": str(jl.debit),
             "credit": str(jl.credit),
-            "balance": str(running),
+            "balance": balance_str,
         })
 
     body = {
@@ -335,6 +404,8 @@ async def get_account_ledger(
         "total_debit": str(total_debit),
         "total_credit": str(total_credit),
         "credit_normal": credit_normal,
+        "sort": sort,
+        "order": order,
     }
     return JSONResponse(body)
 

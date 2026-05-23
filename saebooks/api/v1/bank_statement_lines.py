@@ -92,6 +92,9 @@ def _parse_status(value: str | None) -> StatementLineStatus | None:
 # ---------------------------------------------------------------------------
 
 
+_SORT_COLUMNS_PUBLIC = frozenset({"date", "description", "amount", "balance", "status", "reference"})
+
+
 @router.get("", response_model=BankStatementLineListOut)
 async def list_bank_statement_lines(
     request: Request,
@@ -99,12 +102,16 @@ async def list_bank_statement_lines(
     status: str | None = Query(default=None),
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
+    sort: str = Query(default="date", description="One of: date, description, amount, balance, status, reference"),
+    order: str = Query(default="desc", regex="^(asc|desc)$"),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
     company_id: UUID = Depends(get_active_company_id),
 ) -> BankStatementLineListOut:
     status_filter = _parse_status(status)
+    if sort not in _SORT_COLUMNS_PUBLIC:
+        raise HTTPException(400, f"Invalid sort {sort!r}. Valid: {sorted(_SORT_COLUMNS_PUBLIC)}")
     tenant_id = resolve_tenant_id(request)
     items, total = await svc.list_active(
         session,
@@ -114,6 +121,8 @@ async def list_bank_statement_lines(
         status=status_filter,
         date_from=date_from,
         date_to=date_to,
+        sort=sort,
+        order=order,
         limit=limit,
         offset=offset,
     )
