@@ -100,9 +100,26 @@ from saebooks.services.jwt_tokens import (
 # binds the session — see file docstring.
 
 _APP_ROLE_PASSWORD = "test-only-app-pw"
-_APP_ENGINE_URL = (
-    f"postgresql+asyncpg://saebooks_app:{_APP_ROLE_PASSWORD}@db:5432/saebooks"
-)
+
+
+def _build_app_engine_url() -> str:
+    """Build a saebooks_app URL using the same host+port+db as DATABASE_URL.
+
+    The previous hardcoded "db:5432/saebooks" assumed the production
+    container layout; the test stack uses saebooks_test on the test
+    network, so deriving from settings keeps this fixture portable.
+    """
+    from urllib.parse import urlsplit, urlunsplit
+    from saebooks.config import settings
+
+    parts = urlsplit(settings.database_url)
+    netloc = f"saebooks_app:{_APP_ROLE_PASSWORD}@{parts.hostname}"
+    if parts.port:
+        netloc += f":{parts.port}"
+    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+
+
+_APP_ENGINE_URL = _build_app_engine_url()
 
 
 async def _set_app_role_password() -> None:
