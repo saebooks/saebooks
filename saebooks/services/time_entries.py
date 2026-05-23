@@ -308,6 +308,40 @@ async def approve(
     return entry
 
 
+async def revert(
+    session: AsyncSession,
+    *,
+    entry: TimeEntry,
+) -> TimeEntry:
+    """Revert an APPROVED entry back to DRAFT so it can be edited or archived.
+
+    Only allowed when:
+      * approval_status is APPROVED
+      * invoice_line_id is null (revert after invoicing would orphan a line)
+
+    Clears approved_at + approved_by and bumps the version. Once back at
+    DRAFT the caller can edit via PATCH or archive via DELETE.
+    """
+    if entry.approval_status != TimeEntryApprovalStatus.APPROVED.value:
+        raise TimeEntryError(
+            f"can only revert APPROVED entries; got {entry.approval_status}",
+            code="wrong_state",
+        )
+    if entry.invoice_line_id is not None:
+        raise TimeEntryError(
+            "cannot revert an entry already on an invoice — void the invoice line first",
+            code="already_invoiced",
+        )
+    entry.approval_status = TimeEntryApprovalStatus.DRAFT.value
+    entry.approved_at = None
+    entry.approved_by = None
+    entry.submitted_at = None
+    entry.version += 1
+    await session.flush()
+    await session.refresh(entry)
+    return entry
+
+
 async def reject(
     session: AsyncSession,
     *,

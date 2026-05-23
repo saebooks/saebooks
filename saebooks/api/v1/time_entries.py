@@ -365,6 +365,28 @@ async def reject_time_entry(
 # ---------------------------------------------------------------------------
 
 
+@router.post("/{entry_id}/revert", response_model=TimeEntryOut)
+async def revert_time_entry(
+    entry_id: uuid.UUID,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+    session: AsyncSession = Depends(get_session),
+    company_id: uuid.UUID = Depends(get_active_company_id),
+) -> JSONResponse:
+    """Revert APPROVED -> DRAFT so the entry can be edited or archived."""
+    entry = await svc.get(session, company_id=company_id, entry_id=entry_id)
+    if entry is None:
+        raise HTTPException(404, "time entry not found")
+    expected_version = _parse_if_match(if_match)
+    if expected_version is not None and entry.version != expected_version:
+        raise HTTPException(412, "version mismatch")
+    try:
+        entry = await svc.revert(session, entry=entry)
+        await session.commit()
+    except TimeEntryError as exc:
+        raise _translate_error(exc) from exc
+    return JSONResponse(_dump(entry), headers={"ETag": f'"{entry.version}"'})
+
+
 @router.post(
     "/convert-to-invoice",
     response_model=TimeEntryConvertToInvoiceLineResponse,
