@@ -186,6 +186,7 @@ def test_tier_order_is_canonical() -> None:
         "business",
         "pro",
         "enterprise",
+        "developer",
     )
 
 

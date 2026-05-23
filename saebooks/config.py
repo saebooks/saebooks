@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     # Ed25519 licence (offline) or portal JWT (business/pro/enterprise);
     # community is the fall-through when no licence is present.
     edition: Literal[
-        "community", "offline", "business", "pro", "enterprise"
+        "community", "offline", "business", "pro", "enterprise", "developer"
     ] = Field(default="community", alias="SAEBOOKS_EDITION")
     log_level: str = Field(default="INFO", alias="SAEBOOKS_LOG_LEVEL")
     bind_host: str = Field(default="127.0.0.1", alias="SAEBOOKS_BIND_HOST")

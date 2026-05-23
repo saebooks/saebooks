@@ -102,7 +102,25 @@ FLAG_AI_EXTRACTION = "ai_extraction"
 # overhead. Gated at Business+ since multi-company is the primary driver.
 FLAG_ALLOCATION_RULES = "allocation_rules"
 
+# --- Developer-only flags (not part of any published / billable tier) ----- #
+# These exist ONLY in the ``developer`` tier — Richard's personal instances
+# (sauer / gecairns / app-preview / cashbook-demo) where the codebase is
+# also the dev surface. They MUST NOT appear in any commercial tier — see
+# memory feedback_sauer-instance-no-guardrails for the rationale.
+#
+# FLAG_HARD_DELETE — admin can hard-delete rows directly from the ledger
+#   (skips the soft-archive / reverse-JE workflow that public editions
+#   enforce for ATO retention compliance).
+FLAG_HARD_DELETE = "hard_delete"
+
+# FLAG_DEV_TOOLS — exposes developer affordances in the UI: edit-anything
+#   override on frozen-state entities (APPROVED time entries, POSTED
+#   journals, etc.), raw-JSON entity inspectors, internal endpoints.
+FLAG_DEV_TOOLS = "dev_tools"
+
 ALL_FLAGS: tuple[str, ...] = (
+    FLAG_HARD_DELETE,
+    FLAG_DEV_TOOLS,
     FLAG_BANK_FEEDS,
     FLAG_ABR_LOOKUP,
     FLAG_LEI_LOOKUP,
@@ -176,22 +194,38 @@ _ENTERPRISE_FLAGS: frozenset[str] = _PRO_FLAGS | frozenset({
     FLAG_PER_COMPANY_SISS,
 })
 
+# Developer tier — internal-only. Superset of enterprise + every dev-only
+# flag. NOT a billable subscription; never offered through Stripe checkout;
+# only activated via SAEBOOKS_EDITION=developer in the .env of an instance
+# the owner controls directly. Used by Richard for his personal books
+# (sauer / gecairns / app-preview / cashbook-demo) so test rows can be
+# hard-deleted, frozen-state entities can be edited, etc., without the
+# ATO retention guardrails that ship to paying customers.
+_DEVELOPER_FLAGS: frozenset[str] = _ENTERPRISE_FLAGS | frozenset({
+    FLAG_HARD_DELETE,
+    FLAG_DEV_TOOLS,
+})
+
 _TIER_FLAGS: dict[str, frozenset[str]] = {
     "community": frozenset(),
     "offline": _OFFLINE_FLAGS,
     "business": _BUSINESS_FLAGS,
     "pro": _PRO_FLAGS,
     "enterprise": _ENTERPRISE_FLAGS,
+    "developer": _DEVELOPER_FLAGS,
 }
 
 # Tier display order — used by /admin/license to render the edition
-# comparison matrix left-to-right, cheapest to dearest.
+# comparison matrix left-to-right, cheapest to dearest. "developer" is
+# internal-only and intentionally last; the licence resolver should hide
+# it from the public comparison matrix.
 TIER_ORDER: tuple[str, ...] = (
     "community",
     "offline",
     "business",
     "pro",
     "enterprise",
+    "developer",
 )
 
 
