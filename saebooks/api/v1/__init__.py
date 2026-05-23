@@ -68,6 +68,7 @@ from saebooks.api.v1.payments import router as payments_router
 from saebooks.api.v1.projects import router as projects_router
 from saebooks.api.v1.proration import router as proration_router
 from saebooks.api.v1.purchase_orders import router as purchase_orders_router
+from saebooks.api.v1.email_log import router as email_log_router
 from saebooks.api.v1.quotes import router as quotes_router
 from saebooks.api.v1.reconciliation import router as reconciliation_router
 from saebooks.api.v1.recurring_invoices import router as recurring_invoices_router
@@ -133,6 +134,7 @@ router.include_router(stp_router)
 router.include_router(leave_router)
 router.include_router(purchase_orders_router)
 router.include_router(quotes_router)
+router.include_router(email_log_router)
 router.include_router(payments_router)
 router.include_router(credit_notes_router)
 router.include_router(projects_router)

@@ -275,6 +275,16 @@ async def post_quote_send_email(
     except (KeyError, TypeError) as exc:
         raise HTTPException(422, f"missing field: {exc}")
 
+    # sent_by_user_id is best-effort — set by the web layer from session;
+    # not present when called by the bearer-only `saebooks-verify` tool.
+    sent_by_uid_raw = payload.get("sent_by_user_id")
+    sent_by_user_id: UUID | None = None
+    if sent_by_uid_raw:
+        try:
+            sent_by_user_id = UUID(str(sent_by_uid_raw))
+        except (ValueError, TypeError):
+            sent_by_user_id = None
+
     if not from_addr or not to or not subject or not body_html:
         raise HTTPException(422, "from_addr, to, subject, and body_html are all required")
 
@@ -331,7 +341,7 @@ async def post_quote_send_email(
             doc_type="quote",
             doc_id=q.id,
             doc_version=q.version,
-            sent_by_user_id=None,
+            sent_by_user_id=sent_by_user_id,
             from_addr=from_addr,
             to=to,
             cc=cc,
