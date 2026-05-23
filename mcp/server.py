@@ -157,8 +157,19 @@ def _client_for(ctx: Context | None) -> httpx.AsyncClient:
     if ctx is not None:
         request_ctx = getattr(ctx, "request_context", None)
         if request_ctx is not None:
-            meta = getattr(request_ctx, "meta", None) or {}
-            token = meta.get("authorization") or meta.get("Authorization")
+            meta = getattr(request_ctx, "meta", None)
+            # Newer MCP SDKs give a Pydantic Meta model (no .get); older
+            # ones give a plain dict. Normalise to a dict before lookup
+            # so both shapes work.
+            if meta is None:
+                meta_dict: dict = {}
+            elif isinstance(meta, dict):
+                meta_dict = meta
+            elif hasattr(meta, "model_dump"):
+                meta_dict = meta.model_dump()
+            else:
+                meta_dict = dict(meta.__dict__)
+            token = meta_dict.get("authorization") or meta_dict.get("Authorization")
             if token and token.lower().startswith("bearer "):
                 token = token.split(None, 1)[1].strip()
     if not token:
