@@ -25,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.models.bank_statement import BankStatementLine, StatementLineStatus
+from saebooks.models.company import Company
 from saebooks.services.imports.bank_csv import ParsedLine
 
 # Stamp-prefix so the hash namespace can't collide with upstream
@@ -67,6 +68,19 @@ async def persist_bank_lines(
     if not lines:
         return 0
 
+    # bank_statement_lines has FORCE RLS with a tenant_isolation policy
+    # — INSERTs are rejected unless tenant_id matches
+    # current_setting('app.current_tenant'). The model defaults to the
+    # placeholder UUID, so we have to look up the company's real tenant
+    # and stamp it explicitly. Otherwise CSV imports 500 with
+    # InsufficientPrivilegeError. (Reported 2026-05-23 importing Sauer
+    # Pty Ltd Business One.)
+    tenant_id = (
+        await session.execute(select(Company.tenant_id).where(Company.id == company_id))
+    ).scalar_one_or_none()
+    if tenant_id is None:
+        raise ValueError(f"Company {company_id} not found — cannot resolve tenant for bank import")
+
     fingerprints = [_fingerprint(account_id, ln) for ln in lines]
 
     existing = (
@@ -87,6 +101,7 @@ async def persist_bank_lines(
         new_rows.append(
             BankStatementLine(
                 company_id=company_id,
+                tenant_id=tenant_id,
                 account_id=account_id,
                 txn_date=parsed.txn_date,
                 amount=parsed.amount,
