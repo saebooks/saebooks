@@ -707,3 +707,69 @@ async def test_outgoing_mixed_bill_and_credit_note_split_correctly() -> None:
         "1-1200": Decimal("50.00"),
     }, f"Expected split AP/AR — got debits {codes_debit}."
     assert codes_credit == {"1-1110": Decimal("150.00")}
+
+
+# ---------------------------------------------------------------------- #
+# Round-2 audit #12: allocation XOR + direction validator                 #
+# Pre-DB guard so a malformed allocation dict (both bill_id and           #
+# invoice_id set, or neither set, or direction/target mismatch) raises    #
+# a clean PaymentError 422 instead of a 500 from the DB XOR CHECK.        #
+# Critic 18 saw the 500 path; this guard converts it to 422 + diagnostic. #
+# ---------------------------------------------------------------------- #
+
+
+def test_validate_alloc_target_rejects_no_target() -> None:
+    from saebooks.services.payments import _validate_alloc_target
+    with pytest.raises(svc.PaymentError, match="exactly one"):
+        _validate_alloc_target(
+            {"amount": "10"}, direction=PaymentDirection.OUTGOING
+        )
+
+
+def test_validate_alloc_target_rejects_two_targets() -> None:
+    from saebooks.services.payments import _validate_alloc_target
+    with pytest.raises(svc.PaymentError, match="only one document"):
+        _validate_alloc_target(
+            {
+                "invoice_id": str(uuid.uuid4()),
+                "bill_id": str(uuid.uuid4()),
+                "amount": "10",
+            },
+            direction=PaymentDirection.INCOMING,
+        )
+
+
+def test_validate_alloc_target_rejects_incoming_to_bill() -> None:
+    from saebooks.services.payments import _validate_alloc_target
+    with pytest.raises(svc.PaymentError, match="INCOMING.*cannot allocate to bill"):
+        _validate_alloc_target(
+            {"bill_id": str(uuid.uuid4()), "amount": "10"},
+            direction=PaymentDirection.INCOMING,
+        )
+
+
+def test_validate_alloc_target_rejects_outgoing_to_invoice() -> None:
+    from saebooks.services.payments import _validate_alloc_target
+    with pytest.raises(svc.PaymentError, match="OUTGOING.*cannot allocate to invoice"):
+        _validate_alloc_target(
+            {"invoice_id": str(uuid.uuid4()), "amount": "10"},
+            direction=PaymentDirection.OUTGOING,
+        )
+
+
+def test_validate_alloc_target_accepts_outgoing_to_bill() -> None:
+    from saebooks.services.payments import _validate_alloc_target
+    # Should not raise.
+    _validate_alloc_target(
+        {"bill_id": str(uuid.uuid4()), "amount": "10"},
+        direction=PaymentDirection.OUTGOING,
+    )
+
+
+def test_validate_alloc_target_accepts_outgoing_to_credit_note() -> None:
+    from saebooks.services.payments import _validate_alloc_target
+    # Customer refund — should not raise.
+    _validate_alloc_target(
+        {"credit_note_id": str(uuid.uuid4()), "amount": "10"},
+        direction=PaymentDirection.OUTGOING,
+    )

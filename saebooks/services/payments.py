@@ -826,6 +826,65 @@ def _serialise_payment(pay: Payment) -> dict:
 _DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
+def _validate_alloc_target(
+    alloc: dict, *, direction: PaymentDirection
+) -> None:
+    """Enforce XOR + direction constraints on an allocation dict pre-DB.
+
+    Round-2 audit fix #12: critic 18 reported supplier bill payments
+    crashing because the allocation row landed with the bill UUID in
+    ``invoice_id`` instead of ``bill_id``. The XOR DB constraint
+    catches the bad row but the request 500s instead of returning a
+    clean 422. This validator runs in the service layer before the
+    INSERT so a caller passing both keys (or none) gets a clear error.
+
+    Rules:
+
+    * Exactly one of ``invoice_id`` / ``bill_id`` / ``credit_note_id``
+      must be set on each allocation.
+    * INCOMING payments may not allocate to bills (allocate to invoices
+      or, as a future-proof, vendor credit_notes).
+    * OUTGOING payments may not allocate to invoices (allocate to
+      bills, or to credit_notes for customer refunds).
+
+    Mirrors the legacy ``svc.allocate()`` direction guard so the
+    JSON-API and the form-handler agree.
+    """
+    invoice_id = alloc.get("invoice_id")
+    bill_id = alloc.get("bill_id")
+    credit_note_id = alloc.get("credit_note_id")
+    n_set = sum(1 for v in (invoice_id, bill_id, credit_note_id) if v)
+    if n_set == 0:
+        raise PaymentError(
+            "Allocation must target exactly one of invoice_id, bill_id, "
+            "or credit_note_id"
+        )
+    if n_set > 1:
+        keys = [
+            k for k, v in (
+                ("invoice_id", invoice_id),
+                ("bill_id", bill_id),
+                ("credit_note_id", credit_note_id),
+            )
+            if v
+        ]
+        raise PaymentError(
+            f"Allocation may target only one document — got {keys}. "
+            "Pre-emptive guard for the XOR CHECK on payment_allocations."
+        )
+    if direction == PaymentDirection.INCOMING and bill_id:
+        raise PaymentError(
+            f"INCOMING payment cannot allocate to bill {bill_id}. "
+            "Did you mean credit_note_id (vendor credit) or invoice_id?"
+        )
+    if direction == PaymentDirection.OUTGOING and invoice_id:
+        raise PaymentError(
+            f"OUTGOING payment cannot allocate to invoice {invoice_id}. "
+            "Did you mean bill_id (supplier bill) or credit_note_id "
+            "(customer refund)?"
+        )
+
+
 async def _get_with_allocations(
     session: AsyncSession, payment_id: uuid.UUID
 ) -> Payment | None:
@@ -961,6 +1020,7 @@ async def api_create(
     # Attach allocations if provided
     if allocations:
         for alloc in allocations:
+            _validate_alloc_target(alloc, direction=direction)
             invoice_id = alloc.get("invoice_id")
             bill_id = alloc.get("bill_id")
             credit_note_id = alloc.get("credit_note_id")
@@ -1048,6 +1108,7 @@ async def api_update(
         )
         await session.flush()
         for alloc in allocations:
+            _validate_alloc_target(alloc, direction=pay.direction)
             invoice_id = alloc.get("invoice_id")
             bill_id = alloc.get("bill_id")
             credit_note_id = alloc.get("credit_note_id")
