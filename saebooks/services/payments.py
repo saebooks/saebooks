@@ -333,50 +333,84 @@ async def _refresh_bill_amount_paid(
 async def _compute_control_credit(
     session: AsyncSession,
     pay: Payment,
-) -> tuple[Decimal, Decimal]:
-    """Compute (control_base_amount, allocated_doc_amount) for a payment.
+) -> tuple[dict[str, Decimal], Decimal]:
+    """Compute per-control-account base-currency amounts for a payment.
 
-    ``control_base_amount`` is the base-currency value that clears AR
-    (INCOMING) or AP (OUTGOING): it sums each allocation at the
-    *document's* fx_rate (so AR/AP are cleared at the rate that stamped
-    them), with any unallocated remainder translated at the payment's
-    own rate (= "on account", which will be allocated later at a
-    future rate + reopened for realised FX if needed).
+    The control account is chosen from the **allocation target**, not
+    the payment direction alone. This is Round-2 audit fix #11 — the
+    previous version routed every OUTGOING payment to AP regardless
+    of target, which posts a customer refund (OUTGOING allocated to
+    a credit_note) as Dr AP / Cr Bank instead of Dr AR / Cr Bank,
+    leaving a dangling credit in AR and a phantom liability in AP.
 
-    Returns ``(control_base_amount, allocated_doc_amount)`` where the
-    second is the sum of allocation document-currency amounts. Caller
-    derives unallocated = ``pay.amount - allocated_doc_amount``.
+    Routing table:
+
+    * allocation → invoice     → AR control (1-1200)
+    * allocation → bill        → AP control (2-1200)
+    * allocation → credit_note → AR control (1-1200) — credit notes
+      are customer-side only in this codebase, so settling one (cash
+      refund: OUTGOING; on-account: INCOMING is application-only and
+      doesn't reach a payment row) reduces AR.
+
+    Returns ``({control_code: base_amount}, allocated_doc_amount)``
+    where each ``base_amount`` is the base-currency value to put on the
+    control side of the journal against that control account. Each
+    allocation is converted at the *document's* fx_rate so AR/AP
+    clear at the rate that stamped them.
+
+    Any unallocated remainder is added to the "default" control for
+    the payment direction (AR for INCOMING, AP for OUTGOING) at the
+    payment's own rate — that's the "on account" balance.
+
+    Caller derives unallocated = ``pay.amount - allocated_doc_amount``.
     """
     allocated_doc = Decimal("0")
-    control_base = Decimal("0")
-    if pay.direction == PaymentDirection.INCOMING:
-        for a in pay.allocations:
-            if a.invoice_id is None:
-                continue
+    per_control: dict[str, Decimal] = {}
+
+    for a in pay.allocations:
+        amt = Decimal(str(a.amount))
+        if a.invoice_id is not None:
             inv = await session.get(Invoice, a.invoice_id)
             if inv is None:
                 continue
-            allocated_doc += Decimal(str(a.amount))
-            control_base += _q2(
-                Decimal(str(a.amount)) * Decimal(str(inv.fx_rate))
-            )
-    else:
-        for a in pay.allocations:
-            if a.bill_id is None:
-                continue
+            allocated_doc += amt
+            base = _q2(amt * Decimal(str(inv.fx_rate)))
+            per_control[_AR_CODE] = per_control.get(_AR_CODE, Decimal("0")) + base
+        elif a.bill_id is not None:
             bill = await session.get(Bill, a.bill_id)
             if bill is None:
                 continue
-            allocated_doc += Decimal(str(a.amount))
-            control_base += _q2(
-                Decimal(str(a.amount)) * Decimal(str(bill.fx_rate))
-            )
-    # Unallocated remainder moves at the payment's own rate. Translates
-    # into an "on account" AR/AP balance which, when allocated later,
-    # may kick off further realised FX if rates have moved.
+            allocated_doc += amt
+            base = _q2(amt * Decimal(str(bill.fx_rate)))
+            per_control[_AP_CODE] = per_control.get(_AP_CODE, Decimal("0")) + base
+        elif a.credit_note_id is not None:
+            # Credit notes are customer-side (AR). They have no fx_rate
+            # of their own (AUD-only) — translate at the payment's rate.
+            cn = await session.get(CreditNote, a.credit_note_id)
+            if cn is None:
+                continue
+            allocated_doc += amt
+            base = _q2(amt * Decimal(str(pay.fx_rate)))
+            per_control[_AR_CODE] = per_control.get(_AR_CODE, Decimal("0")) + base
+
+    # Unallocated remainder lands on the default control for the
+    # direction (AR for INCOMING, AP for OUTGOING) at the payment's
+    # own rate — this is the "on account" balance.
     unallocated_doc = Decimal(str(pay.amount)) - allocated_doc
-    control_base += _q2(unallocated_doc * Decimal(str(pay.fx_rate)))
-    return _q2(control_base), allocated_doc
+    if unallocated_doc != Decimal("0"):
+        default_code = (
+            _AR_CODE
+            if pay.direction == PaymentDirection.INCOMING
+            else _AP_CODE
+        )
+        base = _q2(unallocated_doc * Decimal(str(pay.fx_rate)))
+        per_control[default_code] = (
+            per_control.get(default_code, Decimal("0")) + base
+        )
+
+    # Quantize each total and drop zero rows.
+    per_control = {k: _q2(v) for k, v in per_control.items() if v != Decimal("0")}
+    return per_control, allocated_doc
 
 
 async def _get_fx_accounts(
@@ -504,8 +538,9 @@ async def post_payment(
     # and the control credit equals it, so the resulting journal is
     # identical to the pre-FX shape.
     bank_base = Decimal(str(pay.base_amount or pay.amount))
-    control_base, _alloc_doc = await _compute_control_credit(session, pay)
-    fx_delta = bank_base - control_base  # Dr - Cr (INCOMING perspective)
+    per_control, _alloc_doc = await _compute_control_credit(session, pay)
+    control_base_total = sum(per_control.values(), Decimal("0"))
+    fx_delta = bank_base - control_base_total  # Dr - Cr (INCOMING perspective)
 
     if pay.direction == PaymentDirection.INCOMING:
         from saebooks.services import edition as edition_svc
@@ -517,7 +552,6 @@ async def post_payment(
             )
             fx_delta = Decimal("0")
         else:
-            control = await _get_control_account(session, pay.company_id, _AR_CODE)
             lines: list[dict[str, object]] = [
                 {
                     "account_id": bank_acct.id,
@@ -525,22 +559,25 @@ async def post_payment(
                     "debit": bank_base,
                     "credit": Decimal("0"),
                 },
-                {
-                    "account_id": control.id,
-                    "description": f"Receipt {pay.number}",
-                    "debit": Decimal("0"),
-                    "credit": control_base,
-                },
             ]
+            # One Cr line per control account touched. For a pure
+            # invoice-allocated receipt this is exactly one AR line at
+                # the same total as before — identical to the pre-fix shape.
+            for code, base in per_control.items():
+                ctrl = await _get_control_account(session, pay.company_id, code)
+                lines.append(
+                    {
+                        "account_id": ctrl.id,
+                        "description": f"Receipt {pay.number}",
+                        "debit": Decimal("0"),
+                        "credit": base,
+                    }
+                )
     else:
-        control = await _get_control_account(session, pay.company_id, _AP_CODE)
+        # OUTGOING: Cr Bank for the cash paid out + one Dr line per
+        # control account touched (AP for bills, AR for credit-note
+        # refunds — see _compute_control_credit for the routing).
         lines = [
-            {
-                "account_id": control.id,
-                "description": f"Payment {pay.number}",
-                "debit": control_base,
-                "credit": Decimal("0"),
-            },
             {
                 "account_id": bank_acct.id,
                 "description": f"Payment {pay.number}",
@@ -548,11 +585,22 @@ async def post_payment(
                 "credit": bank_base,
             },
         ]
-        # For OUTGOING: Dr control_base, Cr bank_base. Delta from
+        for code, base in per_control.items():
+            ctrl = await _get_control_account(session, pay.company_id, code)
+            lines.insert(
+                0,
+                {
+                    "account_id": ctrl.id,
+                    "description": f"Payment {pay.number}",
+                    "debit": base,
+                    "credit": Decimal("0"),
+                },
+            )
+        # For OUTGOING: Dr control_total, Cr bank_base. Delta from
         # "control > bank" means AP cleared more than bank paid —
         # we owed more than we actually paid → GAIN. Flip the sign so
         # the rest of the function uses a single "positive = gain" rule.
-        fx_delta = control_base - bank_base
+        fx_delta = control_base_total - bank_base
 
     # Post the realised FX gain / loss plug. Sign convention: positive
     # delta = gain (Cr Exchange Rate Gain), negative = loss (Dr
