@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.models.account import Account, AccountType
@@ -60,24 +60,41 @@ async def bank_balances(
     """
     cutoff = as_of or date.today()
 
+    # Aggregate POSTED, on-or-before-cutoff journal lines per account in a
+    # subquery that INNER JOINs JournalEntry. The inner join is load-bearing
+    # for tenant safety: RLS on journal_entries hides cross-tenant rows, and
+    # the inner join propagates that exclusion to the line side. Earlier this
+    # filter sat in the JOIN condition of an OUTER join, which let RLS-hidden
+    # JE rows drop to NULL while their JournalLine debit/credit kept getting
+    # summed — a cross-tenant leak that incorrectly inflated balances by the
+    # amount of any cross-tenant lines on the same ledger account.
+    posted_per_account = (
+        select(
+            JournalLine.account_id.label("account_id"),
+            func.sum(JournalLine.debit).label("dr"),
+            func.sum(JournalLine.credit).label("cr"),
+        )
+        .join(JournalEntry, JournalEntry.id == JournalLine.entry_id)
+        .where(
+            JournalEntry.status == EntryStatus.POSTED,
+            JournalEntry.entry_date <= cutoff,
+        )
+        .group_by(JournalLine.account_id)
+        .subquery()
+    )
+
     stmt = (
         select(
             Account.id,
             Account.code,
             Account.name,
             Account.account_type,
-            func.coalesce(func.sum(JournalLine.debit), 0),
-            func.coalesce(func.sum(JournalLine.credit), 0),
+            func.coalesce(posted_per_account.c.dr, 0),
+            func.coalesce(posted_per_account.c.cr, 0),
         )
         .select_from(Account)
-        .outerjoin(JournalLine, JournalLine.account_id == Account.id)
         .outerjoin(
-            JournalEntry,
-            and_(
-                JournalEntry.id == JournalLine.entry_id,
-                JournalEntry.status == EntryStatus.POSTED,
-                JournalEntry.entry_date <= cutoff,
-            ),
+            posted_per_account, posted_per_account.c.account_id == Account.id
         )
         .where(
             Account.company_id == company_id,
@@ -85,17 +102,15 @@ async def bank_balances(
             Account.reconcile.is_(True),
             Account.archived_at.is_(None),
         )
-        .group_by(Account.id, Account.code, Account.name, Account.account_type)
         .order_by(Account.code)
     )
 
     rows = (await session.execute(stmt)).all()
     balances: list[BankBalance] = []
     for acct_id, code, name, acct_type, dr, cr in rows:
-        # Filter on JournalEntry.status lands in the outer-join
-        # condition so unposted/voided entries don't contribute.
-        # Rows with no matched journal lines still appear with
-        # balance 0 — empty-state friendly.
+        # LEFT JOIN to the aggregated subquery preserves empty-state-friendly
+        # behaviour: an account with no matching POSTED lines still appears
+        # with balance 0, no NULLs leaking past COALESCE.
         balances.append(
             BankBalance(
                 account_id=acct_id,

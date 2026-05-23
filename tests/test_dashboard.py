@@ -6,7 +6,7 @@ widget queries hitting Postgres via ``AsyncSessionLocal``.
 from __future__ import annotations
 
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from itertools import pairwise
 
@@ -16,6 +16,7 @@ from sqlalchemy import select
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
+from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
 from saebooks.services import dashboard as svc
 
 
@@ -182,6 +183,94 @@ async def test_bank_balances_includes_liability_credit_cards() -> None:
     # friendly, no NULLs leaking.
     assert by_id[bank.id].balance == Decimal("0")
     assert by_id[card.id].balance == Decimal("0")
+
+
+@pytest.mark.asyncio
+async def test_bank_balances_excludes_unposted_lines_no_join_leak() -> None:
+    """Regression: ``bank_balances`` must not sum journal lines whose parent
+    JournalEntry doesn't pass the POSTED + on-or-before-cutoff filter.
+
+    The original implementation put the JE status/date filter inside an
+    OUTER JOIN condition. With an outer join, a filter mismatch nulls out
+    the JE side but leaves the JournalLine joined to the Account row — so
+    the SUM(JournalLine.debit) picked up unposted lines anyway. The same
+    pattern leaked cross-tenant rows when RLS hid the JE: line stayed,
+    debit kept getting summed. Fix moves the JE join inside a subquery
+    so filtered-out lines never reach the aggregation.
+    """
+    tag = uuid.uuid4().hex[:8]
+    async with AsyncSessionLocal() as session:
+        company = Company(name=f"BankBalLeak-{tag}")
+        session.add(company)
+        await session.flush()
+        cid = company.id
+
+        bank = Account(
+            company_id=cid,
+            code=f"1-{tag[:5]}",
+            name="Scratch Bank",
+            account_type=AccountType.ASSET,
+            reconcile=True,
+        )
+        offset = Account(
+            company_id=cid,
+            code=f"3-{tag[:5]}",
+            name="Scratch Equity Offset",
+            account_type=AccountType.EQUITY,
+            reconcile=False,
+        )
+        session.add_all([bank, offset])
+        await session.flush()
+
+        # POSTED entry: $100 Dr bank / $100 Cr offset. Should count.
+        posted = JournalEntry(
+            company_id=cid,
+            ref=f"POST-{tag}",
+            entry_date=date(2026, 5, 1),
+            status=EntryStatus.POSTED,
+            posted_at=datetime.now(timezone.utc),
+            posted_by="test",
+        )
+        # DRAFT entry: $500 Dr bank / $500 Cr offset. Must NOT count.
+        draft = JournalEntry(
+            company_id=cid,
+            ref=f"DRFT-{tag}",
+            entry_date=date(2026, 5, 1),
+            status=EntryStatus.DRAFT,
+        )
+        session.add_all([posted, draft])
+        await session.flush()
+
+        session.add_all([
+            JournalLine(
+                entry_id=posted.id, line_no=1, account_id=bank.id,
+                debit=Decimal("100"), credit=Decimal("0"),
+            ),
+            JournalLine(
+                entry_id=posted.id, line_no=2, account_id=offset.id,
+                debit=Decimal("0"), credit=Decimal("100"),
+            ),
+            JournalLine(
+                entry_id=draft.id, line_no=1, account_id=bank.id,
+                debit=Decimal("500"), credit=Decimal("0"),
+            ),
+            JournalLine(
+                entry_id=draft.id, line_no=2, account_id=offset.id,
+                debit=Decimal("0"), credit=Decimal("500"),
+            ),
+        ])
+        await session.commit()
+
+    async with AsyncSessionLocal() as session:
+        balances = await svc.bank_balances(session, cid)
+
+    by_id = {b.account_id: b for b in balances}
+    # Bank balance must be exactly the POSTED amount. Pre-fix this would
+    # have read 600 because the outer-join let the DRAFT line through.
+    assert by_id[bank.id].balance == Decimal("100"), (
+        f"Expected 100 (POSTED only); got {by_id[bank.id].balance} — "
+        "unposted lines are leaking through the JournalEntry filter."
+    )
 
 
 # ---------------------------------------------------------------------- #
