@@ -95,8 +95,13 @@ class VersionConflict(Exception):
 
 
 def _is_bank_account(account: Account) -> bool:
-    """True if this account has been classified as a bank-side account."""
-    return account.account_kind in _BANK_KINDS
+    """True if this account has been classified as a bank-side account.
+
+    Header (parent) accounts are excluded even if they happen to carry
+    a bank kind — they're organisational nodes, not real transacting
+    accounts. Same defensive check is mirrored in ``_bank_account_filter``.
+    """
+    return account.account_kind in _BANK_KINDS and not account.is_header
 
 
 def _serialise(account: Account) -> dict[str, Any]:
@@ -115,11 +120,16 @@ def _serialise(account: Account) -> dict[str, Any]:
 
 
 def _bank_account_filter(company_id: uuid.UUID):
-    """WHERE clause that selects bank-account rows."""
+    """WHERE clause that selects bank-account rows.
+
+    Excludes header accounts even if they carry a bank kind — they're
+    parents in the CoA tree, not transacting accounts. See _is_bank_account.
+    """
     return [
         Account.company_id == company_id,
         Account.archived_at.is_(None),
         Account.account_kind.in_(_BANK_KINDS),
+        Account.is_header.is_(False),
     ]
 
 
