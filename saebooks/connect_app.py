@@ -1061,6 +1061,17 @@ class ConnectDispatchMiddleware:
         self._fastapi = fastapi_app
         self._connect = connect_app
 
+    @property
+    def state(self) -> Any:
+        """Proxy through to the wrapped FastAPI's app.state.
+
+        Code that does from saebooks.main import app gets THIS
+        middleware, not the inner FastAPI. Tests and middleware-tweak
+        code that touch app.state.<...> would otherwise hit
+        AttributeError. Proxying keeps the API surface compatible.
+        """
+        return self._fastapi.state
+
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         if scope.get("type") == "http" and scope.get("path", "").startswith(
             CONNECT_PATH_PREFIX

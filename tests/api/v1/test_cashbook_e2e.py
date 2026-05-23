@@ -68,6 +68,31 @@ async def _seed_state() -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
         return co.tenant_id, co.id, bank.id
 
 
+@pytest.fixture(autouse=True)
+async def _restore_seed_company_mode() -> None:
+    """Restore the seed company to bookkeeping_mode=full after each test.
+
+    _seed_state() flips the seed company to cashbook mode for the
+    cashbook user-journey test. Without a restore, the mutation leaks
+    into every subsequent test file that selects "the oldest company"
+    (test_invoices, test_payments, test_journal, ...) — which is many.
+    """
+    yield
+    async with AsyncSessionLocal() as session:
+        co = (
+            await session.execute(
+                select(Company)
+                .where(Company.archived_at.is_(None))
+                .order_by(Company.created_at)
+            )
+        ).scalars().first()
+        if co is not None and co.bookkeeping_mode != "full":
+            co.bookkeeping_mode = "full"
+            co.cashbook_default_bank_account_id = None
+            co.cashbook_categories = None
+            await session.commit()
+
+
 @pytest.fixture
 async def client() -> AsyncClient:
     token = current_token()
