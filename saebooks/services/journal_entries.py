@@ -105,10 +105,12 @@ async def _get_with_lines(session: AsyncSession, entry_id: uuid.UUID) -> Journal
 def _coerce_uuid(value: Any) -> uuid.UUID | None:
     """Accept str or UUID; return UUID. None passes through.
 
-    Without this, callers that pass str(some_uuid) end up with a
-    JournalLine whose account_id is a str in memory but UUID after
-    a round-trip to the DB. SQLAlchemy SelectInLoader chokes on
-    sorted(our_states) when FK cache keys are mixed types.
+    Without this, callers that pass ``str(some_uuid)`` end up with a
+    JournalLine whose ``account_id`` is a str in memory but UUID after
+    a round-trip to the DB. SQLAlchemy's ``SelectInLoader`` then chokes
+    on ``sorted(our_states)`` because some FK cache keys are str and
+    others are UUID — ``TypeError: '<' not supported between instances
+    of 'str' and ...UUID``. Coerce up front.
     """
     if value is None or isinstance(value, uuid.UUID):
         return value
