@@ -49,7 +49,7 @@ from saebooks.api.v1.schemas import (
     FixedAssetOut,
     InvoiceOut,
     ItemOut,
-    JournalEntryOut,
+    JournalEntryHeaderOut,
     PaymentOut,
     ProjectOut,
     TaxCodeOut,
@@ -238,12 +238,15 @@ async def _generate(company_id, max_id: int, limit: int) -> AsyncGenerator[str, 
             )
 
         # ------------------------------------------------------------------ #
-        # 10. journal_entries — headers only (exclude lines)
+        # 10. journal_entries — headers only via JournalEntryHeaderOut.
+        # JournalEntryOut.lines walks each JournalLine, whose `account`
+        # relationship is lazy='raise' — chained selectinload would work
+        # but loads rows we'd immediately drop. The header-only schema
+        # avoids the walk entirely.
         # ------------------------------------------------------------------ #
         journal_entries = (
             await session.execute(
                 select(JournalEntry)
-                .options(selectinload(JournalEntry.lines))
                 .where(JournalEntry.company_id == company_id)
                 .order_by(JournalEntry.created_at)
                 .limit(limit)
@@ -253,10 +256,7 @@ async def _generate(company_id, max_id: int, limit: int) -> AsyncGenerator[str, 
             {"_entity": "journal_entries", "_count": len(journal_entries)}
         ) + "\n"
         for row in journal_entries:
-            yield (
-                JournalEntryOut.model_validate(row).model_dump_json(exclude={"lines"})
-                + "\n"
-            )
+            yield JournalEntryHeaderOut.model_validate(row).model_dump_json() + "\n"
 
         # ------------------------------------------------------------------ #
         # 11. bank_accounts — view over accounts where bsb IS NOT NULL

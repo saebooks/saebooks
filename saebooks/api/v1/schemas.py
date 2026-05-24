@@ -651,6 +651,37 @@ class JournalEntryOut(BaseModel):
     lines: list[JournalLineOut] = Field(default_factory=list)
 
 
+class JournalEntryHeaderOut(BaseModel):
+    """Header-only journal-entry response — no nested lines.
+
+    Used by ``GET /api/v1/snapshot`` where clients fetch lines on
+    demand. Avoids walking ``row.lines`` during ``model_validate``,
+    which would trigger ``JournalLine.account`` access — a
+    ``lazy='raise'`` relationship that needs nested ``selectinload``
+    to be loadable.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    tenant_id: uuid.UUID
+    ref: str
+    entry_date: date
+    description: str | None = None
+    status: str
+    posted_at: datetime | None = None
+    posted_by: str | None = None
+    reversal_of_id: uuid.UUID | None = None
+    override_reason: str | None = None
+    source_type: str | None = None
+    source_id: uuid.UUID | None = None
+    version: int
+    created_at: datetime
+    updated_at: datetime
+    archived_at: datetime | None = None
+
+
 class JournalEntryListOut(BaseModel):
     items: list[JournalEntryOut]
     total: int
