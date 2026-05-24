@@ -312,7 +312,7 @@ async def _run_on_role(
     async with engine.connect() as conn:
         if tenant_id is not None:
             await conn.execute(
-                text("SET LOCAL app.current_tenant = :tid").bindparams(tid=str(tenant_id))
+                text(f"SET LOCAL app.current_tenant = '{tenant_id}'")
             )
         result = await conn.execute(text(statement))
         if result.returns_rows:
