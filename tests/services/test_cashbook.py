@@ -40,6 +40,53 @@ pytestmark = pytest.mark.postgres_only
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True, scope="module")
+async def _restore_seed_company_after_module():
+    """Reset the seed company back to its post-seed defaults when this
+    module's tests finish — ``_seed_company_into_cashbook_mode`` below
+    mutates ``bookkeeping_mode='cashbook'``,
+    ``cashbook_default_bank_account_id=<bank>``, and ``gst_registered``
+    on the shared seed company. Without a teardown those mutations
+    leak to every subsequent test in the session (the test stack runs
+    alphabetically by directory and the seed company is shared across
+    all tests), breaking ~25 invoice/payment/items/retention tests that
+    expect ``bookkeeping_mode='full'``.
+
+    Reset order matters: ``ck_cashbook_requires_bank`` (migration 0126)
+    forbids ``bookkeeping_mode='cashbook'`` with a NULL bank, and the
+    complement forbids non-NULL bank with ``bookkeeping_mode != 'cashbook'``.
+    Single UPDATE sets both columns atomically so the CHECK sees the
+    consistent end state.
+    """
+    yield
+    # Teardown — runs once, after every test in this module has finished.
+    from sqlalchemy import text
+
+    async with AsyncSessionLocal() as session:
+        co = (
+            await session.execute(
+                select(Company)
+                .where(Company.archived_at.is_(None))
+                .order_by(Company.created_at)
+            )
+        ).scalars().first()
+        if co is None:
+            return  # No seed company — nothing to reset.
+        # Atomic UPDATE: both columns at once so the CHECK constraint sees
+        # the consistent (full, NULL bank) end state regardless of order.
+        # gst_registered also gets reset to the model default (False).
+        await session.execute(
+            text(
+                "UPDATE companies SET "
+                "bookkeeping_mode = 'full', "
+                "cashbook_default_bank_account_id = NULL, "
+                "gst_registered = false "
+                "WHERE id = :cid"
+            ).bindparams(cid=co.id)
+        )
+        await session.commit()
+
+
 async def _seed_company_into_cashbook_mode(
     *,
     gst_registered: bool = False,
@@ -329,6 +376,12 @@ async def test_company_not_in_cashbook_mode_rejected() -> None:
                 .order_by(Company.created_at)
             )
         ).scalars().first()
+        # Null the bank FIRST — ck_cashbook_requires_bank (migration 0126)
+        # forbids non-NULL bank when bookkeeping_mode != 'cashbook'. Earlier
+        # tests in this module set bank=<seeded bank> via
+        # _seed_company_into_cashbook_mode, so flipping mode alone now
+        # violates the check.
+        co.cashbook_default_bank_account_id = None
         co.bookkeeping_mode = "full"
         await session.commit()
         tenant_id, company_id = co.tenant_id, co.id
