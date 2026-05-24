@@ -126,6 +126,34 @@ def _build_lines(entry_id: uuid.UUID, lines: list[dict[str, Any]]) -> list[Journ
 # ---------------------------------------------------------------------------
 
 
+# Whitelist of sortable column keys → callables returning the
+# SQLAlchemy ORDER BY expression (with direction applied by the caller).
+# Keep keys stable: they are public API on /api/v1/journal_entries?sort=.
+SORTABLE_FIELDS: tuple[str, ...] = ("date", "ref", "total_debit", "status")
+
+
+def _sort_expr(field: str):
+    """Return the SQLAlchemy expression to ORDER BY for ``field``.
+
+    Raises ValueError for unknown fields — callers should validate first.
+    ``total_debit`` is computed as a scalar SUM subquery on journal_lines.
+    """
+    if field == "date":
+        return JournalEntry.entry_date
+    if field == "ref":
+        return JournalEntry.ref
+    if field == "status":
+        return JournalEntry.status
+    if field == "total_debit":
+        return (
+            select(func.coalesce(func.sum(JournalLine.debit), 0))
+            .where(JournalLine.entry_id == JournalEntry.id)
+            .correlate(JournalEntry)
+            .scalar_subquery()
+        )
+    raise ValueError(f"Unsupported sort field: {field}")
+
+
 async def list_active(
     session: AsyncSession,
     company_id: uuid.UUID,
@@ -139,6 +167,8 @@ async def list_active(
     posted_by: str | None = None,
     account_id: uuid.UUID | None = None,
     account_code: str | None = None,
+    sort_field: str = "date",
+    sort_dir: str = "desc",
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[JournalEntry], int]:
@@ -201,11 +231,19 @@ async def list_active(
     )
     total = (await session.execute(count_stmt)).scalar_one()
 
+    primary = _sort_expr(sort_field if sort_field in SORTABLE_FIELDS else "date")
+    direction_desc = (sort_dir or "desc").lower() != "asc"
+    primary_ord = primary.desc() if direction_desc else primary.asc()
+    # Stable secondary sort on ref so equal primary keys are deterministic.
+    secondary_ord = (
+        JournalEntry.ref.desc() if direction_desc else JournalEntry.ref.asc()
+    )
+
     stmt = (
         select(JournalEntry)
         .options(selectinload(JournalEntry.lines))
         .where(*base_where)
-        .order_by(JournalEntry.entry_date.desc(), JournalEntry.ref.desc())
+        .order_by(primary_ord, secondary_ord)
         .limit(limit)
         .offset(offset)
     )

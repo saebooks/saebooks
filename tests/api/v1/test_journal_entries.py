@@ -265,6 +265,56 @@ async def test_journal_entries_list_filter_by_account_code(
     assert miss.json()["total"] == 0
 
 
+async def test_journal_entries_list_sort_ref_asc(
+    api_client: AsyncClient, account_ids: dict[str, str]
+) -> None:
+    """Two entries with refs ending Z and A — asc puts A first."""
+    suffix = uuid.uuid4().hex[:6].upper()
+    r1 = await api_client.post(
+        "/api/v1/journal_entries",
+        json=_entry_payload(account_ids, reference=f"SORT-{suffix}-Z"),
+    )
+    assert r1.status_code == 201
+    r2 = await api_client.post(
+        "/api/v1/journal_entries",
+        json=_entry_payload(account_ids, reference=f"SORT-{suffix}-A"),
+    )
+    assert r2.status_code == 201
+
+    r = await api_client.get(
+        "/api/v1/journal_entries",
+        params={"ref": f"SORT-{suffix}", "sort": "ref", "dir": "asc"},
+    )
+    assert r.status_code == 200
+    refs = [item["ref"] for item in r.json()["items"]]
+    a_idx = next(i for i, x in enumerate(refs) if x.endswith("-A"))
+    z_idx = next(i for i, x in enumerate(refs) if x.endswith("-Z"))
+    assert a_idx < z_idx, f"asc on ref should put -A before -Z; got {refs}"
+
+    # Flip direction.
+    r = await api_client.get(
+        "/api/v1/journal_entries",
+        params={"ref": f"SORT-{suffix}", "sort": "ref", "dir": "desc"},
+    )
+    refs = [item["ref"] for item in r.json()["items"]]
+    a_idx = next(i for i, x in enumerate(refs) if x.endswith("-A"))
+    z_idx = next(i for i, x in enumerate(refs) if x.endswith("-Z"))
+    assert z_idx < a_idx, f"desc on ref should put -Z before -A; got {refs}"
+
+
+async def test_journal_entries_list_sort_invalid_400(
+    api_client: AsyncClient,
+) -> None:
+    r = await api_client.get(
+        "/api/v1/journal_entries", params={"sort": "haxxor"}
+    )
+    assert r.status_code == 400
+    r2 = await api_client.get(
+        "/api/v1/journal_entries", params={"dir": "sideways"}
+    )
+    assert r2.status_code == 400
+
+
 async def test_journal_entries_list_filter_by_posted_by(
     api_client: AsyncClient, account_ids: dict[str, str]
 ) -> None:

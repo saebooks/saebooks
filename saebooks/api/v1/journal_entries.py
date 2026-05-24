@@ -99,6 +99,8 @@ async def list_journal_entries(
     posted_by: str | None = Query(default=None, description="Case-insensitive substring on posted_by"),
     account_id: UUID | None = Query(default=None, description="Only entries with a line on this account"),
     account_code: str | None = Query(default=None, description="Convenience: resolves to account_id by Account.code"),
+    sort: str = Query(default="date", description="Sort column: date | ref | total_debit | status"),
+    dir: str = Query(default="desc", description="Sort direction: asc | desc"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
     session: AsyncSession = Depends(get_session),
@@ -111,6 +113,15 @@ async def list_journal_entries(
             status_enum = EntryStatus(status.upper())
         except ValueError as exc:
             raise HTTPException(400, f"Invalid status '{status}'") from exc
+
+    if sort not in svc.SORTABLE_FIELDS:
+        raise HTTPException(
+            400,
+            f"Invalid sort '{sort}' — must be one of {list(svc.SORTABLE_FIELDS)}",
+        )
+    dir_lower = (dir or "").lower()
+    if dir_lower not in ("asc", "desc"):
+        raise HTTPException(400, f"Invalid dir '{dir}' — must be asc or desc")
 
     tenant_id = resolve_tenant_id(request)
     entries, total = await svc.list_active(
@@ -125,6 +136,8 @@ async def list_journal_entries(
         posted_by=posted_by,
         account_id=account_id,
         account_code=account_code,
+        sort_field=sort,
+        sort_dir=dir_lower,
         limit=page_size,
         offset=offset,
     )
