@@ -13,6 +13,7 @@ from itertools import pairwise
 import pytest
 from sqlalchemy import select
 
+from saebooks.api.v1.auth import DEFAULT_TENANT_ID
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
@@ -121,7 +122,7 @@ async def test_bank_balances_returns_list_of_reconcile_accounts() -> None:
         assert isinstance(b.code, str) and b.code
         assert isinstance(b.balance, Decimal)
         assert b.account_type == AccountType.ASSET or (
-            b.account_type == AccountType.LIABILITY and b.account_kind == CREDIT_CARD
+            b.account_type == AccountType.LIABILITY and b.account_kind == "CREDIT_CARD"
         )
 
 
@@ -168,7 +169,20 @@ async def test_bank_balances_includes_liability_credit_cards() -> None:
             account_type=AccountType.LIABILITY,
             reconcile=False,
         )
-        for a in (bank, card, other_asset, other_liab):
+        # Reconcilable LIABILITY but NOT a credit card — must NOT appear.
+        # Mirrors Trade Creditors / Wages Payable / BAS Payable which used
+        # to leak into the widget when the filter was just (ASSET, LIABILITY)
+        # + reconcile=True. Critic #20 added the account_kind=CREDIT_CARD
+        # check on the LIABILITY branch; this test pins it.
+        non_cc_liab = Account(
+            company_id=cid,
+            code=f"2-{tag[:5]}Y",
+            name="Scratch Reconcile-Flagged Payable",
+            account_type=AccountType.LIABILITY,
+            account_kind=None,  # Not CREDIT_CARD
+            reconcile=True,
+        )
+        for a in (bank, card, other_asset, other_liab, non_cc_liab):
             session.add(a)
         await session.commit()
 
@@ -177,9 +191,13 @@ async def test_bank_balances_includes_liability_credit_cards() -> None:
 
     by_id = {b.account_id: b for b in balances}
     assert bank.id in by_id, "ASSET + reconcile=True must appear"
-    assert card.id in by_id, "LIABILITY + reconcile=True must appear (CC)"
+    assert card.id in by_id, "LIABILITY + reconcile=True + CREDIT_CARD must appear"
     assert other_asset.id not in by_id, "ASSET without reconcile must NOT appear"
     assert other_liab.id not in by_id, "LIABILITY without reconcile must NOT appear"
+    assert non_cc_liab.id not in by_id, (
+        "LIABILITY + reconcile=True but account_kind != CREDIT_CARD must NOT "
+        "appear (e.g. Trade Creditors, Wages Payable, BAS Payable)"
+    )
     assert by_id[bank.id].account_type == AccountType.ASSET
     assert by_id[card.id].account_type == AccountType.LIABILITY
     # Brand-new accounts with no journal lines read as zero — empty-state
@@ -228,6 +246,7 @@ async def test_bank_balances_excludes_unposted_lines_no_join_leak() -> None:
         # POSTED entry: $100 Dr bank / $100 Cr offset. Should count.
         posted = JournalEntry(
             company_id=cid,
+            tenant_id=DEFAULT_TENANT_ID,
             ref=f"POST-{tag}",
             entry_date=date(2026, 5, 1),
             status=EntryStatus.POSTED,
@@ -237,6 +256,7 @@ async def test_bank_balances_excludes_unposted_lines_no_join_leak() -> None:
         # DRAFT entry: $500 Dr bank / $500 Cr offset. Must NOT count.
         draft = JournalEntry(
             company_id=cid,
+            tenant_id=DEFAULT_TENANT_ID,
             ref=f"DRFT-{tag}",
             entry_date=date(2026, 5, 1),
             status=EntryStatus.DRAFT,

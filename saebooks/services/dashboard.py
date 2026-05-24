@@ -40,6 +40,7 @@ class BankBalance:
     code: str
     name: str
     account_type: AccountType
+    account_kind: str | None  # BANK_CHECKING / BANK_SAVINGS / CREDIT_CARD / CASH / ...
     balance: Decimal  # GL debit - credit; negative on a LIABILITY card = owed to bank
 
 
@@ -89,6 +90,7 @@ async def bank_balances(
             Account.code,
             Account.name,
             Account.account_type,
+            Account.account_kind,
             func.coalesce(posted_per_account.c.dr, 0),
             func.coalesce(posted_per_account.c.cr, 0),
         )
@@ -119,7 +121,7 @@ async def bank_balances(
 
     rows = (await session.execute(stmt)).all()
     balances: list[BankBalance] = []
-    for acct_id, code, name, acct_type, dr, cr in rows:
+    for acct_id, code, name, acct_type, acct_kind, dr, cr in rows:
         # LEFT JOIN to the aggregated subquery preserves empty-state-friendly
         # behaviour: an account with no matching POSTED lines still appears
         # with balance 0, no NULLs leaking past COALESCE.
@@ -129,6 +131,7 @@ async def bank_balances(
                 code=code,
                 name=name,
                 account_type=acct_type,
+                account_kind=acct_kind,
                 balance=Decimal(dr) - Decimal(cr),
             )
         )

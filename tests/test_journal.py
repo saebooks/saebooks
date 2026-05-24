@@ -312,6 +312,7 @@ async def _draft_in_locked_period(
         entry = await svc.create_draft(
             session,
             company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
             entry_date=entry_date,
             lines=[
                 {"account_id": debit_id, "debit": Decimal("100"), "credit": Decimal("0")},
@@ -435,6 +436,7 @@ async def test_f04_post_into_open_period_role_irrelevant() -> None:
         entry = await svc.create_draft(
             session,
             company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
             entry_date=date(2021, 1, 5),  # AFTER the lock — open period.
             lines=[
                 {"account_id": debit_id, "debit": Decimal("50"), "credit": Decimal("0")},
@@ -461,6 +463,7 @@ async def test_f04_reverse_threads_actor_role() -> None:
         entry = await svc.create_draft(
             session,
             company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
             entry_date=date(2021, 1, 5),
             lines=[
                 {"account_id": debit_id, "debit": Decimal("30"), "credit": Decimal("0")},
