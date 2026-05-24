@@ -55,8 +55,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision: str = "0128_pay_runs_rls"
-down_revision: str | None = "0127_drop_journal_tenant_default"
+revision: str = "0129_pay_runs_rls"
+down_revision: str | None = "0128_app_role"
 branch_labels: tuple[str, ...] | None = None
 depends_on: tuple[str, ...] | None = None
 

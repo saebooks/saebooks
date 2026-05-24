@@ -36,8 +36,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision: str = "0129_wizard_state_with_check"
-down_revision: str | None = "0128_pay_runs_rls"
+revision: str = "0130_wizard_state_with_check"
+down_revision: str | None = "0129_pay_runs_rls"
 branch_labels: tuple[str, ...] | None = None
 depends_on: tuple[str, ...] | None = None
 
