@@ -13,8 +13,10 @@ P0 cross-tenant leak fix
 All handlers now share a single ``Depends(get_session)`` session per
 request. ``app.current_tenant`` is bound at the connection level by
 ``get_session``; every query is gated by the ``tenant_isolation`` RLS
-policy from migration 0055. ``_first_company_id`` is scoped by the
-request tenant. ``svc.get`` is called with ``tenant_id`` so a
+policy from migration 0055. The active company is resolved by the
+shared ``get_active_company_id`` dep — callers may pin a specific
+company via ``X-Company-Id``; otherwise the first active company for
+the tenant is used. ``svc.get`` is called with ``tenant_id`` so a
 foreign-tenant UUID returns ``None`` (404) even if the row exists.
 """
 from __future__ import annotations
@@ -30,7 +32,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
-from saebooks.api.v1.deps import get_session
+from saebooks.api.v1.deps import get_active_company_id, get_session
 from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.api.v1.schemas import (
@@ -41,7 +43,6 @@ from saebooks.api.v1.schemas import (
     AccountUpdate,
 )
 from saebooks.models.account import Account, AccountType
-from saebooks.models.company import Company
 from saebooks.services import accounts as svc
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 
@@ -55,22 +56,6 @@ router = APIRouter(
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
-
-
-async def _first_company_id(session: AsyncSession, tenant_id: UUID) -> UUID:
-    """Return the first active company for the request tenant."""
-    result = await session.execute(
-        select(Company)
-        .where(
-            Company.tenant_id == tenant_id,
-            Company.archived_at.is_(None),
-        )
-        .order_by(Company.created_at)
-    )
-    company = result.scalars().first()
-    if company is None:
-        raise HTTPException(404, "No active company for tenant")
-    return company.id
 
 
 def _parse_if_match(header: str | None) -> int | None:
@@ -101,20 +86,18 @@ def _dump(account: Account) -> dict[str, Any]:
 
 @router.get("", response_model=AccountListOut)
 async def list_accounts(
-    request: Request,
     account_type: AccountType | None = Query(default=None),  # noqa: B008
     include_balance: bool = Query(default=False, description="Include current balance per account (POSTED journal lines)."),
     include_archived: bool = Query(default=False, description="Include accounts whose archived_at is set (historical lookups)."),
     limit: int = Query(default=200, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> JSONResponse:
     from decimal import Decimal as _Decimal
 
     from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
 
-    tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
     count_stmt = (
         select(func.count())
         .select_from(Account)
@@ -427,6 +410,7 @@ async def create_account(
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
     key = _parse_idempotency_key(idempotency_key)
@@ -452,7 +436,6 @@ async def create_account(
                 status_code=claim.response_status or 201,
             )
 
-    company_id = await _first_company_id(session, tenant_id)
     try:
         account = await svc.create(
             session,

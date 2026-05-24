@@ -7,6 +7,9 @@ Phase 1 cycle 40.
 * PATCH and DELETE operate by ID with company_id isolation.
 * ``POST /{id}/apply`` returns pre-filled lines for the caller to submit
   to ``/api/v1/journal_entries`` — it does NOT create a journal entry.
+* The active company is resolved by ``get_active_company_id`` —
+  callers may pin a specific company via ``X-Company-Id``; otherwise
+  the first active company for the tenant is used.
 """
 from __future__ import annotations
 
@@ -21,8 +24,8 @@ from fastapi.responses import JSONResponse, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
-from saebooks.api.v1.deps import get_session
+from saebooks.api.v1.auth import require_bearer
+from saebooks.api.v1.deps import get_active_company_id, get_session
 from saebooks.api.v1.schemas import (
     JournalTemplateApplyOut,
     JournalTemplateCreate,
@@ -32,7 +35,6 @@ from saebooks.api.v1.schemas import (
     JournalTemplateUpdate,
 )
 from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
-from saebooks.models.company import Company
 from saebooks.models.journal_template import JournalTemplate
 from saebooks.services import journal_templates as svc
 from saebooks.services.hard_delete import hard_delete_with_audit
@@ -49,22 +51,6 @@ router = APIRouter(
 # ---------------------------------------------------------------------------
 
 
-async def _first_company_id(session: AsyncSession, tenant_id: UUID) -> UUID:
-    """Return the first active company for the request tenant."""
-    result = await session.execute(
-        select(Company)
-        .where(
-            Company.tenant_id == tenant_id,
-            Company.archived_at.is_(None),
-        )
-        .order_by(Company.created_at)
-    )
-    company = result.scalars().first()
-    if company is None:
-        raise HTTPException(404, "No active company for tenant")
-    return company.id
-
-
 def _dump(tmpl: JournalTemplate) -> dict[str, Any]:
     return json.loads(JournalTemplateOut.model_validate(tmpl).model_dump_json())
 
@@ -76,14 +62,11 @@ def _dump(tmpl: JournalTemplate) -> dict[str, Any]:
 
 @router.get("", response_model=JournalTemplateListOut)
 async def list_journal_templates(
-    request: Request,
     limit: int = Query(default=200, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> JournalTemplateListOut:
-    tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
-
     count_stmt = (
         select(func.count())
         .select_from(JournalTemplate)
@@ -121,12 +104,10 @@ async def list_journal_templates(
 
 @router.get("/{template_id}", response_model=JournalTemplateOut)
 async def get_journal_template(
-    request: Request,
     template_id: UUID,
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> JournalTemplateOut:
-    tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
     tmpl = await svc.get(session, template_id)
     if tmpl is None or tmpl.company_id != company_id:
         raise HTTPException(404, "Journal template not found")
@@ -140,13 +121,11 @@ async def get_journal_template(
 
 @router.post("", response_model=JournalTemplateOut, status_code=201)
 async def create_journal_template(
-    request: Request,
     payload: JournalTemplateCreate,
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
-    tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
     try:
         tmpl = await svc.create(
             session,
@@ -169,15 +148,12 @@ async def create_journal_template(
 
 @router.patch("/{template_id}", response_model=JournalTemplateOut)
 async def update_journal_template(
-    request: Request,
     template_id: UUID,
     payload: JournalTemplateUpdate,
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
-    tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
-
     # Verify the template exists and belongs to this company
     tmpl = await svc.get(session, template_id)
     if tmpl is None or tmpl.company_id != company_id:
@@ -215,10 +191,8 @@ async def archive_journal_template(
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
     hard: bool = Depends(hard_delete_admin_gate),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
-    tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
-
     tmpl = await svc.get(session, template_id)
     if tmpl is None or tmpl.company_id != company_id:
         raise HTTPException(404, "Journal template not found")
@@ -241,10 +215,10 @@ async def archive_journal_template(
 
 @router.post("/{template_id}/apply", response_model=JournalTemplateApplyOut)
 async def apply_journal_template(
-    request: Request,
     template_id: UUID,
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> JournalTemplateApplyOut:
     """Return a template's lines as suggested JE lines.
 
@@ -252,8 +226,6 @@ async def apply_journal_template(
     when POSTing to ``/api/v1/journal_entries``.  No journal entry is created
     by this endpoint.
     """
-    tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
     tmpl = await svc.get(session, template_id)
     if tmpl is None or tmpl.company_id != company_id:
         raise HTTPException(404, "Journal template not found")

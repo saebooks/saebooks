@@ -9,14 +9,14 @@ Global read-only search across contacts, invoices, bills and accounts.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import select
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
-from saebooks.api.v1.deps import get_session
+from saebooks.api.v1.auth import require_bearer
+from saebooks.api.v1.deps import get_active_company_id, get_session
 from saebooks.api.v1.schemas import SearchHitOut, SearchResponse
-from saebooks.models.company import Company
 from saebooks.services import search as search_svc
 
 router = APIRouter(
@@ -26,37 +26,23 @@ router = APIRouter(
 )
 
 
-async def _first_company_id(session: AsyncSession, tenant_id) -> str:
-    """Return the first active company's UUID for this tenant."""
-    result = await session.execute(
-        select(Company)
-        .where(
-            Company.tenant_id == tenant_id,
-            Company.archived_at.is_(None),
-        )
-        .order_by(Company.created_at)
-    )
-    company = result.scalars().first()
-    if company is None:
-        raise HTTPException(404, "No active company for tenant")
-    return company.id
-
-
 @router.get("", response_model=SearchResponse)
 async def search(
-    request: Request,
     q: str = Query(default="", description="Search query string"),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> SearchResponse:
     """Search across contacts, invoices, bills and accounts.
 
     Returns up to 10 hits per entity type (40 total). An empty or
     whitespace-only ``q`` returns an empty hits list immediately.
+
+    The active company is resolved by ``get_active_company_id`` —
+    callers may pin a specific company via the ``X-Company-Id`` header;
+    otherwise the first active company for the tenant is used.
     """
     query = (q or "").strip()
 
-    tenant_id = resolve_tenant_id(request)
-    company_id = await _first_company_id(session, tenant_id)
     hits = await search_svc.search_all(session, company_id, query=query)
 
     out_hits = [
