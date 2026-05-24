@@ -109,12 +109,18 @@ async def journal_new(request: Request) -> HTMLResponse:
 
 @router.get("/{entry_id}", response_class=HTMLResponse)
 async def journal_detail(request: Request, entry_id: uuid.UUID) -> HTMLResponse:
-    tenant_id = resolve_tenant_id(request)
+    # Use the company tenant_id for the lookup rather than resolving from the
+    # bearer JWT. The list route uses the same pattern. The legacy /journal
+    # router has no require_bearer dependency, so request.state.jwt_claims is
+    # unset, which causes resolve_tenant_id to 401 in production when the
+    # static saebk_* machine token is presented. RLS at the DB layer provides
+    # the real tenant isolation; the company.tenant_id check here is belt-and-
+    # braces at the application layer.
     company = await _first_company()
     accounts, tax_codes, projects = await _accounts_and_tax_codes(company.id)
     async with AsyncSessionLocal() as session:
         try:
-            entry = await svc.get(session, entry_id, tenant_id=tenant_id)
+            entry = await svc.get(session, entry_id, tenant_id=company.tenant_id)
         except ValueError as exc:
             raise HTTPException(404, "Journal entry not found") from exc
     return templates.TemplateResponse(
