@@ -1,1 +1,1 @@
-__version__ = "1.27.1"
+__version__ = "0.2.0"  # alpha — three-segment decimal versioning
