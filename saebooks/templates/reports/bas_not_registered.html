@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}BAS report - SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>BAS report</h1>
+  <div class="meta">{{ company_name }}</div>
+</div>
+
+<div class="alert alert-warning">
+  <strong>Not GST-registered</strong>
+  {% if gst_effective_date %}
+  - {{ company_name }} is not registered for GST as of {{ gst_effective_date }}.
+  {% else %}
+  - {{ company_name }} is not registered for GST. Update company settings to enable BAS reporting.
+  {% endif %}
+</div>
+{% endblock %}

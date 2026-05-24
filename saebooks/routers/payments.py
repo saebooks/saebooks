@@ -43,6 +43,7 @@ from saebooks.models.payment import (
 )
 from saebooks.services import numbering
 from saebooks.services import payments as svc
+from saebooks.services.journal import PostingError
 from saebooks.web import templates
 from saebooks.services import active_company as active_svc
 
@@ -298,8 +299,11 @@ async def payments_detail(request: Request, payment_id: UUID) -> HTMLResponse:
 
 @router.post("/{payment_id}/post")
 async def payments_post(payment_id: UUID) -> RedirectResponse:
-    async with AsyncSessionLocal() as session:
-        await svc.post_payment(session, payment_id, posted_by="web")
+    try:
+        async with AsyncSessionLocal() as session:
+            await svc.post_payment(session, payment_id, posted_by="web")
+    except (PostingError, svc.PaymentError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return RedirectResponse(f"/payments/{payment_id}", status_code=303)
 
 
