@@ -13,6 +13,10 @@ Covers (matching the W5 brief):
   audit row written with status=rejected
 * FLAG_SQL_TOOL gate: community / business tier rejected on
   /sql/execute (404 — feature gate semantics in this codebase)
+* Cross-tenant probe: tenant A admin sees only tenant A change_log rows;
+  tenant B rows MUST NOT appear (Lane 5 P0-007 regression guard).
+* Mid-statement-fail audit: sql_tool execute that raises a DB error
+  still commits the audit row with status='error' (Lane 5 P0-007 + P2-012).
 """
 from __future__ import annotations
 
@@ -386,3 +390,129 @@ async def test_sql_execute_blocked_on_business_edition(
     finally:
         _settings.edition = saved
     assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Cross-tenant probe — audit-log endpoint (Lane 5 P0-007)
+# ---------------------------------------------------------------------------
+
+# Tenant IDs for cross-tenant tests — keep separate from the
+# sql_tool tests so autouse cleanup doesn't interfere.
+_ADMIN_DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+_ADMIN_OTHER_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-aaaaaaaaaaaa")
+
+
+async def _seed_audit_tenant() -> None:
+    """Ensure the 'other' tenant row exists in tenants (FK required)."""
+    async with AsyncSessionLocal() as session:
+        from sqlalchemy import text
+
+        await session.execute(
+            text(
+                "INSERT INTO tenants (id, name, slug) "
+                "VALUES (:tid, 'pytest-admin-other', 'pytest-admin-other') "
+                "ON CONFLICT (id) DO NOTHING"
+            ).bindparams(tid=_ADMIN_OTHER_TENANT_ID)
+        )
+        await session.commit()
+
+
+async def _insert_change_log_row(
+    *,
+    tenant_id: uuid.UUID,
+    entity: str = "contact",
+) -> int:
+    """Directly insert a ChangeLog row; return its id."""
+    async with AsyncSessionLocal() as session:
+        row = ChangeLog(
+            tenant_id=tenant_id,
+            entity=entity,
+            entity_id=uuid.uuid4(),
+            op="create",
+            actor="pytest",
+            payload={"note": "admin-cross-tenant-test"},
+            version=1,
+        )
+        session.add(row)
+        await session.commit()
+        await session.refresh(row)
+        return row.id
+
+
+async def test_audit_log_cross_tenant_isolation(
+    admin_api_client: AsyncClient,
+) -> None:
+    """Tenant-A admin MUST NOT see change_log rows owned by tenant B.
+
+    The static dev bearer resolves to DEFAULT_TENANT_ID (tenant A here).
+    We seed one row for tenant A and one for another tenant, then assert
+    the audit-log endpoint returns exactly the tenant-A row — not the
+    other-tenant row.
+
+    This directly tests the Lane 5 P0-007 fix: the previous filter
+    ``(entity != 'sql_tool') | (payload.tenant_id matches)`` let every
+    non-sql_tool domain row through regardless of tenant. The fix
+    replaces it with ``ChangeLog.tenant_id == tenant_id``.
+    """
+    await _seed_audit_tenant()
+
+    tenant_a_row_id = await _insert_change_log_row(
+        tenant_id=_ADMIN_DEFAULT_TENANT_ID, entity="invoice"
+    )
+    other_row_id = await _insert_change_log_row(
+        tenant_id=_ADMIN_OTHER_TENANT_ID, entity="invoice"
+    )
+
+    # Filter to "invoice" to avoid picking up unrelated sql_tool rows
+    # from other tests in this run.
+    r = await admin_api_client.get(
+        "/api/v1/admin/audit-log",
+        params={"route": "invoice", "limit": 500},
+    )
+    assert r.status_code == 200, r.text
+    items = r.json()["items"]
+    ids_returned = {i["id"] for i in items}
+
+    assert tenant_a_row_id in ids_returned, (
+        f"tenant A row {tenant_a_row_id} not found in audit log"
+    )
+    assert other_row_id not in ids_returned, (
+        f"other-tenant row {other_row_id} leaked into tenant A audit log"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Mid-statement-fail audit (Lane 5 P0-007 + P2-012)
+# ---------------------------------------------------------------------------
+
+
+async def test_sql_execute_error_still_writes_audit_row(
+    admin_api_client: AsyncClient,
+) -> None:
+    """A SELECT that raises a DB error mid-execution still commits its audit row.
+
+    sql_tool.execute() wraps the run in try/except and writes an audit row
+    with status='error' on any exception. The endpoint returns 400
+    (QueryError). We verify the audit row was committed and the
+    payload carries the error status.
+    """
+    # Division by zero is a reliable runtime error on every Postgres version.
+    r = await admin_api_client.post(
+        "/api/v1/admin/sql/execute",
+        json={"statement": "SELECT 1 / 0"},
+    )
+    assert r.status_code == 400, r.text
+    body = r.json()
+    assert body.get("code") == "query_error"
+
+    # Audit row must still exist with status='error'.
+    row = await _latest_sql_audit_row()
+    assert row is not None, "no audit row found after failing statement"
+    assert row.payload.get("status") == "error", (
+        f"expected status='error' in audit payload, got {row.payload!r}"
+    )
+    # The error field should mention division by zero (Postgres message).
+    err = row.payload.get("error", "")
+    assert "zero" in err.lower() or "division" in err.lower(), (
+        f"unexpected error text in audit payload: {err!r}"
+    )
