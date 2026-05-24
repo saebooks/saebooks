@@ -100,8 +100,11 @@ mcp = FastMCP(
 )
 # Expose the application version via MCP initialize serverInfo.
 # FastMCP does not accept a version= kwarg; we set it on the
-# underlying low-level server directly after construction.
-mcp._mcp_server.version = "0.5.0"  # beta — MCP integration is more mature than the alpha-tier product API
+# underlying low-level server directly after construction. Mirror
+# saebooks.__version__ so the three surfaces (OpenAPI /openapi.json,
+# /api/v1/version, and MCP initialize) all agree — see
+# tests/test_version_unification.py for the asserts.
+mcp._mcp_server.version = __version__
 
 
 def _register(safety: str = "safe"):
