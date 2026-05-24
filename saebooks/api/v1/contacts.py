@@ -290,6 +290,7 @@ async def update_contact(
             contact_id,
             actor=f"api:{bearer[:8]}…",
             expected_version=expected,
+            tenant_id=tenant_id,
             **payload.model_dump(exclude_unset=True),
         )
     except svc.VersionConflict as exc:
@@ -383,6 +384,7 @@ async def archive_contact(
             contact_id,
             actor=f"api:{bearer[:8]}…",
             expected_version=expected,
+            tenant_id=tenant_id,
         )
     except svc.VersionConflict as exc:
         await session.refresh(exc.current)

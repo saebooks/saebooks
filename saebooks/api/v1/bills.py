@@ -318,11 +318,12 @@ async def void_bill(
         raise HTTPException(428, "If-Match header with bill version is required")
 
     try:
-        await svc.api_void(
+        await svc.api_void_bill(
             session,
             bill_id,
             actor=f"api:{bearer[:8]}…",
             expected_version=expected,
+            tenant_id=tenant_id,
         )
     except svc.VersionConflict as exc:
         body = BillConflictBody(

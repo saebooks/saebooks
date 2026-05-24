@@ -299,11 +299,12 @@ async def void_credit_note(
         raise HTTPException(428, "If-Match header with credit note version is required")
 
     try:
-        await svc.api_void(
+        await svc.api_void_credit_note(
             session,
             credit_note_id,
             actor=f"api:{bearer[:8]}…",
             expected_version=expected,
+            tenant_id=tenant_id,
         )
     except svc.VersionConflict as exc:
         body = CreditNoteConflictBody(

@@ -317,11 +317,12 @@ async def void_invoice(
         raise HTTPException(428, "If-Match header with invoice version is required")
 
     try:
-        await svc.api_void(
+        await svc.api_void_invoice(
             session,
             invoice_id,
             actor=f"api:{bearer[:8]}…",
             expected_version=expected,
+            tenant_id=tenant_id,
         )
     except svc.VersionConflict as exc:
         body = InvoiceConflictBody(
