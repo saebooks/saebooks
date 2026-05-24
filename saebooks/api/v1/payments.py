@@ -43,6 +43,7 @@ from saebooks.models.company import Company
 from saebooks.models.payment import PaymentDirection, PaymentMethod
 from saebooks.services import payments as svc
 from saebooks.services.hard_delete import hard_delete_with_audit
+from saebooks.services.journal import PostingError
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 
 router = APIRouter(
@@ -369,3 +370,99 @@ async def void_payment(
         raise HTTPException(422, msg) from exc
 
     return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
+# Post transition (POST /{payment_id}/post → DRAFT → POSTED)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/{payment_id}/post",
+    responses={
+        200: {"model": PaymentOut},
+        409: {"model": PaymentConflictBody, "description": "Version mismatch"},
+    },
+)
+async def post_payment_endpoint(
+    payment_id: UUID,
+    request: Request,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+    idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
+    bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
+) -> Any:
+    """Transition payment DRAFT → POSTED, generating the GL journal entry.
+
+    Symmetric with POST /api/v1/invoices/{id}/post and
+    POST /api/v1/bills/{id}/post.
+
+    * Requires If-Match: <version> for optimistic locking.
+    * Supports X-Idempotency-Key for at-most-once semantics.
+    * 200 → posted payment body.
+    * 409 → version mismatch (current state in body).
+    * 422 → payment already posted/voided, or PostingError from the
+        journal layer (e.g. cross-company account reference).
+    * 404 → payment not found.
+    """
+    expected = _parse_if_match(if_match)
+    if expected is None:
+        raise HTTPException(428, "If-Match header with payment version is required")
+
+    tenant_id = resolve_tenant_id(request)
+    key = _parse_idempotency_key(idempotency_key)
+
+    if key is not None:
+        raw_body = await request.body()
+        body_sha256 = hashlib.sha256(raw_body).hexdigest()
+        claim = await claim_or_fetch(session, key, tenant_id, body_sha256)
+        if claim.status == ClaimStatus.CONFLICT:
+            return JSONResponse(
+                {"code": "idempotency_key_conflict", "message": "X-Idempotency-Key reused with a different request body"},
+                status_code=422,
+            )
+        if claim.status == ClaimStatus.IN_FLIGHT:
+            return JSONResponse(
+                {"code": "request_in_flight", "message": "A request with this idempotency key is currently being processed. Retry after 1 second."},
+                status_code=503,
+                headers={"Retry-After": "1"},
+            )
+        if claim.status == ClaimStatus.REPLAY:
+            return JSONResponse(
+                content=json.loads(claim.response_body) if claim.response_body else {},
+                status_code=claim.response_status or 200,
+            )
+
+    if await svc.api_get(session, payment_id, tenant_id=tenant_id) is None:
+        raise HTTPException(404, "Payment not found")
+
+    try:
+        payment = await svc.api_post_payment(
+            session,
+            payment_id,
+            actor=f"api:{bearer[:8]}…",
+            expected_version=expected,
+            tenant_id=tenant_id,
+        )
+    except svc.VersionConflict as exc:
+        body = PaymentConflictBody(
+            detail="version mismatch",
+            current=PaymentOut.model_validate(exc.current),
+        ).model_dump(mode="json")
+        if key is not None:
+            await store_response(session, key, 409, json.dumps(body).encode())
+            await session.commit()
+        return JSONResponse(body, status_code=409)
+    except PostingError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except (ValueError, svc.PaymentError) as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
+
+    body = _dump(payment)
+    if key is not None:
+        await store_response(session, key, 200, json.dumps(body).encode())
+        await session.commit()
+    return JSONResponse(body, status_code=200)

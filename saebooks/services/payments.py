@@ -735,6 +735,7 @@ __all__ = [
     "api_create",
     "api_get",
     "api_update",
+    "api_post_payment",
     "api_void",
     "archive",
     "create_draft",
@@ -1175,6 +1176,68 @@ async def api_void(
         entity="payment",
         entity_id=pay_loaded.id,
         op="archive",
+        actor=actor,
+        payload=_serialise_payment(pay_loaded),
+        version=pay_loaded.version,
+    )
+    await session.commit()
+    return await _get_with_allocations(session, payment_id)  # type: ignore[return-value]
+
+
+async def api_post_payment(
+    session: AsyncSession,
+    payment_id: uuid.UUID,
+    actor: str,
+    expected_version: int,
+    *,
+    tenant_id: uuid.UUID | None = None,
+) -> Payment:
+    """Transition DRAFT → POSTED with optimistic locking + change_log.
+
+    Wraps the legacy post_payment() pipeline, adding:
+    - tenant isolation guard
+    - optimistic-locking check (VersionConflict on mismatch)
+    - payment_not_draft gate (PaymentError on non-DRAFT)
+    - version bump + change_log row after posting succeeds
+
+    Raises:
+        PaymentError: payment not found, or already POSTED/VOIDED
+        VersionConflict: expected_version does not match stored value
+        PostingError (from journal layer): cross-company account reference
+            or other journal integrity violation
+    """
+    from saebooks.services.journal import PostingError as _PostingError  # noqa: F401 (re-exported via raise)
+
+    pay = await _get_with_allocations(session, payment_id)
+    if pay is None:
+        raise PaymentError(f"Payment {payment_id} not found")
+    if tenant_id is not None and pay.tenant_id != tenant_id:
+        raise PaymentError(f"Payment {payment_id} not found")
+    if pay.version != expected_version:
+        raise VersionConflict(pay)
+    if pay.status != PaymentStatus.DRAFT:
+        raise PaymentError(
+            f"payment_not_draft: Payment {pay.id} is {pay.status.value}, not DRAFT"
+        )
+
+    # Delegate to the existing posting pipeline (journal creation, number
+    # minting, bank/control account wiring, FX delta).
+    # post_payment commits internally; we then bump version + write change_log.
+    await post_payment(session, payment_id, posted_by=actor)
+
+    # Reload after the commit so we see the latest state.
+    pay_loaded = await _get_with_allocations(session, payment_id)
+    assert pay_loaded is not None
+
+    pay_loaded.version = pay_loaded.version + 1
+    await session.flush()
+    await session.refresh(pay_loaded)
+
+    await change_log_svc.append(
+        session,
+        entity="payment",
+        entity_id=pay_loaded.id,
+        op="post",
         actor=actor,
         payload=_serialise_payment(pay_loaded),
         version=pay_loaded.version,
