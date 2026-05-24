@@ -36,6 +36,16 @@ TEST_YEAR = 2099
 
 
 async def _ctx() -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
+    """Return (company_id, income_id, expense_id) using dedicated
+    Budget-vs-Actual test accounts.
+
+    Other test modules (notably tests/test_pl_by_segment.py) post P&L
+    JEs in year 2099 against the *first* income account by code order
+    — so a naïve "_first_of(INCOME)" here picks up their pollution and
+    skews variance assertions. Each invocation grabs (or lazily
+    creates) accounts with unique codes ``9-BVA-INC`` / ``9-BVA-EXP``
+    that no other test touches.
+    """
     async with AsyncSessionLocal() as session:
         company = (
             await session.execute(
@@ -46,26 +56,37 @@ async def _ctx() -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
         ).scalars().first()
         assert company is not None
 
-        async def _first_of(t: AccountType) -> uuid.UUID:
-            acct = (
+        async def _dedicated(t: AccountType, code: str, name: str) -> uuid.UUID:
+            existing = (
                 await session.execute(
-                    select(Account)
-                    .where(
+                    select(Account).where(
                         Account.company_id == company.id,
-                        Account.account_type == t,
-                        Account.is_header.is_(False),
+                        Account.code == code,
                     )
-                    .order_by(Account.code)
                 )
             ).scalars().first()
-            assert acct is not None
+            if existing is not None:
+                return existing.id
+            acct = Account(
+                tenant_id=company.tenant_id,
+                company_id=company.id,
+                code=code,
+                name=name,
+                account_type=t,
+                is_header=False,
+            )
+            session.add(acct)
+            await session.commit()
+            await session.refresh(acct)
             return acct.id
 
-        return (
-            company.id,
-            await _first_of(AccountType.INCOME),
-            await _first_of(AccountType.EXPENSE),
+        income_id = await _dedicated(
+            AccountType.INCOME, "9-BVA-INC", "Budget Test Income"
         )
+        expense_id = await _dedicated(
+            AccountType.EXPENSE, "9-BVA-EXP", "Budget Test Expense"
+        )
+        return company.id, income_id, expense_id
 
 
 async def _post_expense_je(
