@@ -105,8 +105,31 @@ async def bas_report(
     to_date: str | None = Query(None, alias="to"),
 ) -> HTMLResponse:
     company = await _first_company()
+
+    # Gate: company must be GST-registered before rendering the BAS.
+    # A non-registered company seeing GST numbers + a "Lodge BAS" CTA
+    # is misleading and potentially harmful.
+    if not company.gst_registered:
+        return templates.TemplateResponse(
+            request,
+            "reports/bas_not_registered.html",
+            {
+                "edition": settings.edition,
+                "company_name": company.name,
+                "gst_effective_date": company.gst_effective_date,
+            },
+            status_code=200,
+        )
+
     fd = _parse_date(from_date)
     td = _parse_date(to_date)
+
+    # When the company has a gst_effective_date, clamp the report start to
+    # that date so pre-registration transactions are excluded.
+    if company.gst_effective_date is not None:
+        if fd is None or fd < company.gst_effective_date:
+            fd = company.gst_effective_date
+
     async with AsyncSessionLocal() as session:
         report = await bas_svc.bas_report(session, company.id, from_date=fd, to_date=td)
     return templates.TemplateResponse(
@@ -118,6 +141,7 @@ async def bas_report(
             "report": report,
             "from_date": from_date or "",
             "to_date": to_date or "",
+            "gst_effective_date": company.gst_effective_date,
         },
     )
 
