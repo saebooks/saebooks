@@ -320,3 +320,42 @@ async def _reset_seed_company_to_full_after_test() -> None:
             ).bindparams(cid=co.id)
         )
         await session.commit()
+
+
+# --- Edition snapshot/restore -----------------------------------------------
+# Root cause: ``tests/db/test_runtime_database_url_strict.py`` calls
+# ``importlib.reload(saebooks.config)`` which creates a *new* Settings()
+# singleton and rebinds ``saebooks.config.settings``. All other modules that
+# captured ``from saebooks.config import settings as _foo`` at import time
+# (``features._default_settings``, ``resolver._settings``, etc.) now hold a
+# stale reference to the original object -- so monkeypatching the "current"
+# ``saebooks.config.settings`` in later tests has no effect on
+# ``features.is_enabled`` or ``resolver._resolve``.
+#
+# This autouse fixture closes the gap before every test:
+#   1. Re-sync ``features._default_settings`` and ``resolver._settings`` to
+#      whatever ``saebooks.config.settings`` is right now.
+#   2. Snapshot the current edition from *that* object.
+#   3. After the test: restore edition on the live object and re-sync the
+#      references again so the next test starts clean.
+
+
+@pytest.fixture(autouse=True)
+def _restore_settings_edition() -> None:
+    import saebooks.config as _cfg_mod
+    import saebooks.services.features as _feat_mod
+    import saebooks.services.licence.resolver as _resolver_mod
+
+    # Point every cached reference at the current live singleton.
+    live = _cfg_mod.settings
+    _feat_mod._default_settings = live
+    _resolver_mod._settings = live
+
+    _saved = live.edition
+    yield
+
+    # Restore edition + re-sync in case the test reloaded config.
+    live = _cfg_mod.settings
+    live.edition = _saved
+    _feat_mod._default_settings = live
+    _resolver_mod._settings = live
