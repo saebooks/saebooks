@@ -530,6 +530,7 @@ async def convert_to_inventory(
     entry = await journal_svc.create_draft(
         session,
         company_id=asset.company_id,
+        tenant_id=asset.tenant_id,
         entry_date=conversion_date,
         description=f"Convert to inventory: {asset.code} {asset.name}",
         lines=lines,

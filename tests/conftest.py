@@ -255,3 +255,116 @@ def pytest_ignore_collect(collection_path, config):  # type: ignore[no-untyped-d
         if str(collection_path).endswith(suffix):
             return True
     return None
+
+
+
+# --- Session-wide seed-company reset -----------------------------------------
+# tests/api/v1/test_cashbook.py and a handful of other modules mutate the
+# shared seed company into bookkeeping_mode=cashbook (with a non-NULL
+# cashbook_default_bank_account_id and possibly gst_registered=true) but
+# do not always restore it. That leaks across test files because the
+# seed company is selected by ``ORDER BY created_at`` and pinned to
+# epoch (see seed_coa above) — so every later test that picks "the
+# oldest company" inherits cashbook mode and breaks (~15 known
+# failures in test_payments, test_invoices, test_reconciliation,
+# test_payments_page, test_cashbook_e2e, test_cashbook).
+#
+# Promote the cleanup to function-scope autouse at the suite root so
+# every test in every file gets a known-good ``full`` mode start. This
+# is a belt-and-braces measure: per-file teardowns are kept but no
+# longer rely on each other.
+#
+# Reset uses a single atomic UPDATE so the
+# ``ck_cashbook_default_bank_requires_cashbook_mode`` CHECK
+# constraint (migration 0126) sees the consistent
+# (full, NULL bank) end state regardless of column-update order.
+# ``gst_registered`` is also reset to the model default (False) since
+# the cashbook seed helper flips it on for GST-registered branches.
+
+@pytest.fixture(autouse=True)
+async def _reset_seed_company_to_full_after_test() -> None:
+    """Restore the seed company to ``bookkeeping_mode=full`` after every test.
+
+    Applies suite-wide. No-op on SQLite (the Cashbook backend uses a
+    different schema path and does not have the seed-company invariant).
+    No-op when the seed company is missing (collection-time tests
+    that never instantiate it).
+    """
+    yield
+    if _BACKEND_IS_SQLITE:
+        return
+    from sqlalchemy import select, text
+
+    from saebooks.db import AsyncSessionLocal
+    from saebooks.models.company import Company
+
+    async with AsyncSessionLocal() as session:
+        co = (
+            await session.execute(
+                select(Company)
+                .where(Company.archived_at.is_(None))
+                .order_by(Company.created_at)
+            )
+        ).scalars().first()
+        if co is None:
+            return
+        # Atomic UPDATE: both columns at once so the CHECK constraint sees
+        # the consistent (full, NULL bank) end state regardless of order.
+        await session.execute(
+            text(
+                "UPDATE companies SET "
+                "bookkeeping_mode = 'full', "
+                "cashbook_default_bank_account_id = NULL, "
+                "gst_registered = false "
+                "WHERE id = :cid"
+            ).bindparams(cid=co.id)
+        )
+        await session.commit()
+
+
+# --- Edition snapshot/restore -----------------------------------------------
+# Root cause: ``tests/db/test_runtime_database_url_strict.py`` calls
+# ``importlib.reload(saebooks.config)`` which creates a *new* Settings()
+# singleton and rebinds ``saebooks.config.settings``. All other modules that
+# captured ``from saebooks.config import settings as _foo`` at import time
+# (``features._default_settings``, ``resolver._settings``, etc.) now hold a
+# stale reference to the original object -- so monkeypatching the "current"
+# ``saebooks.config.settings`` in later tests has no effect on
+# ``features.is_enabled`` or ``resolver._resolve``.
+#
+# This autouse fixture closes the gap before every test:
+#   1. Re-sync ``features._default_settings`` and ``resolver._settings`` to
+#      whatever ``saebooks.config.settings`` is right now.
+#   2. Snapshot the current edition from *that* object.
+#   3. After the test: restore edition on the live object and re-sync the
+#      references again so the next test starts clean.
+
+
+@pytest.fixture(autouse=True)
+def _restore_settings_edition() -> None:
+    import saebooks.config as _cfg_mod
+    import saebooks.services.features as _feat_mod
+    import saebooks.services.licence.resolver as _resolver_mod
+
+    # Point every cached reference at the current live singleton.
+    live = _cfg_mod.settings
+    _feat_mod._default_settings = live
+    _resolver_mod._settings = live
+
+    # Bust the resolver's cached ResolvedLicence so a previous test that
+    # populated it (e.g. ``resolve_licence()`` called during /admin/license
+    # rendering, or any feature-gate path with a JWT user) cannot poison
+    # this test's view of ``settings.edition``. Without this, the resolver
+    # returns the cached value and ``test_env_override_short_circuits_drivers``
+    # sees the wrong edition + the drivers get invoked. Cheap call.
+    _resolver_mod._reset_for_tests()
+
+    _saved = live.edition
+    yield
+
+    # Restore edition + re-sync in case the test reloaded config.
+    live = _cfg_mod.settings
+    live.edition = _saved
+    _feat_mod._default_settings = live
+    _resolver_mod._settings = live
+    _resolver_mod._reset_for_tests()

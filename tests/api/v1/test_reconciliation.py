@@ -20,7 +20,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
-from saebooks.api.v1.auth import current_token
+from saebooks.api.v1.auth import DEFAULT_TENANT_ID, current_token
 from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.account import Account, AccountType
@@ -130,6 +130,7 @@ async def posted_entry_for_bsl(
         entry = JournalEntry(
             id=uuid.uuid4(),
             company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
             ref=f"RECON-{uuid.uuid4().hex[:6].upper()}",
             entry_date=__import__("datetime").date(2026, 4, 1),
             description="Recon test posted entry",
@@ -344,6 +345,7 @@ async def test_reconciliation_match_422_unposted_entry(
         draft_entry = JournalEntry(
             id=uuid.uuid4(),
             company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
             ref=f"DRAFT-{uuid.uuid4().hex[:6].upper()}",
             entry_date=__import__("datetime").date(2026, 4, 1),
             status=EntryStatus.DRAFT,

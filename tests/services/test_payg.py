@@ -91,7 +91,10 @@ def _fake_employee(
     )
 
 
-_FY25_26_DATE = date(2025, 8, 1)   # within FY25-26
+# Must be on or after 2025-09-24 so the new NAT 3539 Schedule 8
+# STSL coefficients (seeded in 0120) are in effect for the
+# STSL test cases below.
+_FY25_26_DATE = date(2025, 10, 1)  # within FY25-26, STSL effective
 _FY24_25_DATE = date(2025, 6, 1)   # within FY24-25 (rate = 11.5%)
 
 
@@ -111,20 +114,25 @@ class TestResolveScale:
         ) == 2
 
     def test_resident_without_tft(self) -> None:
+        # ATO Scale 1 — resident, no tax-free threshold claimed
+        # (second job). Was internal pseudo-scale 3 before 0120;
+        # service constants swapped to match ATO numbering.
         assert resolve_scale_no(
             is_australian_resident=True,
             claims_tax_free_threshold=False,
             tfn_status=TfnStatus.PROVIDED.value,
             working_holiday_maker=False,
-        ) == 3
+        ) == 1
 
     def test_non_resident(self) -> None:
+        # ATO Scale 3 — foreign residents (no TFT, no Medicare).
+        # Was internal pseudo-scale 1 before 0120.
         assert resolve_scale_no(
             is_australian_resident=False,
             claims_tax_free_threshold=False,
             tfn_status=TfnStatus.PROVIDED.value,
             working_holiday_maker=False,
-        ) == 1
+        ) == 3
 
     def test_no_tfn_resident(self) -> None:
         assert resolve_scale_no(
@@ -253,7 +261,7 @@ class TestComputeWithholding:
         assert result.stsl_amount == Decimal("0.00")
 
     async def test_scale_2_band_2_known_calc(self) -> None:
-        """Resident + TFT, $500/wk → exercises Scale 2 band 2."""
+        """Resident + TFT, $500/wk → exercises Scale 2 band 3 (ATO)."""
         emp = _fake_employee()
         async with AsyncSessionLocal() as session:
             result = await compute_withholding(
@@ -263,12 +271,20 @@ class TestComputeWithholding:
                 employee=emp,
                 effective_date=_FY25_26_DATE,
             )
-        # Per DERIVED seed: a=0.18 b=63 → 0.18*500.99 - 63 = 27.18 → $27
-        assert result.payg_amount == Decimal("27.00")
+        # NAT 1004 Scale 2 FY25-26 band (500.00, 625.00): a=0.26 b=107.8462
+        # x = floor(500) + 0.99 = 500.99
+        # wh = 0.26 * 500.99 - 107.8462 = 130.2574 - 107.8462 = 22.4112 → $22
+        assert result.payg_amount == Decimal("22.00")
         assert result.scale_used == 2
 
-    async def test_scale_3_no_tft_taxes_from_dollar_one(self) -> None:
-        """Resident no TFT, $300/wk → Scale 3 hits 18% from $0."""
+    async def test_scale_1_no_tft_taxes_from_dollar_one(self) -> None:
+        """Resident no TFT → ATO Scale 1 (second-job schedule).
+
+        Constants swap (0120): old DB scale 3 was the resident-no-TFT
+        slot; ATO numbering reserves scale 1 for it. $300/wk lands in
+        band 2 of NAT 1004 Scale 1 — LITO shade-out is included so
+        the marginal rate from $150 is 21.17%, not the old 18%.
+        """
         emp = _fake_employee(tft=False)
         async with AsyncSessionLocal() as session:
             result = await compute_withholding(
@@ -278,9 +294,11 @@ class TestComputeWithholding:
                 employee=emp,
                 effective_date=_FY25_26_DATE,
             )
-        # Scale 3 band 1: a=0.18 b=0 → 0.18 * 300.99 = 54.1782 → $54
-        assert result.scale_used == 3
-        assert result.payg_amount == Decimal("54.00")
+        # NAT 1004 Scale 1 FY25-26 band (150.00, 371.00): a=0.2117 b=7.755
+        # x = floor(300) + 0.99 = 300.99
+        # wh = 0.2117 * 300.99 - 7.755 = 63.7196 - 7.755 = 55.9646 → $56
+        assert result.scale_used == 1
+        assert result.payg_amount == Decimal("56.00")
 
     async def test_scale_4_no_tfn_flat_47pct(self) -> None:
         """Resident, no TFN provided → flat 47% (scale 4)."""
@@ -320,13 +338,17 @@ class TestComputeWithholding:
     async def test_stsl_additive(self) -> None:
         """With STSL flag, withholding = base + STSL top-up.
 
-        Test target: $1,500/wk resident with TFT + STSL.
-        Base Scale 2 band 3: 0.32 * 1500.99 - 184.15 = 480.3168 - 184.15
-            = 296.1668 → $296
-        STSL band at $1,500/wk: 1359.10 <= 1500.99 < 1440.43? No,
-            1500.99 falls in the 1440.43 .. 1525.70 band: a=0.035 b=32.5077
-            → 0.035 * 1500.99 - 32.5077 = 52.53465 - 32.5077 = 20.0269 → $20
-        Total = $296 + $20 = $316
+        Test target: $1,500/wk resident with TFT + STSL on/after
+        2025-09-24 (the effective_from for NAT 3539 Schedule 8).
+
+        Base ATO Scale 2 band (1282, 2596): a=0.32 b=176.5769
+            x = floor(1500) + 0.99 = 1500.99
+            wh = 0.32 * 1500.99 - 176.5769 = 480.3168 - 176.5769
+               = 303.7399 → $304
+        STSL Schedule 8 band 2 (1288, 2403): a=0.15 b=193.2692
+            stsl = 0.15 * 1500.99 - 193.2692 = 225.1485 - 193.2692
+                 = 31.8793 → $32
+        Total = $304 + $32 = $336
         """
         emp_no_stsl = _fake_employee()
         emp_stsl = _fake_employee(stsl=True)
@@ -564,8 +586,11 @@ async def test_stsl_seed_present() -> None:
             select(StslCoefficient).order_by(StslCoefficient.earnings_floor)
         )
         rows = list(result.scalars().all())
-        # 19 bands: 0% + 1%, 2%, 2.5%, 3%, 3.5%, 4%, 4.5%, 5%, 5.5%,
-        # 6%, 6.5%, 7%, 7.5%, 8%, 8.5%, 9%, 9.5%, 10%
-        assert len(rows) >= 19
+        # NAT 3539 Schedule 8 collapsed the old 19 percentage bands
+        # into 4 marginal bands effective 2025-09-24:
+        #   nil (< $1,288/wk), 15% ($1,288-$2,403), 17% ($2,403-$3,447),
+        #   10% (above $3,447 — flat HELP repayment cap).
+        assert len(rows) >= 4
         assert rows[0].coef_a == Decimal("0.000000")
+        # Top band: HELP repayment cap at 10% above $3,447/wk.
         assert rows[-1].coef_a == Decimal("0.100000")

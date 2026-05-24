@@ -185,6 +185,9 @@ def _parse_lines_from_form(form: dict[str, Any]) -> list[dict[str, object]]:
                 "project_id": uuid.UUID(raw["project_id"])
                 if raw.get("project_id")
                 else None,
+                "retention_pct": _parse_decimal(
+                    raw.get("retention_pct", "0"), "retention_pct"
+                ),
             }
         )
     return lines

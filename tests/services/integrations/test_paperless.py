@@ -13,6 +13,7 @@ import respx
 from sqlalchemy import select
 
 from saebooks.config import Settings
+from saebooks.api.v1.auth import DEFAULT_TENANT_ID
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
@@ -159,6 +160,7 @@ async def _build_sample_journal() -> uuid.UUID:
 
         entry = JournalEntry(
             company_id=company.id,
+            tenant_id=DEFAULT_TENANT_ID,
             ref=f"TEST-{uuid.uuid4().hex[:8]}",
             entry_date=date.today(),
             description="paperless test",

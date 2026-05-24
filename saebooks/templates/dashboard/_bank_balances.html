@@ -1,11 +1,12 @@
 {# Bank balances widget — list every reconcile-type bank/cash/CC account. #}
-{# Asset rows display GL balance as-is (positive = cash on hand). Liability #}
-{# rows (credit cards) negate the GL value so "owed" reads as a positive #}
-{# number with an "owed" tag — debit-minus-credit on a CC with debt is #}
-{# negative in GL terms, which confuses non-accountants. The footer total #}
-{# is left as the raw sum of GL balances: assets - liabilities = the net #}
-{# cash position you actually have to spend, which is the right number for #}
-{# a one-line summary. #}
+{# Two columns: "Per ledger" = GL balance (POSTED journal lines, debit −   #}
+{# credit, as-of today); "Per statement" = cumulative SUM(amount) over     #}
+{# all non-archived bank_statement_lines on the account (i.e. the latest  #}
+{# running balance the bsl view shows). The difference between the two is #}
+{# the unreconciled position. Liability (CC) rows negate the sign on      #}
+{# display so "owed" reads as a positive number. Per-statement is "—" if  #}
+{# the account has no statement lines (cash, petty cash, or feeds yet to  #}
+{# import). The footer net position uses the raw GL sum.                  #}
 <section class="widget widget-bank-balances">
   <header>
     <h2>Bank balances</h2>
@@ -14,7 +15,11 @@
   {% if dashboard.bank_balances %}
   <table class="widget-table">
     <thead>
-      <tr><th>Account</th><th class="num">Balance</th></tr>
+      <tr>
+        <th>Account</th>
+        <th class="num">Per ledger</th>
+        <th class="num">Per statement</th>
+      </tr>
     </thead>
     <tbody>
       {% for b in dashboard.bank_balances %}
@@ -33,6 +38,17 @@
             {{ "%.2f"|format(b.balance) }}
           {% endif %}
         </td>
+        <td class="num">
+          {% if b.statement_balance is not none %}
+            {% if b.account_type.value == "LIABILITY" %}
+              {{ "%.2f"|format(-b.statement_balance) }}
+            {% else %}
+              {{ "%.2f"|format(b.statement_balance) }}
+            {% endif %}
+          {% else %}
+            —
+          {% endif %}
+        </td>
       </tr>
       {% endfor %}
     </tbody>
@@ -42,6 +58,7 @@
         <th class="num">
           {{ "%.2f"|format(dashboard.bank_balances|sum(attribute="balance")) }}
         </th>
+        <th class="num"></th>
       </tr>
     </tfoot>
   </table>

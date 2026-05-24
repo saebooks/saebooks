@@ -39,7 +39,8 @@ Formula (NAT 1004 §2):
 
        (FORTNIGHTLY = ×2, MONTHLY = ×13/3, WEEKLY = ×1.)
 
-Scale resolution (resolves to a single ``scale_no`` 1–8):
+Scale resolution (resolves to a single ``scale_no`` 1–8, matching
+ATO Schedule 1 NAT 1004 numbering since migration 0120):
 
     +-----------------------------------------------+----------+
     | Employee state                                | scale_no |
@@ -49,9 +50,9 @@ Scale resolution (resolves to a single ``scale_no`` 1–8):
     | TFN not provided, non-resident                |    8     |
     | Resident, full medicare exemption             |    5     |
     | Resident, half medicare exemption             |    6     |
-    | Non-resident (claiming any TFT flag)          |    1     |
+    | Resident, no TFT                              |    1     |
     | Resident, claims TFT                          |    2     |
-    | Resident, no TFT                              |    3     |
+    | Non-resident (claiming any TFT flag)          |    3     |
     +-----------------------------------------------+----------+
 
 The "no TFN" scales (4 / 8) override every other flag — once a TFN is
@@ -129,11 +130,12 @@ class WithholdingResult:
 # --------------------------------------------------------------------- #
 
 
-# Internal pseudo-scale numbers (not on the ATO wire — for our table
-# lookup only).
-_SCALE_NONRES = 1
+# ATO scale numbers (Schedule 1 NAT 1004 — the DB column ``scale_no``
+# matches the ATO numbering after migration 0120; see the migration
+# docstring for the historical inversion these constants now reflect).
+_SCALE_RES_NO_TFT = 1
 _SCALE_RES_TFT = 2
-_SCALE_RES_NO_TFT = 3
+_SCALE_NONRES = 3
 _SCALE_NO_TFN_RES = 4
 _SCALE_FULL_MED_EXEMPT = 5
 _SCALE_HALF_MED_EXEMPT = 6

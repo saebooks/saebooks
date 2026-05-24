@@ -128,6 +128,12 @@ class JournalLine(Base):
     # Null means no franking dimension — standard non-dividend lines never
     # need to set this.
     franking_credit_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    # Per-line tax-determination snapshot (TaxTreatment.to_jsonable()).
+    # Populated by services.journal.post() via the active jurisdictions
+    # TaxEngine.compute() so that audit history stays self-consistent
+    # even if the underlying tax_code definition changes later.
+    # Pre-existing rows from before 0104 stay null — no backfill.
+    tax_treatment: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     entry: Mapped[JournalEntry] = relationship(back_populates="lines")
     account: Mapped["Account"] = relationship(

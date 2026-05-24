@@ -33,6 +33,7 @@ from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.api.v1.schemas import (
     CompanyConflictBody,
+    CompanyCreate,
     CompanyListOut,
     CompanyOut,
     CompanyUpdate,
@@ -40,6 +41,7 @@ from saebooks.api.v1.schemas import (
 from saebooks.models.company import Company
 from saebooks.models.invoice import Invoice, InvoiceStatus
 from saebooks.services import companies as svc
+from saebooks.services.features import FLAG_MULTI_COMPANY, require_feature
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 
 router = APIRouter(
@@ -112,6 +114,55 @@ async def list_companies(
         items=[CompanyOut.model_validate(c) for c in companies],
         total=total,
     )
+
+
+# ---------------------------------------------------------------------------
+# Create
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "",
+    response_model=CompanyOut,
+    status_code=201,
+    dependencies=[Depends(require_feature(FLAG_MULTI_COMPANY))],
+)
+async def create_company(
+    request: Request,
+    payload: CompanyCreate,
+    session: AsyncSession = Depends(get_session),
+) -> CompanyOut:
+    """Create a new company under the active tenant.
+
+    Gated on ``FLAG_MULTI_COMPANY`` so Community / Offline editions
+    return 404 (the route is invisible at lower tiers). Service-layer
+    ``create_company`` enforces the per-edition company cap via the
+    licence resolver and raises ``CompanyCapExceeded`` when the
+    request would push the active edition over its limit — translated
+    here to HTTP 409.
+    """
+    tenant_id = resolve_tenant_id(request)
+    try:
+        company = await svc.create_company(
+            session,
+            tenant_id=tenant_id,
+            name=payload.name,
+            legal_name=payload.legal_name,
+            trading_name=payload.trading_name,
+            abn=payload.abn,
+            acn=payload.acn,
+            base_currency=payload.base_currency,
+            fin_year_start_month=payload.fin_year_start_month,
+        )
+    except svc.CompanyCapExceeded as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Company cap exceeded for edition '{exc.edition}': "
+                f"{exc.current}/{exc.limit}"
+            ),
+        ) from exc
+    return CompanyOut.model_validate(company)
 
 
 # ---------------------------------------------------------------------------

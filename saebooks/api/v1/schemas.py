@@ -651,6 +651,37 @@ class JournalEntryOut(BaseModel):
     lines: list[JournalLineOut] = Field(default_factory=list)
 
 
+class JournalEntryHeaderOut(BaseModel):
+    """Header-only journal-entry response — no nested lines.
+
+    Used by ``GET /api/v1/snapshot`` where clients fetch lines on
+    demand. Avoids walking ``row.lines`` during ``model_validate``,
+    which would trigger ``JournalLine.account`` access — a
+    ``lazy='raise'`` relationship that needs nested ``selectinload``
+    to be loadable.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    tenant_id: uuid.UUID
+    ref: str
+    entry_date: date
+    description: str | None = None
+    status: str
+    posted_at: datetime | None = None
+    posted_by: str | None = None
+    reversal_of_id: uuid.UUID | None = None
+    override_reason: str | None = None
+    source_type: str | None = None
+    source_id: uuid.UUID | None = None
+    version: int
+    created_at: datetime
+    updated_at: datetime
+    archived_at: datetime | None = None
+
+
 class JournalEntryListOut(BaseModel):
     items: list[JournalEntryOut]
     total: int
@@ -718,6 +749,7 @@ class InvoiceLineOut(BaseModel):
     quantity: Decimal
     unit_price: Decimal
     discount_pct: Decimal
+    retention_pct: Decimal = Decimal("0")
     line_subtotal: Decimal
     line_tax: Decimal
     line_total: Decimal
@@ -736,6 +768,7 @@ class InvoiceLineCreate(BaseModel):
     quantity: Decimal = Decimal("1")
     unit_price: Decimal = Decimal("0")
     discount_pct: Decimal = Decimal("0")
+    retention_pct: Decimal = Decimal("0")
     project_id: uuid.UUID | None = None
     item_id: uuid.UUID | None = None
     service_start_date: date | None = None
@@ -859,6 +892,7 @@ class BillLineOut(BaseModel):
     quantity: Decimal
     unit_price: Decimal
     discount_pct: Decimal
+    retention_pct: Decimal = Decimal("0")
     line_subtotal: Decimal
     line_tax: Decimal
     line_total: Decimal
@@ -876,6 +910,7 @@ class BillLineCreate(BaseModel):
     quantity: Decimal = Decimal("1")
     unit_price: Decimal = Decimal("0")
     discount_pct: Decimal = Decimal("0")
+    retention_pct: Decimal = Decimal("0")
     project_id: uuid.UUID | None = None
     item_id: uuid.UUID | None = None
     tracking_vehicle_id: str | None = Field(default=None, max_length=64)
@@ -1231,6 +1266,14 @@ class BankAccountOut(BaseModel):
     version: int
     created_at: datetime
     archived_at: datetime | None = None
+    # Populated by the list handler only when ?include_balance=true /
+    # ?include_statement_balance=true is set. ``balance`` is the GL
+    # balance (POSTED journal lines, debit − credit) as-of today;
+    # ``statement_balance`` is the cumulative SUM(amount) of all
+    # non-archived bank_statement_lines on this account — the latest
+    # running balance the bsl view would show.
+    balance: Decimal | None = None
+    statement_balance: Decimal | None = None
 
 
 class BankAccountListOut(BaseModel):

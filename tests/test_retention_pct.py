@@ -88,6 +88,13 @@ async def _customer_id() -> str:
 
 
 async def _supplier_id() -> str:
+    """Return any active supplier id, seeding one if the test DB has none.
+
+    The original test relied on an earlier full-suite test (test_bills /
+    test_aged_ap) having created a supplier first. Running this file
+    in isolation showed the gap — seed a deterministic placeholder so
+    the retention tests stand on their own.
+    """
     async with AsyncSessionLocal() as session:
         c = (
             await session.execute(
@@ -98,7 +105,28 @@ async def _supplier_id() -> str:
                 ).limit(1)
             )
         ).scalars().first()
-        assert c is not None
+        if c is None:
+            # Look up a company in the same tenant so the FK lands.
+            from saebooks.models.company import Company
+            co = (
+                await session.execute(
+                    select(Company)
+                    .where(Company.tenant_id == DEFAULT_TENANT_ID, Company.archived_at.is_(None))
+                    .order_by(Company.created_at)
+                    .limit(1)
+                )
+            ).scalars().first()
+            assert co is not None, "no company in test DB for tenant"
+            c = Contact(
+                company_id=co.id,
+                tenant_id=DEFAULT_TENANT_ID,
+                name="Retention Test Supplier",
+                contact_type=ContactType.SUPPLIER,
+                email="ret-supplier@example.com",
+            )
+            session.add(c)
+            await session.commit()
+            await session.refresh(c)
         return str(c.id)
 
 

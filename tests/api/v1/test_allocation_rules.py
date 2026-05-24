@@ -73,7 +73,23 @@ async def _two_expense_account_ids() -> tuple[str, str]:
 
 
 @pytest.fixture
-async def auth_client() -> AsyncClient:
+def _business_edition(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Flip the singleton edition to ``business`` for API gate tests.
+
+    ``FLAG_ALLOCATION_RULES`` is Business+; the static dev-bearer path
+    used by ``auth_client`` does not stamp ``request.state.user``, so
+    ``_effective_edition_for_request`` falls back to the module-level
+    ``_default_settings.edition`` (which defaults to ``community`` in
+    the test stack). Without this fixture every API call below returns
+    404 because the router gate trips before any handler runs.
+    """
+    from saebooks.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "edition", "business")
+
+
+@pytest.fixture
+async def auth_client(_business_edition: None) -> AsyncClient:
     token = current_token()
     async with AsyncClient(
         transport=ASGITransport(app=app),

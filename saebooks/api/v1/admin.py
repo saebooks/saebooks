@@ -136,12 +136,12 @@ async def get_audit_log(
 ) -> AuditLogPage:
     """List ``change_log`` rows with filters.
 
-    Tenant scoping: the change_log table is global (no ``tenant_id``
-    column). For sql_tool rows we filter on ``payload.tenant_id`` so
-    one admin can only see audit rows for their own tenant. For domain
-    rows, the actor stamping is the only scope — but those rows record
-    a tenant-scoped entity_id, so a read here cannot reveal anything
-    the same admin couldn't read via the entity's own endpoint.
+    Tenant scoping: ``change_log`` carries a ``tenant_id`` column (added
+    by migration 0118) and has FORCE RLS with a ``tenant_isolation``
+    policy. Every row is filtered to the caller's tenant via
+    ``ChangeLog.tenant_id == tenant_id`` — no special-casing for
+    entity type. (Lane 5 P0-007: the previous filter let every
+    non-sql_tool row through regardless of tenant.)
     """
     from_dt = _parse_iso_ts(from_ts, name="from_ts")
     to_dt = _parse_iso_ts(to_ts, name="to_ts")
@@ -165,17 +165,10 @@ async def get_audit_log(
     if status is not None and status.strip():
         filters.append(ChangeLog.payload["status"].astext == status.strip())
 
-    # Tenant-scope sql_tool rows — payload.tenant_id must match. For
-    # non-sql_tool rows, we leave them unfiltered (the actor model is
-    # the source of truth for those). This means an admin in tenant A
-    # browsing the audit log sees: their own tenant's sql_tool rows +
-    # all domain rows. That matches the legacy ``/admin/audit`` behavior
-    # which surfaces audit_log snapshots from the global table.
-    tenant_filter = (
-        (ChangeLog.entity != "sql_tool")
-        | (ChangeLog.payload["tenant_id"].astext == str(tenant_id))
-    )
-    filters.append(tenant_filter)
+    # Tenant-scope: filter every row to the caller's tenant.
+    # change_log.tenant_id was added by migration 0118 (P0-007 fix).
+    # RLS enforces this at the DB level too; this is defence-in-depth.
+    filters.append(ChangeLog.tenant_id == tenant_id)
 
     where = and_(*filters) if filters else None
 

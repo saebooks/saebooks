@@ -30,8 +30,11 @@ from saebooks.services.features import (
     FLAG_AUDIT_SNAPSHOTS,
     FLAG_BANK_FEEDS,
     FLAG_COMPANIES_HOUSE,
+    FLAG_DEV_TOOLS,
+    FLAG_EDIT_FROZEN_STATE,
     FLAG_EXTENDED_AUDIT_MODES,
     FLAG_GRANULAR_PERMISSIONS,
+    FLAG_HARD_DELETE,
     FLAG_INVENTORY,
     FLAG_LEI_LOOKUP,
     FLAG_MULTI_COMPANY,
@@ -40,10 +43,13 @@ from saebooks.services.features import (
     FLAG_PER_COMPANY_SISS,
     FLAG_PROJECTS_BUDGETS,
     FLAG_QBO_IMPORT,
+    FLAG_RAW_JSON_INSPECTOR,
     FLAG_SCHEDULED_BACKUPS,
+    FLAG_SKIP_AUDIT_TRAIL,
     FLAG_SMTP_RELAY,
     FLAG_SQL_TOOL,
     FLAG_STRIPE_INTEGRATION,
+    FLAG_TENANT_SWITCHER,
     FLAG_THEMES,
     TIER_ORDER,
     active_flags,
@@ -57,6 +63,7 @@ OFFLINE = Settings(SAEBOOKS_EDITION="offline")
 BUSINESS = Settings(SAEBOOKS_EDITION="business")
 PRO = Settings(SAEBOOKS_EDITION="pro")
 ENTERPRISE = Settings(SAEBOOKS_EDITION="enterprise")
+DEVELOPER = Settings(SAEBOOKS_EDITION="developer")
 
 
 # ---------------------------------------------------------------------- #
@@ -101,6 +108,23 @@ EXPECTED_PRO = EXPECTED_BUSINESS | frozenset({
 EXPECTED_ENTERPRISE = EXPECTED_PRO | frozenset({
     FLAG_PER_COMPANY_SISS,
 })
+
+# Developer tier — internal-only superset of enterprise + the six
+# dev-only flags (hard_delete, dev_tools, edit_frozen_state,
+# raw_json_inspector, tenant_switcher, skip_audit_trail). Not part of
+# any billable subscription — only activated via SAEBOOKS_EDITION=developer
+# on instances Richard controls directly. Developer is the new "every
+# flag on" tier; enterprise stops at the public-tier boundary.
+DEVELOPER_ONLY_FLAGS = frozenset({
+    FLAG_HARD_DELETE,
+    FLAG_DEV_TOOLS,
+    FLAG_EDIT_FROZEN_STATE,
+    FLAG_RAW_JSON_INSPECTOR,
+    FLAG_TENANT_SWITCHER,
+    FLAG_SKIP_AUDIT_TRAIL,
+})
+
+EXPECTED_DEVELOPER = EXPECTED_ENTERPRISE | DEVELOPER_ONLY_FLAGS
 
 
 # ---------------------------------------------------------------------- #
@@ -149,9 +173,29 @@ def test_non_pro_flags_disabled_on_pro(flag: str) -> None:
     assert is_enabled(flag, settings=PRO) is False
 
 
-@pytest.mark.parametrize("flag", ALL_FLAGS)
-def test_all_flags_enabled_on_enterprise(flag: str) -> None:
+@pytest.mark.parametrize("flag", sorted(EXPECTED_ENTERPRISE))
+def test_enterprise_flags_enabled_on_enterprise(flag: str) -> None:
+    """Every flag in the published enterprise contract is on at enterprise.
+
+    Note: developer-only flags (hard_delete, dev_tools, etc.) are NOT in
+    EXPECTED_ENTERPRISE — they belong to the internal developer tier and
+    must stay off on every commercial tier including enterprise. The
+    inverse assertion lives in
+    ``test_developer_only_flags_disabled_on_enterprise``.
+    """
     assert is_enabled(flag, settings=ENTERPRISE) is True
+
+
+@pytest.mark.parametrize("flag", sorted(DEVELOPER_ONLY_FLAGS))
+def test_developer_only_flags_disabled_on_enterprise(flag: str) -> None:
+    """Dev-only flags must NOT leak into the (paying) enterprise tier."""
+    assert is_enabled(flag, settings=ENTERPRISE) is False
+
+
+@pytest.mark.parametrize("flag", ALL_FLAGS)
+def test_all_flags_enabled_on_developer(flag: str) -> None:
+    """Developer is the new always-on ceiling — every known flag is on."""
+    assert is_enabled(flag, settings=DEVELOPER) is True
 
 
 def test_is_enabled_unknown_flag_raises() -> None:
@@ -196,6 +240,7 @@ def test_tier_flags_match_expected_sets() -> None:
     assert tier_flags("business") == EXPECTED_BUSINESS
     assert tier_flags("pro") == EXPECTED_PRO
     assert tier_flags("enterprise") == EXPECTED_ENTERPRISE
+    assert tier_flags("developer") == EXPECTED_DEVELOPER
 
 
 def test_tier_flags_unknown_tier_raises() -> None:
@@ -217,9 +262,25 @@ def test_tier_superset_invariant() -> None:
         )
 
 
-def test_enterprise_contains_every_flag() -> None:
-    """Enterprise is the always-on tier — if a flag exists, it's on here."""
-    assert tier_flags("enterprise") == frozenset(ALL_FLAGS)
+def test_developer_contains_every_flag() -> None:
+    """Developer is the always-on ceiling — if a flag exists, it's on here.
+
+    Replaces the prior ``test_enterprise_contains_every_flag`` invariant:
+    when the developer tier was added above enterprise, enterprise lost
+    its "every flag" property by design. The dev-only flags must NOT
+    ship in any commercial tier, so the always-on assertion now belongs
+    to developer.
+    """
+    assert tier_flags("developer") == frozenset(ALL_FLAGS)
+
+
+def test_enterprise_is_developer_minus_dev_only_flags() -> None:
+    """Enterprise = developer minus the six dev-only flags. Pins the
+    invariant that the only difference between the two top tiers is
+    the developer-only set — any new flag added to enterprise that
+    isn't also added to developer would break the superset invariant
+    and surface here."""
+    assert tier_flags("enterprise") == tier_flags("developer") - DEVELOPER_ONLY_FLAGS
 
 
 # ---------------------------------------------------------------------- #
@@ -230,10 +291,21 @@ def test_enterprise_contains_every_flag() -> None:
 def test_active_flags_shape_and_values() -> None:
     com = active_flags(settings=COMMUNITY)
     ent = active_flags(settings=ENTERPRISE)
+    dev = active_flags(settings=DEVELOPER)
+    # Shape: every known flag is keyed on every tier (display matrix
+    # contract — /admin/license renders rows for every flag).
     assert set(com.keys()) == set(ALL_FLAGS)
     assert set(ent.keys()) == set(ALL_FLAGS)
+    assert set(dev.keys()) == set(ALL_FLAGS)
+    # Community: nothing on.
     assert all(v is False for v in com.values())
-    assert all(v is True for v in ent.values())
+    # Enterprise: public-tier flags on, dev-only flags off.
+    for flag in EXPECTED_ENTERPRISE:
+        assert ent[flag] is True, f"enterprise should enable {flag}"
+    for flag in DEVELOPER_ONLY_FLAGS:
+        assert ent[flag] is False, f"enterprise must not enable dev-only {flag}"
+    # Developer: every known flag on (always-on ceiling).
+    assert all(v is True for v in dev.values())
 
 
 def test_active_flags_business_mixed() -> None:

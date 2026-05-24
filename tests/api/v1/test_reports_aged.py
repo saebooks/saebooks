@@ -27,7 +27,7 @@ from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
-from saebooks.models.contact import Contact
+from saebooks.models.contact import Contact, ContactType
 pytestmark = pytest.mark.postgres_only
 
 
@@ -49,25 +49,49 @@ async def api_client() -> AsyncClient:
 
 @pytest.fixture
 async def invoice_deps() -> dict[str, str]:
-    """Return account + contact IDs for building invoice payloads."""
+    """Return account + contact IDs for building invoice payloads.
+
+    Creates a per-test contact unique to this fixture invocation so prior
+    tests in the suite (test_contacts, test_invoices, etc.) that posted
+    invoices/payments against the shared seed contact don't leak into
+    the aged-receivables buckets the assertions rely on.
+    """
     async with AsyncSessionLocal() as session:
+        seed_company = (
+            await session.execute(
+                select(Company)
+                .where(Company.archived_at.is_(None))
+                .order_by(Company.created_at)
+                .limit(1)
+            )
+        ).scalars().first()
+        assert seed_company is not None, "Test DB has no seeded company"
         income = (
             await session.execute(
                 select(Account).where(
                     Account.archived_at.is_(None),
                     Account.account_type == AccountType.INCOME,
                     Account.tenant_id == DEFAULT_TENANT_ID,
-                ).limit(1)
+                    Account.company_id == seed_company.id,
+                    Account.is_header.is_(False),
+                )
+                .order_by(Account.code)
+                .limit(1)
             )
         ).scalars().first()
-        contact = (
-            await session.execute(
-                select(Contact).where(Contact.archived_at.is_(None), Contact.tenant_id == DEFAULT_TENANT_ID).limit(1)
-            )
-        ).scalars().first()
+        assert income is not None, "Test DB has no INCOME account"
 
-    assert income is not None, "Test DB has no INCOME account"
-    assert contact is not None, "Test DB has no contact"
+        # Fresh contact per test → guarantees a clean AR/AP slate.
+        contact = Contact(
+            tenant_id=DEFAULT_TENANT_ID,
+            company_id=seed_company.id,
+            name=f"AgedTest-{uuid.uuid4().hex[:8]}",
+            contact_type=ContactType.BOTH,
+        )
+        session.add(contact)
+        await session.commit()
+        await session.refresh(contact)
+
     return {
         "income_account_id": str(income.id),
         "contact_id": str(contact.id),
@@ -76,25 +100,45 @@ async def invoice_deps() -> dict[str, str]:
 
 @pytest.fixture
 async def bill_deps() -> dict[str, str]:
-    """Return account + contact IDs for building bill payloads."""
+    """Return account + contact IDs for building bill payloads.
+
+    Fresh contact per test for the same reason ``invoice_deps`` does it.
+    """
     async with AsyncSessionLocal() as session:
+        seed_company = (
+            await session.execute(
+                select(Company)
+                .where(Company.archived_at.is_(None))
+                .order_by(Company.created_at)
+                .limit(1)
+            )
+        ).scalars().first()
+        assert seed_company is not None
         expense = (
             await session.execute(
                 select(Account).where(
                     Account.archived_at.is_(None),
                     Account.account_type == AccountType.EXPENSE,
                     Account.tenant_id == DEFAULT_TENANT_ID,
-                ).limit(1)
+                    Account.company_id == seed_company.id,
+                    Account.is_header.is_(False),
+                )
+                .order_by(Account.code)
+                .limit(1)
             )
         ).scalars().first()
-        contact = (
-            await session.execute(
-                select(Contact).where(Contact.archived_at.is_(None), Contact.tenant_id == DEFAULT_TENANT_ID).limit(1)
-            )
-        ).scalars().first()
+        assert expense is not None, "Test DB has no EXPENSE account"
 
-    assert expense is not None, "Test DB has no EXPENSE account"
-    assert contact is not None, "Test DB has no contact"
+        contact = Contact(
+            tenant_id=DEFAULT_TENANT_ID,
+            company_id=seed_company.id,
+            name=f"AgedBillTest-{uuid.uuid4().hex[:8]}",
+            contact_type=ContactType.BOTH,
+        )
+        session.add(contact)
+        await session.commit()
+        await session.refresh(contact)
+
     return {
         "expense_account_id": str(expense.id),
         "contact_id": str(contact.id),
@@ -433,7 +477,14 @@ async def test_aged_receivables_retentions_row(
             )
         ).scalar_one_or_none()
         if existing is None:
+            # tenant_id MUST be set explicitly — migration 0131
+            # (tenant_id_coherence_trigger) refuses inserts where the
+            # account's tenant differs from the parent company's. The
+            # model defaults to the legacy DEFAULT tenant (00000000…),
+            # which differs from non-default companies and trips the
+            # trigger. Mirror the parent company's tenant here.
             session.add(Account(
+                tenant_id=company.tenant_id,
                 company_id=company.id,
                 code="1-1220",
                 name="Retentions Receivable",

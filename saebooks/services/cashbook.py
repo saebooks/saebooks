@@ -883,6 +883,12 @@ async def upgrade_cashbook_to_full(
     Returns the refreshed company. Raises ``CashbookSetupError`` if
     the company is not currently in cashbook mode (so the caller can
     surface a precise 409).
+
+    ``cashbook_default_bank_account_id`` is cleared atomically with the
+    mode flip to satisfy the CHECK constraint added in migration 0126
+    (``ck_cashbook_default_bank_requires_cashbook_mode``).  The user can
+    re-attach a preferred bank account through the full-mode settings once
+    the upgrade is complete.
     """
     company_stmt = select(Company).where(
         Company.id == company_id,
@@ -909,9 +915,11 @@ async def upgrade_cashbook_to_full(
     )
 
     company.bookkeeping_mode = "full"
-    # Leave cashbook_default_bank_account_id in place — it's still a
-    # valid bank account; the next cashbook entry recorded against this
-    # company would refuse anyway because mode is now 'full'.
+    # Clear the cashbook default bank atomically with the mode flip so the
+    # CHECK constraint ck_cashbook_default_bank_requires_cashbook_mode is
+    # satisfied in a single UPDATE.  The user can re-attach a bank account
+    # via full-mode settings after the upgrade.
+    company.cashbook_default_bank_account_id = None
     company.version = (company.version or 1) + 1
     await db.commit()
     await db.refresh(company)

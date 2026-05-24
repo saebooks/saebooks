@@ -220,7 +220,7 @@ async def test_api_create_foreign_contact_rejected(two_tenant_seed: dict) -> Non
                 due_date=date(2026, 5, 28),
                 lines=[_line(edge["account_id"], edge["tax_code_id"])],
             )
-    assert "contact not found in current tenant" in str(exc.value).lower()
+    assert "contact_company_mismatch" in str(exc.value).lower()
 
 
 # ---------------------------------------------------------------------------
@@ -291,7 +291,7 @@ async def test_api_create_unknown_contact_rejected(two_tenant_seed: dict) -> Non
                 due_date=date(2026, 5, 28),
                 lines=[_line(edge["account_id"], edge["tax_code_id"])],
             )
-    assert "contact not found in current tenant" in str(exc.value).lower()
+    assert "contact_company_mismatch" in str(exc.value).lower()
 
 
 # ---------------------------------------------------------------------------
@@ -326,7 +326,7 @@ async def test_api_update_foreign_contact_rejected(two_tenant_seed: dict) -> Non
                 expected_version=version,
                 contact_id=walsh["contact_id"],
             )
-    assert "contact not found in current tenant" in str(exc.value).lower()
+    assert "contact_company_mismatch" in str(exc.value).lower()
 
 
 # ---------------------------------------------------------------------------

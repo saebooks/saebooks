@@ -98,14 +98,21 @@ class ActiveCompanyMiddleware(BaseHTTPMiddleware):
         if any(path.startswith(p) for p in _SKIP_PREFIXES):
             return await call_next(request)
 
-        # Tenant resolution: try the ordinary path first (jwt_claims
-        # may already be stamped on later middleware in the chain),
-        # and fall back to decoding the bearer header inline.
-        tenant_id: uuid.UUID | None
-        try:
-            tenant_id = resolve_tenant_id(request)
-        except HTTPException:
-            tenant_id = _tenant_from_bearer(request)
+        # Tenant resolution. ActiveCompanyMiddleware runs OUTSIDE
+        # ForwardAuthMiddleware in the stack — i.e. *before* it on the
+        # request path — so request.state.jwt_claims is not yet
+        # stamped. Worse, resolve_tenant_id falls back to
+        # DEFAULT_TENANT_ID in dev/test rather than raising, which would
+        # silently bind every request to the seed tenant regardless of
+        # the JWT. We therefore decode the bearer header inline FIRST,
+        # then fall back to resolve_tenant_id only when no usable
+        # bearer is present (e.g. dev-override-only requests).
+        tenant_id: uuid.UUID | None = _tenant_from_bearer(request)
+        if tenant_id is None:
+            try:
+                tenant_id = resolve_tenant_id(request)
+            except HTTPException:
+                tenant_id = None
 
         if tenant_id is None:
             return await call_next(request)

@@ -151,7 +151,14 @@ async def list_active(
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[BankStatementLine], int]:
-    """Return (lines, total_count) — active (non-archived) only."""
+    """Return (lines, total_count) — active (non-archived) only.
+
+    Each returned line's ``balance`` is overwritten with a freshly
+    computed running balance (cumulative SUM(amount) ordered by
+    txn_date, id, partitioned by account_id over all non-archived bsls
+    in scope). The stored ``balance`` column is treated as unreliable
+    and is not consulted.
+    """
     where = _base_filter(
         company_id,
         account_id=account_id,
@@ -167,21 +174,44 @@ async def list_active(
 
     sort_col = _SORT_COLUMNS.get(sort, BankStatementLine.txn_date)
     primary = sort_col.asc() if direction == "asc" else sort_col.desc()
-    # created_at tie-breaker keeps the order stable when the primary
-    # column has duplicates (e.g. same txn_date).
     tiebreak = (
         BankStatementLine.created_at.asc() if direction == "asc"
         else BankStatementLine.created_at.desc()
     )
 
+    rb_scope = [
+        BankStatementLine.archived_at.is_(None),
+        BankStatementLine.company_id == company_id,
+    ]
+    if account_id is not None:
+        rb_scope.append(BankStatementLine.account_id == account_id)
+    rb_cte = (
+        select(
+            BankStatementLine.id.label("bsl_id"),
+            sa_func.sum(BankStatementLine.amount).over(
+                partition_by=BankStatementLine.account_id,
+                order_by=(BankStatementLine.txn_date, BankStatementLine.id),
+            ).label("running_balance"),
+        )
+        .where(*rb_scope)
+        .cte("bsl_running_balance")
+    )
+
     stmt = (
-        select(BankStatementLine)
+        select(BankStatementLine, rb_cte.c.running_balance)
+        .join(rb_cte, rb_cte.c.bsl_id == BankStatementLine.id)
         .where(*where)
         .order_by(primary, tiebreak)
         .limit(limit)
         .offset(offset)
     )
-    items = list((await session.execute(stmt)).scalars().all())
+    rows = (await session.execute(stmt)).all()
+    items: list[BankStatementLine] = []
+    for row in rows:
+        line = row.BankStatementLine
+        session.expunge(line)
+        line.balance = row.running_balance
+        items.append(line)
     return items, total
 
 

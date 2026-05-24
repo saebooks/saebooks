@@ -26,6 +26,7 @@ from saebooks.api.v1.auth import current_token, DEFAULT_TENANT_ID
 from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.account import Account, AccountType
+from saebooks.models.company import Company
 pytestmark = pytest.mark.postgres_only
 
 
@@ -47,8 +48,21 @@ async def api_client() -> AsyncClient:
 
 @pytest.fixture
 async def gl_accounts() -> dict[str, str]:
-    """Return one account ID per relevant AccountType for building JE payloads."""
+    """Return one account ID per relevant AccountType for building JE
+    payloads — scoped to the seed company + DEFAULT_TENANT_ID so prior
+    tests' foreign-tenant accounts can't be picked (which would 422 on
+    the JE POST as "Account(s) do not belong to this tenant").
+    """
     async with AsyncSessionLocal() as session:
+        seed_company = (
+            await session.execute(
+                select(Company)
+                .where(Company.archived_at.is_(None))
+                .order_by(Company.created_at)
+                .limit(1)
+            )
+        ).scalars().first()
+        assert seed_company is not None
         result: dict[str, str] = {}
         for at in (
             AccountType.INCOME,
@@ -63,7 +77,11 @@ async def gl_accounts() -> dict[str, str]:
                         Account.archived_at.is_(None),
                         Account.account_type == at,
                         Account.is_header.is_(False),
-                    ).limit(1)
+                        Account.tenant_id == DEFAULT_TENANT_ID,
+                        Account.company_id == seed_company.id,
+                    )
+                    .order_by(Account.code)
+                    .limit(1)
                 )
             ).scalars().first()
             assert row is not None, f"Test DB has no non-header {at.value} account"
@@ -506,6 +524,25 @@ async def test_balance_sheet_balances_with_income_only(
     income_id = gl_accounts[AccountType.INCOME.value]
     liability_id = gl_accounts[AccountType.LIABILITY.value]
 
+    # Capture CYE before our postings so the assertion compares the
+    # *delta* — CYE is computed as lifetime income - lifetime expense
+    # up to as_of_date, so any test that posted P&L lines in this DB
+    # (irrespective of year) contributes. A naïve "CYE >= 86750"
+    # assertion is brittle whenever the test suite grows.
+    r0 = await api_client.get(
+        "/api/v1/reports/balance_sheet",
+        params={"as_of_date": "2091-03-31"},
+    )
+    assert r0.status_code == 200, r0.text
+    cye_before = next(
+        (
+            ln["balance"]
+            for ln in r0.json()["equity"]["EQUITY"]
+            if ln.get("code") == "CYE"
+        ),
+        0.0,
+    )
+
     # Post: debit ASSET 86,750, credit INCOME 86,750
     await _create_and_post_je(
         api_client,
@@ -538,12 +575,16 @@ async def test_balance_sheet_balances_with_income_only(
         f"Expected difference < 0.01, got {body['difference']}"
     )
 
-    # CYE line must exist and carry the income value.
+    # CYE line must exist and have grown by at least the income we just
+    # posted (86,750). Other tests' postings may add to or subtract from
+    # the absolute CYE figure; the delta is the part this test owns.
     equity_lines = body["equity"]["EQUITY"]
     cye_lines = [ln for ln in equity_lines if ln.get("code") == "CYE"]
     assert cye_lines, "CYE line missing from equity section"
-    assert cye_lines[0]["balance"] >= 86750.0 - 0.01, (
-        f"CYE balance should include 86,750 income, got {cye_lines[0]['balance']}"
+    delta = cye_lines[0]["balance"] - cye_before
+    assert delta >= 86750.0 - 0.01, (
+        f"CYE should have grown by ≥86,750 from our income posting; "
+        f"got delta={delta} (before={cye_before}, after={cye_lines[0]['balance']})"
     )
 
 

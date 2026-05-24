@@ -103,7 +103,14 @@ async def _db_available() -> bool:
 # The app role has FORCE RLS — the main defence against cross-tenant leaks.
 # ---------------------------------------------------------------------------
 
-_APP_ROLE_PASSWORD = "test-only-app-pw"
+# Use the canonical password from SAEBOOKS_APP_DB_PASSWORD so this
+# fixture does not stomp on test_integrations_rls.py (which connects
+# directly as saebooks_app with that env value). Falls back to the
+# compose default so a developer running this single test file outside
+# the test stack still gets a working URL.
+_APP_ROLE_PASSWORD = os.environ.get(
+    "SAEBOOKS_APP_DB_PASSWORD", "saebooks_app_test_pw"
+)
 
 
 def _app_engine_url() -> str:

@@ -124,7 +124,12 @@ async def _delete_key(engine: AsyncEngine, key: str) -> None:
 async def test_parallel_same_key_no_crashes(engine: AsyncEngine) -> None:
     """10 concurrent claims for the same key must produce zero exceptions.
 
-    Exactly one must get CLAIMED; all nine others must get REPLY.
+    Exactly one must get CLAIMED; the remaining nine must get either
+    REPLAY (winner already stored a response) or IN_FLIGHT (winner has
+    the row but hasn't called store_response yet). Both are legal
+    non-error outcomes for a same-key/same-body replay; CONFLICT is
+    not, because that signals a body-hash mismatch.
+
     (In the in-process ASGITransport test harness each task may
     sequentially hit the DB and all ten may appear as CLAIMED on
     distinct connections before any store_response is committed.
@@ -155,10 +160,14 @@ async def test_parallel_same_key_no_crashes(engine: AsyncEngine) -> None:
     claim_count = results.count(ClaimStatus.CLAIMED)
     assert claim_count >= 1, "Expected at least one CLAIMED; got none"
 
-    # All non-CLAIMED results should be REPLAY (not CONFLICT).
+    # All non-CLAIMED results must be REPLAY or IN_FLIGHT — never
+    # CONFLICT, because the body hash is identical across all ten
+    # claims. IN_FLIGHT is expected when concurrent callers see the
+    # row before any single caller has committed store_response.
+    allowed_non_claimed = {ClaimStatus.REPLAY, ClaimStatus.IN_FLIGHT}
     for r in results:
         if r != ClaimStatus.CLAIMED:
-            assert r == ClaimStatus.REPLAY, f"Unexpected status {r!r}"
+            assert r in allowed_non_claimed, f"Unexpected status {r!r}"
 
     await _delete_key(engine, key)
 

@@ -18,9 +18,12 @@ from sqlalchemy.orm import selectinload
 
 from saebooks.models.account import Account, AccountType
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine, PeriodLock
+from saebooks.models.tax_code import TaxCode
 from saebooks.services import audit as audit_svc
 from saebooks.services import gst as gst_svc
 from saebooks.services import settings as settings_svc
+from saebooks.services.tax_engine import get_engine
+from saebooks.services.tax_engine.types import PostingContext
 
 
 class PostingError(Exception):
@@ -475,6 +478,74 @@ async def _check_period_lock(
         )
 
 
+async def _apply_tax_treatment(
+    session: AsyncSession, entry: JournalEntry
+) -> None:
+    """Snapshot a TaxTreatment onto every line via the AU tax engine.
+
+    M0 ships AU only; the per-jurisdiction dispatcher will be plumbed
+    in once company.jurisdiction lands. Until then every post is AU.
+
+    Runs AFTER ``gst_svc.auto_post_gst_lines`` so the auto-added GST
+    Collected/Paid line gets its own snapshot too (direction='none'
+    because GST liability/asset accounts aren't in the input/output
+    sets — they're plumbing, not BAS-reportable themselves).
+    """
+    engine = get_engine("AU")
+    # Pre-load account types + tax-code attrs for every distinct id on
+    # the entry — avoids an N+1 lookup per line.
+    acct_ids = {ln.account_id for ln in entry.lines}
+    tc_ids = {ln.tax_code_id for ln in entry.lines if ln.tax_code_id is not None}
+    acct_rows = (
+        (
+            await session.execute(
+                select(Account.id, Account.account_type).where(
+                    Account.id.in_(acct_ids)
+                )
+            )
+        ).all()
+        if acct_ids
+        else []
+    )
+    acct_type = {row[0]: row[1] for row in acct_rows}
+    tc_rows = (
+        (
+            await session.execute(
+                select(
+                    TaxCode.id, TaxCode.code, TaxCode.rate, TaxCode.reporting_type
+                ).where(TaxCode.id.in_(tc_ids))
+            )
+        ).all()
+        if tc_ids
+        else []
+    )
+    tc_meta = {row[0]: (row[1], row[2], row[3]) for row in tc_rows}
+
+    for ln in entry.lines:
+        # debit + credit captures whichever side is non-zero (exactly
+        # one is > 0 on a balanced line) — gives the line amount
+        # without branching on direction.
+        amount = (ln.debit or Decimal("0")) + (ln.credit or Decimal("0"))
+        tc_code, tc_rate, tc_reporting = (None, None, None)
+        if ln.tax_code_id is not None and ln.tax_code_id in tc_meta:
+            tc_code, tc_rate, tc_reporting = tc_meta[ln.tax_code_id]
+        ctx = PostingContext(
+            company_id=entry.company_id,
+            jurisdiction="AU",
+            posting_date=entry.entry_date,
+            account_id=ln.account_id,
+            account_type=acct_type.get(ln.account_id, AccountType.ASSET),
+            amount=amount,
+            gst_amount=ln.gst_amount,
+            tax_code=tc_code,
+            tax_code_id=ln.tax_code_id,
+            rate=tc_rate,
+            reporting_type=tc_reporting,
+        )
+        treatment = engine.compute(ctx)
+        ln.tax_treatment = treatment.to_jsonable()
+
+
 async def post(
     session: AsyncSession,
     entry_id: uuid.UUID,
@@ -518,6 +589,11 @@ async def post(
     if gst_lines:
         await session.flush()
         # auto_post_gst_lines appends to entry.lines in-place, so no re-fetch needed.
+
+    # Snapshot per-line tax determination onto journal_lines.tax_treatment.
+    # Runs after auto_post_gst_lines so the auto-added GST line also gets
+    # a treatment row (direction='none' for GST liability/asset accounts).
+    await _apply_tax_treatment(session, entry)
 
     # Final balance check — the entry must balance after GST has been posted.
     await _check_balance(entry)

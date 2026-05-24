@@ -25,13 +25,43 @@ from saebooks.api.v1.auth import current_token, DEFAULT_TENANT_ID
 from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.account import Account, AccountType
+from saebooks.models.company import Company
 from saebooks.models.tax_code import TaxCode
+from saebooks.services import settings as settings_svc
 pytestmark = pytest.mark.postgres_only
 
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+async def _seed_gst_settings() -> None:
+    """Configure the GST control account settings so the BAS report's
+    ``_bas_gst_amounts`` aggregator finds the 1A/1B numbers.
+
+    Round-2 audit fix #6 changed ``_bas_gst_amounts`` to read 1A/1B from
+    the configured GST control accounts (``2-1310`` GST Collected and
+    ``2-1330`` GST Paid). The aggregator returns (0, 0) when either
+    setting is unset, regardless of any ``gst_amount`` stamped on the
+    ledger.
+
+    ``gst_auto_post`` is set to ``false`` here because the BAS tests
+    include the GST control account leg explicitly in their JE payloads
+    (the API's schema-level balance validator rejects unbalanced lines
+    before the service-layer auto-poster can supply them). If auto-post
+    ran on top of the explicit leg, the lines on INCOME/EXPENSE with
+    ``gst_amount`` would cause a duplicate GST posting.
+
+    AU CoA seed (``load_au_coa``) already creates the 2-1310 and 2-1330
+    accounts; this fixture only wires the settings to point at them.
+    Idempotent — settings.set() upserts.
+    """
+    async with AsyncSessionLocal() as session:
+        await settings_svc.set(session, "gst_collected_account_code", "2-1310")
+        await settings_svc.set(session, "gst_paid_account_code", "2-1330")
+        await settings_svc.set(session, "gst_auto_post", "false")
 
 
 @pytest.fixture
@@ -47,8 +77,29 @@ async def api_client() -> AsyncClient:
 
 @pytest.fixture
 async def gl_accounts() -> dict[str, str]:
-    """Return one account ID per relevant AccountType."""
+    """Return one account ID per relevant AccountType, scoped to the seed
+    company + DEFAULT_TENANT_ID. Also exposes the GST control accounts
+    under the keys ``GST_COLLECTED`` and ``GST_PAID`` (codes 2-1310 /
+    2-1330) so BAS tests can include those legs explicitly — the API's
+    schema-level balance validator rejects unbalanced lines BEFORE the
+    service-layer auto-poster can supply them.
+
+    Filtering by both tenant_id and company_id is critical: prior tests
+    (e.g. ``test_bas_tenant_isolation``) create accounts in foreign
+    tenants/companies which would otherwise be selected by an unscoped
+    ``LIMIT 1`` and then rejected by the API's tenant guard on the JE
+    POST path (HTTP 422 "Account(s) do not belong to this tenant").
+    """
     async with AsyncSessionLocal() as session:
+        company = (
+            await session.execute(
+                select(Company)
+                .where(Company.archived_at.is_(None))
+                .order_by(Company.created_at)
+                .limit(1)
+            )
+        ).scalars().first()
+        assert company is not None, "Test DB has no seeded company"
         result: dict[str, str] = {}
         for at in (
             AccountType.INCOME,
@@ -64,24 +115,56 @@ async def gl_accounts() -> dict[str, str]:
                         Account.archived_at.is_(None),
                         Account.account_type == at,
                         Account.is_header.is_(False),
+                        Account.tenant_id == DEFAULT_TENANT_ID,
+                        Account.company_id == company.id,
                     )
+                    .order_by(Account.code)
                     .limit(1)
                 )
             ).scalars().first()
             assert row is not None, f"Test DB has no non-header {at.value} account"
             result[at.value] = str(row.id)
+        # GST control accounts (codes 2-1310 / 2-1330) seeded by AU CoA.
+        for key, code in (("GST_COLLECTED", "2-1310"), ("GST_PAID", "2-1330")):
+            row = (
+                await session.execute(
+                    select(Account).where(
+                        Account.archived_at.is_(None),
+                        Account.code == code,
+                        Account.tenant_id == DEFAULT_TENANT_ID,
+                        Account.company_id == company.id,
+                    )
+                )
+            ).scalars().first()
+            assert row is not None, f"Seed AU CoA missing {code}"
+            result[key] = str(row.id)
     return result
 
 
 @pytest.fixture
 async def tax_codes() -> dict[str, str]:
-    """Return tax code IDs keyed by reporting_type from seeded AU tax codes."""
+    """Return tax code IDs keyed by reporting_type from seeded AU tax codes.
+
+    Scoped to the seed company + DEFAULT_TENANT_ID so the JE create path's
+    tenant guard accepts them (TaxCode is per-company, like Account).
+    """
     async with AsyncSessionLocal() as session:
+        seed_company = (
+            await session.execute(
+                select(Company)
+                .where(Company.archived_at.is_(None))
+                .order_by(Company.created_at)
+                .limit(1)
+            )
+        ).scalars().first()
+        assert seed_company is not None
         gst_row = (
             await session.execute(
                 select(TaxCode).where(
                     TaxCode.archived_at.is_(None),
                     TaxCode.code == "GST",
+                    TaxCode.tenant_id == DEFAULT_TENANT_ID,
+                    TaxCode.company_id == seed_company.id,
                 )
             )
         ).scalars().first()
@@ -90,6 +173,8 @@ async def tax_codes() -> dict[str, str]:
                 select(TaxCode).where(
                     TaxCode.archived_at.is_(None),
                     TaxCode.code == "FRE",
+                    TaxCode.tenant_id == DEFAULT_TENANT_ID,
+                    TaxCode.company_id == seed_company.id,
                 )
             )
         ).scalars().first()
@@ -111,7 +196,16 @@ async def _create_and_post_je(
     entry_date: str,
     lines: list[dict],
 ) -> dict:
-    """Create a DRAFT journal entry then PATCH it to POSTED. Return posted body."""
+    """Create a DRAFT journal entry then transition it to POSTED via the
+    dedicated ``/post`` endpoint. Return the posted body.
+
+    Critical: PATCH /journal_entries/{id} with ``status=POSTED`` bypasses
+    ``services.journal.post()`` — it just flips the column. That skips
+    ``auto_post_gst_lines`` and the balance/period-lock checks. For BAS
+    tests (post fix #6) that read 1A/1B from the GST control accounts,
+    we MUST go through ``POST /{id}/post`` so auto-post actually fires
+    on lines carrying ``gst_amount``.
+    """
     r = await client.post(
         "/api/v1/journal_entries",
         json={
@@ -125,9 +219,8 @@ async def _create_and_post_je(
     je_id = body["id"]
     version = body["version"]
 
-    r2 = await client.patch(
-        f"/api/v1/journal_entries/{je_id}",
-        json={"status": "POSTED"},
+    r2 = await client.post(
+        f"/api/v1/journal_entries/{je_id}/post",
         headers={"If-Match": str(version)},
     )
     assert r2.status_code == 200, r2.text
@@ -172,26 +265,31 @@ async def test_bas_taxable_sale(
     asset_id = gl_accounts[AccountType.ASSET.value]
     gst_id = tax_codes["taxable"]
 
-    amount = "1000.00"
-    # Round-2 audit fix #6: 1A is now derived from the actual
-    # gst_amount stamped on each line (matching how the invoice
-    # posting service marks tax in production), not from g1 × 10%.
-    # Test JEs must carry gst_amount to drive 1A.
+    # Round-2 audit fix #6: 1A is read at report time from the GST
+    # Collected control account (2-1310). The JE includes that leg
+    # explicitly — auto-post is disabled in tests (fixture above) and
+    # the API's schema-level balance validator would reject the JE if
+    # we relied on auto-post to supply the third line.
+    gst_collected_id = gl_accounts["GST_COLLECTED"]
     await _create_and_post_je(
         api_client,
         "2027-01-15",
         lines=[
             {
                 "account_id": asset_id,
-                "debit": amount,
+                "debit": "1100.00",
                 "credit": "0",
             },
             {
                 "account_id": income_id,
                 "debit": "0",
-                "credit": amount,
+                "credit": "1000.00",
                 "tax_code_id": gst_id,
-                "gst_amount": "100.00",
+            },
+            {
+                "account_id": gst_collected_id,
+                "debit": "0",
+                "credit": "100.00",
             },
         ],
     )
@@ -266,24 +364,30 @@ async def test_bas_expense(
     asset_id = gl_accounts[AccountType.ASSET.value]
     gst_id = tax_codes["taxable"]
 
-    amount = "1100.00"
-    # Round-2 audit fix #6: 1B is now sum of gst_amount on purchase
-    # lines, not g11/11. Test must stamp gst_amount explicitly.
+    # Round-2 audit fix #6: 1B is read at report time from the GST Paid
+    # control account (2-1330). JE includes that leg explicitly; the
+    # expense line carries the NET amount and the asset/bank Cr the
+    # gross. G11 sums net debit on EXPENSE lines = $1000.
+    gst_paid_id = gl_accounts["GST_PAID"]
     await _create_and_post_je(
         api_client,
         "2027-03-05",
         lines=[
             {
                 "account_id": expense_id,
-                "debit": amount,
+                "debit": "1000.00",
                 "credit": "0",
                 "tax_code_id": gst_id,
-                "gst_amount": "100.00",
+            },
+            {
+                "account_id": gst_paid_id,
+                "debit": "100.00",
+                "credit": "0",
             },
             {
                 "account_id": asset_id,
                 "debit": "0",
-                "credit": amount,
+                "credit": "1100.00",
             },
         ],
     )
@@ -295,10 +399,15 @@ async def test_bas_expense(
     assert r.status_code == 200, r.text
     body = r.json()
 
-    assert body["g11_other_acquisitions"] >= 1100.0, (
-        f"Expected g11 >= 1100, got {body['g11_other_acquisitions']}"
+    # G11 sums the NET (ex-GST) debit on EXPENSE lines — gst_amount is a
+    # sidecar that becomes a separate Dr to 2-1330 via auto-post and does
+    # NOT inflate G11. Expense leg here was Dr $1000 net + $100 gst_amount,
+    # so G11 = 1000 (not 1100 as in the pre-fix-#6 test).
+    assert body["g11_other_acquisitions"] >= 1000.0, (
+        f"Expected g11 >= 1000, got {body['g11_other_acquisitions']}"
     )
-    # 1B = sum of gst_amount on expense lines (post-fix #6).
+    # 1B = net Dr on the GST Paid control account (post-fix #6); auto-post
+    # added that leg from the stamped gst_amount.
     assert body["label_1b_gst_on_purchases"] >= 100.0, (
         f"Expected 1b >= 100, got {body['label_1b_gst_on_purchases']}"
     )
@@ -315,33 +424,41 @@ async def test_bas_net_gst_remit(
     asset_id = gl_accounts[AccountType.ASSET.value]
     gst_id = tax_codes["taxable"]
 
-    # Large taxable sale — gst_amount stamped to drive 1A (fix #6).
+    gst_collected_id = gl_accounts["GST_COLLECTED"]
+    gst_paid_id = gl_accounts["GST_PAID"]
+    # Large taxable sale — explicit Cr 2-1310 leg supplies the $500 of
+    # GST collected that 1A reads at report time.
     await _create_and_post_je(
         api_client,
         "2027-04-15",
         lines=[
-            {"account_id": asset_id, "debit": "5000.00", "credit": "0"},
+            {"account_id": asset_id, "debit": "5500.00", "credit": "0"},
             {
                 "account_id": income_id,
                 "debit": "0",
                 "credit": "5000.00",
                 "tax_code_id": gst_id,
-                "gst_amount": "500.00",
+            },
+            {
+                "account_id": gst_collected_id,
+                "debit": "0",
+                "credit": "500.00",
             },
         ],
     )
-    # Small taxable expense — gst_amount stamped to drive 1B (fix #6).
+    # Small taxable expense — explicit Dr 2-1330 leg supplies the $10
+    # of GST paid that 1B reads at report time.
     await _create_and_post_je(
         api_client,
         "2027-04-20",
         lines=[
             {
                 "account_id": expense_id,
-                "debit": "110.00",
+                "debit": "100.00",
                 "credit": "0",
                 "tax_code_id": gst_id,
-                "gst_amount": "10.00",
             },
+            {"account_id": gst_paid_id, "debit": "10.00", "credit": "0"},
             {"account_id": asset_id, "debit": "0", "credit": "110.00"},
         ],
     )
@@ -370,18 +487,25 @@ async def test_bas_tenant_isolation(
     asset_id = gl_accounts[AccountType.ASSET.value]
     gst_id = tax_codes["taxable"]
 
-    # Post a JE under the default tenant (A)
+    # Post a JE under the default tenant (A). 3-line shape: Asset gross
+    # / Income net / GST control. (Auto-post is off; explicit leg
+    # required for the schema-level balance check to pass.)
+    gst_collected_id = gl_accounts["GST_COLLECTED"]
     await _create_and_post_je(
         api_client,
         "2027-05-10",
         lines=[
-            {"account_id": asset_id, "debit": "7777.00", "credit": "0"},
+            {"account_id": asset_id, "debit": "8554.70", "credit": "0"},
             {
                 "account_id": income_id,
                 "debit": "0",
                 "credit": "7777.00",
                 "tax_code_id": gst_id,
-                "gst_amount": "777.70",
+            },
+            {
+                "account_id": gst_collected_id,
+                "debit": "0",
+                "credit": "777.70",
             },
         ],
     )
@@ -432,36 +556,46 @@ async def test_bas_mid_quarter_registration_split(
     asset_id = gl_accounts[AccountType.ASSET.value]
     gst_id = tax_codes["taxable"]
 
-    # Pre-registration sale (2027-07-15). gst_amount stamped because
-    # the line still books GST in the ledger — only the BAS 1A label
-    # excludes pre-reg GST (per ATO mid-period registration rules).
+    gst_collected_id = gl_accounts["GST_COLLECTED"]
+    # Pre-registration sale (2027-07-15). The GST control leg is posted
+    # in the ledger; only the BAS 1A label clamps to post-registration
+    # (per ATO mid-period registration rules; ``_bas_gst_amounts`` is
+    # called with from_date=registration_effective_date when split).
     await _create_and_post_je(
         api_client,
         "2027-07-15",
         lines=[
-            {"account_id": asset_id, "debit": "2000.00", "credit": "0"},
+            {"account_id": asset_id, "debit": "2200.00", "credit": "0"},
             {
                 "account_id": income_id,
                 "debit": "0",
                 "credit": "2000.00",
                 "tax_code_id": gst_id,
-                "gst_amount": "200.00",
+            },
+            {
+                "account_id": gst_collected_id,
+                "debit": "0",
+                "credit": "200.00",
             },
         ],
     )
 
-    # Post-registration sale (2027-08-10)
+    # Post-registration sale (2027-08-10) — drives 1A entirely.
     await _create_and_post_je(
         api_client,
         "2027-08-10",
         lines=[
-            {"account_id": asset_id, "debit": "3000.00", "credit": "0"},
+            {"account_id": asset_id, "debit": "3300.00", "credit": "0"},
             {
                 "account_id": income_id,
                 "debit": "0",
                 "credit": "3000.00",
                 "tax_code_id": gst_id,
-                "gst_amount": "300.00",
+            },
+            {
+                "account_id": gst_collected_id,
+                "debit": "0",
+                "credit": "300.00",
             },
         ],
     )
@@ -526,17 +660,19 @@ async def test_bas_1b_matches_actual_gst_on_purchases_not_g11_div_11(
     asset_id = gl_accounts[AccountType.ASSET.value]
     gst_id = tax_codes["taxable"]
 
+    # Explicit GST Paid leg: 1B reads 2-1330 net Dr = $100.
+    gst_paid_id = gl_accounts["GST_PAID"]
     await _create_and_post_je(
         api_client,
         "2028-01-15",
         lines=[
             {
                 "account_id": expense_id,
-                "debit": "1100.00",
+                "debit": "1000.00",
                 "credit": "0",
                 "tax_code_id": gst_id,
-                "gst_amount": "100.00",
             },
+            {"account_id": gst_paid_id, "debit": "100.00", "credit": "0"},
             {"account_id": asset_id, "debit": "0", "credit": "1100.00"},
         ],
     )
@@ -548,7 +684,7 @@ async def test_bas_1b_matches_actual_gst_on_purchases_not_g11_div_11(
     assert r.status_code == 200, r.text
     body = r.json()
 
-    # 1B equals the gst_amount we stamped, full stop. Not g11/11.
+    # 1B equals the GST Paid control posting, full stop. Not g11/11.
     assert body["label_1b_gst_on_purchases"] == pytest.approx(100.00, abs=0.01), (
         f"Expected 1B=100.00 from ledger gst_amount, got "
         f"{body['label_1b_gst_on_purchases']}"
@@ -574,17 +710,21 @@ async def test_bas_1b_matches_when_g11_diverges_from_gst(
     asset_id = gl_accounts[AccountType.ASSET.value]
     gst_id = tax_codes["taxable"]
 
+    # Margin scheme: GST is 5% not 10% of total. Explicit Dr 2-1330 $50
+    # supplies 1B. G11 still sums expense net debit ($1000); the divergence
+    # between g11/11 = 95.45 and the actual 1B = 50.00 is the bug shape.
+    gst_paid_id = gl_accounts["GST_PAID"]
     await _create_and_post_je(
         api_client,
         "2028-02-15",
         lines=[
             {
                 "account_id": expense_id,
-                "debit": "1050.00",
+                "debit": "1000.00",
                 "credit": "0",
                 "tax_code_id": gst_id,
-                "gst_amount": "50.00",
             },
+            {"account_id": gst_paid_id, "debit": "50.00", "credit": "0"},
             {"account_id": asset_id, "debit": "0", "credit": "1050.00"},
         ],
     )
@@ -637,7 +777,12 @@ async def test_cashflow_operating(
     api_client: AsyncClient,
     gl_accounts: dict[str, str],
 ) -> None:
-    """Income and expense JEs drive net_profit in the operating section."""
+    """Income and expense JEs drive net_profit in the operating section.
+
+    Uses a clean month (2030-06) outside the windows that other BAS tests
+    above post into — earlier tests in this file post in 2028-01 and would
+    otherwise leak into this period's net_profit.
+    """
     income_id = gl_accounts[AccountType.INCOME.value]
     expense_id = gl_accounts[AccountType.EXPENSE.value]
     asset_id = gl_accounts[AccountType.ASSET.value]
@@ -645,7 +790,7 @@ async def test_cashflow_operating(
     # Income 3000
     await _create_and_post_je(
         api_client,
-        "2028-01-10",
+        "2030-06-10",
         lines=[
             {"account_id": asset_id, "debit": "3000.00", "credit": "0"},
             {"account_id": income_id, "debit": "0", "credit": "3000.00"},
@@ -654,7 +799,7 @@ async def test_cashflow_operating(
     # Expense 1000
     await _create_and_post_je(
         api_client,
-        "2028-01-20",
+        "2030-06-20",
         lines=[
             {"account_id": expense_id, "debit": "1000.00", "credit": "0"},
             {"account_id": asset_id, "debit": "0", "credit": "1000.00"},
@@ -663,7 +808,7 @@ async def test_cashflow_operating(
 
     r = await api_client.get(
         "/api/v1/reports/cashflow",
-        params={"from_date": "2028-01-01", "to_date": "2028-01-31"},
+        params={"from_date": "2030-06-01", "to_date": "2030-06-30"},
     )
     assert r.status_code == 200, r.text
     body = r.json()
@@ -681,7 +826,19 @@ async def test_cashflow_investing(
     """A non-cash ASSET debit shows as an outflow in the investing section."""
     # We need a non-cash asset account — use the seeded fixed-asset or any
     # ASSET account whose name/code does NOT contain "cash" or "bank".
+    # Filter by the seed company's tenant so earlier tests' foreign-tenant
+    # accounts (e.g. test_bas_tenant_isolation) are excluded — picking one
+    # of those would 422 on the JE POST with "do not belong to this tenant".
     async with AsyncSessionLocal() as session:
+        seed_company = (
+            await session.execute(
+                select(Company)
+                .where(Company.archived_at.is_(None))
+                .order_by(Company.created_at)
+                .limit(1)
+            )
+        ).scalars().first()
+        assert seed_company is not None
         fixed_asset_row = (
             await session.execute(
                 select(Account)
@@ -689,6 +846,8 @@ async def test_cashflow_investing(
                     Account.archived_at.is_(None),
                     Account.account_type == AccountType.ASSET,
                     Account.is_header.is_(False),
+                    Account.tenant_id == DEFAULT_TENANT_ID,
+                    Account.company_id == seed_company.id,
                 )
                 .order_by(Account.code)
             )
@@ -708,10 +867,13 @@ async def test_cashflow_investing(
 
     income_id = gl_accounts[AccountType.INCOME.value]
 
-    # DR non-cash asset, CR income (simulates asset purchase financed by income)
+    # DR non-cash asset, CR income (simulates asset purchase financed by
+    # income). Clean period (2030-07) avoids overlap with earlier BAS
+    # tests in this file that post into 2028-01/02 and would otherwise
+    # leak into the investing-section asset_purchases bucket.
     await _create_and_post_je(
         api_client,
-        "2028-02-05",
+        "2030-07-05",
         lines=[
             {"account_id": non_cash_asset, "debit": "4000.00", "credit": "0"},
             {"account_id": income_id, "debit": "0", "credit": "4000.00"},
@@ -720,7 +882,7 @@ async def test_cashflow_investing(
 
     r = await api_client.get(
         "/api/v1/reports/cashflow",
-        params={"from_date": "2028-02-01", "to_date": "2028-02-28"},
+        params={"from_date": "2030-07-01", "to_date": "2030-07-31"},
     )
     assert r.status_code == 200, r.text
     body = r.json()

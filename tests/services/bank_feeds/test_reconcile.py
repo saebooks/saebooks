@@ -18,6 +18,7 @@ from decimal import Decimal
 
 from sqlalchemy import delete, select
 
+from saebooks.api.v1.auth import DEFAULT_TENANT_ID
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
 from saebooks.models.bank_feed import BankFeedAccount, BankFeedClient
@@ -136,6 +137,7 @@ async def _post_journal(
     async with AsyncSessionLocal() as session:
         entry = JournalEntry(
             company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
             ref=f"REC-{_tag()}",
             entry_date=entry_date,
             description="Reconcile test",
@@ -644,6 +646,7 @@ async def test_sweep_ignores_draft_journal_entries() -> None:
         async with AsyncSessionLocal() as session:
             draft = JournalEntry(
                 company_id=company_id,
+                tenant_id=DEFAULT_TENANT_ID,
                 ref=f"REC-DRAFT-{_tag()}",
                 entry_date=date(2026, 4, 19),
                 status=EntryStatus.DRAFT,

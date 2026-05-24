@@ -814,8 +814,19 @@ async def test_ref_too_long_on_update_draft_raises_422() -> None:
 
 
 async def test_cross_tenant_account_rejected_on_create_draft() -> None:
-    """create_draft must reject line accounts from a foreign tenant (gap PRTR-1)."""
-    company_id, acct_a, _acct_b = await _ctx()
+    """create_draft must reject line accounts that belong to a foreign
+    company/tenant (gap PRTR-1).
+
+    Migration 0131_tenant_id_coherence_trigger now enforces at the DB
+    layer that ``accounts.tenant_id == companies.tenant_id`` — so we
+    can't (any more) construct the original "same company, different
+    tenant" probe; the foreign Account insert is itself rejected. The
+    equivalent attack surface is "borrow a foreign company's account
+    into the home company's JE", which ``_validate_line_accounts``
+    catches via the ``row.company_id != company_id`` check. That's
+    what this test now asserts.
+    """
+    home_company_id, acct_a, _acct_b = await _ctx()
     home_tenant_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
     foreign_tenant_id = uuid.uuid4()
 
@@ -826,8 +837,18 @@ async def test_cross_tenant_account_rejected_on_create_draft() -> None:
             slug=f"foreign-{foreign_tenant_id}",
         ))
         await session.flush()
+        # Foreign company in the foreign tenant — needed to satisfy
+        # migration 0131's tenant_id_coherence_trigger on accounts.
+        foreign_company = Company(
+            tenant_id=foreign_tenant_id,
+            name=f"Foreign Co {str(foreign_tenant_id)[:6]}",
+            base_currency="AUD",
+            fin_year_start_month=7,
+        )
+        session.add(foreign_company)
+        await session.flush()
         foreign_acct = Account(
-            company_id=company_id,
+            company_id=foreign_company.id,
             tenant_id=foreign_tenant_id,
             code=f"9-XT{str(foreign_tenant_id)[:4].upper()}",
             name="Cross-Tenant Test Account",
@@ -841,7 +862,7 @@ async def test_cross_tenant_account_rejected_on_create_draft() -> None:
         with pytest.raises(PostingError, match="do not belong"):
             await svc.create_draft(
                 session,
-                company_id=company_id,
+                company_id=home_company_id,
                 tenant_id=home_tenant_id,
                 entry_date=date(2026, 4, 10),
                 lines=[
