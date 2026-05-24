@@ -45,6 +45,22 @@ HARD_DELETE_ROUTES: tuple[str, ...] = (
 )
 
 
+@pytest.fixture(autouse=True)
+def _enterprise_edition(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Flip the singleton edition to ``enterprise`` so every gated route is reachable.
+
+    Routes like ``/api/v1/allocation_rules`` (FLAG_ALLOCATION_RULES) and
+    ``/api/v1/companies`` (FLAG_MULTI_COMPANY) sit behind feature gates that
+    return 404 before any admin check runs. The hard-delete contract is
+    "admin gate runs before any DB lookup" — to exercise it we need to get
+    past the feature gate first, so we run the whole suite as the highest
+    public tier.
+    """
+    from saebooks.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "edition", "enterprise")
+
+
 @pytest.fixture
 async def api_client() -> AsyncClient:
     token = current_token()
