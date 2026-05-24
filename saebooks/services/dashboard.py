@@ -98,7 +98,19 @@ async def bank_balances(
         )
         .where(
             Account.company_id == company_id,
-            Account.account_type.in_((AccountType.ASSET, AccountType.LIABILITY)),
+            # Restrict to ASSET accounts (bank, cash, undeposited-funds) and
+            # LIABILITY accounts that are explicitly tagged as credit cards via
+            # account_kind=CREDIT_CARD. This excludes liability control accounts
+            # (Trade Creditors, Wages Payable, BAS Payable, Superannuation, etc.)
+            # which were incorrectly included when the filter was broad
+            # account_type IN (ASSET, LIABILITY). Critic finding #20.
+            (
+                (Account.account_type == AccountType.ASSET)
+                | (
+                    (Account.account_type == AccountType.LIABILITY)
+                    & (Account.account_kind == "CREDIT_CARD")
+                )
+            ),
             Account.reconcile.is_(True),
             Account.archived_at.is_(None),
         )

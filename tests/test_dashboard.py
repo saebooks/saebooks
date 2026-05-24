@@ -112,15 +112,17 @@ async def test_bank_balances_returns_list_of_reconcile_accounts() -> None:
         balances = await svc.bank_balances(session, cid)
     # Must be a list (possibly empty on minimal installs, but the AU
     # seed marks at least one cash-at-bank account reconcilable). The
-    # query is (ASSET OR LIABILITY) + reconcile=True — code prefix is
-    # a seed convention we don't hard-assert against because things
-    # like BAS Receivable legitimately carry a "2-" code despite
-    # being an asset for reconciliation.
+    # query returns ASSET accounts + LIABILITY accounts that are credit cards
+    # (account_kind=CREDIT_CARD). Critic finding #20 fixed the original
+    # (ASSET OR LIABILITY) + reconcile=True filter that included liability
+    # control accounts (Trade Creditors, BAS Payable, etc.).
     assert isinstance(balances, list)
     for b in balances:
         assert isinstance(b.code, str) and b.code
         assert isinstance(b.balance, Decimal)
-        assert b.account_type in (AccountType.ASSET, AccountType.LIABILITY)
+        assert b.account_type == AccountType.ASSET or (
+            b.account_type == AccountType.LIABILITY and b.account_kind == CREDIT_CARD
+        )
 
 
 @pytest.mark.asyncio
@@ -148,6 +150,7 @@ async def test_bank_balances_includes_liability_credit_cards() -> None:
             code=f"2-{tag[:5]}",
             name="Scratch Visa",
             account_type=AccountType.LIABILITY,
+            account_kind="CREDIT_CARD",  # Must have CREDIT_CARD kind to appear (critic #20 fix)
             reconcile=True,
         )
         # Control accounts that must NOT appear in the result.
