@@ -43,14 +43,18 @@ class JournalEntry(CompanyScoped, Base):
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False
     )
-    # tenant_id has a DB-side server default (the single default tenant) so that
-    # legacy service code (services/journal.py) that doesn't pass tenant_id still
-    # works.  The API service (services/journal_entries.py) always passes it explicitly.
+    # tenant_id is required at construction. Phase 1 (0042) shipped a
+    # ``00000000`` default for both Python and the DB column so the
+    # legacy ``services/journal.py`` could keep working before it
+    # accepted tenant_id explicitly. Phase 2 (0127) drops both defaults
+    # now that ``create_draft`` raises ``PostingError`` on missing
+    # ``tenant_id`` and ``reverse`` inherits from the original entry —
+    # the model can stop pretending the legacy dev tenant is a safe
+    # fallback, so a bare construct surfaces as an immediate error.
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("tenants.id", ondelete="RESTRICT"),
         nullable=False,
-        default=uuid.UUID("00000000-0000-0000-0000-000000000001"),
     )
     ref: Mapped[str] = mapped_column(String(32), nullable=False)
     entry_date: Mapped[date] = mapped_column(Date, nullable=False)

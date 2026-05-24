@@ -296,3 +296,120 @@ async def test_snapshot_streams_ndjson(api_client: AsyncClient) -> None:
     # contacts entity marker must be present somewhere in the output
     entity_markers = {ln["_entity"] for ln in lines if "_entity" in ln}
     assert "contacts" in entity_markers
+
+
+# ---------------------------------------------------------------------------
+# One-off filter + bulk-tag (covers the gap that existed when the Jinja UI
+# was wired up; the bearer endpoint had no test even though it had shipped).
+# ---------------------------------------------------------------------------
+
+
+async def test_list_filter_is_one_off(api_client: AsyncClient) -> None:
+    """GET /api/v1/contacts?is_one_off=true|false filters correctly."""
+    real_name = _rand_name("Real")
+    oneoff_name = _rand_name("OneOff")
+    r = await api_client.post(
+        "/api/v1/contacts",
+        json={"name": real_name, "contact_type": "CUSTOMER"},
+    )
+    assert r.status_code == 201
+    r = await api_client.post(
+        "/api/v1/contacts",
+        json={"name": oneoff_name, "contact_type": "CUSTOMER", "is_one_off": True},
+    )
+    assert r.status_code == 201
+
+    # is_one_off=true must include the one-off but exclude the real
+    r = await api_client.get("/api/v1/contacts", params={"is_one_off": "true", "q": "OneOff"})
+    assert r.status_code == 200
+    names = {c["name"] for c in r.json()["items"]}
+    assert oneoff_name in names
+    assert real_name not in names
+
+    # is_one_off=false hides one-offs
+    r = await api_client.get("/api/v1/contacts", params={"is_one_off": "false", "q": "Real"})
+    assert r.status_code == 200
+    names = {c["name"] for c in r.json()["items"]}
+    assert real_name in names
+    assert oneoff_name not in names
+
+    # No filter returns both
+    r = await api_client.get("/api/v1/contacts", params={"q": real_name.split()[-1][:4]})
+    assert r.status_code == 200
+
+
+async def test_bulk_tag_one_off_endpoint(api_client: AsyncClient) -> None:
+    """POST /api/v1/contacts/bulk-tag-one-off flips is_one_off + bumps version."""
+    ids: list[str] = []
+    for i in range(3):
+        r = await api_client.post(
+            "/api/v1/contacts",
+            json={"name": _rand_name(f"Bulk{i}"), "contact_type": "CUSTOMER"},
+        )
+        assert r.status_code == 201
+        ids.append(r.json()["id"])
+
+    # Flip all three to is_one_off=True
+    r = await api_client.post(
+        "/api/v1/contacts/bulk-tag-one-off",
+        json={"contact_ids": ids, "is_one_off": True},
+    )
+    assert r.status_code == 200
+    assert r.json() == {"flipped": 3}
+
+    # Verify each is now flagged + version bumped to 2
+    for cid in ids:
+        r = await api_client.get(f"/api/v1/contacts/{cid}")
+        body = r.json()
+        assert body["is_one_off"] is True
+        assert body["version"] == 2
+
+    # Replay the same request — already-true rows are skipped
+    r = await api_client.post(
+        "/api/v1/contacts/bulk-tag-one-off",
+        json={"contact_ids": ids, "is_one_off": True},
+    )
+    assert r.json() == {"flipped": 0}
+
+
+async def test_jinja_bulk_tag_one_off_endpoint(api_client: AsyncClient, client: AsyncClient) -> None:
+    """POST /contacts/bulk-tag-one-off (cookie-authed Jinja mirror) flips + redirects."""
+    # Create two test contacts via the bearer API (faster than form-posting).
+    ids: list[str] = []
+    for i in range(2):
+        r = await api_client.post(
+            "/api/v1/contacts",
+            json={"name": _rand_name(f"JBulk{i}"), "contact_type": "CUSTOMER"},
+        )
+        ids.append(r.json()["id"])
+
+    # POST the Jinja form-encoded body. In test env, resolve_tenant_id
+    # falls back to DEFAULT_TENANT_ID so the cookie session isn't needed.
+    r = await client.post(
+        "/contacts/bulk-tag-one-off",
+        data=[("contact_ids", ids[0]), ("contact_ids", ids[1]), ("is_one_off", "true")],
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"] == "/contacts"
+
+    # Both contacts should now be flagged
+    for cid in ids:
+        r = await api_client.get(f"/api/v1/contacts/{cid}")
+        body = r.json()
+        assert body["is_one_off"] is True
+
+    # Un-mark via the same Jinja endpoint with is_one_off=false
+    r = await client.post(
+        "/contacts/bulk-tag-one-off",
+        data=[("contact_ids", ids[0]), ("is_one_off", "false"), ("return_to", "/contacts?one_off=true")],
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"] == "/contacts?one_off=true"
+
+    r = await api_client.get(f"/api/v1/contacts/{ids[0]}")
+    assert r.json()["is_one_off"] is False
+    # The other contact is untouched
+    r = await api_client.get(f"/api/v1/contacts/{ids[1]}")
+    assert r.json()["is_one_off"] is True

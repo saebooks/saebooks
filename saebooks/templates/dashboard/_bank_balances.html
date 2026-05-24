@@ -1,4 +1,11 @@
-{# Bank balances widget — list every reconcile-type asset account with GL balance #}
+{# Bank balances widget — list every reconcile-type bank/cash/CC account. #}
+{# Asset rows display GL balance as-is (positive = cash on hand). Liability #}
+{# rows (credit cards) negate the GL value so "owed" reads as a positive #}
+{# number with an "owed" tag — debit-minus-credit on a CC with debt is #}
+{# negative in GL terms, which confuses non-accountants. The footer total #}
+{# is left as the raw sum of GL balances: assets - liabilities = the net #}
+{# cash position you actually have to spend, which is the right number for #}
+{# a one-line summary. #}
 <section class="widget widget-bank-balances">
   <header>
     <h2>Bank balances</h2>
@@ -11,18 +18,27 @@
     </thead>
     <tbody>
       {% for b in dashboard.bank_balances %}
-      <tr>
+      <tr class="acct-{{ b.account_type.value|lower }}">
         <td>
           <span class="code">{{ b.code }}</span>
           {{ b.name }}
+          {% if b.account_type.value == "LIABILITY" %}
+          <span class="acct-tag acct-tag-liab">owed</span>
+          {% endif %}
         </td>
-        <td class="num">{{ "%.2f"|format(b.balance) }}</td>
+        <td class="num">
+          {% if b.account_type.value == "LIABILITY" %}
+            {{ "%.2f"|format(-b.balance) }}
+          {% else %}
+            {{ "%.2f"|format(b.balance) }}
+          {% endif %}
+        </td>
       </tr>
       {% endfor %}
     </tbody>
     <tfoot>
       <tr>
-        <th>Total</th>
+        <th>Net position</th>
         <th class="num">
           {{ "%.2f"|format(dashboard.bank_balances|sum(attribute="balance")) }}
         </th>
@@ -31,9 +47,9 @@
   </table>
   {% else %}
   <p class="empty-state">
-    No reconcile-type accounts yet. Mark a bank or cash account as
-    reconcilable in <a href="/accounts">Accounts</a> and it will
-    appear here.
+    No reconcile-type accounts yet. Mark a bank, cash, or credit-card
+    account as reconcilable in <a href="/accounts">Accounts</a> and
+    it will appear here.
   </p>
   {% endif %}
 </section>

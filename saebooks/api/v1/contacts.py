@@ -106,6 +106,7 @@ def _dump(contact: Contact) -> dict[str, Any]:
 async def list_contacts(
     contact_type: ContactType | None = Query(default=None, alias="type"),  # noqa: B008
     search: str | None = Query(default=None, alias="q"),
+    is_one_off: bool | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
@@ -119,6 +120,8 @@ async def list_contacts(
     )
     if contact_type is not None:
         count_stmt = count_stmt.where(Contact.contact_type == contact_type)
+    if is_one_off is not None:
+        count_stmt = count_stmt.where(Contact.is_one_off.is_(is_one_off))
     if search:
         pattern = f"%{search}%"
         count_stmt = count_stmt.where(
@@ -130,6 +133,7 @@ async def list_contacts(
         company_id,
         contact_type=contact_type,
         search=search,
+        is_one_off=is_one_off,
         limit=limit,
         offset=offset,
     )
