@@ -749,6 +749,7 @@ class InvoiceLineOut(BaseModel):
     quantity: Decimal
     unit_price: Decimal
     discount_pct: Decimal
+    retention_pct: Decimal = Decimal("0")
     line_subtotal: Decimal
     line_tax: Decimal
     line_total: Decimal
@@ -767,6 +768,7 @@ class InvoiceLineCreate(BaseModel):
     quantity: Decimal = Decimal("1")
     unit_price: Decimal = Decimal("0")
     discount_pct: Decimal = Decimal("0")
+    retention_pct: Decimal = Decimal("0")
     project_id: uuid.UUID | None = None
     item_id: uuid.UUID | None = None
     service_start_date: date | None = None
@@ -890,6 +892,7 @@ class BillLineOut(BaseModel):
     quantity: Decimal
     unit_price: Decimal
     discount_pct: Decimal
+    retention_pct: Decimal = Decimal("0")
     line_subtotal: Decimal
     line_tax: Decimal
     line_total: Decimal
@@ -907,6 +910,7 @@ class BillLineCreate(BaseModel):
     quantity: Decimal = Decimal("1")
     unit_price: Decimal = Decimal("0")
     discount_pct: Decimal = Decimal("0")
+    retention_pct: Decimal = Decimal("0")
     project_id: uuid.UUID | None = None
     item_id: uuid.UUID | None = None
     tracking_vehicle_id: str | None = Field(default=None, max_length=64)
