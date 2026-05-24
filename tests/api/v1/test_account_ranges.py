@@ -31,6 +31,7 @@ from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.account_range import AccountRange
 from saebooks.models.company import Company
+pytestmark = pytest.mark.postgres_only
 
 
 # ---------------------------------------------------------------------------

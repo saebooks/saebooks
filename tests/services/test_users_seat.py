@@ -8,6 +8,8 @@ from sqlalchemy import delete
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.user import User, UserRole
 from saebooks.services import users as users_svc
+import pytest
+pytestmark = pytest.mark.postgres_only
 
 
 def test_seat_class_for_admin_is_admin() -> None:

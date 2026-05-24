@@ -27,6 +27,7 @@ from saebooks.models.account import Account, AccountType
 from saebooks.models.budget import Budget
 from saebooks.models.company import Company
 from saebooks.services import budgets as svc
+pytestmark = pytest.mark.postgres_only
 
 TEST_YEAR = 2099  # far-future sentinel so nothing real collides
 

@@ -22,6 +22,7 @@ from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.change_log import ChangeLog
 from saebooks.models.company import Company
+pytestmark = pytest.mark.postgres_only
 
 
 @pytest.fixture

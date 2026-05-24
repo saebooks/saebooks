@@ -78,7 +78,15 @@ async def _assert_not_bypass(session: AsyncSession) -> None:
     The query reads ``rolbypassrls`` from ``pg_roles`` for
     ``current_user``. Superuser short-circuits BYPASSRLS in Postgres
     so we OR ``is_superuser`` into the check.
+
+    SQLite skip: there is no RLS on SQLite (Cashbook is single-tenant
+    by physical device), so the bypass check is vacuously satisfied
+    and we return without querying. The cli is not a meaningful
+    workflow on a single-tenant local DB; tests that exercise this
+    function are marked ``postgres_only``.
     """
+    if session.bind is not None and session.bind.dialect.name != "postgresql":
+        return
     row = (
         await session.execute(
             text(
@@ -240,12 +248,18 @@ async def _sync_feeds(company_id: str | None, *, allow_bypass: bool) -> int:
                 # nested sync_all_active runs all its writes inside
                 # the same transaction and commits at the bottom.
                 async with session.begin():
-                    await session.execute(
-                        text(
-                            "SELECT set_config('app.current_tenant', :tid, true)"
-                        ),
-                        {"tid": str(tenant_id)},
-                    )
+                    # set_config is a Postgres-only GUC helper. SQLite
+                    # has no GUC machinery; on SQLite the cli would be
+                    # a degenerate single-tenant walker anyway, but
+                    # guarding here keeps the function callable on
+                    # both backends without exploding.
+                    if session.bind is not None and session.bind.dialect.name == "postgresql":
+                        await session.execute(
+                            text(
+                                "SELECT set_config('app.current_tenant', :tid, true)"
+                            ),
+                            {"tid": str(tenant_id)},
+                        )
                     logger.info(
                         "sync-feeds: company=%s tenant=%s accounts=%d",
                         group_company_id,

@@ -32,6 +32,7 @@ from saebooks.services.cashbook import (
     CashbookNotConfigured,
     record_cashbook_entry,
 )
+pytestmark = pytest.mark.postgres_only
 
 
 # ---------------------------------------------------------------------------

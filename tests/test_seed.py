@@ -11,6 +11,8 @@ from sqlalchemy import select
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
 from saebooks.services.companies import ensure_seed_company
+import pytest
+pytestmark = pytest.mark.postgres_only
 
 
 async def _seed_company_id() -> object:

@@ -18,6 +18,8 @@ from __future__ import annotations
 import uuid
 
 from httpx import AsyncClient
+import pytest
+pytestmark = pytest.mark.postgres_only
 
 
 async def _first_company_and_accounts(client: AsyncClient) -> dict[str, str]:

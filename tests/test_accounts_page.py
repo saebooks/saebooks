@@ -1,4 +1,6 @@
 from httpx import AsyncClient
+import pytest
+pytestmark = pytest.mark.postgres_only
 
 
 async def test_accounts_list_renders(client: AsyncClient) -> None:

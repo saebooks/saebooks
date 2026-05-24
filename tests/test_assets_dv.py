@@ -23,6 +23,8 @@ from saebooks.models.company import Company
 from saebooks.models.journal import EntryStatus, JournalEntry
 from saebooks.services import assets as svc
 from saebooks.services.assets import _cumulative_dv
+import pytest
+pytestmark = pytest.mark.postgres_only
 
 # ---------------------------------------------------------------------- #
 # Pure helper (no DB)                                                    #

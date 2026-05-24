@@ -31,6 +31,7 @@ from saebooks.models.distribution import (
 )
 from saebooks.models.journal import JournalEntry, JournalLine
 from saebooks.services import distributions as svc
+pytestmark = pytest.mark.postgres_only
 
 TEST_DATE = date(2099, 6, 30)
 TEST_YEAR = 2099

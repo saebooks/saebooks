@@ -30,6 +30,7 @@ from saebooks.services.tenant import (
     current_company_id,
     scope,
 )
+pytestmark = pytest.mark.postgres_only
 
 
 @pytest.fixture

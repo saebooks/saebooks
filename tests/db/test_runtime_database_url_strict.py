@@ -24,6 +24,9 @@ import importlib
 
 import pytest
 
+pytestmark = pytest.mark.postgres_only
+
+
 
 @pytest.fixture(autouse=True)
 def _restore_db_module() -> None:

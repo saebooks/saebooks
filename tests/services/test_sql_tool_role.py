@@ -36,7 +36,7 @@ from saebooks.db import AsyncSessionLocal
 from saebooks.services import sql_tool as sql_svc
 
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.asyncio, pytest.mark.postgres_only]
 
 
 # ---------------------------------------------------------------------------

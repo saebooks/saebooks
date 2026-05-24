@@ -30,6 +30,7 @@ from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.account import Account
 from saebooks.models.company import Company
+pytestmark = pytest.mark.postgres_only
 
 
 def _D(s: str) -> Decimal:

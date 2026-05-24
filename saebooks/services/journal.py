@@ -65,6 +65,25 @@ async def _validate_line_accounts(
 
 
 async def next_ref(session: AsyncSession) -> str:
+    """Return the next ``JE-NNNNNN`` reference for a draft entry.
+
+    Postgres path uses the ``journal_ref_seq`` SEQUENCE (migration 0005)
+    so concurrent callers don''t collide. SQLite has no SEQUENCE
+    primitive, so we fall back to MAX(extracted-number)+1 — safe on
+    Cashbook because there''s exactly one writer (the local app on
+    the device) and journal entries are append-only from a single
+    session.
+    """
+    bind = session.bind
+    if bind is not None and bind.dialect.name != "postgresql":
+        result = await session.execute(
+            text(
+                "SELECT COALESCE(MAX(CAST(SUBSTR(ref, 4) AS INTEGER)), 0) + 1 "
+                "FROM journal_entries WHERE ref LIKE 'JE-%'"
+            )
+        )
+        seq = int(result.scalar_one() or 1)
+        return f"JE-{seq:06d}"
     result = await session.execute(text("SELECT nextval('journal_ref_seq')"))
     seq = result.scalar_one()
     return f"JE-{seq:06d}"

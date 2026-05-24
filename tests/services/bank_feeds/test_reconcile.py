@@ -25,6 +25,8 @@ from saebooks.models.bank_statement import BankStatementLine, StatementLineStatu
 from saebooks.models.company import Company
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
 from saebooks.services.bank_feeds import reconcile
+import pytest
+pytestmark = pytest.mark.postgres_only
 
 # ---------------------------------------------------------------------- #
 # Test fixtures — scratch company + scratch ledger account + scratch     #

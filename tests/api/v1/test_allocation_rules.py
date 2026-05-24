@@ -31,6 +31,7 @@ from saebooks.services.allocations import (
     compute_allocation_lines,
 )
 import saebooks.services.features as features_mod
+pytestmark = pytest.mark.postgres_only
 
 
 # ---------------------------------------------------------------------------

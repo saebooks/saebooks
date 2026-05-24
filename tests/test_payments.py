@@ -39,6 +39,7 @@ from saebooks.services import bills as bill_svc
 from saebooks.services import credit_notes as cn_svc
 from saebooks.services import invoices as inv_svc
 from saebooks.services import payments as svc
+pytestmark = pytest.mark.postgres_only
 
 
 _COUNTER_PREFIXES = {

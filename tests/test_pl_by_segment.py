@@ -31,6 +31,7 @@ from saebooks.models.project import Project
 from saebooks.services import journal as journal_svc
 from saebooks.services import projects as project_svc
 from saebooks.services import reports as svc
+pytestmark = pytest.mark.postgres_only
 
 TEST_PROJECT_PREFIX = "SEG-TEST"
 

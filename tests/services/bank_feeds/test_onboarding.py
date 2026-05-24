@@ -26,6 +26,7 @@ from saebooks.models.account import Account
 from saebooks.models.bank_feed import BankFeedAccount, BankFeedClient
 from saebooks.models.company import Company
 from saebooks.services.bank_feeds import endpoints, onboarding
+pytestmark = pytest.mark.postgres_only
 
 
 def _test_settings(**overrides: Any) -> Settings:

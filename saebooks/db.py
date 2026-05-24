@@ -1,9 +1,23 @@
+from __future__ import annotations
+
+import uuid as _uuid
 from collections.abc import AsyncIterator
 
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy import event
+from sqlalchemy.engine import make_url
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import NullPool
 
+# Side-effect import: registers @compiles hooks so postgresql.JSONB / ARRAY
+# render as JSON on SQLite (used by both model columns and the inline
+# postgresql.JSONB() references in alembic migrations).
+from saebooks import db_types  # noqa: F401
 from saebooks.config import settings
 
 
@@ -20,15 +34,114 @@ def _runtime_database_url() -> str:
     a superuser or a role with ``BYPASSRLS``, FORCE row security is a
     no-op and tenant isolation collapses to the application-layer
     filters only.
+
+    SQLite (``sqlite+aiosqlite://...``) is the Cashbook single-tenant
+    local backend. ``SAEBOOKS_APP_DATABASE_URL`` is ignored on SQLite —
+    there is no second role to split into; tenant isolation is
+    enforced at the application layer because Cashbook is one physical
+    device = one user.
     """
-    if settings.app_database_url:
+    if settings.app_database_url and not _url_is_sqlite(settings.app_database_url):
         return settings.app_database_url
     return settings.database_url
 
 
-engine = create_async_engine(
-    _runtime_database_url(), echo=False, future=True, poolclass=NullPool
-)
+def _url_is_sqlite(url: str) -> bool:
+    try:
+        return make_url(url).get_backend_name() == "sqlite"
+    except Exception:
+        return url.startswith("sqlite")
+
+
+def backend_supports_rls() -> bool:
+    """Return True if the configured backend supports Postgres-style RLS.
+
+    All ``SET LOCAL app.current_tenant`` and ``FORCE ROW LEVEL SECURITY``
+    work is gated behind this predicate. On SQLite (Cashbook) the gate
+    returns False and those calls become no-ops; single-tenant
+    isolation is a physical invariant of the device, not a DB
+    constraint.
+
+    Note: this checks the *runtime* engine's dialect, not the URL
+    string — covers cases where a future driver alias maps to the
+    same dialect.
+    """
+    try:
+        return engine.dialect.name == "postgresql"
+    except Exception:
+        # Fall back to URL inspection if engine not yet bound (shouldn't
+        # happen in normal use — kept for safety during module import).
+        return not _url_is_sqlite(_runtime_database_url())
+
+
+def _engine_kwargs_for(url: str) -> dict[str, object]:
+    """Return create_async_engine kwargs appropriate for the URL's dialect."""
+    if _url_is_sqlite(url):
+        # aiosqlite needs check_same_thread=False so SQLAlchemy's async
+        # pool can hand the connection across thread boundaries. NullPool
+        # makes the connection lifecycle "open per request, close on
+        # release" — same shape as the Postgres path.
+        return {
+            "echo": False,
+            "future": True,
+            "poolclass": NullPool,
+            "connect_args": {"check_same_thread": False},
+        }
+    return {"echo": False, "future": True, "poolclass": NullPool}
+
+
+def _register_sqlite_pragmas_and_funcs(eng: AsyncEngine) -> None:
+    """Wire SQLite connect-time setup onto an engine.
+
+    Three jobs per connection:
+
+    1. ``PRAGMA foreign_keys = ON`` — SQLite default is OFF, which
+       would let every FK in the schema silently no-op. The accounting
+       invariants (journal_line.account_id, payment_allocation
+       targets) only hold up if FKs are enforced.
+    2. Register ``gen_random_uuid()`` as a Python function returning a
+       UUID4 string. ~33 alembic migrations use this as a column
+       server default; without the function they fail at insert time.
+    3. Register ``set_config(name, value, is_local)`` and
+       ``current_setting(name, missing_ok)`` as no-op stubs. These
+       are Postgres GUC helpers used in cli + wizard SQL — on SQLite
+       there is no GUC, but the helpers must exist for query
+       parser purposes. ``current_setting`` returns NULL which makes
+       any ``::uuid`` cast fail loudly if it accidentally fires on a
+       SQLite session; that''s the intended behaviour — RLS is not a
+       thing here and the call sites should be guarded.
+
+    Listener is attached to the synchronous engine underneath the
+    AsyncEngine (the "sync_engine" attribute exists on every
+    AsyncEngine since SQLAlchemy 2.0).
+    """
+
+    @event.listens_for(eng.sync_engine, "connect")
+    def _on_connect(dbapi_connection, _connection_record):  # type: ignore[no-untyped-def]
+        cur = dbapi_connection.cursor()
+        try:
+            cur.execute("PRAGMA foreign_keys = ON")
+        finally:
+            cur.close()
+        dbapi_connection.create_function(
+            "gen_random_uuid", 0, lambda: str(_uuid.uuid4())
+        )
+        # set_config / current_setting kept as defensive stubs so SQL
+        # parsing of mixed-dialect statements doesn''t error before
+        # the call-site guard kicks in. Real RLS enforcement requires
+        # Postgres; see backend_supports_rls().
+        dbapi_connection.create_function(
+            "set_config", 3, lambda _k, v, _is_local: v
+        )
+        dbapi_connection.create_function(
+            "current_setting", 2, lambda _k, _missing_ok: None
+        )
+
+
+_RUNTIME_URL = _runtime_database_url()
+engine = create_async_engine(_RUNTIME_URL, **_engine_kwargs_for(_RUNTIME_URL))
+if _url_is_sqlite(_RUNTIME_URL):
+    _register_sqlite_pragmas_and_funcs(engine)
 
 AsyncSessionLocal = async_sessionmaker(
     engine, expire_on_commit=False, class_=AsyncSession
@@ -55,15 +168,16 @@ AsyncSessionLocal = async_sessionmaker(
 # the FastAPI test suite seeds tenants directly. Once every web router
 # is audited (see ``audit-trail/06``-style guard in compose ``.env``)
 # the web engine should adopt the same strict pattern.
+#
+# On SQLite, AppSessionLocal stays None — the CLI is a multi-tenant
+# walker and has no analogue on a single-tenant local DB.
 
 _app_role_engine = (
     create_async_engine(
         settings.app_database_url,
-        echo=False,
-        future=True,
-        poolclass=NullPool,
+        **_engine_kwargs_for(settings.app_database_url),
     )
-    if settings.app_database_url
+    if settings.app_database_url and not _url_is_sqlite(settings.app_database_url)
     else None
 )
 
@@ -142,23 +256,36 @@ class ReferenceNotConfiguredError(RuntimeError):
     """Raised when reference DB lookup is attempted but no engine exists."""
 
 
+def _reference_connect_args(url: str) -> dict[str, object]:
+    """Per-dialect connect args for the read-only reference engine.
+
+    Postgres path: belt-and-braces ``default_transaction_read_only = on``
+    so even if the role grants drift, the transaction itself refuses
+    writes.
+
+    SQLite path: ``check_same_thread=False`` for aiosqlite. Read-only
+    enforcement on SQLite would normally use ``mode=ro`` in the URI;
+    leaving it to the caller since reference data on SQLite is
+    typically loaded once at first launch.
+    """
+    if _url_is_sqlite(url):
+        return {"check_same_thread": False}
+    return {"server_settings": {"default_transaction_read_only": "on"}}
+
+
 _reference_engine = (
     create_async_engine(
         settings.reference_database_url,
         echo=False,
         future=True,
         poolclass=NullPool,
-        # Belt-and-braces: the role itself should be NOLOGIN-write, but
-        # asking Postgres to also refuse writes at the transaction level
-        # turns "I forgot" into a loud error rather than a silent
-        # mutation in the rare case the role grants drift.
-        connect_args={
-            "server_settings": {"default_transaction_read_only": "on"},
-        },
+        connect_args=_reference_connect_args(settings.reference_database_url),
     )
     if settings.reference_database_url
     else None
 )
+if _reference_engine is not None and _url_is_sqlite(settings.reference_database_url):
+    _register_sqlite_pragmas_and_funcs(_reference_engine)
 
 ReferenceSession: async_sessionmaker[AsyncSession] | None = (
     async_sessionmaker(
@@ -172,13 +299,15 @@ ReferenceSession: async_sessionmaker[AsyncSession] | None = (
 _reference_migration_engine = (
     create_async_engine(
         settings.reference_migration_database_url,
-        echo=False,
-        future=True,
-        poolclass=NullPool,
+        **_engine_kwargs_for(settings.reference_migration_database_url),
     )
     if settings.reference_migration_database_url
     else None
 )
+if _reference_migration_engine is not None and _url_is_sqlite(
+    settings.reference_migration_database_url
+):
+    _register_sqlite_pragmas_and_funcs(_reference_migration_engine)
 
 ReferenceMigrationSession: async_sessionmaker[AsyncSession] | None = (
     async_sessionmaker(
@@ -213,3 +342,102 @@ async def get_reference_session() -> AsyncIterator[AsyncSession]:
         )
     async with ReferenceSession() as session:
         yield session
+
+
+async def bootstrap_schema(engine_to_init: AsyncEngine | None = None) -> None:
+    """Create all ORM-declared tables on ``engine_to_init``.
+
+    Cashbook / SQLite-backend story: the 100+ alembic migrations
+    written for the Postgres ledger are not portable to SQLite. They
+    use features SQLite cannot express (ROW LEVEL SECURITY, FORCE RLS,
+    CREATE POLICY, CREATE ROLE, SECURITY DEFINER, sequences, PG ENUM
+    types, ALTER TABLE forms beyond ADD COLUMN, …). Rewriting each one
+    for cross-dialect compatibility is a massive surface and changes
+    the migrations' intent — which the architecture decision (see
+    [[saebooks-mobile-architecture]] §"two-backend rule") explicitly
+    forbade.
+
+    Instead, SQLite consumers (the Cashbook mobile app via the Rust
+    core, the test suite when DATABASE_URL is sqlite+aiosqlite://...,
+    any local dev box that wants to skip Postgres) build their schema
+    from ``Base.metadata.create_all`` directly. This is safe because:
+
+    * SQLite Cashbook is single-tenant by device — no RLS to enforce
+      and no multi-role split. The "tenant" is whoever holds the phone.
+    * The ORM model is the source of truth for column shapes already
+      (Postgres alembic migrations are kept in lock-step via
+      ``alembic check`` in CI).
+    * No upgrade path is required: when the schema changes, the next
+      mobile-app release re-runs ``bootstrap_schema`` against the
+      device DB. Existing data is migrated by the Rust core's own
+      versioned snapshot logic, not by alembic.
+
+    Calling against Postgres is allowed (e.g. test harness setup) but
+    discouraged — Postgres should always use ``alembic upgrade head``
+    so the migration history matches production.
+
+    Side effects:
+
+    * Imports every module under ``saebooks.models.*`` to ensure each
+      class registers with ``Base.metadata`` before ``create_all``
+      runs. Some modules are not re-exported from
+      ``saebooks.models.__init__`` (invoice, bill, recurring_invoice)
+      but are still part of the ORM — walking the package catches them.
+    * Registers SQLite pragmas / Python functions on the engine if it
+      is a SQLite engine and the listener was not already wired (idempotent
+      via SQLAlchemy event de-dup).
+    """
+    import importlib
+    import pkgutil
+
+    import saebooks.models as _models  # noqa: F401
+
+    for mod_info in pkgutil.iter_modules(_models.__path__):
+        importlib.import_module(f"saebooks.models.{mod_info.name}")
+
+    target = engine_to_init if engine_to_init is not None else engine
+    is_sqlite = _url_is_sqlite(str(target.url))
+    if is_sqlite:
+        _register_sqlite_pragmas_and_funcs(target)
+    async with target.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    # On SQLite, seed the rows that Postgres migrations would have
+    # seeded:
+    # * Default tenant (0040_tenants) — required because the dev/test
+    #   static tenant_id '00000000-0000-0000-0000-000000000001' is
+    #   FK-referenced by every tenant_id column.
+    # The seed uses the ORM model so the UUID is stored in the same
+    # 32-char-hex form SQLAlchemy's postgresql.UUID type emits on
+    # SQLite (without dashes). Idempotent via uniqueness check.
+    if is_sqlite:
+        import uuid as _uuid_seed
+
+        from saebooks.models.tenant import Tenant
+
+        AsyncSession_local = async_sessionmaker(
+            target, expire_on_commit=False, class_=AsyncSession
+        )
+        default_tid = _uuid_seed.UUID("00000000-0000-0000-0000-000000000001")
+        async with AsyncSession_local() as session:
+            existing = await session.get(Tenant, default_tid)
+            if existing is None:
+                session.add(Tenant(id=default_tid, name="Default", slug="default"))
+                await session.commit()
+
+
+__all__ = [
+    "AppSessionLocal",
+    "AsyncSessionLocal",
+    "Base",
+    "CompanySession",
+    "ReferenceBase",
+    "ReferenceMigrationSession",
+    "ReferenceNotConfiguredError",
+    "ReferenceSession",
+    "backend_supports_rls",
+    "bootstrap_schema",
+    "engine",
+    "get_reference_session",
+    "get_session",
+]

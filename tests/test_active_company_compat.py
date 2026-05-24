@@ -25,6 +25,7 @@ from saebooks.api.v1.auth import DEFAULT_TENANT_ID
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 from saebooks.services import active_company as active_svc
+pytestmark = pytest.mark.postgres_only
 
 
 async def _seeded_company() -> Company:

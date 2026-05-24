@@ -26,6 +26,7 @@ from saebooks.api.v1.auth import current_token, DEFAULT_TENANT_ID
 from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.account import Account, AccountType
+pytestmark = pytest.mark.postgres_only
 
 
 # ---------------------------------------------------------------------------

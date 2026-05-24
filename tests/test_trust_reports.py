@@ -25,6 +25,7 @@ from saebooks.models.company import Company
 from saebooks.models.journal import EntryStatus
 from saebooks.services import journal as journal_svc
 from saebooks.services import trust_reports as svc
+pytestmark = pytest.mark.postgres_only
 
 
 # ---------------------------------------------------------------------------

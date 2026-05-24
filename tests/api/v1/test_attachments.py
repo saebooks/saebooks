@@ -33,6 +33,7 @@ from saebooks.models.account import Account, AccountType
 from saebooks.models.bill import Bill, BillStatus
 from saebooks.models.contact import Contact, ContactType
 from saebooks.services import vault as vault_client
+pytestmark = pytest.mark.postgres_only
 
 
 # ---------------------------------------------------------------------------

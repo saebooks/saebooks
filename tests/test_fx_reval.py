@@ -46,6 +46,7 @@ from saebooks.services.fx.reval import (
     _reval_for_currency,
     _reverse_lines,
 )
+pytestmark = pytest.mark.postgres_only
 
 # ------------------------------------------------------------------ #
 # Test DB prep — same fast-forward-counter pattern as test_fx.py        #
