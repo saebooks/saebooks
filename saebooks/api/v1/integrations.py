@@ -59,7 +59,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
@@ -303,13 +303,29 @@ async def paperless_webhook(
 
     raw_body = await request.body()
 
-    # Load the per-tenant secret from the DB, bypassing RLS by using
-    # the owner session (the webhook has no user JWT — we authenticate
-    # by HMAC instead, which is equivalent to bearer token auth for a
-    # webhook).
-    async with AsyncSessionLocal() as session:
-        from saebooks.models.integrations import PaperlessWebhookSecret  # noqa: PLC0415
+    # Load the per-tenant secret from the DB. The table has FORCE ROW
+    # LEVEL SECURITY + a tenant_isolation policy keyed on
+    # app.current_tenant — under the runtime saebooks_app role
+    # (NOSUPERUSER + NOBYPASSRLS, see migration 0056_split_db_role and
+    # docs/db-role-split.md) the policy is enforced, so we MUST set
+    # the GUC before the SELECT or every webhook 404s.
+    #
+    # The webhook has no JWT/Bearer (it's authenticated by HMAC after
+    # the lookup), so we don't go through get_session — we bind
+    # the tenant explicitly here. Lane 5 P0-005 / Lane 4 P0-1.
+    #
+    # SET LOCAL does NOT accept bindparams in Postgres ("syntax
+    # error at or near "$1""); use literal interpolation, safe
+    # because tenant_uuid is a typed UUID. Matches the pattern in
+    # saebooks/api/v1/deps.py:_set_current_tenant_on_begin.
+    from saebooks.models.integrations import PaperlessWebhookSecret  # noqa: PLC0415
 
+    async with AsyncSessionLocal() as session:
+        # SET LOCAL needs an open transaction; the first statement on
+        # an asyncpg connection in SQLAlchemy auto-begins.
+        await session.execute(
+            text(f"SET LOCAL app.current_tenant = '{tenant_uuid}'")
+        )
         result = await session.execute(
             select(PaperlessWebhookSecret).where(
                 PaperlessWebhookSecret.tenant_id == tenant_uuid,

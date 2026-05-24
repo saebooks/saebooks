@@ -54,6 +54,10 @@ services:
       # config, employees TFN) raises FieldEncryptionNotConfiguredError
       # and the whole encrypted-field test surface crashes.
       SAEBOOKS_FIELD_ENCRYPTION_KEY: "c2FlYm9va3MtdGVzdC1rZXktZG8tbm90LXVzZS1wcm8="
+      # Migration 0128 ALTERs the saebooks_app role password. The
+      # docker/test-initdb/01-test-roles.sql script seeds the role with
+      # this same value so the test compose stays self-consistent.
+      SAEBOOKS_APP_DB_PASSWORD: "saebooks_app_test_pw"
     # entrypoint.sh with args execs them directly (no uvicorn).
     # We run alembic upgrade head first, then pytest.
     # bash -c is passed as the single arg so entrypoint execs it.
