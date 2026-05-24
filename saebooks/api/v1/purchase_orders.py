@@ -163,9 +163,10 @@ async def get_purchase_order(
     po_id: UUID,
     request: Request,
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> PurchaseOrderOut:
     tenant_id = resolve_tenant_id(request)
-    po = await svc.api_get(session, po_id, tenant_id=tenant_id)
+    po = await svc.api_get(session, po_id, tenant_id=tenant_id, company_id=company_id)
     if po is None:
         raise HTTPException(404, "PurchaseOrder not found")
     return PurchaseOrderOut.model_validate(po)
@@ -260,13 +261,14 @@ async def update_purchase_order(
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
     force: bool = Depends(edit_force_admin_gate),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with PO version is required")
 
     tenant_id = resolve_tenant_id(request)
-    if await svc.api_get(session, po_id, tenant_id=tenant_id) is None:
+    if await svc.api_get(session, po_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "PurchaseOrder not found")
 
     try:
@@ -429,6 +431,7 @@ async def convert_to_bill(
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
@@ -464,7 +467,7 @@ async def convert_to_bill(
                 status_code=claim.response_status or 200,
             )
 
-    if await svc.api_get(session, po_id, tenant_id=tenant_id) is None:
+    if await svc.api_get(session, po_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "PurchaseOrder not found")
 
     try:
@@ -518,9 +521,10 @@ async def archive_purchase_order(
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
     hard: bool = Depends(hard_delete_admin_gate),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
-    existing = await svc.api_get(session, po_id, tenant_id=tenant_id)
+    existing = await svc.api_get(session, po_id, tenant_id=tenant_id, company_id=company_id)
     if existing is None:
         raise HTTPException(404, "PurchaseOrder not found")
 

@@ -155,9 +155,10 @@ async def get_contact(
     contact_id: UUID,
     request: Request,
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> ContactOut:
     tenant_id = resolve_tenant_id(request)
-    contact = await svc.get(session, contact_id, tenant_id=tenant_id)
+    contact = await svc.get(session, contact_id, tenant_id=tenant_id, company_id=company_id)
     if contact is None:
         raise HTTPException(404, "Contact not found")
     return ContactOut.model_validate(contact)
@@ -247,6 +248,7 @@ async def update_contact(
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
@@ -279,7 +281,7 @@ async def update_contact(
     # tenant before we attempt the update. RLS already enforces this,
     # but the service-layer ValueError message is friendlier than a
     # silent zero-rows update.
-    if await svc.get(session, contact_id, tenant_id=tenant_id) is None:
+    if await svc.get(session, contact_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Contact not found")
 
     try:
@@ -334,10 +336,11 @@ async def archive_contact(
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
     hard: bool = Depends(hard_delete_admin_gate),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
     if hard:
-        existing = await svc.get(session, contact_id, tenant_id=tenant_id)
+        existing = await svc.get(session, contact_id, tenant_id=tenant_id, company_id=company_id)
         if existing is None:
             raise HTTPException(404, "Contact not found")
         await hard_delete_with_audit(
@@ -371,7 +374,7 @@ async def archive_contact(
                 status_code=claim.response_status or 204,
             )
 
-    if await svc.get(session, contact_id, tenant_id=tenant_id) is None:
+    if await svc.get(session, contact_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Contact not found")
 
     try:
@@ -413,6 +416,7 @@ async def bulk_tag_one_off(
     request: Request,
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> JSONResponse:
     """Set ``is_one_off`` on a list of contacts in one transaction.
 
@@ -431,7 +435,7 @@ async def bulk_tag_one_off(
     tenant_id = resolve_tenant_id(request)
     flipped = 0
     for cid in payload.contact_ids:
-        existing = await svc.get(session, cid, tenant_id=tenant_id)
+        existing = await svc.get(session, cid, tenant_id=tenant_id, company_id=company_id)
         if existing is None or existing.archived_at is not None:
             continue
         if existing.is_one_off == payload.is_one_off:

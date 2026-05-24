@@ -573,18 +573,24 @@ async def api_get(
     credit_note_id: uuid.UUID,
     *,
     tenant_id: uuid.UUID | None = None,
+    company_id: uuid.UUID | None = None,
 ) -> CreditNote | None:
     """Fetch a single credit note with its lines. Returns None if not found.
 
     When ``tenant_id`` is supplied the lookup is filtered by tenant —
     a foreign-tenant id returns ``None`` even if the row exists.
     """
-    if tenant_id is None:
+    if tenant_id is None and company_id is None:
         return await _get_api(session, credit_note_id)
+    clauses = [CreditNote.id == credit_note_id]
+    if tenant_id is not None:
+        clauses.append(CreditNote.tenant_id == tenant_id)
+    if company_id is not None:
+        clauses.append(CreditNote.company_id == company_id)
     result = await session.execute(
         select(CreditNote)
         .options(selectinload(CreditNote.lines))
-        .where(CreditNote.id == credit_note_id, CreditNote.tenant_id == tenant_id)
+        .where(*clauses)
     )
     return result.scalar_one_or_none()
 

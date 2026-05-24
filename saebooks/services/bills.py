@@ -733,6 +733,7 @@ async def api_get(
     bill_id: uuid.UUID,
     *,
     tenant_id: uuid.UUID | None = None,
+    company_id: uuid.UUID | None = None,
 ) -> Bill | None:
     """Fetch a single bill with its lines. Returns None if not found.
 
@@ -742,15 +743,17 @@ async def api_get(
     and optional so existing callers (the legacy posting pipeline)
     keep working unchanged; the API layer always supplies it.
     """
-    if tenant_id is None:
+    if tenant_id is None and company_id is None:
         return await _get_with_lines(session, bill_id)
+    clauses = [Bill.id == bill_id]
+    if tenant_id is not None:
+        clauses.append(Bill.tenant_id == tenant_id)
+    if company_id is not None:
+        clauses.append(Bill.company_id == company_id)
     result = await session.execute(
         select(Bill)
         .options(selectinload(Bill.lines))
-        .where(
-            Bill.id == bill_id,
-            Bill.tenant_id == tenant_id,
-        )
+        .where(*clauses)
     )
     return result.scalar_one_or_none()
 

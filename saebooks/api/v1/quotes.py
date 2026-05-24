@@ -149,9 +149,10 @@ async def get_quote(
     quote_id: UUID,
     request: Request,
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> QuoteOut:
     tenant_id = resolve_tenant_id(request)
-    q = await svc.api_get(session, quote_id, tenant_id=tenant_id)
+    q = await svc.api_get(session, quote_id, tenant_id=tenant_id, company_id=company_id)
     if q is None:
         raise HTTPException(404, "Quote not found")
     return QuoteOut.model_validate(q)
@@ -167,6 +168,7 @@ async def get_quote_pdf(
     request: Request,
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Response:
     """Render a quote as PDF — engineering-style ESTIMATE matching the Overleaf template.
 
@@ -178,7 +180,7 @@ async def get_quote_pdf(
     from sqlalchemy import select as sa_select
 
     tenant_id = resolve_tenant_id(request)
-    q = await svc.api_get(session, quote_id, tenant_id=tenant_id)
+    q = await svc.api_get(session, quote_id, tenant_id=tenant_id, company_id=company_id)
     if q is None:
         raise HTTPException(404, "Quote not found")
 
@@ -241,6 +243,7 @@ async def post_quote_send_email(
     request: Request,
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Response:
     """Render the quote PDF + send (or block) via customer_email.
 
@@ -289,7 +292,7 @@ async def post_quote_send_email(
     if not from_addr or not to or not subject or not body_html:
         raise HTTPException(422, "from_addr, to, subject, and body_html are all required")
 
-    q = await svc.api_get(session, quote_id, tenant_id=tenant_id)
+    q = await svc.api_get(session, quote_id, tenant_id=tenant_id, company_id=company_id)
     if q is None:
         raise HTTPException(404, "Quote not found")
 
@@ -463,13 +466,14 @@ async def update_quote(
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
     force: bool = Depends(edit_force_admin_gate),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with quote version is required")
 
     tenant_id = resolve_tenant_id(request)
-    if await svc.api_get(session, quote_id, tenant_id=tenant_id) is None:
+    if await svc.api_get(session, quote_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Quote not found")
 
     try:
@@ -533,9 +537,10 @@ async def delete_quote(
     request: Request,
     session: AsyncSession = Depends(get_session),
     hard: bool = Depends(hard_delete_admin_gate),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
-    existing = await svc.api_get(session, quote_id, tenant_id=tenant_id)
+    existing = await svc.api_get(session, quote_id, tenant_id=tenant_id, company_id=company_id)
     if existing is None:
         raise HTTPException(404, "Quote not found")
 
@@ -687,6 +692,7 @@ async def convert_to_invoice(
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
@@ -722,7 +728,7 @@ async def convert_to_invoice(
                 status_code=claim.response_status or 200,
             )
 
-    if await svc.api_get(session, quote_id, tenant_id=tenant_id) is None:
+    if await svc.api_get(session, quote_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Quote not found")
 
     try:

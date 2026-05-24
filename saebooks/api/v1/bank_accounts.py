@@ -169,9 +169,12 @@ async def get_bank_account(
     request: Request,
     bank_account_id: UUID,
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> BankAccountOut:
     tenant_id = resolve_tenant_id(request)
-    account = await svc.api_get(session, bank_account_id, tenant_id=tenant_id)
+    account = await svc.api_get(
+        session, bank_account_id, tenant_id=tenant_id, company_id=company_id
+    )
     if account is None:
         raise HTTPException(404, "Bank account not found")
     return BankAccountOut.model_validate(account)
@@ -261,6 +264,7 @@ async def update_bank_account(
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
@@ -268,8 +272,10 @@ async def update_bank_account(
     key = _parse_idempotency_key(idempotency_key)
 
     tenant_id = resolve_tenant_id(request)
-    # Belt-and-braces: verify bank account belongs to this tenant
-    if await svc.api_get(session, bank_account_id, tenant_id=tenant_id) is None:
+    # Belt-and-braces: verify bank account belongs to this tenant + company.
+    if await svc.api_get(
+        session, bank_account_id, tenant_id=tenant_id, company_id=company_id
+    ) is None:
         raise HTTPException(404, "Bank account not found")
 
     if key is not None:
@@ -342,10 +348,13 @@ async def delete_bank_account(
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
     hard: bool = Depends(hard_delete_admin_gate),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
     if hard:
-        existing = await svc.api_get(session, bank_account_id, tenant_id=tenant_id)
+        existing = await svc.api_get(
+            session, bank_account_id, tenant_id=tenant_id, company_id=company_id
+        )
         if existing is None:
             raise HTTPException(404, "Bank account not found")
         await hard_delete_with_audit(
@@ -358,7 +367,9 @@ async def delete_bank_account(
     if expected is None:
         raise HTTPException(428, "If-Match header with bank account version is required")
 
-    if await svc.api_get(session, bank_account_id, tenant_id=tenant_id) is None:
+    if await svc.api_get(
+        session, bank_account_id, tenant_id=tenant_id, company_id=company_id
+    ) is None:
         raise HTTPException(404, "Bank account not found")
 
     try:

@@ -213,9 +213,10 @@ async def get_fixed_asset(
     request: Request,
     asset_id: UUID,
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> FixedAssetOut:
     tenant_id = resolve_tenant_id(request)
-    asset = await svc.get(session, asset_id, tenant_id=tenant_id)
+    asset = await svc.get(session, asset_id, tenant_id=tenant_id, company_id=company_id)
     if asset is None:
         raise HTTPException(404, "Fixed asset not found")
     return FixedAssetOut.model_validate(asset)
@@ -315,6 +316,7 @@ async def update_fixed_asset(
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
@@ -323,7 +325,7 @@ async def update_fixed_asset(
 
     tenant_id = resolve_tenant_id(request)
     # Belt-and-braces: verify asset belongs to this tenant
-    if await svc.get(session, asset_id, tenant_id=tenant_id) is None:
+    if await svc.get(session, asset_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Fixed asset not found")
 
     if key is not None:
@@ -396,6 +398,7 @@ async def dispose_fixed_asset(
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     """Dispose a fixed asset.
 
@@ -412,7 +415,7 @@ async def dispose_fixed_asset(
 
     tenant_id = resolve_tenant_id(request)
     # Belt-and-braces: verify asset belongs to this tenant
-    if await svc.get(session, asset_id, tenant_id=tenant_id) is None:
+    if await svc.get(session, asset_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Fixed asset not found")
 
     try:
@@ -459,6 +462,7 @@ async def post_depreciation(
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     """Run a depreciation posting for a fixed asset up to ``through``.
 
@@ -477,7 +481,7 @@ async def post_depreciation(
 
     actor = f"api:{bearer[:8]}…"
     tenant_id = resolve_tenant_id(request)
-    asset = await svc.get(session, asset_id, tenant_id=tenant_id)
+    asset = await svc.get(session, asset_id, tenant_id=tenant_id, company_id=company_id)
     if asset is None:
         raise HTTPException(404, "Fixed asset not found")
     if asset.version != expected:
@@ -557,6 +561,7 @@ async def convert_to_inventory(
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     """Convert an active FA demonstrator to used-inventory stock.
 
@@ -575,7 +580,7 @@ async def convert_to_inventory(
 
     actor = f"api:{bearer[:8]}…"
     tenant_id = resolve_tenant_id(request)
-    if await svc.get(session, asset_id, tenant_id=tenant_id) is None:
+    if await svc.get(session, asset_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Fixed asset not found")
 
     try:
@@ -632,9 +637,10 @@ async def delete_fixed_asset(
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
     hard: bool = Depends(hard_delete_admin_gate),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
-    existing = await svc.get(session, asset_id, tenant_id=tenant_id)
+    existing = await svc.get(session, asset_id, tenant_id=tenant_id, company_id=company_id)
     if existing is None:
         raise HTTPException(404, "Fixed asset not found")
 

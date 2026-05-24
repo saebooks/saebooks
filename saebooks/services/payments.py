@@ -950,6 +950,7 @@ async def api_get(
     payment_id: uuid.UUID,
     *,
     tenant_id: uuid.UUID | None = None,
+    company_id: uuid.UUID | None = None,
 ) -> Payment | None:
     """Fetch a single payment with its allocations. Returns None if not found.
 
@@ -959,15 +960,17 @@ async def api_get(
     and optional so existing callers keep working unchanged; the
     API layer always supplies it.
     """
-    if tenant_id is None:
+    if tenant_id is None and company_id is None:
         return await _get_with_allocations(session, payment_id)
+    clauses = [Payment.id == payment_id]
+    if tenant_id is not None:
+        clauses.append(Payment.tenant_id == tenant_id)
+    if company_id is not None:
+        clauses.append(Payment.company_id == company_id)
     result = await session.execute(
         select(Payment)
         .options(selectinload(Payment.allocations))
-        .where(
-            Payment.id == payment_id,
-            Payment.tenant_id == tenant_id,
-        )
+        .where(*clauses)
     )
     return result.scalar_one_or_none()
 

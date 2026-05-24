@@ -133,6 +133,7 @@ async def get(
     item_id: uuid.UUID,
     *,
     tenant_id: uuid.UUID | None = None,
+    company_id: uuid.UUID | None = None,
 ) -> Item | None:
     """Fetch an item by id.
 
@@ -140,13 +141,15 @@ async def get(
     a foreign-tenant id returns ``None`` even if the row exists.
     Keyword-only + optional so existing callers keep working unchanged.
     """
-    if tenant_id is None:
+    if tenant_id is None and company_id is None:
         return await session.get(Item, item_id)
+    clauses = [Item.id == item_id]
+    if tenant_id is not None:
+        clauses.append(Item.tenant_id == tenant_id)
+    if company_id is not None:
+        clauses.append(Item.company_id == company_id)
     result = await session.execute(
-        select(Item).where(
-            Item.id == item_id,
-            Item.tenant_id == tenant_id,
-        )
+        select(Item).where(*clauses)
     )
     return result.scalars().first()
 

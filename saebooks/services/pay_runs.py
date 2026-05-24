@@ -47,6 +47,7 @@ async def _get_with_lines(
     pay_run_id: uuid.UUID,
     *,
     tenant_id: uuid.UUID | None = None,
+    company_id: uuid.UUID | None = None,
 ) -> PayRun | None:
     stmt = (
         select(PayRun)
@@ -55,6 +56,8 @@ async def _get_with_lines(
     )
     if tenant_id is not None:
         stmt = stmt.where(PayRun.tenant_id == tenant_id)
+    if company_id is not None:
+        stmt = stmt.where(PayRun.company_id == company_id)
     result = await session.execute(stmt)
     return result.scalars().first()
 
@@ -163,8 +166,11 @@ async def get(
     pay_run_id: uuid.UUID,
     *,
     tenant_id: uuid.UUID | None = None,
+    company_id: uuid.UUID | None = None,
 ) -> PayRun | None:
-    return await _get_with_lines(session, pay_run_id, tenant_id=tenant_id)
+    return await _get_with_lines(
+        session, pay_run_id, tenant_id=tenant_id, company_id=company_id
+    )
 
 
 async def list_runs(

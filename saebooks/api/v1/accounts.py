@@ -172,9 +172,10 @@ async def get_account(
     account_id: UUID,
     request: Request,
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> AccountOut:
     tenant_id = resolve_tenant_id(request)
-    account = await svc.get(session, account_id, tenant_id=tenant_id)
+    account = await svc.get(session, account_id, tenant_id=tenant_id, company_id=company_id)
     if account is None:
         raise HTTPException(404, "Account not found")
     return AccountOut.model_validate(account)
@@ -204,6 +205,7 @@ async def get_account_ledger(
     limit: int = Query(default=200, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> JSONResponse:
     """Return posted journal lines for this account with running balance.
 
@@ -238,7 +240,7 @@ async def get_account_ledger(
     show_balance = (sort == "date")
 
     tenant_id = resolve_tenant_id(request)
-    account = await svc.get(session, account_id, tenant_id=tenant_id)
+    account = await svc.get(session, account_id, tenant_id=tenant_id, company_id=company_id)
     if account is None:
         raise HTTPException(404, "Account not found")
 
@@ -480,6 +482,7 @@ async def update_account(
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
@@ -508,7 +511,7 @@ async def update_account(
                 status_code=claim.response_status or 200,
             )
 
-    if await svc.get(session, account_id, tenant_id=tenant_id) is None:
+    if await svc.get(session, account_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Account not found")
 
     try:
@@ -563,10 +566,11 @@ async def archive_account(
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
     hard: bool = Depends(hard_delete_admin_gate),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
     if hard:
-        existing = await svc.get(session, account_id, tenant_id=tenant_id)
+        existing = await svc.get(session, account_id, tenant_id=tenant_id, company_id=company_id)
         if existing is None:
             raise HTTPException(404, "Account not found")
         await hard_delete_with_audit(
@@ -601,7 +605,7 @@ async def archive_account(
                 status_code=claim.response_status or 204,
             )
 
-    if await svc.get(session, account_id, tenant_id=tenant_id) is None:
+    if await svc.get(session, account_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Account not found")
 
     try:

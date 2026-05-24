@@ -106,9 +106,10 @@ async def get_allocation_rule(
     request: Request,
     rule_id: UUID,
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> AllocationRuleOut:
     tenant_id = resolve_tenant_id(request)
-    rule = await svc.api_get(session, rule_id, tenant_id)
+    rule = await svc.api_get(session, rule_id, tenant_id, company_id=company_id)
     if rule is None:
         raise HTTPException(404, "Allocation rule not found")
     return AllocationRuleOut.model_validate(rule)
@@ -157,6 +158,7 @@ async def update_allocation_rule(
     body: AllocationRuleUpdate,
     if_match: str | None = Header(default=None, alias="If-Match"),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> AllocationRuleOut | JSONResponse:
     tenant_id = resolve_tenant_id(request)
     actor = getattr(request.state, "user", "api")
@@ -170,6 +172,10 @@ async def update_allocation_rule(
             t.model_dump(mode="json") if hasattr(t, "model_dump") else t
             for t in updates["targets"]
         ]
+
+    # Belt-and-braces: cross-company isolation (Layer 2, 2026-05-24)
+    if await svc.api_get(session, rule_id, tenant_id, company_id=company_id) is None:
+        raise HTTPException(404, "Allocation rule not found")
 
     try:
         rule = await svc.api_update(
@@ -205,11 +211,12 @@ async def delete_allocation_rule(
     if_match: str | None = Header(default=None, alias="If-Match"),
     session: AsyncSession = Depends(get_session),
     hard: bool = Depends(hard_delete_admin_gate),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Response:
     tenant_id = resolve_tenant_id(request)
     actor = getattr(request.state, "user", "api")
     if hard:
-        existing = await svc.api_get(session, rule_id, tenant_id)
+        existing = await svc.api_get(session, rule_id, tenant_id, company_id=company_id)
         if existing is None:
             raise HTTPException(404, "Allocation rule not found")
         await hard_delete_with_audit(
@@ -220,6 +227,9 @@ async def delete_allocation_rule(
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header required for DELETE")
+    # Belt-and-braces: cross-company isolation (Layer 2, 2026-05-24)
+    if await svc.api_get(session, rule_id, tenant_id, company_id=company_id) is None:
+        raise HTTPException(404, "Allocation rule not found")
     try:
         await svc.api_delete(
             session,
@@ -262,7 +272,7 @@ async def apply_allocation_rule(
     """
     tenant_id = resolve_tenant_id(request)
     actor = getattr(request.state, "user", "api")
-    rule = await svc.api_get(session, rule_id, tenant_id)
+    rule = await svc.api_get(session, rule_id, tenant_id, company_id=company_id)
     if rule is None:
         raise HTTPException(404, "Allocation rule not found")
     if rule.archived_at is not None:
