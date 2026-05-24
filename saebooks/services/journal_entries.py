@@ -102,6 +102,19 @@ async def _get_with_lines(session: AsyncSession, entry_id: uuid.UUID) -> Journal
     return result.scalar_one_or_none()
 
 
+def _coerce_uuid(value: Any) -> uuid.UUID | None:
+    """Accept str or UUID; return UUID. None passes through.
+
+    Without this, callers that pass str(some_uuid) end up with a
+    JournalLine whose account_id is a str in memory but UUID after
+    a round-trip to the DB. SQLAlchemy SelectInLoader chokes on
+    sorted(our_states) when FK cache keys are mixed types.
+    """
+    if value is None or isinstance(value, uuid.UUID):
+        return value
+    return uuid.UUID(str(value))
+
+
 def _build_lines(entry_id: uuid.UUID, lines: list[dict[str, Any]]) -> list[JournalLine]:
     result = []
     for i, line_data in enumerate(lines, 1):
@@ -109,13 +122,13 @@ def _build_lines(entry_id: uuid.UUID, lines: list[dict[str, Any]]) -> list[Journ
             JournalLine(
                 entry_id=entry_id,
                 line_no=i,
-                account_id=line_data["account_id"],
+                account_id=_coerce_uuid(line_data["account_id"]),
                 description=line_data.get("description"),
                 debit=Decimal(str(line_data.get("debit", 0))),
                 credit=Decimal(str(line_data.get("credit", 0))),
-                tax_code_id=line_data.get("tax_code_id"),
+                tax_code_id=_coerce_uuid(line_data.get("tax_code_id")),
                 gst_amount=line_data.get("gst_amount"),
-                project_id=line_data.get("project_id"),
+                project_id=_coerce_uuid(line_data.get("project_id")),
             )
         )
     return result
