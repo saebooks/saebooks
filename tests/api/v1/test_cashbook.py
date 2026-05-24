@@ -780,12 +780,26 @@ async def test_setup_idempotent_when_already_cashbook(api_client: AsyncClient) -
     assert body["version"] >= 2
 
 
+@pytest.mark.skip(
+    reason=(
+        "Behaviour superseded by Round-2 audit fix #10 + "
+        "[[cashbook-upgrade-downgrade-policy]]: full -> cashbook is now a "
+        "first-class downgrade that refuses only on AR > 0, not on the "
+        "mere presence of journal entries. ``setup_cashbook_mode`` delegates "
+        "to ``downgrade_full_to_cashbook`` for the policy check (see "
+        "services/cashbook.py). The dedicated AR-balance refusal path is "
+        "covered by test_downgrade_refuses_when_ar_outstanding elsewhere "
+        "in the cashbook suite."
+    )
+)
 async def test_setup_refuses_full_company_with_existing_je(
     api_client: AsyncClient,
 ) -> None:
-    """Dev-DB seed company carries journal entries from prior runs, so
-    flipping it back to 'full' and trying to setup must refuse — design
-    rules out mid-life full→cashbook switching."""
+    """Historical: full -> cashbook used to refuse on any journal entries.
+
+    Kept (skipped) so the rationale stays adjacent to the call site and
+    a future contributor doesn't reintroduce the old guard.
+    """
     await _reset_company_to_full_mode()
     try:
         bank_id = await _bank_account_id()

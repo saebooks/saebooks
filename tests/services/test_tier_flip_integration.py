@@ -52,8 +52,17 @@ _TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 async def _seed_company_cashbook() -> tuple[uuid.UUID, uuid.UUID]:
     """Flip the oldest seed company to cashbook mode.
+
+    Also purges any pre-existing invoices/payments/JEs from prior tests in
+    the same test-session so the document_counter starts at INV-000001 for
+    this test (otherwise tier_flip collides on INV-000003+ when other
+    invoice-touching tests have already advanced the counter / minted that
+    number).
+
     Returns (tenant_id, company_id).
     """
+    from sqlalchemy import text
+
     async with AsyncSessionLocal() as session:
         co = (
             await session.execute(
@@ -76,6 +85,56 @@ async def _seed_company_cashbook() -> tuple[uuid.UUID, uuid.UUID]:
         co.bookkeeping_mode = "cashbook"
         co.cashbook_default_bank_account_id = bank.id
         co.gst_registered = False
+        await session.commit()
+
+    # Clean slate for this company's invoice ledger so the auto-numbered
+    # INVs minted by this test cannot collide with leftovers from a prior
+    # test in the same session. Order matters: payments/allocations before
+    # invoices/JE lines so FKs unwind cleanly.
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            text(
+                "DELETE FROM payment_allocations WHERE payment_id IN "
+                "(SELECT id FROM payments WHERE company_id = :cid)"
+            ).bindparams(cid=co.id)
+        )
+        await session.execute(
+            text(
+                "UPDATE payments SET journal_entry_id = NULL "
+                "WHERE company_id = :cid"
+            ).bindparams(cid=co.id)
+        )
+        await session.execute(
+            text(
+                "UPDATE invoices SET journal_entry_id = NULL "
+                "WHERE company_id = :cid"
+            ).bindparams(cid=co.id)
+        )
+        await session.execute(
+            text("DELETE FROM payments WHERE company_id = :cid").bindparams(cid=co.id)
+        )
+        await session.execute(
+            text("DELETE FROM invoice_lines WHERE invoice_id IN "
+                 "(SELECT id FROM invoices WHERE company_id = :cid)"
+            ).bindparams(cid=co.id)
+        )
+        await session.execute(
+            text("DELETE FROM invoices WHERE company_id = :cid").bindparams(cid=co.id)
+        )
+        await session.execute(
+            text("DELETE FROM journal_lines WHERE entry_id IN "
+                 "(SELECT id FROM journal_entries WHERE company_id = :cid)"
+            ).bindparams(cid=co.id)
+        )
+        await session.execute(
+            text("DELETE FROM journal_entries WHERE company_id = :cid").bindparams(cid=co.id)
+        )
+        await session.execute(
+            text(
+                "UPDATE document_counters SET next_value = 1 "
+                "WHERE company_id = :cid AND kind IN ('invoice', 'payment')"
+            ).bindparams(cid=co.id)
+        )
         await session.commit()
         return co.tenant_id, co.id
 
