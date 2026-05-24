@@ -52,6 +52,8 @@ from typing import Any
 import httpx
 from mcp.server.fastmcp import Context, FastMCP
 
+from saebooks import __version__
+
 logger = logging.getLogger("saebooks.mcp")
 logging.basicConfig(level=os.getenv("SAEBOOKS_MCP_LOG_LEVEL", "INFO"))
 
@@ -96,6 +98,10 @@ mcp = FastMCP(
         "to read its current version."
     ),
 )
+# Expose the application version via MCP initialize serverInfo.
+# FastMCP does not accept a version= kwarg; we set it on the
+# underlying low-level server directly after construction.
+mcp._mcp_server.version = __version__
 
 
 def _register(safety: str = "safe"):
