@@ -49,6 +49,10 @@ services:
       # password. Use a throwaway credential — the role has no access
       # outside this ephemeral network.
       SAEBOOKS_SQL_RO_PASSWORD: "saebooks_sql_ro_test_pw"
+      # ensure_seed_company defaults to "Default Company" without this;
+      # test_accounts_page.test_accounts_list_renders asserts the literal
+      # production-like name renders on /accounts, so seed it explicitly.
+      SEED_COMPANY_NAME: "Sauer Pty Ltd ATF Saueesti Trust"
       # Deterministic Fernet test key (NOT FOR PRODUCTION). Without this,
       # any test that touches Fernet-encrypted fields (SISS creds, ATO SBR
       # config, employees TFN) raises FieldEncryptionNotConfiguredError
