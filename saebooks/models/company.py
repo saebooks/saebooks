@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import text, Boolean, Date, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -68,6 +68,22 @@ class Company(Base):
         nullable=True,
     )
     cashbook_categories: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
+    # Legal-entity model (migration 0133, 2026-05-24).
+    # entity_type: COMPANY | TRUST | INDIVIDUAL | PARTNERSHIP | SUPER_FUND
+    # trades: false for pure trustee companies that hold no ABN
+    # trustee_company_id: on a TRUST row, points at the trustee Company
+    entity_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default="COMPANY", default="COMPANY",
+    )
+    trades: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true"), default=True,
+    )
+    trustee_company_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("companies.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
 
     # Optimistic-locking version — bumped on every write through the API.
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)

@@ -37,6 +37,7 @@ from saebooks.api.v1.bank_rules import router as bank_rules_router
 from saebooks.api.v1.bank_statement_lines import router as bank_statement_lines_router
 from saebooks.api.v1.billing import router as billing_router
 from saebooks.api.v1.bills import router as bills_router
+from saebooks.api.v1.branches import router as branches_router
 from saebooks.api.v1.employees import router as employees_router
 from saebooks.api.v1.expenses import router as expenses_router
 from saebooks.api.v1.leave import router as leave_router
@@ -126,6 +127,7 @@ router.include_router(journal_entries_router)
 router.include_router(invoices_router)
 router.include_router(journal_templates_router)
 router.include_router(bills_router)
+router.include_router(branches_router)
 router.include_router(expenses_router)
 router.include_router(time_entries_router)
 # Payroll Phase 1A foundations
