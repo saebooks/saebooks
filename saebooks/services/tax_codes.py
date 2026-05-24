@@ -132,12 +132,20 @@ async def ensure_au_seed(session: AsyncSession, company_id: uuid.UUID) -> int:
     return inserted
 
 
-async def list_active(session: AsyncSession, company_id: uuid.UUID) -> list[TaxCode]:
-    result = await session.execute(
+async def list_active(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
+) -> list[TaxCode]:
+    stmt = (
         select(TaxCode)
         .where(TaxCode.company_id == company_id, TaxCode.archived_at.is_(None))
-        .order_by(TaxCode.code)
     )
+    if tenant_id is not None:
+        stmt = stmt.where(TaxCode.tenant_id == tenant_id)
+    stmt = stmt.order_by(TaxCode.code)
+    result = await session.execute(stmt)
     return list(result.scalars().all())
 
 

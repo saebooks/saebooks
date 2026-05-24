@@ -463,13 +463,19 @@ async def find_parent(
 
 
 async def list_active(
-    session: AsyncSession, company_id: uuid.UUID
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
 ) -> list[Account]:
-    result = await session.execute(
+    stmt = (
         select(Account)
         .where(Account.company_id == company_id, Account.archived_at.is_(None))
-        .order_by(Account.code)
     )
+    if tenant_id is not None:
+        stmt = stmt.where(Account.tenant_id == tenant_id)
+    stmt = stmt.order_by(Account.code)
+    result = await session.execute(stmt)
     return list(result.scalars().all())
 
 

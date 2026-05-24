@@ -108,6 +108,7 @@ async def list_active(
     session: AsyncSession,
     company_id: uuid.UUID,
     *,
+    tenant_id: uuid.UUID | None = None,
     contact_type: ContactType | None = None,
     search: str | None = None,
     is_one_off: bool | None = None,
@@ -124,6 +125,8 @@ async def list_active(
         select(Contact)
         .where(Contact.company_id == company_id, Contact.archived_at.is_(None))
     )
+    if tenant_id is not None:
+        stmt = stmt.where(Contact.tenant_id == tenant_id)
     if contact_type is not None:
         stmt = stmt.where(Contact.contact_type == contact_type)
     if is_one_off is not None:
@@ -367,16 +370,25 @@ async def search_by_name(
     company_id: uuid.UUID,
     query: str,
     limit: int = 10,
+    *,
+    tenant_id: uuid.UUID | None = None,
 ) -> list[Contact]:
-    """Quick search for autocomplete — ILIKE on name."""
-    result = await session.execute(
+    """Quick search for autocomplete — ILIKE on name.
+
+    P0 defence-in-depth: when ``tenant_id`` is supplied the result is
+    additionally filtered by tenant so a corrupt row cannot surface to
+    the wrong tenant via the autocomplete path.
+    """
+    stmt = (
         select(Contact)
         .where(
             Contact.company_id == company_id,
             Contact.archived_at.is_(None),
             Contact.name.ilike(f"%{query}%"),
         )
-        .order_by(Contact.name)
-        .limit(limit)
     )
+    if tenant_id is not None:
+        stmt = stmt.where(Contact.tenant_id == tenant_id)
+    stmt = stmt.order_by(Contact.name).limit(limit)
+    result = await session.execute(stmt)
     return list(result.scalars().all())
