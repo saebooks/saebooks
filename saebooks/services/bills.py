@@ -773,20 +773,26 @@ async def api_get(
 # contractor critic expected (gap CIVL-1).
 
 
-async def _validate_contact_tenant(
+async def _validate_contact_company_and_tenant(
     session: AsyncSession,
     contact_id: uuid.UUID,
+    company_id: uuid.UUID,
     tenant_id: uuid.UUID,
 ) -> None:
-    """Raise ``BillError`` if ``contact_id`` does not belong to ``tenant_id``."""
+    """Raise ``BillError`` if ``contact_id`` does not belong to ``tenant_id``
+    or to ``company_id`` (Lane 1/2 P0-3 -- cross-company FK on invoice/bill create).
+    """
     result = await session.execute(
         select(Contact.id).where(
             Contact.id == contact_id,
+            Contact.company_id == company_id,
             Contact.tenant_id == tenant_id,
         )
     )
     if result.scalar_one_or_none() is None:
-        raise BillError("contact not found in current tenant")
+        raise BillError(
+            "contact_company_mismatch: contact does not belong to this company"
+        )
 
 
 async def _validate_account_tenant(
@@ -878,7 +884,7 @@ async def api_create(
     INSERT. Cross-tenant FK injection raises ``BillError`` (HTTP 422
     via the router).
     """
-    await _validate_contact_tenant(session, contact_id, tenant_id)
+    await _validate_contact_company_and_tenant(session, contact_id, company_id, tenant_id)
     if lines:
         await _validate_line_fks(session, lines, tenant_id)
 
@@ -956,9 +962,14 @@ async def api_update(
         raise BillError(f"Bill {bill_id} not found")
     if bill.version != expected_version:
         raise VersionConflict(bill)
+    if bill.status != BillStatus.DRAFT:
+        raise BillError(
+            f"bill_not_draft: cannot edit bill {bill.id} in state "
+            f"{bill.status.value}; void the existing bill and raise a new one instead."
+        )
 
     if contact_id is not None:
-        await _validate_contact_tenant(session, contact_id, bill.tenant_id)
+        await _validate_contact_company_and_tenant(session, contact_id, bill.company_id, bill.tenant_id)
         bill.contact_id = contact_id
     if lines is not None:
         await _validate_line_fks(session, lines, bill.tenant_id)

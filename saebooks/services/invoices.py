@@ -1015,20 +1015,26 @@ async def api_get(
 # ---------------------------------------------------------------------------
 
 
-async def _validate_contact_tenant(
+async def _validate_contact_company_and_tenant(
     session: AsyncSession,
     contact_id: uuid.UUID,
+    company_id: uuid.UUID,
     tenant_id: uuid.UUID,
 ) -> None:
-    """Raise ``InvoiceError`` if ``contact_id`` does not belong to ``tenant_id``."""
+    """Raise ``InvoiceError`` if ``contact_id`` does not belong to ``tenant_id``
+    or to ``company_id`` (Lane 1/2 P0-3 -- cross-company FK on invoice/bill create).
+    """
     result = await session.execute(
         select(Contact.id).where(
             Contact.id == contact_id,
+            Contact.company_id == company_id,
             Contact.tenant_id == tenant_id,
         )
     )
     if result.scalar_one_or_none() is None:
-        raise InvoiceError("contact not found in current tenant")
+        raise InvoiceError(
+            "contact_company_mismatch: contact does not belong to this company"
+        )
 
 
 async def _validate_account_tenant(
@@ -1121,7 +1127,7 @@ async def api_create(
     INSERT. Cross-tenant FK injection raises ``InvoiceError`` (HTTP 422
     via the router).
     """
-    await _validate_contact_tenant(session, contact_id, tenant_id)
+    await _validate_contact_company_and_tenant(session, contact_id, company_id, tenant_id)
     if lines:
         await _validate_line_fks(session, lines, tenant_id)
 
@@ -1199,9 +1205,14 @@ async def api_update(
         raise InvoiceError(f"Invoice {invoice_id} not found")
     if inv.version != expected_version:
         raise VersionConflict(inv)
+    if inv.status != InvoiceStatus.DRAFT:
+        raise InvoiceError(
+            f"invoice_not_draft: cannot edit invoice {inv.id} in state "
+            f"{inv.status.value}; void the existing invoice and raise a new one instead."
+        )
 
     if contact_id is not None:
-        await _validate_contact_tenant(session, contact_id, inv.tenant_id)
+        await _validate_contact_company_and_tenant(session, contact_id, inv.company_id, inv.tenant_id)
         inv.contact_id = contact_id
     if lines is not None:
         await _validate_line_fks(session, lines, inv.tenant_id)

@@ -432,3 +432,141 @@ async def test_invoices_change_log_full_sequence(
     assert [row.op for row in rows] == ["create", "update", "archive"]
     assert [row.version for row in rows] == [1, 2, 3]
     assert rows[0].entity == "invoice"
+
+
+# ---------------------------------------------------------------------------
+# Fix #1 — POSTED invoice mutation lock (Lane 2 P0-1)
+# ---------------------------------------------------------------------------
+
+
+async def test_patch_posted_invoice_returns_422(
+    api_client: AsyncClient, invoice_deps: dict[str, str]
+) -> None:
+    """PATCH on a POSTED invoice must return 422 with invoice_not_draft in body."""
+    # Create
+    r = await api_client.post("/api/v1/invoices", json=_invoice_payload(invoice_deps))
+    assert r.status_code == 201, r.text
+    invoice_id = r.json()["id"]
+    v = r.json()["version"]
+
+    # Post it (transition DRAFT -> POSTED)
+    r2 = await api_client.post(
+        f"/api/v1/invoices/{invoice_id}/post",
+        headers={"If-Match": str(v)},
+    )
+    assert r2.status_code == 200, r2.text
+    posted_v = r2.json()["version"]
+    assert r2.json()["status"] == "POSTED"
+
+    # PATCH a POSTED invoice -- must be rejected
+    r3 = await api_client.patch(
+        f"/api/v1/invoices/{invoice_id}",
+        json={"notes": "illegal mutation"},
+        headers={"If-Match": str(posted_v)},
+    )
+    assert r3.status_code == 422, r3.text
+    assert "invoice_not_draft" in r3.text
+
+
+async def test_patch_draft_invoice_still_works(
+    api_client: AsyncClient, invoice_deps: dict[str, str]
+) -> None:
+    """PATCH on a DRAFT invoice must still succeed (regression guard)."""
+    r = await api_client.post("/api/v1/invoices", json=_invoice_payload(invoice_deps))
+    assert r.status_code == 201
+    invoice_id = r.json()["id"]
+    v = r.json()["version"]
+
+    r2 = await api_client.patch(
+        f"/api/v1/invoices/{invoice_id}",
+        json={"notes": "draft update ok"},
+        headers={"If-Match": str(v)},
+    )
+    assert r2.status_code == 200, r2.text
+
+
+# ---------------------------------------------------------------------------
+# Fix #4 -- Cross-company contact on invoice create (Lane 1/2 P0-3)
+# ---------------------------------------------------------------------------
+
+
+async def test_invoice_create_rejects_cross_company_contact(
+    api_client: AsyncClient, invoice_deps: dict[str, str]
+) -> None:
+    """POST /invoices with a contact from a different company must return 422."""
+    from saebooks.api.v1.auth import DEFAULT_TENANT_ID
+    from saebooks.db import AsyncSessionLocal
+    from saebooks.models.contact import Contact, ContactType
+    from saebooks.models.company import Company
+    import uuid as _uuid
+
+    # Create a second company + contact in the same tenant but a different company
+    async with AsyncSessionLocal() as session:
+        other_company = Company(
+            tenant_id=DEFAULT_TENANT_ID,
+            name=f"Other Company {_uuid.uuid4().hex[:6]}",
+            base_currency="AUD",
+            fin_year_start_month=7,
+        )
+        session.add(other_company)
+        await session.flush()
+        other_contact = Contact(
+            tenant_id=DEFAULT_TENANT_ID,
+            company_id=other_company.id,
+            name="Cross-Company Contact",
+            contact_type=ContactType.BOTH,
+        )
+        session.add(other_contact)
+        await session.commit()
+        other_contact_id = str(other_contact.id)
+
+    payload = _invoice_payload(invoice_deps, contact_id=other_contact_id)
+    r = await api_client.post("/api/v1/invoices", json=payload)
+    assert r.status_code == 422, r.text
+    assert "contact_company_mismatch" in r.text
+
+
+# ---------------------------------------------------------------------------
+# Fix #28 -- Negative-total invoice rejected at schema layer (Lane 1 P2)
+# ---------------------------------------------------------------------------
+
+
+async def test_invoice_create_rejects_negative_total(
+    api_client: AsyncClient, invoice_deps: dict[str, str]
+) -> None:
+    """POST /invoices with a line that produces a negative total must return 422."""
+    payload = _invoice_payload(
+        invoice_deps,
+        lines=[
+            {
+                "description": "Negative line",
+                "account_id": invoice_deps["income_account_id"],
+                "quantity": "1",
+                "unit_price": "-100.00",
+                "discount_pct": "0",
+            }
+        ],
+    )
+    r = await api_client.post("/api/v1/invoices", json=payload)
+    assert r.status_code == 422, r.text
+    assert "invoice_negative_total" in r.text
+
+
+async def test_invoice_create_zero_total_allowed(
+    api_client: AsyncClient, invoice_deps: dict[str, str]
+) -> None:
+    """POST /invoices with a zero total (e.g. fully discounted) must succeed."""
+    payload = _invoice_payload(
+        invoice_deps,
+        lines=[
+            {
+                "description": "Zero-value line",
+                "account_id": invoice_deps["income_account_id"],
+                "quantity": "1",
+                "unit_price": "0.00",
+                "discount_pct": "0",
+            }
+        ],
+    )
+    r = await api_client.post("/api/v1/invoices", json=payload)
+    assert r.status_code == 201, r.text
