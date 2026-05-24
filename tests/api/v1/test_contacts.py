@@ -158,19 +158,24 @@ async def test_if_match_stale_returns_409_with_current(api_client: AsyncClient) 
 async def test_idempotent_replay_returns_cached_body(api_client: AsyncClient) -> None:
     key = str(uuid.uuid4())
     name = _rand_name("Idempotent")
+    body = {"name": name, "contact_type": "CUSTOMER"}
     r1 = await api_client.post(
         "/api/v1/contacts",
-        json={"name": name, "contact_type": "CUSTOMER"},
+        json=body,
         headers={"X-Idempotency-Key": key},
     )
     assert r1.status_code == 201
     first = r1.json()
 
-    # Replay the same request — server should NOT create a new contact;
-    # it should return the exact same body + status.
+    # Replay the SAME request (same key + same body) — server must
+    # return the cached response without creating a second contact.
+    # (Posting a *different* body under the same key is a separate
+    # contract — it returns 422 "idempotency_key_conflict" via the
+    # sha256-of-body check in services/idempotency.py; that path is
+    # exercised by test_idempotent_key_conflict_on_different_body.)
     r2 = await api_client.post(
         "/api/v1/contacts",
-        json={"name": _rand_name("Different"), "contact_type": "SUPPLIER"},
+        json=body,
         headers={"X-Idempotency-Key": key},
     )
     assert r2.status_code == 201
@@ -179,6 +184,26 @@ async def test_idempotent_replay_returns_cached_body(api_client: AsyncClient) ->
     # And there should be exactly ONE contact with that name.
     r3 = await api_client.get("/api/v1/contacts", params={"q": name})
     assert len([c for c in r3.json()["items"] if c["name"] == name]) == 1
+
+
+async def test_idempotent_key_conflict_on_different_body(api_client: AsyncClient) -> None:
+    """Same key, different body -> 422 idempotency_key_conflict (Stripe-style)."""
+    key = str(uuid.uuid4())
+    name1 = _rand_name("KeyConflictA")
+    name2 = _rand_name("KeyConflictB")
+    r1 = await api_client.post(
+        "/api/v1/contacts",
+        json={"name": name1, "contact_type": "CUSTOMER"},
+        headers={"X-Idempotency-Key": key},
+    )
+    assert r1.status_code == 201
+    r2 = await api_client.post(
+        "/api/v1/contacts",
+        json={"name": name2, "contact_type": "SUPPLIER"},
+        headers={"X-Idempotency-Key": key},
+    )
+    assert r2.status_code == 422
+    assert r2.json().get("code") == "idempotency_key_conflict"
 
 
 async def test_currency_code_roundtrip(api_client: AsyncClient) -> None:
