@@ -49,6 +49,10 @@ services:
       # password. Use a throwaway credential — the role has no access
       # outside this ephemeral network.
       SAEBOOKS_SQL_RO_PASSWORD: "saebooks_sql_ro_test_pw"
+      # Migration 0128 ALTERs the saebooks_app role password. The
+      # docker/test-initdb/01-test-roles.sql script seeds the role with
+      # this same value so the test compose stays self-consistent.
+      SAEBOOKS_APP_DB_PASSWORD: "saebooks_app_test_pw"
     # entrypoint.sh with args execs them directly (no uvicorn).
     # We run alembic upgrade head first, then pytest.
     # bash -c is passed as the single arg so entrypoint execs it.
