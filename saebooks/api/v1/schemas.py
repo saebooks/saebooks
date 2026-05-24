@@ -1231,6 +1231,14 @@ class BankAccountOut(BaseModel):
     version: int
     created_at: datetime
     archived_at: datetime | None = None
+    # Populated by the list handler only when ?include_balance=true /
+    # ?include_statement_balance=true is set. ``balance`` is the GL
+    # balance (POSTED journal lines, debit − credit) as-of today;
+    # ``statement_balance`` is the cumulative SUM(amount) of all
+    # non-archived bank_statement_lines on this account — the latest
+    # running balance the bsl view would show.
+    balance: Decimal | None = None
+    statement_balance: Decimal | None = None
 
 
 class BankAccountListOut(BaseModel):

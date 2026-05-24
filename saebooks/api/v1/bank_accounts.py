@@ -18,8 +18,11 @@ import json
 from typing import Any
 from uuid import UUID
 
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
@@ -32,6 +35,8 @@ from saebooks.api.v1.schemas import (
     BankAccountUpdate,
 )
 from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
+from saebooks.models.bank_statement import BankStatementLine
+from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
 from saebooks.services import bank_accounts as svc
 from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
@@ -81,6 +86,14 @@ async def list_bank_accounts(
     request: Request,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
+    include_balance: bool = Query(
+        default=False,
+        description="Include GL balance (POSTED journal lines, debit − credit) per account.",
+    ),
+    include_statement_balance: bool = Query(
+        default=False,
+        description="Include bank-statement running balance (cumulative SUM(amount) of non-archived bsls) per account.",
+    ),
     session: AsyncSession = Depends(get_session),
     company_id: UUID = Depends(get_active_company_id),
 ) -> BankAccountListOut:
@@ -93,8 +106,53 @@ async def list_bank_accounts(
         limit=page_size,
         offset=offset,
     )
+
+    gl_by_id: dict[UUID, Decimal] = {}
+    if include_balance and items:
+        bal_stmt = (
+            select(
+                JournalLine.account_id,
+                func.coalesce(func.sum(JournalLine.debit), Decimal("0")).label("dr"),
+                func.coalesce(func.sum(JournalLine.credit), Decimal("0")).label("cr"),
+            )
+            .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+            .where(
+                JournalEntry.company_id == company_id,
+                JournalEntry.status == EntryStatus.POSTED,
+            )
+            .group_by(JournalLine.account_id)
+        )
+        for row in (await session.execute(bal_stmt)).all():
+            gl_by_id[row.account_id] = Decimal(row.dr) - Decimal(row.cr)
+
+    stmt_by_id: dict[UUID, Decimal] = {}
+    if include_statement_balance and items:
+        sb_stmt = (
+            select(
+                BankStatementLine.account_id,
+                func.coalesce(func.sum(BankStatementLine.amount), Decimal("0")).label("running"),
+            )
+            .where(
+                BankStatementLine.company_id == company_id,
+                BankStatementLine.archived_at.is_(None),
+            )
+            .group_by(BankStatementLine.account_id)
+        )
+        for row in (await session.execute(sb_stmt)).all():
+            stmt_by_id[row.account_id] = Decimal(row.running)
+
+    out: list[BankAccountOut] = []
+    for a in items:
+        m = BankAccountOut.model_validate(a)
+        if include_balance:
+            m.balance = gl_by_id.get(a.id, Decimal("0"))
+        if include_statement_balance:
+            # None when the account has no bsls — the UI renders "—".
+            m.statement_balance = stmt_by_id.get(a.id)
+        out.append(m)
+
     return BankAccountListOut(
-        items=[BankAccountOut.model_validate(a) for a in items],
+        items=out,
         total=total,
         limit=page_size,
         offset=offset,

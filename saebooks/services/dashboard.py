@@ -42,6 +42,10 @@ class BankBalance:
     account_type: AccountType
     account_kind: str | None  # BANK_CHECKING / BANK_SAVINGS / CREDIT_CARD / CASH / ...
     balance: Decimal  # GL debit - credit; negative on a LIABILITY card = owed to bank
+    # Cumulative SUM(amount) over non-archived bank_statement_lines on
+    # this account — the running balance the bsl view would show at the
+    # latest line. None when the account has no statement lines.
+    statement_balance: Decimal | None = None
 
 
 async def bank_balances(
@@ -135,6 +139,32 @@ async def bank_balances(
                 balance=Decimal(dr) - Decimal(cr),
             )
         )
+
+    # Statement balance per account — cumulative SUM(amount) over all
+    # non-archived bsls. Empty when the account has no feed history.
+    # Kept as a separate query so the GL path stays unchanged (and the
+    # existing regression test exercising the no-join-leak shape keeps
+    # exercising exactly the same code).
+    if balances:
+        sb_stmt = (
+            select(
+                BankStatementLine.account_id,
+                func.sum(BankStatementLine.amount).label("running"),
+            )
+            .where(
+                BankStatementLine.company_id == company_id,
+                BankStatementLine.archived_at.is_(None),
+                BankStatementLine.account_id.in_([b.account_id for b in balances]),
+            )
+            .group_by(BankStatementLine.account_id)
+        )
+        sb_by_id: dict[uuid.UUID, Decimal] = {
+            row.account_id: Decimal(row.running)
+            for row in (await session.execute(sb_stmt)).all()
+        }
+        for b in balances:
+            b.statement_balance = sb_by_id.get(b.account_id)
+
     return balances
 
 
