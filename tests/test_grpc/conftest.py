@@ -45,7 +45,15 @@ async def seeded_company() -> Company:
 
 @pytest_asyncio.fixture
 async def seeded_user() -> User:
-    """Return (creating if needed) a non-admin user in the default tenant."""
+    """Return (creating if needed) a non-admin user in the default tenant.
+
+    Also purges any api_tokens owned by this user before yielding so
+    tests asserting on the token list (e.g.
+    ``test_list_excludes_revoked_by_default``) start with a clean set
+    rather than the accumulation from prior tests in the same session.
+    """
+    from sqlalchemy import text
+
     username = "grpc-test-user"
     async with AsyncSessionLocal() as session:
         user = (
@@ -62,4 +70,45 @@ async def seeded_user() -> User:
             session.add(user)
             await session.commit()
             await session.refresh(user)
+        await session.execute(
+            text("DELETE FROM api_tokens WHERE user_id = :uid").bindparams(
+                uid=user.id
+            )
+        )
+        await session.commit()
+        return user
+
+
+@pytest_asyncio.fixture
+async def another_user() -> User:
+    """Return (creating if needed) a second non-admin user.
+
+    Used by ``test_revoke_other_users_token_returns_false`` to prove a
+    user cannot revoke a token they don't own. Tokens are purged on
+    each yield so cross-test state does not bleed.
+    """
+    from sqlalchemy import text
+
+    username = "grpc-test-user-other"
+    async with AsyncSessionLocal() as session:
+        user = (
+            await session.execute(
+                select(User).where(User.username == username)
+            )
+        ).scalars().first()
+        if user is None:
+            user = User(
+                tenant_id=_DEFAULT_TENANT_ID,
+                username=username,
+                role=UserRole.BOOKKEEPER.value,
+            )
+            session.add(user)
+            await session.commit()
+            await session.refresh(user)
+        await session.execute(
+            text("DELETE FROM api_tokens WHERE user_id = :uid").bindparams(
+                uid=user.id
+            )
+        )
+        await session.commit()
         return user

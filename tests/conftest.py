@@ -351,6 +351,14 @@ def _restore_settings_edition() -> None:
     _feat_mod._default_settings = live
     _resolver_mod._settings = live
 
+    # Bust the resolver's cached ResolvedLicence so a previous test that
+    # populated it (e.g. ``resolve_licence()`` called during /admin/license
+    # rendering, or any feature-gate path with a JWT user) cannot poison
+    # this test's view of ``settings.edition``. Without this, the resolver
+    # returns the cached value and ``test_env_override_short_circuits_drivers``
+    # sees the wrong edition + the drivers get invoked. Cheap call.
+    _resolver_mod._reset_for_tests()
+
     _saved = live.edition
     yield
 
@@ -359,3 +367,4 @@ def _restore_settings_edition() -> None:
     live.edition = _saved
     _feat_mod._default_settings = live
     _resolver_mod._settings = live
+    _resolver_mod._reset_for_tests()
