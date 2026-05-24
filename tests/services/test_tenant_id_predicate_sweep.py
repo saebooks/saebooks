@@ -113,7 +113,18 @@ async def two_tenants() -> dict:
             )
         await session.commit()
 
-    # Tenants after companies are gone
+    # Delete change_log rows referencing these tenants before deleting tenants
+    # (change_log has FK constraint on tenant_id)
+    async with AsyncSessionLocal() as session:
+        for label in ("alpha", "beta"):
+            ids = out[label]
+            await session.execute(
+                text("DELETE FROM change_log WHERE tenant_id = :tid"),
+                {"tid": ids["tenant_id"]},
+            )
+        await session.commit()
+
+    # Tenants after companies and change_log are gone
     async with AsyncSessionLocal() as session:
         for label in ("alpha", "beta"):
             ids = out[label]
@@ -356,7 +367,7 @@ async def test_items_list_items_excludes_corrupt_row(two_tenants: dict) -> None:
                 "tid": beta["tenant_id"],
                 "sku": f"H-{suffix}-CORRUPT",
                 "name": f"H-corrupt-item-{suffix}",
-                "itype": "INVENTORY",
+                "itype": "inventory",
                 "cm": "WAC",
                 "inv": inv_acct_id,
                 "cogs": cogs_acct_id,
@@ -519,10 +530,8 @@ async def test_journal_templates_list_active_excludes_corrupt_row(two_tenants: d
             alpha["company_id"],
             name=f"H-good-tmpl-{suffix}",
             lines=[],
+            tenant_id=alpha["tenant_id"],
         )
-        # create() doesn't set tenant_id, patch it directly
-        good.tenant_id = alpha["tenant_id"]
-        await session.commit()
         good_id = good.id
 
     async with AsyncSessionLocal() as session:

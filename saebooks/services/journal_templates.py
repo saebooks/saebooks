@@ -29,6 +29,9 @@ async def get(session: AsyncSession, template_id: uuid.UUID) -> JournalTemplate 
     return await session.get(JournalTemplate, template_id)
 
 
+_DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+
 async def create(
     session: AsyncSession,
     company_id: uuid.UUID,
@@ -36,9 +39,11 @@ async def create(
     name: str,
     description: str | None = None,
     lines: list[dict[str, Any]],
+    tenant_id: uuid.UUID = _DEFAULT_TENANT_ID,
 ) -> JournalTemplate:
     tmpl = JournalTemplate(
         company_id=company_id,
+        tenant_id=tenant_id,
         name=name.strip(),
         description=description,
         lines=lines,
