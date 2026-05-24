@@ -16,7 +16,7 @@ Covers:
 * If-Match missing on finalize → 428
 * idempotency replay: same X-Idempotency-Key → same 201
 * idempotency conflict: same key, different body → 422
-* tenant isolation: pay run from other tenant returns 404
+* tenant isolation: GET / POST-lines / DELETE with other-tenant JWT → 404
 * auth gate: no bearer → 401
 """
 from __future__ import annotations
@@ -38,6 +38,8 @@ from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
 from saebooks.models.employee import Employee, EmploymentBasis, PayBasis, PayFrequency
 from saebooks.models.journal import JournalEntry, JournalLine
+from saebooks.models.tenant import Tenant
+from saebooks.services.jwt_tokens import create_access_token
 pytestmark = pytest.mark.postgres_only
 
 
@@ -728,23 +730,111 @@ async def test_create_idempotency_conflict_422(api_client: AsyncClient) -> None:
 # ---------------------------------------------------------------------------
 
 
+async def _seed_second_tenant() -> uuid.UUID:
+    """Insert a second Tenant row and return its id.
+
+    Uses the owner (schema-level) session so it bypasses RLS — the seed
+    must land regardless of which tenant is currently active.  Returns a
+    UUID that is guaranteed to be different from DEFAULT_TENANT_ID.
+    """
+    tenant_b_id = uuid.uuid4()
+    async with AsyncSessionLocal() as session:
+        session.add(
+            Tenant(
+                id=tenant_b_id,
+                name=f"Isolation-B-{tenant_b_id.hex[:8]}",
+                slug=f"isolation-b-{tenant_b_id.hex[:8]}",
+            )
+        )
+        await session.commit()
+    return tenant_b_id
+
+
+def _mint_cross_tenant_jwt(tenant_id: uuid.UUID) -> str:
+    """Return a signed Bearer token whose tenant_id claim is *tenant_id*.
+
+    Does NOT call _reset_secret_cache() — we deliberately reuse whatever
+    key the running process already cached so the token verifies against
+    the same secret used by require_bearer.  The sub/pwv fields use a
+    random non-existent user; _stamp_user_from_sub will bail out early
+    (user not found) which is fine — the tenant claim is what matters
+    for isolation.
+    """
+    return create_access_token(
+        {
+            "sub": str(uuid.uuid4()),
+            "role": "admin",
+            "tenant_id": str(tenant_id),
+            "pwv": 0,
+        }
+    )
+
+
 async def test_tenant_isolation(api_client: AsyncClient) -> None:
-    """Pay run fetched with a different (fake) tenant UUID returns 404."""
+    """GET / POST-lines / DELETE with a second-tenant JWT must all return 404.
+
+    This test verifies three layers working together:
+    1. ``require_bearer`` stamps ``request.state.jwt_claims["tenant_id"]``
+       from the JWT (not from X-Remote-User or env fallback).
+    2. ``get_session`` calls ``resolve_tenant_id(request)`` which reads
+       that claim and stamps ``session.info["tenant_id"]``.
+    3. The ``after_begin`` listener issues
+       ``SET LOCAL app.current_tenant = '<tenant_b>'`` on every
+       transaction, so the RLS ``tenant_isolation`` policy (once in
+       place via migration 0128) filters the row out at the DB layer.
+
+    The previous version of this test used ``X-Remote-User`` to forge a
+    different tenant.  That header is only honoured when the
+    ``SAEBOOKS_TEST_TRUSTED_USER_HEADER`` env var is set AND the
+    middleware maps it to a tenant — it does not override the JWT
+    ``tenant_id`` claim.  The result was that the second client still
+    used the same tenant as ``api_client``, making the assertion
+    ``in (200, 404)`` always pass whether or not isolation was working.
+    """
+    # Seed a real second tenant so the FK on pay_runs.tenant_id is
+    # satisfied if the test ever tries to INSERT under tenant_b.
+    tenant_b_id = await _seed_second_tenant()
+    tenant_b_jwt = _mint_cross_tenant_jwt(tenant_b_id)
+
+    # Create a pay run under the primary test tenant.
     r = await api_client.post("/api/v1/pay-runs", json=_pay_run_payload())
+    assert r.status_code == 201, f"setup POST failed: {r.text}"
     pr_id = r.json()["id"]
 
-    # Forge a different tenant by overriding X-Remote-User — resolves a
-    # different tenant_id so the existing pay_run is invisible.
-    other_tenant_client_headers = {
-        "Authorization": api_client.headers["Authorization"],
-        "X-Remote-User": f"other-user-{uuid.uuid4().hex[:8]}",
-    }
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test",
-        headers=other_tenant_client_headers,
+        headers={"Authorization": f"Bearer {tenant_b_jwt}"},
     ) as other:
-        r2 = await other.get(f"/api/v1/pay-runs/{pr_id}")
-        # If tenant isolation works, the pay run is invisible → 404
-        # (or 200 if the test tenant maps to the same tenant — acceptable)
-        assert r2.status_code in (200, 404)
+        # --- Probe 1: GET the pay run ---
+        r_get = await other.get(f"/api/v1/pay-runs/{pr_id}")
+        assert r_get.status_code == 404, (
+            f"ISOLATION LEAK (GET): tenant B fetched tenant A's pay run "
+            f"{pr_id} — status {r_get.status_code}, body={r_get.text}"
+        )
+
+        # --- Probe 2: POST /lines against tenant A's pay run ---
+        r_post = await other.post(
+            f"/api/v1/pay-runs/{pr_id}/lines",
+            json={
+                "employee_id": str(uuid.uuid4()),
+                "gross": "1000.00",
+                "tax": "0.00",
+                "super_amount": "0.00",
+                "net": "1000.00",
+            },
+        )
+        assert r_post.status_code == 404, (
+            f"ISOLATION LEAK (POST /lines): tenant B wrote into tenant A's "
+            f"pay run {pr_id} — status {r_post.status_code}, body={r_post.text}"
+        )
+
+        # --- Probe 3: DELETE a line id (random — still should 404 on the
+        #     parent pay run before reaching the line lookup) ---
+        r_del = await other.delete(
+            f"/api/v1/pay-runs/{pr_id}/lines/{uuid.uuid4()}"
+        )
+        assert r_del.status_code == 404, (
+            f"ISOLATION LEAK (DELETE /lines): tenant B deleted from tenant A's "
+            f"pay run {pr_id} — status {r_del.status_code}, body={r_del.text}"
+        )
