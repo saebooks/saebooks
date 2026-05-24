@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import os
 import uuid as _uuid
 from collections.abc import AsyncIterator
 
@@ -20,6 +22,14 @@ from sqlalchemy.pool import NullPool
 from saebooks import db_types  # noqa: F401
 from saebooks.config import settings
 
+_log = logging.getLogger("saebooks.db")
+
+# SAEBOOKS_ENV values that are allowed to silently fall back to the
+# BYPASSRLS owner role when SAEBOOKS_APP_DATABASE_URL is unset.
+# Anything else (production, staging, prod, "") is treated as
+# production and fails fast — see tests/db/test_runtime_database_url_strict.py.
+_FALLBACK_ALLOWED_ENVS: frozenset[str] = frozenset({"dev", "test", "ci"})
+
 
 def _runtime_database_url() -> str:
     """Pick the URL the request-time engine should connect with.
@@ -28,7 +38,10 @@ def _runtime_database_url() -> str:
     0056_split_db_role.py):
 
     1. ``SAEBOOKS_APP_DATABASE_URL`` if set — explicit non-superuser role.
-    2. ``DATABASE_URL`` — fallback for dev / single-role setups.
+    2. ``DATABASE_URL`` — fallback in dev/test/ci only, with a WARNING.
+    3. ``RuntimeError`` in production / unknown env — refuse to boot
+       rather than serve traffic through the BYPASSRLS owner role
+       where ``FORCE ROW LEVEL SECURITY`` is a no-op.
 
     The value chosen here governs RLS enforcement: if the URL points at
     a superuser or a role with ``BYPASSRLS``, FORCE row security is a
@@ -43,7 +56,28 @@ def _runtime_database_url() -> str:
     """
     if settings.app_database_url and not _url_is_sqlite(settings.app_database_url):
         return settings.app_database_url
-    return settings.database_url
+
+    # SQLite fallback is single-tenant — no RLS to enforce, no warning needed.
+    if _url_is_sqlite(settings.database_url):
+        return settings.database_url
+
+    env = os.environ.get("SAEBOOKS_ENV", "").lower()
+    if env in _FALLBACK_ALLOWED_ENVS:
+        _log.warning(
+            "SAEBOOKS_APP_DATABASE_URL is unset — falling back to DATABASE_URL "
+            "(BYPASSRLS owner role). FORCE ROW LEVEL SECURITY is a no-op on this "
+            "role; tenant isolation in dev relies on the application-layer "
+            "filters only. Do not run production traffic through this engine."
+        )
+        return settings.database_url
+
+    raise RuntimeError(
+        "SAEBOOKS_APP_DATABASE_URL is required when SAEBOOKS_ENV is "
+        f"{env!r} (any value other than 'dev'/'test'/'ci' is treated as "
+        "production). Set SAEBOOKS_APP_DATABASE_URL to the non-superuser "
+        "saebooks_app role so FORCE ROW LEVEL SECURITY actually binds — "
+        "see migration 0056_split_db_role.py."
+    )
 
 
 def _url_is_sqlite(url: str) -> bool:
