@@ -110,11 +110,14 @@ async def list_items(
     session: AsyncSession,
     company_id: uuid.UUID,
     *,
+    tenant_id: uuid.UUID | None = None,
     search: str | None = None,
     include_archived: bool = False,
     limit: int = 200,
 ) -> list[Item]:
     stmt = select(Item).where(Item.company_id == company_id)
+    if tenant_id is not None:
+        stmt = stmt.where(Item.tenant_id == tenant_id)
     if not include_archived:
         stmt = stmt.where(Item.archived_at.is_(None))
     if search:

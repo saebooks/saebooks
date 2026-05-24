@@ -9,13 +9,19 @@ from saebooks.models.journal_template import JournalTemplate
 
 
 async def list_active(
-    session: AsyncSession, company_id: uuid.UUID
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
 ) -> list[JournalTemplate]:
-    result = await session.execute(
+    stmt = (
         select(JournalTemplate)
         .where(JournalTemplate.company_id == company_id, JournalTemplate.archived_at.is_(None))
-        .order_by(JournalTemplate.name)
     )
+    if tenant_id is not None:
+        stmt = stmt.where(JournalTemplate.tenant_id == tenant_id)
+    stmt = stmt.order_by(JournalTemplate.name)
+    result = await session.execute(stmt)
     return list(result.scalars().all())
 
 

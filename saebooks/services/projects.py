@@ -50,6 +50,7 @@ async def list_active(
     session: AsyncSession,
     company_id: uuid.UUID,
     *,
+    tenant_id: uuid.UUID | None = None,
     status: ProjectStatus | None = None,
     search: str | None = None,
     include_archived: bool = False,
@@ -60,8 +61,13 @@ async def list_active(
     By default returns non-archived, with all statuses. Pass
     ``status=ProjectStatus.ACTIVE`` when rendering the line-item
     picker so completed projects don't clutter the dropdown.
+
+    P0 defence-in-depth: when ``tenant_id`` is supplied, the query
+    is additionally filtered by tenant.
     """
     stmt = select(Project).where(Project.company_id == company_id)
+    if tenant_id is not None:
+        stmt = stmt.where(Project.tenant_id == tenant_id)
     if not include_archived:
         stmt = stmt.where(Project.archived_at.is_(None))
     if status is not None:
@@ -262,7 +268,7 @@ async def list_projects(
     offset: int = 0,
 ) -> tuple[list[Project], int]:
     """Return (projects, total_count) filtered by status/archived flag."""
-    where = [Project.company_id == company_id]
+    where = [Project.company_id == company_id, Project.tenant_id == tenant_id]
 
     if not archived:
         where.append(Project.archived_at.is_(None))
