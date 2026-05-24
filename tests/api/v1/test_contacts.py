@@ -23,7 +23,6 @@ from saebooks.api.v1.auth import current_token
 from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.change_log import ChangeLog
-pytestmark = pytest.mark.postgres_only
 
 
 @pytest.fixture
@@ -375,6 +374,10 @@ async def test_bulk_tag_one_off_endpoint(api_client: AsyncClient) -> None:
 
 async def test_jinja_bulk_tag_one_off_endpoint(api_client: AsyncClient, client: AsyncClient) -> None:
     """POST /contacts/bulk-tag-one-off (cookie-authed Jinja mirror) flips + redirects."""
+    from urllib.parse import urlencode
+
+    form_headers = {"Content-Type": "application/x-www-form-urlencoded"}
+
     # Create two test contacts via the bearer API (faster than form-posting).
     ids: list[str] = []
     for i in range(2):
@@ -386,9 +389,13 @@ async def test_jinja_bulk_tag_one_off_endpoint(api_client: AsyncClient, client: 
 
     # POST the Jinja form-encoded body. In test env, resolve_tenant_id
     # falls back to DEFAULT_TENANT_ID so the cookie session isn't needed.
+    body = urlencode(
+        [("contact_ids", ids[0]), ("contact_ids", ids[1]), ("is_one_off", "true")]
+    )
     r = await client.post(
         "/contacts/bulk-tag-one-off",
-        data=[("contact_ids", ids[0]), ("contact_ids", ids[1]), ("is_one_off", "true")],
+        content=body,
+        headers=form_headers,
         follow_redirects=False,
     )
     assert r.status_code == 303
@@ -397,13 +404,17 @@ async def test_jinja_bulk_tag_one_off_endpoint(api_client: AsyncClient, client: 
     # Both contacts should now be flagged
     for cid in ids:
         r = await api_client.get(f"/api/v1/contacts/{cid}")
-        body = r.json()
-        assert body["is_one_off"] is True
+        body_json = r.json()
+        assert body_json["is_one_off"] is True
 
     # Un-mark via the same Jinja endpoint with is_one_off=false
+    body = urlencode(
+        [("contact_ids", ids[0]), ("is_one_off", "false"), ("return_to", "/contacts?one_off=true")]
+    )
     r = await client.post(
         "/contacts/bulk-tag-one-off",
-        data=[("contact_ids", ids[0]), ("is_one_off", "false"), ("return_to", "/contacts?one_off=true")],
+        content=body,
+        headers=form_headers,
         follow_redirects=False,
     )
     assert r.status_code == 303
