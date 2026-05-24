@@ -216,11 +216,278 @@ async def test_period_lock_override_with_reason() -> None:
                 {"account_id": acct_b, "debit": 0, "credit": 75},
             ],
         )
+        # F-04: an authorised role (admin/accountant/owner) plus a real
+        # explanation now both required to bypass a period lock.
         posted = await svc.post(
-            session, entry.id, override_reason="BAS amendment approved"
+            session,
+            entry.id,
+            override_reason="BAS amendment approved",
+            actor_role="admin",
         )
         assert posted.status == EntryStatus.POSTED
         assert posted.override_reason == "BAS amendment approved"
+
+
+# ---------------------------------------------------------------------------
+# F-04 — period-lock override role gate
+#
+# Override into a closed period requires BOTH an authorised role
+# (admin/accountant/owner) AND a non-trivial 12+ char reason. These
+# tests cover every gate cell of the matrix below:
+#
+#   role × reason  | trivial | meaningful
+#   ---------------+---------+-----------
+#   admin          |  fail   |  pass
+#   accountant     |  fail   |  pass
+#   owner          |   —     |  pass
+#   bookkeeper     |   —     |  fail (role)
+#   viewer         |   —     |  fail (role)
+#   None           |   —     |  fail (role, fail-closed)
+#
+# We also assert that the role gate fires BEFORE the reason gate when
+# both are bad, so the operator gets the more actionable error
+# ("I'm not allowed") rather than the secondary one ("reason too short").
+# ---------------------------------------------------------------------------
+
+
+async def _ctx_with_lock(
+    lock_date: date,
+) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
+    """Return (company_id, debit, credit) with a period lock at ``lock_date``.
+
+    Uses a fresh isolated company so the lock doesn't pollute the rest of
+    the test module's shared company fixture. Reuses CoA accounts from
+    the seed.
+    """
+    async with AsyncSessionLocal() as session:
+        # Look up the seed tenant for the FK.
+        tenant_row = (
+            await session.execute(select(Tenant).order_by(Tenant.created_at).limit(1))
+        ).scalars().first()
+        assert tenant_row is not None
+
+        company = Company(
+            tenant_id=tenant_row.id,
+            name=f"f04_test_{uuid.uuid4().hex[:8]}",
+            legal_name=f"F04 Test Co {uuid.uuid4().hex[:6]}",
+        )
+        session.add(company)
+        await session.flush()
+
+        # Two minimal accounts — bank (asset) and revenue (income).
+        bank = Account(
+            tenant_id=tenant_row.id,
+            company_id=company.id,
+            code=f"1-{uuid.uuid4().hex[:4]}",
+            name="F04 Bank",
+            account_type=AccountType.ASSET,
+            reconcile=False,
+        )
+        revenue = Account(
+            tenant_id=tenant_row.id,
+            company_id=company.id,
+            code=f"4-{uuid.uuid4().hex[:4]}",
+            name="F04 Revenue",
+            account_type=AccountType.INCOME,
+        )
+        session.add_all([bank, revenue])
+        await session.flush()
+
+        # Lock the period.
+        await svc.lock_period(session, company.id, lock_date, locked_by="f04_test")
+        await session.commit()
+
+        return company.id, bank.id, revenue.id
+
+
+async def _draft_in_locked_period(
+    company_id: uuid.UUID,
+    debit_id: uuid.UUID,
+    credit_id: uuid.UUID,
+    *,
+    entry_date: date,
+) -> uuid.UUID:
+    """Create a balanced draft journal dated inside the locked period."""
+    async with AsyncSessionLocal() as session:
+        entry = await svc.create_draft(
+            session,
+            company_id=company_id,
+            entry_date=entry_date,
+            lines=[
+                {"account_id": debit_id, "debit": Decimal("100"), "credit": Decimal("0")},
+                {"account_id": credit_id, "debit": Decimal("0"), "credit": Decimal("100")},
+            ],
+        )
+        return entry.id
+
+
+_GOOD_REASON = "Year-end accrual booked late by approval of CFO"
+
+
+@pytest.mark.parametrize("role", ["admin", "accountant", "owner"])
+async def test_f04_authorised_role_with_good_reason_succeeds(role: str) -> None:
+    company_id, debit_id, credit_id = await _ctx_with_lock(date(2020, 6, 30))
+    entry_id = await _draft_in_locked_period(
+        company_id, debit_id, credit_id, entry_date=date(2020, 6, 15)
+    )
+    async with AsyncSessionLocal() as session:
+        posted = await svc.post(
+            session,
+            entry_id,
+            override_reason=_GOOD_REASON,
+            actor_role=role,
+        )
+        assert posted.status == EntryStatus.POSTED
+        assert posted.override_reason == _GOOD_REASON
+
+
+@pytest.mark.parametrize("role", ["bookkeeper", "viewer", "junk-role"])
+async def test_f04_unauthorised_role_with_good_reason_rejected(role: str) -> None:
+    company_id, debit_id, credit_id = await _ctx_with_lock(date(2020, 6, 30))
+    entry_id = await _draft_in_locked_period(
+        company_id, debit_id, credit_id, entry_date=date(2020, 6, 15)
+    )
+    async with AsyncSessionLocal() as session:
+        with pytest.raises(PostingError, match="admin or accountant"):
+            await svc.post(
+                session,
+                entry_id,
+                override_reason=_GOOD_REASON,
+                actor_role=role,
+            )
+
+
+async def test_f04_no_role_passed_fails_closed() -> None:
+    """Default actor_role=None — period-lock override must be rejected."""
+    company_id, debit_id, credit_id = await _ctx_with_lock(date(2020, 6, 30))
+    entry_id = await _draft_in_locked_period(
+        company_id, debit_id, credit_id, entry_date=date(2020, 6, 15)
+    )
+    async with AsyncSessionLocal() as session:
+        with pytest.raises(PostingError, match="admin or accountant"):
+            await svc.post(
+                session,
+                entry_id,
+                override_reason=_GOOD_REASON,
+                # actor_role intentionally omitted — must fail closed.
+            )
+
+
+async def test_f04_admin_with_short_reason_rejected() -> None:
+    """12-char gate still fires for authorised roles (interim guard kept)."""
+    company_id, debit_id, credit_id = await _ctx_with_lock(date(2020, 6, 30))
+    entry_id = await _draft_in_locked_period(
+        company_id, debit_id, credit_id, entry_date=date(2020, 6, 15)
+    )
+    async with AsyncSessionLocal() as session:
+        with pytest.raises(PostingError, match="meaningful explanation"):
+            await svc.post(
+                session,
+                entry_id,
+                override_reason="too short",  # 9 chars
+                actor_role="admin",
+            )
+
+
+async def test_f04_admin_with_stop_word_reason_rejected() -> None:
+    """Stop-word gate still fires for authorised roles."""
+    company_id, debit_id, credit_id = await _ctx_with_lock(date(2020, 6, 30))
+    entry_id = await _draft_in_locked_period(
+        company_id, debit_id, credit_id, entry_date=date(2020, 6, 15)
+    )
+    async with AsyncSessionLocal() as session:
+        with pytest.raises(PostingError, match="meaningful explanation"):
+            await svc.post(
+                session,
+                entry_id,
+                # 12+ chars but the cleaned value normalises to the
+                # stop-word "override" — must still be rejected.
+                override_reason="  Override  ",
+                actor_role="admin",
+            )
+
+
+async def test_f04_unauthorised_role_short_reason_role_error_first() -> None:
+    """When BOTH gates would fire, role-gate error wins for usability."""
+    company_id, debit_id, credit_id = await _ctx_with_lock(date(2020, 6, 30))
+    entry_id = await _draft_in_locked_period(
+        company_id, debit_id, credit_id, entry_date=date(2020, 6, 15)
+    )
+    async with AsyncSessionLocal() as session:
+        with pytest.raises(PostingError, match="admin or accountant"):
+            await svc.post(
+                session,
+                entry_id,
+                override_reason="ok",  # would fail the 12-char gate too
+                actor_role="bookkeeper",
+            )
+
+
+async def test_f04_post_into_open_period_role_irrelevant() -> None:
+    """When the date is outside the lock, no role check fires at all.
+
+    Confirms the gate only triggers on the lock path — a bookkeeper can
+    still post a journal dated in an open period without supplying any
+    override metadata.
+    """
+    company_id, debit_id, credit_id = await _ctx_with_lock(date(2020, 6, 30))
+    async with AsyncSessionLocal() as session:
+        entry = await svc.create_draft(
+            session,
+            company_id=company_id,
+            entry_date=date(2021, 1, 5),  # AFTER the lock — open period.
+            lines=[
+                {"account_id": debit_id, "debit": Decimal("50"), "credit": Decimal("0")},
+                {"account_id": credit_id, "debit": Decimal("0"), "credit": Decimal("50")},
+            ],
+        )
+        posted = await svc.post(session, entry.id)  # no role, no reason
+        assert posted.status == EntryStatus.POSTED
+
+
+async def test_f04_reverse_threads_actor_role() -> None:
+    """``reverse()`` must pass actor_role into the inner post() so the
+    reversal's auto-post inherits the gate.
+
+    Setup: post an entry into an OPEN period (no override needed), then
+    lock the period that contains the reversal date, then attempt to
+    reverse with a non-privileged role. The reversal auto-post should
+    fail with the role-gate error.
+    """
+    company_id, debit_id, credit_id = await _ctx_with_lock(date(2020, 6, 30))
+    # Post a normal entry AFTER the lock so the original post needs no
+    # override.
+    async with AsyncSessionLocal() as session:
+        entry = await svc.create_draft(
+            session,
+            company_id=company_id,
+            entry_date=date(2021, 1, 5),
+            lines=[
+                {"account_id": debit_id, "debit": Decimal("30"), "credit": Decimal("0")},
+                {"account_id": credit_id, "debit": Decimal("0"), "credit": Decimal("30")},
+            ],
+        )
+        await svc.post(session, entry.id)
+        entry_id = entry.id
+
+    # Now extend the lock past the original entry_date so the reversal
+    # (which inherits the date) lands in the locked period.
+    async with AsyncSessionLocal() as session:
+        await svc.lock_period(
+            session, company_id, date(2021, 12, 31), locked_by="f04_test_extend"
+        )
+        await session.commit()
+
+    # Bookkeeper trying to reverse with an explanation — still blocked
+    # because the role isn't on the override list.
+    async with AsyncSessionLocal() as session:
+        with pytest.raises(PostingError, match="admin or accountant"):
+            await svc.reverse(
+                session,
+                entry_id,
+                override_reason=_GOOD_REASON,
+                actor_role="bookkeeper",
+            )
 
 
 async def test_cannot_reverse_draft() -> None:

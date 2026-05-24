@@ -83,6 +83,45 @@ def _dump(entry: Any) -> dict[str, Any]:
     return json.loads(JournalEntryOut.model_validate(entry).model_dump_json())
 
 
+def _resolve_actor_role(request: Request) -> str | None:
+    """Resolve the calling user's role for the F-04 period-lock gate.
+
+    Priority order:
+      1. ``request.state.role`` stamped by ``require_bearer`` after JWT
+         decode — the canonical path for user-authenticated requests.
+      2. ``X-Actor-Role`` request header — escape hatch for service-to-
+         service calls where the upstream has already enforced authn.
+         Only honoured when no JWT user is on the request (so a normal
+         user can't elevate themselves by sending the header).
+      3. ``admin`` when the request came in on the static dev bearer
+         (``SAEBOOKS_DEV_API_TOKEN``). The dev bearer is a god-key used
+         by scripts and the test suite; treating it as admin preserves
+         backward compatibility without weakening the gate for normal
+         user JWTs.
+      4. ``None`` otherwise — fail-closed at the service layer.
+    """
+    role = getattr(request.state, "role", None)
+    if role:
+        return str(role)
+
+    # No JWT user on the request — check the explicit header escape hatch.
+    hdr = request.headers.get("x-actor-role")
+    if hdr:
+        return hdr.strip()
+
+    # Static dev bearer path — require_bearer stamped jwt_claims but no
+    # user/role. Treat as admin for backward compat with scripts/tests
+    # that rely on SAEBOOKS_DEV_API_TOKEN. The user JWT path always
+    # populates state.role above, so a normal user can't reach here with
+    # an elevated role.
+    if getattr(request.state, "jwt_claims", None) and not getattr(
+        request.state, "user", None
+    ):
+        return "admin"
+
+    return None
+
+
 # ---------------------------------------------------------------------------
 # List
 # ---------------------------------------------------------------------------
@@ -473,6 +512,7 @@ async def post_journal_entry(
             actor=f"api:{bearer[:8]}…",
             expected_version=expected,
             override_reason=payload.override_reason or None,
+            actor_role=_resolve_actor_role(request),
         )
     except svc.VersionConflict as exc:
         body = JournalEntryConflictBody(
@@ -558,6 +598,7 @@ async def reverse_journal_entry(
             entry_id,
             actor=f"api:{bearer[:8]}…",
             expected_version=expected,
+            actor_role=_resolve_actor_role(request),
         )
     except svc.VersionConflict as exc:
         body = JournalEntryConflictBody(

@@ -27,6 +27,14 @@ class PostingError(Exception):
     pass
 
 
+# F-04: roles allowed to override a closed period-lock. Bookkeepers and
+# viewers cannot bypass a period lock regardless of the reason they type;
+# they must hand off to an accountant or admin. Owners outrank admins in
+# the role hierarchy so they are included here too — excluding them would
+# leave a tenant's primary owner unable to override their own lock.
+_OVERRIDE_ROLES: frozenset[str] = frozenset({"admin", "accountant", "owner"})
+
+
 async def _validate_line_accounts(
     session: AsyncSession,
     company_id: uuid.UUID,
@@ -387,34 +395,65 @@ async def _check_period_lock(
     company_id: uuid.UUID,
     entry_date: date,
     override_reason: str | None,
+    actor_role: str | None = None,
 ) -> None:
+    """Block posts into a locked period unless an authorised actor overrides.
+
+    Override path requires BOTH:
+      1. ``actor_role`` is one of ``_OVERRIDE_ROLES`` (admin / accountant /
+         owner). A bookkeeper or viewer is rejected regardless of what they
+         type in ``override_reason``. Missing role is treated as not-allowed
+         (fail-closed) — callers that genuinely have no user context (system
+         flows like deferred-revenue auto-recognition) should pass an
+         explicit privileged role string after authenticating the request,
+         or land their entry in an open period.
+      2. ``override_reason`` is a non-trivial human-readable explanation:
+         at least 12 characters after trim/lowercase, and not in the
+         stop-word set. This is the F-04 interim guard kept as a
+         second-line check; it still helps an auditor spot drive-by overrides
+         even from an authorised actor.
+
+    Raises ``PostingError`` for either failure with a message describing the
+    failure mode (role vs reason).
+    """
     result = await session.execute(
         select(func.max(PeriodLock.locked_through)).where(
             PeriodLock.company_id == company_id
         )
     )
     locked_through = result.scalar_one_or_none()
-    if locked_through is not None and entry_date <= locked_through:
-        if not override_reason:
-            raise PostingError(
-                f"Period is locked through {locked_through}. "
-                f"Provide an override reason to post into a locked period."
-            )
-        # F-04 interim: refuse trivial / stop-word overrides. A non-admin
-        # user can still bypass by typing a 12-char string, but the worst
-        # case ("x" / "override" / blank-ish) is closed off. Full
-        # role-gate plumbing (actor_role through post/reverse/update_draft
-        # and bank_feeds.py:464) is tracked separately — see overnight
-        # 2026-05-13/F-04-deferred.md.
-        _cleaned = override_reason.strip().lower()
-        _STOPS = {"x", ".", "yes", "ok", "override", "reason", "no", "y", "-", "na", "n/a"}
-        if len(_cleaned) < 12 or _cleaned in _STOPS:
-            raise PostingError(
-                f"Period is locked through {locked_through}. "
-                f"Override reason must be a meaningful explanation "
-                f"(minimum 12 characters, not a stop-word). "
-                f"Provided: {override_reason!r}."
-            )
+    if locked_through is None or entry_date > locked_through:
+        return
+
+    if not override_reason:
+        raise PostingError(
+            f"Period is locked through {locked_through}. "
+            f"Provide an override reason to post into a locked period."
+        )
+
+    # First-line gate (F-04 full fix): role must be admin / accountant /
+    # owner. Reject before the reason-content check so a stop-word reason
+    # from an unprivileged actor gets the role-gate error (more useful to
+    # the operator: "I'm not allowed", not "my reason is too short").
+    if actor_role not in _OVERRIDE_ROLES:
+        raise PostingError(
+            f"Period is locked through {locked_through}. "
+            f"Override requires admin or accountant role "
+            f"(your role: {actor_role or 'unknown'})."
+        )
+
+    # Second-line gate (F-04 interim, retained): refuse trivial /
+    # stop-word overrides even from authorised actors. A real explanation
+    # in the audit trail is much more useful to an auditor than "ok".
+    _cleaned = override_reason.strip().lower()
+    _STOPS = {"x", ".", "yes", "ok", "override", "reason", "no", "y", "-", "na", "n/a"}
+    if len(_cleaned) < 12 or _cleaned in _STOPS:
+        raise PostingError(
+            f"Period is locked through {locked_through}. "
+            f"Override reason must be a meaningful explanation "
+            f"(minimum 12 characters, not a stop-word). "
+            f"Provided: {override_reason!r}."
+        )
 
 
 async def post(
@@ -423,15 +462,26 @@ async def post(
     *,
     posted_by: str | None = None,
     override_reason: str | None = None,
+    actor_role: str | None = None,
     tenant_id: uuid.UUID | None = None,
 ) -> JournalEntry:
+    """Transition DRAFT → POSTED.
+
+    ``actor_role`` is the role string of the user driving the post — used
+    only by the period-lock override gate (see ``_check_period_lock``).
+    Callers that don't pass it cannot override a locked period. The
+    role is also recorded on ``entry.override_reason`` for audit when an
+    override is accepted.
+    """
     entry = await get(session, entry_id, tenant_id=tenant_id)
     if entry.status == EntryStatus.POSTED:
         raise PostingError(f"Entry {entry.ref} is already posted")
     if entry.status == EntryStatus.REVERSED:
         raise PostingError(f"Entry {entry.ref} has been reversed")
 
-    await _check_period_lock(session, entry.company_id, entry.entry_date, override_reason)
+    await _check_period_lock(
+        session, entry.company_id, entry.entry_date, override_reason, actor_role
+    )
 
     # Trust commingling guard — must run BEFORE GST auto-posting so GST lines
     # can't mask a trust→operating transfer that was originally balanced without them.
@@ -470,18 +520,30 @@ async def reverse(
     reversal_date: date | None = None,
     posted_by: str | None = None,
     override_reason: str | None = None,
+    actor_role: str | None = None,
     tenant_id: uuid.UUID | None = None,
 ) -> JournalEntry:
-    """Create and post a reversal of a posted entry."""
+    """Create and post a reversal of a posted entry.
+
+    ``actor_role`` is threaded through to ``post()`` so the period-lock
+    override gate also applies to reversals that land in a closed period
+    (the reversal entry's date may be the original's entry_date which is
+    by definition in or before the lock).
+    """
     original = await get(session, entry_id, tenant_id=tenant_id)
     if original.status != EntryStatus.POSTED:
         raise PostingError(f"Can only reverse posted entries (current: {original.status})")
 
     # Snapshot the original before we flip its status to REVERSED.
+    # actor_role is included in the audit reason so an auditor can see
+    # which authorisation level approved the reversal (F-04).
+    _reason = f"Reversed by new entry (date={reversal_date or original.entry_date})"
+    if actor_role:
+        _reason = f"{_reason}; actor_role={actor_role}"
     await audit_svc.snapshot_row(
         session, original,
         action="reverse",
-        reason=f"Reversed by new entry (date={reversal_date or original.entry_date})",
+        reason=_reason,
         performed_by=posted_by,
     )
 
@@ -528,9 +590,14 @@ async def reverse(
 
     await session.commit()
 
-    # Auto-post the reversal
+    # Auto-post the reversal — pass actor_role through so the period-lock
+    # override gate fires consistently for the reversal post.
     reversal = await post(
-        session, reversal.id, posted_by=posted_by, override_reason=override_reason
+        session,
+        reversal.id,
+        posted_by=posted_by,
+        override_reason=override_reason,
+        actor_role=actor_role,
     )
 
     # Mark original as reversed
