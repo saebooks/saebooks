@@ -96,7 +96,7 @@ def _serialise(entry: JournalEntry) -> dict[str, Any]:
 async def _get_with_lines(session: AsyncSession, entry_id: uuid.UUID) -> JournalEntry | None:
     result = await session.execute(
         select(JournalEntry)
-        .options(selectinload(JournalEntry.lines))
+        .options(selectinload(JournalEntry.lines).selectinload(JournalLine.account))
         .where(JournalEntry.id == entry_id)
     )
     return result.scalar_one_or_none()
@@ -241,7 +241,7 @@ async def list_active(
 
     stmt = (
         select(JournalEntry)
-        .options(selectinload(JournalEntry.lines))
+        .options(selectinload(JournalEntry.lines).selectinload(JournalLine.account))
         .where(*base_where)
         .order_by(primary_ord, secondary_ord)
         .limit(limit)
@@ -269,7 +269,7 @@ async def get(
         return await _get_with_lines(session, entry_id)
     result = await session.execute(
         select(JournalEntry)
-        .options(selectinload(JournalEntry.lines))
+        .options(selectinload(JournalEntry.lines).selectinload(JournalLine.account))
         .where(
             JournalEntry.id == entry_id,
             JournalEntry.tenant_id == tenant_id,
@@ -654,6 +654,23 @@ async def api_reverse(
 # ---------------------------------------------------------------------------
 
 
+# Module-level flag: True when the expenses table is present in the DB.
+# Initialised to None (unknown); resolved lazily on first call to
+# get_source_doc() via to_regclass so fresh DBs without the Expenses
+# module never hit "relation expenses does not exist" (#11).
+_expenses_table_exists: bool | None = None
+
+
+async def _check_expenses_table(session: AsyncSession) -> bool:
+    """Return True if public.expenses exists in this DB."""
+    from sqlalchemy import text
+
+    result = await session.execute(
+        text("SELECT to_regclass('public.expenses') IS NOT NULL AS exists")
+    )
+    return bool(result.scalar_one())
+
+
 async def get_source_doc(
     session: AsyncSession,
     entry_id: Any,
@@ -667,13 +684,32 @@ async def get_source_doc(
     enforced by the RLS policy on each table; we also pass tenant_id
     explicitly so callers without RLS context still get safe results.
 
+    The expenses branch is skipped when the Expenses module is not
+    deployed (i.e. when public.expenses does not exist in the DB). The
+    table presence is resolved once per process startup via to_regclass
+    and cached in _expenses_table_exists (#11 — graceful degradation).
+
     Returns a dict like {'type': 'invoice', 'id': '<uuid>', 'ref': 'INV3901'}
     or None when no source document is linked.
     """
+    global _expenses_table_exists
     from sqlalchemy import text
 
-    sql = text(
+    if _expenses_table_exists is None:
+        _expenses_table_exists = await _check_expenses_table(session)
+
+    expenses_branch = (
         """
+            UNION ALL
+            SELECT 'expense', id, COALESCE(NULLIF(reference, ''), NULLIF(number, ''), id::text), 4
+                FROM expenses
+                WHERE journal_entry_id = :eid AND tenant_id = :tid AND archived_at IS NULL"""
+        if _expenses_table_exists
+        else ""
+    )
+
+    sql = text(
+        f"""
         SELECT type, id, ref FROM (
             SELECT 'invoice'::text AS type, id, number AS ref, 1 AS prio
                 FROM invoices
@@ -686,10 +722,7 @@ async def get_source_doc(
             SELECT 'credit_note', id, number, 3
                 FROM credit_notes
                 WHERE journal_entry_id = :eid AND tenant_id = :tid AND archived_at IS NULL
-            UNION ALL
-            SELECT 'expense', id, COALESCE(NULLIF(reference, ''), NULLIF(number, ''), id::text), 4
-                FROM expenses
-                WHERE journal_entry_id = :eid AND tenant_id = :tid AND archived_at IS NULL
+            {expenses_branch}
             UNION ALL
             SELECT 'payment', id, COALESCE(NULLIF(reference, ''), NULLIF(number, ''), 'Payment ' || left(id::text, 8)), 5
                 FROM payments
