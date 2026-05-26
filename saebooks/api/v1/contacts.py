@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import date
 from typing import Any
 from uuid import UUID
 
@@ -401,3 +402,102 @@ async def archive_contact(
     return Response(status_code=204)
 
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Customer statements (G3) — added 2026-05-27.
+# JSON + PDF surfaces for "this customer's AR activity in a date range".
+# Built on services.statements.build_statement.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{contact_id}/statement")
+async def get_contact_statement(
+    contact_id: UUID,
+    request: Request,
+    period_from: date = Query(..., alias="from", description="Statement period start (YYYY-MM-DD)"),
+    period_to:   date = Query(..., alias="to",   description="Statement period end (YYYY-MM-DD)"),
+    bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> JSONResponse:
+    """Return a customer statement as JSON for the given period."""
+    from saebooks.services.statements import build_statement
+
+    tenant_id = resolve_tenant_id(request)
+    if period_to < period_from:
+        raise HTTPException(422, "'to' must not be before 'from'")
+    try:
+        statement = await build_statement(
+            session, contact_id,
+            tenant_id=tenant_id, company_id=company_id,
+            period_start=period_from, period_end=period_to,
+        )
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+    return JSONResponse({
+        "contact_id":    str(statement.contact_id),
+        "contact_name":  statement.contact_name,
+        "contact_email": statement.contact_email,
+        "period": {
+            "from": statement.period_start.isoformat(),
+            "to":   statement.period_end.isoformat(),
+        },
+        "opening_balance":           str(statement.opening_balance),
+        "closing_balance":           str(statement.closing_balance),
+        "total_invoiced_in_period":  str(statement.total_invoiced_in_period),
+        "total_paid_in_period":      str(statement.total_paid_in_period),
+        "lines": [
+            {
+                "date":        ln.line_date.isoformat(),
+                "kind":        ln.kind,
+                "reference":   ln.reference,
+                "description": ln.description,
+                "amount_dr":   str(ln.amount_dr),
+                "amount_cr":   str(ln.amount_cr),
+                "balance":     str(ln.balance),
+            }
+            for ln in statement.lines
+        ],
+    })
+
+
+@router.get("/{contact_id}/statement.pdf")
+async def get_contact_statement_pdf(
+    contact_id: UUID,
+    request: Request,
+    period_from: date = Query(..., alias="from"),
+    period_to:   date = Query(..., alias="to"),
+    bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> Response:
+    """Return the customer statement as a PDF (engineering-style document)."""
+    from saebooks.services.statements import build_statement, render_statement_pdf
+    from saebooks.models.company import Company
+    from sqlalchemy import select as sa_select
+
+    tenant_id = resolve_tenant_id(request)
+    if period_to < period_from:
+        raise HTTPException(422, "'to' must not be before 'from'")
+    try:
+        statement = await build_statement(
+            session, contact_id,
+            tenant_id=tenant_id, company_id=company_id,
+            period_start=period_from, period_end=period_to,
+        )
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+    company = (
+        await session.execute(sa_select(Company).where(Company.id == company_id))
+    ).scalars().first()
+
+    pdf_bytes = render_statement_pdf(statement, company=company)
+    filename = f"statement-{statement.contact_name.replace(' ', '-')[:40]}-{period_from.isoformat()}-{period_to.isoformat()}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
