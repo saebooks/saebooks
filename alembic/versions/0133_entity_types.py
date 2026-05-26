@@ -22,7 +22,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0133_entity_types"
-down_revision: str | None = "0132_gst_system_managed_backfill"
+down_revision: str | None = "0132a_backfill_missing_tables"
 branch_labels: Sequence[str] | None = None
 depends_on: Sequence[str] | None = None
 
