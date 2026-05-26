@@ -356,7 +356,7 @@ async def get(
     """
     stmt = (
         select(Invoice)
-        .options(selectinload(Invoice.lines))
+        .options(selectinload(Invoice.lines), selectinload(Invoice.one_off_customer))
         .where(Invoice.id == invoice_id)
     )
     if tenant_id is not None:
@@ -380,7 +380,7 @@ async def list_invoices(
 ) -> list[Invoice]:
     stmt = (
         select(Invoice)
-        .options(selectinload(Invoice.lines))
+        .options(selectinload(Invoice.lines), selectinload(Invoice.one_off_customer))
         .where(Invoice.company_id == company_id)
     )
     if not include_archived:
@@ -917,7 +917,7 @@ async def _get_with_lines(
 ) -> Invoice | None:
     result = await session.execute(
         select(Invoice)
-        .options(selectinload(Invoice.lines))
+        .options(selectinload(Invoice.lines), selectinload(Invoice.one_off_customer))
         .where(Invoice.id == invoice_id)
     )
     return result.scalar_one_or_none()
@@ -961,7 +961,7 @@ async def list_active(
 
     stmt = (
         select(Invoice)
-        .options(selectinload(Invoice.lines))
+        .options(selectinload(Invoice.lines), selectinload(Invoice.one_off_customer))
         .where(*base_where)
         .order_by(Invoice.issue_date.desc(), Invoice.created_at.desc())
         .limit(limit)
@@ -1001,7 +1001,7 @@ async def api_get(
         clauses.append(Invoice.company_id == company_id)
     result = await session.execute(
         select(Invoice)
-        .options(selectinload(Invoice.lines))
+        .options(selectinload(Invoice.lines), selectinload(Invoice.one_off_customer))
         .where(*clauses)
     )
     return result.scalar_one_or_none()

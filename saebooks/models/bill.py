@@ -152,6 +152,16 @@ class Bill(CompanyScoped, Base):
         cascade="all, delete-orphan",
         order_by="BillLine.line_no",
     )
+    one_off_vendor: Mapped["OneOffVendor | None"] = relationship(
+        "OneOffVendor",
+        foreign_keys=[one_off_vendor_id],
+        lazy="raise",
+    )
+
+    @property
+    def one_off_vendor_name(self) -> str | None:
+        ov = self.__dict__.get("one_off_vendor")
+        return ov.name if ov is not None else None
 
 
 class BillLine(Base):

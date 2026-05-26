@@ -830,6 +830,8 @@ class InvoiceOut(BaseModel):
     company_id: uuid.UUID
     tenant_id: uuid.UUID
     contact_id: uuid.UUID | None = None
+    one_off_customer_id: uuid.UUID | None = None
+    one_off_customer_name: str | None = None
     number: str | None = None
     issue_date: date
     due_date: date
@@ -951,6 +953,8 @@ class BillOut(BaseModel):
     company_id: uuid.UUID
     tenant_id: uuid.UUID
     contact_id: uuid.UUID | None = None
+    one_off_vendor_id: uuid.UUID | None = None
+    one_off_vendor_name: str | None = None
     number: str | None = None
     supplier_reference: str | None = None
     issue_date: date
@@ -3149,6 +3153,8 @@ class ExpenseOut(BaseModel):
     company_id: uuid.UUID
     tenant_id: uuid.UUID
     contact_id: uuid.UUID | None = None
+    one_off_vendor_id: uuid.UUID | None = None
+    one_off_vendor_name: str | None = None
     payment_account_id: uuid.UUID
     number: str | None = None
     reference: str | None = None
@@ -3557,3 +3563,117 @@ class BranchOut(BaseModel):
 class BranchListOut(BaseModel):
     items: list[BranchOut]
     total: int
+
+
+# ---------------------------------------------------------------------------
+# One-off vendors
+# ---------------------------------------------------------------------------
+
+
+class OneOffVendorBase(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str = Field(min_length=1, max_length=255)
+    abn: str | None = None
+    default_account_id: uuid.UUID | None = None
+    default_tax_code: str | None = None
+    notes: str | None = None
+
+
+class OneOffVendorCreate(OneOffVendorBase):
+    """POST body for creating a one-off vendor."""
+
+
+class OneOffVendorUpdate(BaseModel):
+    """PATCH body — every field optional. ``None`` clears, missing leaves alone."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    abn: str | None = None
+    default_account_id: uuid.UUID | None = None
+    default_tax_code: str | None = None
+    notes: str | None = None
+
+
+class OneOffVendorOut(OneOffVendorBase):
+    id: uuid.UUID
+    company_id: uuid.UUID
+    tenant_id: uuid.UUID
+    last_used_at: datetime | None = None
+    use_count: int
+    total_spent: Decimal
+    archived_at: datetime | None = None
+    promoted_to_contact_id: uuid.UUID | None = None
+    version: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class OneOffVendorListOut(BaseModel):
+    items: list[OneOffVendorOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class OneOffVendorConflictBody(BaseModel):
+    detail: str
+    current: OneOffVendorOut
+
+
+# ---------------------------------------------------------------------------
+# One-off customers
+# ---------------------------------------------------------------------------
+
+
+class OneOffCustomerBase(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str = Field(min_length=1, max_length=255)
+    abn: str | None = None
+    default_account_id: uuid.UUID | None = None
+    default_tax_code: str | None = None
+    notes: str | None = None
+
+
+class OneOffCustomerCreate(OneOffCustomerBase):
+    """POST body for creating a one-off customer."""
+
+
+class OneOffCustomerUpdate(BaseModel):
+    """PATCH body — every field optional. ``None`` clears, missing leaves alone."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    abn: str | None = None
+    default_account_id: uuid.UUID | None = None
+    default_tax_code: str | None = None
+    notes: str | None = None
+
+
+class OneOffCustomerOut(OneOffCustomerBase):
+    id: uuid.UUID
+    company_id: uuid.UUID
+    tenant_id: uuid.UUID
+    last_used_at: datetime | None = None
+    use_count: int
+    total_billed: Decimal
+    archived_at: datetime | None = None
+    promoted_to_contact_id: uuid.UUID | None = None
+    version: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class OneOffCustomerListOut(BaseModel):
+    items: list[OneOffCustomerOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class OneOffCustomerConflictBody(BaseModel):
+    detail: str
+    current: OneOffCustomerOut

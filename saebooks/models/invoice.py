@@ -178,6 +178,16 @@ class Invoice(CompanyScoped, Base):
         cascade="all, delete-orphan",
         order_by="InvoiceLine.line_no",
     )
+    one_off_customer: Mapped["OneOffCustomer | None"] = relationship(
+        "OneOffCustomer",
+        foreign_keys=[one_off_customer_id],
+        lazy="raise",
+    )
+
+    @property
+    def one_off_customer_name(self) -> str | None:
+        oc = self.__dict__.get("one_off_customer")
+        return oc.name if oc is not None else None
 
 
 class InvoiceLine(Base):

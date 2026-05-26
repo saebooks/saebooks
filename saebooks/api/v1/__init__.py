@@ -53,6 +53,8 @@ from saebooks.api.v1.changes import router as changes_router
 from saebooks.api.v1.companies import router as companies_router
 from saebooks.api.v1.contact_public import router as contact_public_router
 from saebooks.api.v1.contacts import router as contacts_router
+from saebooks.api.v1.one_off_vendors import router as one_off_vendors_router
+from saebooks.api.v1.one_off_customers import router as one_off_customers_router
 from saebooks.api.v1.credit_notes import router as credit_notes_router
 from saebooks.api.v1.depreciation_models import router as depreciation_models_router
 from saebooks.api.v1.fixed_assets import router as fixed_assets_router
@@ -112,6 +114,8 @@ router.include_router(lodgement_router)
 # Public contact form — unauthenticated, rate-limited per IP/hour.
 router.include_router(contact_public_router)
 router.include_router(contacts_router)
+router.include_router(one_off_vendors_router)
+router.include_router(one_off_customers_router)
 router.include_router(account_ranges_router)
 router.include_router(accounts_router)
 router.include_router(ato_sbr_router)
