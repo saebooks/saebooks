@@ -54,7 +54,7 @@ from saebooks.api.v1.schemas import (
     ContactListOut,
     ContactOut,
     ContactUpdate,
-    OneOffBulkTagRequest,
+
 )
 from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.models.contact import Contact, ContactType
@@ -106,7 +106,6 @@ def _dump(contact: Contact) -> dict[str, Any]:
 async def list_contacts(
     contact_type: ContactType | None = Query(default=None, alias="type"),  # noqa: B008
     search: str | None = Query(default=None, alias="q"),
-    is_one_off: bool | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
@@ -120,8 +119,6 @@ async def list_contacts(
     )
     if contact_type is not None:
         count_stmt = count_stmt.where(Contact.contact_type == contact_type)
-    if is_one_off is not None:
-        count_stmt = count_stmt.where(Contact.is_one_off.is_(is_one_off))
     if search:
         pattern = f"%{search}%"
         count_stmt = count_stmt.where(
@@ -133,7 +130,6 @@ async def list_contacts(
         company_id,
         contact_type=contact_type,
         search=search,
-        is_one_off=is_one_off,
         limit=limit,
         offset=offset,
     )
@@ -405,54 +401,3 @@ async def archive_contact(
     return Response(status_code=204)
 
 # ---------------------------------------------------------------------------
-# Bulk-tag one-off — flip ``is_one_off`` on many contacts in one call.
-# ---------------------------------------------------------------------------
-
-
-@router.post(
-    "/bulk-tag-one-off",
-    response_model=None,
-)
-async def bulk_tag_one_off(
-    payload: OneOffBulkTagRequest,
-    request: Request,
-    bearer: str = Depends(require_bearer),
-    session: AsyncSession = Depends(get_session),
-    company_id: UUID = Depends(get_active_company_id),
-) -> JSONResponse:
-    """Set ``is_one_off`` on a list of contacts in one transaction.
-
-    Body: ``{"contact_ids": [...], "is_one_off": true|false}``.
-
-    Each contact is fetched (tenant-scoped, archived rows skipped), its
-    ``is_one_off`` flag updated to the requested value if it differs,
-    a change_log row appended, and the version bumped. Already-correct
-    rows are skipped silently. Foreign-tenant ids (or non-existent ids)
-    are silently skipped — same shape as the existing per-row update
-    would yield a 404 individually.
-
-    Returns ``{"flipped": <count>}`` — number of rows whose flag actually
-    changed.
-    """
-    tenant_id = resolve_tenant_id(request)
-    flipped = 0
-    for cid in payload.contact_ids:
-        existing = await svc.get(session, cid, tenant_id=tenant_id, company_id=company_id)
-        if existing is None or existing.archived_at is not None:
-            continue
-        if existing.is_one_off == payload.is_one_off:
-            continue
-        try:
-            await svc.update(
-                session,
-                cid,
-                actor=f"api:{bearer[:8]}…",
-                tenant_id=tenant_id,
-                is_one_off=payload.is_one_off,
-            )
-        except (ValueError, svc.VersionConflict):
-            # Skip a bad/conflicting row; the rest of the batch still proceeds.
-            continue
-        flipped += 1
-    return JSONResponse({"flipped": flipped}, status_code=200)
-

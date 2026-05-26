@@ -72,6 +72,10 @@ class Expense(CompanyScoped, Base):
         UUID(as_uuid=True),
         ForeignKey("contacts.id", ondelete="RESTRICT"),
     )
+    one_off_vendor_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("one_off_vendors.id", ondelete="RESTRICT"),
+    )
     payment_account_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("accounts.id", ondelete="RESTRICT"),

@@ -38,10 +38,6 @@ class ContactBase(BaseModel):
     bank_account_number: str | None = None
     bank_account_title: str | None = None
     currency_code: str | None = Field(default=None, max_length=3, description="ISO 4217 billing currency")
-    is_one_off: bool = Field(
-        default=False,
-        description="Hidden from main /contacts list. Cash purchases / walk-ins / once-off counterparties.",
-    )
 
 
 class ContactCreate(ContactBase):
@@ -72,7 +68,6 @@ class ContactUpdate(BaseModel):
     default_account_id: uuid.UUID | None = None
     default_tax_code: str | None = None
     currency_code: str | None = Field(default=None, max_length=3)
-    is_one_off: bool | None = None
 
 
 class ContactOut(ContactBase):
@@ -111,20 +106,6 @@ class OneOffCandidatesOut(BaseModel):
     total: int
 
 
-class OneOffBulkTagRequest(BaseModel):
-    """POST body for /api/v1/contacts/bulk-tag-one-off.
-
-    Flips ``is_one_off`` on all listed contacts. Default ``True`` retains
-    the original mark these as one-offs semantics; pass ``False`` to
-    move contacts back to the main pool.
-    """
-
-    contact_ids: list[uuid.UUID] = Field(min_length=1)
-    is_one_off: bool = True
-
-
-class OneOffBulkTagOut(BaseModel):
-    flipped: int
 
 
 class ConflictBody(BaseModel):
