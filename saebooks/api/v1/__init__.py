@@ -43,6 +43,7 @@ from saebooks.api.v1.employees import router as employees_router
 from saebooks.api.v1.expenses import router as expenses_router
 from saebooks.api.v1.leave import router as leave_router
 from saebooks.api.v1.stp import router as stp_router
+from saebooks.api.v1.tpar import router as tpar_router
 from saebooks.api.v1.super_funds import router as super_funds_router
 from saebooks.api.v1.time_entries import router as time_entries_router
 from saebooks.api.v1.budgets import router as budgets_router
@@ -191,5 +192,6 @@ router.include_router(cashbook_router)
 # the dependency on Authentik / CF Access for FIDO2-bound login. Default
 # on; per-instance config via SAEBOOKS_WEBAUTHN_RP_ID / _ORIGIN env vars.
 router.include_router(webauthn_router)
+router.include_router(tpar_router)
 
 __all__ = ["router"]
