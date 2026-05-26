@@ -572,3 +572,201 @@ async def create_stripe_payment_link(
     await session.commit()
 
     return JSONResponse({"payment_link": url})
+
+
+# ---------------------------------------------------------------------------
+# PDF + send-email — added 2026-05-26 (parity with quotes /pdf and
+# /send-email). Both endpoints render via render_invoice_pdf; /send-email
+# pushes through the customer_email kill-switch (two-key gate: env flag
+# + per-tenant outbound_email_enabled). NEVER bypasses the gate.
+# ---------------------------------------------------------------------------
+
+
+def _build_invoice_ctx(inv: Any, customer: Any, company: Any) -> dict[str, Any]:
+    """Construct the render-document ctx from an invoice + its customer + company."""
+    customer_addr = {}
+    if customer:
+        customer_addr = {k: v for k, v in {
+            "address_line1": customer.address_line1,
+            "address_line2": customer.address_line2,
+            "city":          customer.city,
+            "state":         customer.state,
+            "postcode":      customer.postcode,
+            "country":       customer.country,
+        }.items() if v}
+    company_addr = (company.address or {}) if company else {}
+    return {
+        "number":       inv.number or str(inv.id)[:8],
+        "issue_date":   inv.issue_date.isoformat() if inv.issue_date else "",
+        "due_date":     inv.due_date.isoformat() if inv.due_date else "",
+        "currency":     inv.currency,
+        "subtotal":     str(inv.subtotal),
+        "tax_total":    str(inv.tax_total),
+        "total":        str(inv.total),
+        "amount_paid":  str(inv.amount_paid),
+        "notes":        inv.notes or "",
+        "payment_terms": inv.payment_terms or "",
+        "company": {
+            "name":    (company.legal_name or company.name) if company else "",
+            "abn":     (company.abn or "") if company else "",
+            "address": customer_addr,  # placeholder if real address absent
+            **({k: v for k, v in company_addr.items()} if company_addr else {}),
+        },
+        "contact": {
+            "name":    customer.name if customer else "",
+            "email":   (customer.email or "") if customer else "",
+            "phone":   (customer.phone or "") if customer else "",
+            **({k: v for k, v in customer_addr.items()} if customer_addr else {}),
+        },
+        "lines": [
+            {
+                "line_no":     ln.line_no,
+                "description": ln.description,
+                "quantity":    str(ln.quantity),
+                "unit_price":  str(ln.unit_price),
+                "line_total":  str(ln.line_total),
+                "line_tax":    str(ln.line_tax),
+            }
+            for ln in inv.lines
+        ],
+    }
+
+
+@router.get("/{invoice_id}/pdf")
+async def get_invoice_pdf(
+    invoice_id: UUID,
+    request: Request,
+    bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> Response:
+    """Render an invoice as PDF (Tax Invoice layout). Always regenerated; never stored."""
+    from saebooks.services.pdf import render_invoice_pdf
+    from saebooks.models.contact import Contact
+    from saebooks.models.company import Company
+    from sqlalchemy import select as sa_select
+
+    tenant_id = resolve_tenant_id(request)
+    inv = await svc.api_get(session, invoice_id, tenant_id=tenant_id, company_id=company_id)
+    if inv is None:
+        raise HTTPException(404, "Invoice not found")
+
+    customer = (
+        await session.execute(sa_select(Contact).where(Contact.id == inv.contact_id))
+    ).scalars().first()
+    company = (
+        await session.execute(sa_select(Company).where(Company.id == inv.company_id))
+    ).scalars().first()
+
+    ctx = _build_invoice_ctx(inv, customer, company)
+    pdf_bytes = render_invoice_pdf(ctx)
+    filename = f"invoice-{ctx['number']}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
+@router.post("/{invoice_id}/send-email")
+async def post_invoice_send_email(
+    invoice_id: UUID,
+    request: Request,
+    bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> Response:
+    """Render the invoice PDF and send (or block) via customer_email.
+
+    Request JSON:
+        {
+            "from_addr": "billing@yourbiz.com.au",
+            "to":   ["customer@example.com"],
+            "cc":   [],                              // optional
+            "bcc":  [],                              // optional
+            "subject": "Tax Invoice 1234 from ...",
+            "body_html": "<p>Please find attached…</p>"
+        }
+    Response: { mode, log_id, message_id?, reason?, outbox_path? }
+    """
+    from saebooks.services.pdf import render_invoice_pdf
+    from saebooks.services.customer_email import (
+        send_customer_email, CustomerEmailAttachment, CustomerEmailError,
+    )
+    from saebooks.models.contact import Contact
+    from saebooks.models.company import Company
+    from sqlalchemy import select as sa_select
+
+    tenant_id = resolve_tenant_id(request)
+    payload = await request.json()
+    try:
+        from_addr = str(payload["from_addr"]).strip()
+        to = [x.strip() for x in (payload.get("to") or []) if x and str(x).strip()]
+        cc = [x.strip() for x in (payload.get("cc") or []) if x and str(x).strip()]
+        bcc = [x.strip() for x in (payload.get("bcc") or []) if x and str(x).strip()]
+        subject = str(payload["subject"]).strip()
+        body_html = str(payload["body_html"]).strip()
+    except (KeyError, TypeError) as exc:
+        raise HTTPException(422, f"missing field: {exc}")
+
+    sent_by_uid_raw = payload.get("sent_by_user_id")
+    sent_by_user_id: UUID | None = None
+    if sent_by_uid_raw:
+        try:
+            sent_by_user_id = UUID(str(sent_by_uid_raw))
+        except (ValueError, TypeError):
+            sent_by_user_id = None
+
+    if not from_addr or not to or not subject or not body_html:
+        raise HTTPException(422, "from_addr, to, subject, and body_html are all required")
+
+    inv = await svc.api_get(session, invoice_id, tenant_id=tenant_id, company_id=company_id)
+    if inv is None:
+        raise HTTPException(404, "Invoice not found")
+
+    customer = (
+        await session.execute(sa_select(Contact).where(Contact.id == inv.contact_id))
+    ).scalars().first()
+    company = (
+        await session.execute(sa_select(Company).where(Company.id == inv.company_id))
+    ).scalars().first()
+
+    ctx = _build_invoice_ctx(inv, customer, company)
+    pdf_bytes = render_invoice_pdf(ctx)
+    pdf_filename = f"invoice-{ctx['number']}.pdf"
+
+    try:
+        result = await send_customer_email(
+            session,
+            tenant_id=tenant_id,
+            doc_type="invoice",
+            doc_id=inv.id,
+            doc_version=inv.version,
+            sent_by_user_id=sent_by_user_id,
+            from_addr=from_addr,
+            to=to,
+            cc=cc,
+            bcc=bcc,
+            subject=subject,
+            body_html=body_html,
+            attachments=[CustomerEmailAttachment(
+                filename=pdf_filename, content=pdf_bytes, content_type="application/pdf",
+            )],
+        )
+    except CustomerEmailError as exc:
+        raise HTTPException(422, str(exc))
+
+    # Stamp sent_at on POSTED invoices (drafts can be re-rendered; sent_at
+    # is only meaningful once the document is final).
+    if inv.status == InvoiceStatus.POSTED and inv.sent_at is None:
+        from datetime import datetime, timezone
+        inv.sent_at = datetime.now(timezone.utc)
+    await session.commit()
+
+    return JSONResponse({
+        "mode":        result.mode,
+        "log_id":      str(result.log_id),
+        "message_id":  result.message_id,
+        "reason":      result.reason,
+        "outbox_path": result.outbox_path,
+    }, status_code=200)
