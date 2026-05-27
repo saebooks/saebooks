@@ -193,7 +193,7 @@ async def create_draft(
 async def get(session: AsyncSession, credit_note_id: uuid.UUID) -> CreditNote:
     result = await session.execute(
         select(CreditNote)
-        .options(selectinload(CreditNote.lines))
+        .options(selectinload(CreditNote.lines), selectinload(CreditNote.one_off_customer))
         .where(CreditNote.id == credit_note_id)
     )
     cn = result.scalar_one_or_none()
@@ -214,7 +214,7 @@ async def list_credit_notes(
 ) -> list[CreditNote]:
     stmt = (
         select(CreditNote)
-        .options(selectinload(CreditNote.lines))
+        .options(selectinload(CreditNote.lines), selectinload(CreditNote.one_off_customer))
         .where(CreditNote.company_id == company_id)
     )
     if not include_archived:
@@ -515,7 +515,7 @@ async def _get_api(
     """Fetch a single credit note with lines. Returns None if not found."""
     result = await session.execute(
         select(CreditNote)
-        .options(selectinload(CreditNote.lines))
+        .options(selectinload(CreditNote.lines), selectinload(CreditNote.one_off_customer))
         .where(CreditNote.id == credit_note_id)
     )
     return result.scalar_one_or_none()
@@ -558,7 +558,7 @@ async def list_active(
 
     stmt = (
         select(CreditNote)
-        .options(selectinload(CreditNote.lines))
+        .options(selectinload(CreditNote.lines), selectinload(CreditNote.one_off_customer))
         .where(*base_where)
         .order_by(CreditNote.issue_date.desc(), CreditNote.created_at.desc())
         .limit(limit)
@@ -589,7 +589,7 @@ async def api_get(
         clauses.append(CreditNote.company_id == company_id)
     result = await session.execute(
         select(CreditNote)
-        .options(selectinload(CreditNote.lines))
+        .options(selectinload(CreditNote.lines), selectinload(CreditNote.one_off_customer))
         .where(*clauses)
     )
     return result.scalar_one_or_none()

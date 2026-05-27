@@ -1062,7 +1062,11 @@ class PaymentOut(BaseModel):
     id: uuid.UUID
     company_id: uuid.UUID
     tenant_id: uuid.UUID
-    contact_id: uuid.UUID
+    contact_id: uuid.UUID | None = None
+    one_off_vendor_id: uuid.UUID | None = None
+    one_off_vendor_name: str | None = None
+    one_off_customer_id: uuid.UUID | None = None
+    one_off_customer_name: str | None = None
     bank_account_id: uuid.UUID
     number: str | None = None
     direction: str
@@ -1167,7 +1171,9 @@ class CreditNoteOut(BaseModel):
     id: uuid.UUID
     company_id: uuid.UUID
     tenant_id: uuid.UUID
-    contact_id: uuid.UUID
+    contact_id: uuid.UUID | None = None
+    one_off_customer_id: uuid.UUID | None = None
+    one_off_customer_name: str | None = None
     number: str | None = None
     issue_date: date
     status: str

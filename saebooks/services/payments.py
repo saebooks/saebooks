@@ -119,7 +119,11 @@ async def create_draft(
 async def get(session: AsyncSession, payment_id: uuid.UUID) -> Payment:
     result = await session.execute(
         select(Payment)
-        .options(selectinload(Payment.allocations))
+        .options(
+            selectinload(Payment.allocations),
+            selectinload(Payment.one_off_vendor),
+            selectinload(Payment.one_off_customer),
+        )
         .where(Payment.id == payment_id)
     )
     pay = result.scalar_one_or_none()
@@ -141,7 +145,11 @@ async def list_payments(
 ) -> list[Payment]:
     stmt = (
         select(Payment)
-        .options(selectinload(Payment.allocations))
+        .options(
+            selectinload(Payment.allocations),
+            selectinload(Payment.one_off_vendor),
+            selectinload(Payment.one_off_customer),
+        )
         .where(Payment.company_id == company_id)
     )
     if not include_archived:
@@ -893,7 +901,11 @@ async def _get_with_allocations(
 ) -> Payment | None:
     result = await session.execute(
         select(Payment)
-        .options(selectinload(Payment.allocations))
+        .options(
+            selectinload(Payment.allocations),
+            selectinload(Payment.one_off_vendor),
+            selectinload(Payment.one_off_customer),
+        )
         .where(Payment.id == payment_id)
     )
     return result.scalar_one_or_none()
@@ -935,7 +947,11 @@ async def list_active(
 
     stmt = (
         select(Payment)
-        .options(selectinload(Payment.allocations))
+        .options(
+            selectinload(Payment.allocations),
+            selectinload(Payment.one_off_vendor),
+            selectinload(Payment.one_off_customer),
+        )
         .where(*base_where)
         .order_by(Payment.payment_date.desc(), Payment.created_at.desc())
         .limit(limit)
@@ -969,7 +985,11 @@ async def api_get(
         clauses.append(Payment.company_id == company_id)
     result = await session.execute(
         select(Payment)
-        .options(selectinload(Payment.allocations))
+        .options(
+            selectinload(Payment.allocations),
+            selectinload(Payment.one_off_vendor),
+            selectinload(Payment.one_off_customer),
+        )
         .where(*clauses)
     )
     return result.scalar_one_or_none()
