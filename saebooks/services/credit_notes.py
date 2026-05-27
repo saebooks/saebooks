@@ -339,6 +339,14 @@ async def post_credit_note(
 
     # Income reversal: Dr Income / Dr GST Collected / Cr AR
     # Contra-COGS (hold-back): Cr COGS / Cr GST Collected / Dr AR  ← BAS G8
+    #
+    # tax_code_id MUST be carried onto the income/COGS reversal lines —
+    # the BAS aggregator filters journal_lines by their tax_code
+    # reporting_type, and a NULL tax_code_id makes the reversal invisible
+    # to G1/G8, leaving the BAS still showing the original sale (Round-2
+    # critic 13). The GST adjustment line itself doesn't need a tax_code
+    # because its account already IS the GST control account and the BAS
+    # builder picks it up via account-side aggregation.
     lines: list[dict[str, object]] = []
     for line in cn.lines:
         is_cogs = acct_type_map.get(line.account_id) in _COGS_TYPES
@@ -348,6 +356,7 @@ async def post_credit_note(
                 "description": f"{cn.number}: {line.description}",
                 "debit": Decimal("0") if is_cogs else line.line_subtotal,
                 "credit": line.line_subtotal if is_cogs else Decimal("0"),
+                "tax_code_id": line.tax_code_id,
             }
         )
     if cn.tax_total > Decimal("0") and gst_account is not None:
