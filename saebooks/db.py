@@ -109,17 +109,34 @@ def backend_supports_rls() -> bool:
 
 
 def _engine_kwargs_for(url: str) -> dict[str, object]:
-    """Return create_async_engine kwargs appropriate for the URL's dialect."""
+    """Return create_async_engine kwargs appropriate for the URL's dialect.
+
+    Pooling: defaults to NullPool on both dialects for backwards-compatible
+    behaviour. To enable real pooling on Postgres, set
+    ``SAEBOOKS_DB_POOL_SIZE`` to a positive integer in the stack env;
+    optionally ``SAEBOOKS_DB_MAX_OVERFLOW`` (default 5). With pooling on,
+    the per-request connection-establish cost (TLS + auth handshake,
+    typically 50-300ms on cold connect) is amortised across the worker's
+    lifetime. Safe because all tenant-scoping uses ``SET LOCAL`` which
+    is transaction-scoped and resets on connection release.
+    """
     if _url_is_sqlite(url):
-        # aiosqlite needs check_same_thread=False so SQLAlchemy's async
-        # pool can hand the connection across thread boundaries. NullPool
-        # makes the connection lifecycle "open per request, close on
-        # release" — same shape as the Postgres path.
         return {
             "echo": False,
             "future": True,
             "poolclass": NullPool,
             "connect_args": {"check_same_thread": False},
+        }
+    pool_size = int(os.environ.get("SAEBOOKS_DB_POOL_SIZE", "0") or "0")
+    if pool_size > 0:
+        max_overflow = int(os.environ.get("SAEBOOKS_DB_MAX_OVERFLOW", "5") or "5")
+        return {
+            "echo": False,
+            "future": True,
+            "pool_size": pool_size,
+            "max_overflow": max_overflow,
+            "pool_pre_ping": True,
+            "pool_recycle": 1800,
         }
     return {"echo": False, "future": True, "poolclass": NullPool}
 

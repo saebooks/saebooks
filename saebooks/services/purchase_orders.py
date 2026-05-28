@@ -409,17 +409,20 @@ async def api_get(
     po_id: uuid.UUID,
     *,
     tenant_id: uuid.UUID | None = None,
+    company_id: uuid.UUID | None = None,
 ) -> PurchaseOrder | None:
     """Fetch a PO with lines. Returns ``None`` if not found / wrong tenant."""
-    if tenant_id is None:
+    if tenant_id is None and company_id is None:
         return await _get_with_lines(session, po_id)
+    clauses = [PurchaseOrder.id == po_id]
+    if tenant_id is not None:
+        clauses.append(PurchaseOrder.tenant_id == tenant_id)
+    if company_id is not None:
+        clauses.append(PurchaseOrder.company_id == company_id)
     result = await session.execute(
         select(PurchaseOrder)
         .options(selectinload(PurchaseOrder.lines))
-        .where(
-            PurchaseOrder.id == po_id,
-            PurchaseOrder.tenant_id == tenant_id,
-        )
+        .where(*clauses)
     )
     return result.scalar_one_or_none()
 

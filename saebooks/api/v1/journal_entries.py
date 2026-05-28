@@ -254,9 +254,10 @@ async def get_journal_entry(
     entry_id: UUID,
     request: Request,
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> JournalEntryOut:
     tenant_id = resolve_tenant_id(request)
-    entry = await svc.get(session, entry_id, tenant_id=tenant_id)
+    entry = await svc.get(session, entry_id, tenant_id=tenant_id, company_id=company_id)
     if entry is None:
         raise HTTPException(404, "Journal entry not found")
     # Populate source_type/source_id by reverse-lookup (#27, approach b).
@@ -276,6 +277,7 @@ async def get_journal_entry_source(
     entry_id: UUID,
     request: Request,
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> dict[str, str | None]:
     """Return the source document linked to this JE, or nulls.
 
@@ -284,7 +286,7 @@ async def get_journal_entry_source(
     priority order) is returned.
     """
     tenant_id = resolve_tenant_id(request)
-    entry = await svc.get(session, entry_id, tenant_id=tenant_id)
+    entry = await svc.get(session, entry_id, tenant_id=tenant_id, company_id=company_id)
     if entry is None:
         raise HTTPException(404, 'Journal entry not found')
     src = await svc.get_source_doc(session, entry_id, tenant_id=tenant_id)
@@ -345,13 +347,14 @@ async def update_journal_entry(
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
     force: bool = Depends(edit_force_admin_gate),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with entry version is required")
 
     tenant_id = resolve_tenant_id(request)
-    if await svc.get(session, entry_id, tenant_id=tenant_id) is None:
+    if await svc.get(session, entry_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Journal entry not found")
 
     try:
@@ -407,9 +410,10 @@ async def void_journal_entry(
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
     hard: bool = Depends(hard_delete_admin_gate),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
-    existing = await svc.get(session, entry_id, tenant_id=tenant_id)
+    existing = await svc.get(session, entry_id, tenant_id=tenant_id, company_id=company_id)
     if existing is None:
         raise HTTPException(404, "Journal entry not found")
 
@@ -466,6 +470,7 @@ async def post_journal_entry(
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     """Transition journal entry DRAFT → POSTED.
 
@@ -502,7 +507,7 @@ async def post_journal_entry(
                 status_code=claim.response_status or 200,
             )
 
-    if await svc.get(session, entry_id, tenant_id=tenant_id) is None:
+    if await svc.get(session, entry_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Journal entry not found")
 
     try:
@@ -553,6 +558,7 @@ async def reverse_journal_entry(
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     """Create a reversal of a POSTED journal entry (POSTED → REVERSED).
 
@@ -589,7 +595,7 @@ async def reverse_journal_entry(
                 status_code=claim.response_status or 201,
             )
 
-    if await svc.get(session, entry_id, tenant_id=tenant_id) is None:
+    if await svc.get(session, entry_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Journal entry not found")
 
     try:

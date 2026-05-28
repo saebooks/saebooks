@@ -236,6 +236,10 @@ class CompanyOut(BaseModel):
     # See docs/cashbook-edition-design.md §7.
     bookkeeping_mode: str = "full"
     cashbook_default_bank_account_id: uuid.UUID | None = None
+    # Legal-entity model (migration 0133, 2026-05-24)
+    entity_type: str = "COMPANY"
+    trades: bool = True
+    trustee_company_id: uuid.UUID | None = None
     version: int
     created_at: datetime
     archived_at: datetime | None = None
@@ -263,6 +267,10 @@ class CompanyUpdate(BaseModel):
     gst_effective_date: date | None = None
     psi_status: str | None = None
     address: dict[str, Any] | None = None
+    # Legal-entity model
+    entity_type: str | None = None
+    trades: bool | None = None
+    trustee_company_id: uuid.UUID | None = None
 
     @field_validator("psi_status")
     @classmethod
@@ -303,6 +311,10 @@ class CompanyCreate(BaseModel):
     acn: str | None = None
     base_currency: str = Field(default="AUD", min_length=3, max_length=3)
     fin_year_start_month: int = Field(default=7, ge=1, le=12)
+    # Legal-entity model
+    entity_type: str = "COMPANY"
+    trades: bool = True
+    trustee_company_id: uuid.UUID | None = None
 
 
 class CompanyConflictBody(BaseModel):
@@ -3520,3 +3532,47 @@ class EmployeeTfnRevealOut(BaseModel):
 
     employee_id: uuid.UUID
     tfn: str
+
+
+
+# ---------------------------------------------------------------------------
+# Branches — internal sub-divisional tag on transactions (migration 0134)
+# ---------------------------------------------------------------------------
+
+
+class BranchCreate(BaseModel):
+    """POST body for creating a branch."""
+
+    code: str = Field(min_length=1, max_length=32)
+    name: str = Field(min_length=1, max_length=255)
+    is_default: bool = False
+
+
+class BranchUpdate(BaseModel):
+    """PATCH body — code is immutable; every other field optional."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    is_default: bool | None = None
+
+
+class BranchOut(BaseModel):
+    """Branch response body."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    company_id: uuid.UUID
+    tenant_id: uuid.UUID
+    code: str
+    name: str
+    is_default: bool
+    archived_at: datetime | None = None
+    version: int
+    created_at: datetime
+
+
+class BranchListOut(BaseModel):
+    items: list[BranchOut]
+    total: int

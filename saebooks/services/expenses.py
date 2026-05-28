@@ -636,16 +636,19 @@ async def api_get(
     expense_id: uuid.UUID,
     *,
     tenant_id: uuid.UUID | None = None,
+    company_id: uuid.UUID | None = None,
 ) -> Expense | None:
-    if tenant_id is None:
+    if tenant_id is None and company_id is None:
         return await _get_with_lines(session, expense_id)
+    clauses = [Expense.id == expense_id]
+    if tenant_id is not None:
+        clauses.append(Expense.tenant_id == tenant_id)
+    if company_id is not None:
+        clauses.append(Expense.company_id == company_id)
     result = await session.execute(
         select(Expense)
         .options(selectinload(Expense.lines))
-        .where(
-            Expense.id == expense_id,
-            Expense.tenant_id == tenant_id,
-        )
+        .where(*clauses)
     )
     return result.scalar_one_or_none()
 

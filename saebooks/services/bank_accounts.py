@@ -168,19 +168,27 @@ async def api_get(
     bank_account_id: uuid.UUID,
     *,
     tenant_id: uuid.UUID | None = None,
+    company_id: uuid.UUID | None = None,
 ) -> Account | None:
     """Fetch a single bank account. Returns None if not found or not a bank acct.
 
     When ``tenant_id`` is supplied the lookup is filtered by tenant —
     a foreign-tenant id returns ``None`` even if the row exists.
+
+    When ``company_id`` is supplied the lookup is also filtered by
+    company — a sibling-company id within the same tenant returns
+    ``None``. This is the cross-company isolation guard (Layer 2
+    fix, 2026-05-24): without it, a user "in" company A can read a
+    row belonging to company B just because both companies share a
+    tenant.
     """
-    if tenant_id is not None:
-        result = await session.execute(
-            select(Account).where(
-                Account.id == bank_account_id,
-                Account.tenant_id == tenant_id,
-            )
-        )
+    if tenant_id is not None or company_id is not None:
+        clauses = [Account.id == bank_account_id]
+        if tenant_id is not None:
+            clauses.append(Account.tenant_id == tenant_id)
+        if company_id is not None:
+            clauses.append(Account.company_id == company_id)
+        result = await session.execute(select(Account).where(*clauses))
         account = result.scalars().first()
     else:
         account = await session.get(Account, bank_account_id)

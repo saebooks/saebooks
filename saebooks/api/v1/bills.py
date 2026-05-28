@@ -136,9 +136,10 @@ async def get_bill(
     bill_id: UUID,
     request: Request,
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> BillOut:
     tenant_id = resolve_tenant_id(request)
-    bill = await svc.api_get(session, bill_id, tenant_id=tenant_id)
+    bill = await svc.api_get(session, bill_id, tenant_id=tenant_id, company_id=company_id)
     if bill is None:
         raise HTTPException(404, "Bill not found")
     return BillOut.model_validate(bill)
@@ -227,13 +228,14 @@ async def update_bill(
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
     force: bool = Depends(edit_force_admin_gate),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with bill version is required")
 
     tenant_id = resolve_tenant_id(request)
-    if await svc.api_get(session, bill_id, tenant_id=tenant_id) is None:
+    if await svc.api_get(session, bill_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Bill not found")
 
     try:
@@ -297,9 +299,10 @@ async def void_bill(
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
     hard: bool = Depends(hard_delete_admin_gate),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
-    existing = await svc.api_get(session, bill_id, tenant_id=tenant_id)
+    existing = await svc.api_get(session, bill_id, tenant_id=tenant_id, company_id=company_id)
     if existing is None:
         raise HTTPException(404, "Bill not found")
 
@@ -315,11 +318,12 @@ async def void_bill(
         raise HTTPException(428, "If-Match header with bill version is required")
 
     try:
-        await svc.api_void(
+        await svc.api_void_bill(
             session,
             bill_id,
             actor=f"api:{bearer[:8]}…",
             expected_version=expected,
+            tenant_id=tenant_id,
         )
     except svc.VersionConflict as exc:
         body = BillConflictBody(
@@ -355,6 +359,7 @@ async def post_bill(
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     """Transition bill DRAFT → POSTED, generating journal entry lines."""
     expected = _parse_if_match(if_match)
@@ -385,7 +390,7 @@ async def post_bill(
                 status_code=claim.response_status or 200,
             )
 
-    if await svc.api_get(session, bill_id, tenant_id=tenant_id) is None:
+    if await svc.api_get(session, bill_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Bill not found")
 
     try:
@@ -437,6 +442,7 @@ async def void_bill_transition(
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     """Transition any non-VOIDED bill → VOIDED, reversing JE if POSTED."""
     expected = _parse_if_match(if_match)
@@ -467,7 +473,7 @@ async def void_bill_transition(
                 status_code=claim.response_status or 200,
             )
 
-    if await svc.api_get(session, bill_id, tenant_id=tenant_id) is None:
+    if await svc.api_get(session, bill_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Bill not found")
 
     try:
@@ -498,3 +504,181 @@ async def void_bill_transition(
         await store_response(session, key, 200, json.dumps(body).encode())
         await session.commit()
     return JSONResponse(body, status_code=200)
+
+
+# ---------------------------------------------------------------------------
+# PDF + send-email — added 2026-05-26. Parity with quotes/invoices. Bills
+# are usually supplier-received (not sent), but bookkeepers sometimes need
+# to forward a bill copy to staff/auditors — same pipeline, same kill switch.
+# ---------------------------------------------------------------------------
+
+
+def _build_bill_ctx(bill: Any, supplier: Any, company: Any) -> dict[str, Any]:
+    """Construct render-document ctx from a bill + supplier + company."""
+    supplier_addr = {}
+    if supplier:
+        supplier_addr = {k: v for k, v in {
+            "address_line1": supplier.address_line1,
+            "address_line2": supplier.address_line2,
+            "city":          supplier.city,
+            "state":         supplier.state,
+            "postcode":      supplier.postcode,
+            "country":       supplier.country,
+        }.items() if v}
+    company_addr = (company.address or {}) if company else {}
+    return {
+        "number":      bill.number or str(bill.id)[:8],
+        "issue_date":  bill.issue_date.isoformat() if bill.issue_date else "",
+        "due_date":    bill.due_date.isoformat() if bill.due_date else "",
+        "currency":    bill.currency,
+        "subtotal":    str(bill.subtotal),
+        "tax_total":   str(bill.tax_total),
+        "total":       str(bill.total),
+        "amount_paid": str(bill.amount_paid),
+        "notes":       bill.notes or "",
+        "company": {
+            "name":    (company.legal_name or company.name) if company else "",
+            "abn":     (company.abn or "") if company else "",
+            **({k: v for k, v in company_addr.items()} if company_addr else {}),
+        },
+        "contact": {
+            "name":    supplier.name if supplier else "",
+            "email":   (supplier.email or "") if supplier else "",
+            "phone":   (supplier.phone or "") if supplier else "",
+            **({k: v for k, v in supplier_addr.items()} if supplier_addr else {}),
+        },
+        "lines": [
+            {
+                "line_no":     ln.line_no,
+                "description": ln.description,
+                "quantity":    str(ln.quantity),
+                "unit_price":  str(ln.unit_price),
+                "line_total":  str(ln.line_total),
+                "line_tax":    str(ln.line_tax),
+            }
+            for ln in bill.lines
+        ],
+    }
+
+
+@router.get("/{bill_id}/pdf")
+async def get_bill_pdf(
+    bill_id: UUID,
+    request: Request,
+    bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> Response:
+    """Render a bill as PDF (Bill layout). Always regenerated; never stored."""
+    from saebooks.services.pdf import render_bill_pdf
+    from saebooks.models.contact import Contact
+    from saebooks.models.company import Company
+    from sqlalchemy import select as sa_select
+
+    tenant_id = resolve_tenant_id(request)
+    bill = await svc.api_get(session, bill_id, tenant_id=tenant_id, company_id=company_id)
+    if bill is None:
+        raise HTTPException(404, "Bill not found")
+
+    supplier = (
+        await session.execute(sa_select(Contact).where(Contact.id == bill.contact_id))
+    ).scalars().first()
+    company = (
+        await session.execute(sa_select(Company).where(Company.id == bill.company_id))
+    ).scalars().first()
+
+    ctx = _build_bill_ctx(bill, supplier, company)
+    pdf_bytes = render_bill_pdf(ctx)
+    filename = f"bill-{ctx['number']}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
+@router.post("/{bill_id}/send-email")
+async def post_bill_send_email(
+    bill_id: UUID,
+    request: Request,
+    bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> Response:
+    """Render the bill PDF and send via customer_email (kill-switch gated)."""
+    from saebooks.services.pdf import render_bill_pdf
+    from saebooks.services.customer_email import (
+        send_customer_email, CustomerEmailAttachment, CustomerEmailError,
+    )
+    from saebooks.models.contact import Contact
+    from saebooks.models.company import Company
+    from sqlalchemy import select as sa_select
+
+    tenant_id = resolve_tenant_id(request)
+    payload = await request.json()
+    try:
+        from_addr = str(payload["from_addr"]).strip()
+        to = [x.strip() for x in (payload.get("to") or []) if x and str(x).strip()]
+        cc = [x.strip() for x in (payload.get("cc") or []) if x and str(x).strip()]
+        bcc = [x.strip() for x in (payload.get("bcc") or []) if x and str(x).strip()]
+        subject = str(payload["subject"]).strip()
+        body_html = str(payload["body_html"]).strip()
+    except (KeyError, TypeError) as exc:
+        raise HTTPException(422, f"missing field: {exc}")
+
+    sent_by_uid_raw = payload.get("sent_by_user_id")
+    sent_by_user_id: UUID | None = None
+    if sent_by_uid_raw:
+        try:
+            sent_by_user_id = UUID(str(sent_by_uid_raw))
+        except (ValueError, TypeError):
+            sent_by_user_id = None
+
+    if not from_addr or not to or not subject or not body_html:
+        raise HTTPException(422, "from_addr, to, subject, and body_html are all required")
+
+    bill = await svc.api_get(session, bill_id, tenant_id=tenant_id, company_id=company_id)
+    if bill is None:
+        raise HTTPException(404, "Bill not found")
+
+    supplier = (
+        await session.execute(sa_select(Contact).where(Contact.id == bill.contact_id))
+    ).scalars().first()
+    company = (
+        await session.execute(sa_select(Company).where(Company.id == bill.company_id))
+    ).scalars().first()
+
+    ctx = _build_bill_ctx(bill, supplier, company)
+    pdf_bytes = render_bill_pdf(ctx)
+    pdf_filename = f"bill-{ctx['number']}.pdf"
+
+    try:
+        result = await send_customer_email(
+            session,
+            tenant_id=tenant_id,
+            doc_type="bill",
+            doc_id=bill.id,
+            doc_version=bill.version,
+            sent_by_user_id=sent_by_user_id,
+            from_addr=from_addr,
+            to=to,
+            cc=cc,
+            bcc=bcc,
+            subject=subject,
+            body_html=body_html,
+            attachments=[CustomerEmailAttachment(
+                filename=pdf_filename, content=pdf_bytes, content_type="application/pdf",
+            )],
+        )
+    except CustomerEmailError as exc:
+        raise HTTPException(422, str(exc))
+
+    await session.commit()
+
+    return JSONResponse({
+        "mode":        result.mode,
+        "log_id":      str(result.log_id),
+        "message_id":  result.message_id,
+        "reason":      result.reason,
+        "outbox_path": result.outbox_path,
+    }, status_code=200)

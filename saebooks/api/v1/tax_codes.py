@@ -120,9 +120,10 @@ async def get_tax_code(
     tax_code_id: UUID,
     request: Request,
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> TaxCodeOut:
     tenant_id = resolve_tenant_id(request)
-    tc = await svc.get(session, tax_code_id, tenant_id=tenant_id)
+    tc = await svc.get(session, tax_code_id, tenant_id=tenant_id, company_id=company_id)
     if tc is None:
         raise HTTPException(404, "Tax code not found")
     return TaxCodeOut.model_validate(tc)
@@ -182,13 +183,14 @@ async def update_tax_code(
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with tax code version is required")
 
     tenant_id = resolve_tenant_id(request)
-    if await svc.get(session, tax_code_id, tenant_id=tenant_id) is None:
+    if await svc.get(session, tax_code_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Tax code not found")
 
     try:
@@ -236,9 +238,10 @@ async def archive_tax_code(
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
     hard: bool = Depends(hard_delete_admin_gate),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
-    existing = await svc.get(session, tax_code_id, tenant_id=tenant_id)
+    existing = await svc.get(session, tax_code_id, tenant_id=tenant_id, company_id=company_id)
     if existing is None:
         raise HTTPException(404, "Tax code not found")
 

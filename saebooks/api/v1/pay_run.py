@@ -169,9 +169,10 @@ async def get_pay_run(
     pay_run_id: UUID,
     request: Request,
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> PayRunOut:
     tenant_id = resolve_tenant_id(request)
-    pay_run = await svc.get(session, pay_run_id, tenant_id=tenant_id)
+    pay_run = await svc.get(session, pay_run_id, tenant_id=tenant_id, company_id=company_id)
     if pay_run is None:
         raise HTTPException(404, "Pay run not found")
     return PayRunOut.model_validate(pay_run)
@@ -189,8 +190,12 @@ async def add_line(
     request: Request,
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
+    # Belt-and-braces: cross-company isolation (Layer 2, 2026-05-24)
+    if await svc.get(session, pay_run_id, tenant_id=tenant_id, company_id=company_id) is None:
+        raise HTTPException(404, "Pay run not found")
     try:
         line = await svc.add_line(
             session,
@@ -227,8 +232,12 @@ async def delete_line(
     request: Request,
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Response:
     tenant_id = resolve_tenant_id(request)
+    # Belt-and-braces: cross-company isolation (Layer 2, 2026-05-24)
+    if await svc.get(session, pay_run_id, tenant_id=tenant_id, company_id=company_id) is None:
+        raise HTTPException(404, "Pay run not found")
     try:
         await svc.delete_line(
             session,
@@ -267,12 +276,16 @@ async def export_aba(
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with pay run version is required")
 
     tenant_id = resolve_tenant_id(request)
+    # Belt-and-braces: cross-company isolation (Layer 2, 2026-05-24)
+    if await svc.get(session, pay_run_id, tenant_id=tenant_id, company_id=company_id) is None:
+        raise HTTPException(404, "Pay run not found")
     key = _parse_idempotency_key(idempotency_key)
 
     if key is not None:
@@ -346,12 +359,16 @@ async def finalize_pay_run(
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with pay run version is required")
 
     tenant_id = resolve_tenant_id(request)
+    # Belt-and-braces: cross-company isolation (Layer 2, 2026-05-24)
+    if await svc.get(session, pay_run_id, tenant_id=tenant_id, company_id=company_id) is None:
+        raise HTTPException(404, "Pay run not found")
 
     try:
         pay_run = await svc.finalize(

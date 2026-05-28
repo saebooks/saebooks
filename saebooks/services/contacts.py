@@ -146,6 +146,7 @@ async def get(
     contact_id: uuid.UUID,
     *,
     tenant_id: uuid.UUID | None = None,
+    company_id: uuid.UUID | None = None,
 ) -> Contact | None:
     """Fetch a contact by id.
 
@@ -161,13 +162,15 @@ async def get(
     fetch the detail. With ``tenant_id`` supplied we now reject those
     lookups defensively, on top of the FORCE-RLS gate at the DB layer.
     """
-    if tenant_id is None:
+    if tenant_id is None and company_id is None:
         return await session.get(Contact, contact_id)
+    clauses = [Contact.id == contact_id]
+    if tenant_id is not None:
+        clauses.append(Contact.tenant_id == tenant_id)
+    if company_id is not None:
+        clauses.append(Contact.company_id == company_id)
     result = await session.execute(
-        select(Contact).where(
-            Contact.id == contact_id,
-            Contact.tenant_id == tenant_id,
-        )
+        select(Contact).where(*clauses)
     )
     return result.scalars().first()
 

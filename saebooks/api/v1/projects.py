@@ -115,9 +115,10 @@ async def get_project(
     request: Request,
     project_id: UUID,
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> ProjectOut:
     tenant_id = resolve_tenant_id(request)
-    project = await svc.api_get(session, project_id, tenant_id=tenant_id)
+    project = await svc.api_get(session, project_id, tenant_id=tenant_id, company_id=company_id)
     if project is None:
         raise HTTPException(404, "Project not found")
     return ProjectOut.model_validate(project)
@@ -205,6 +206,7 @@ async def update_project(
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
@@ -213,7 +215,7 @@ async def update_project(
 
     tenant_id = resolve_tenant_id(request)
     # Belt-and-braces: verify project belongs to this tenant
-    if await svc.api_get(session, project_id, tenant_id=tenant_id) is None:
+    if await svc.api_get(session, project_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Project not found")
 
     if key is not None:
@@ -286,9 +288,10 @@ async def delete_project(
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
     hard: bool = Depends(hard_delete_admin_gate),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
-    existing = await svc.api_get(session, project_id, tenant_id=tenant_id)
+    existing = await svc.api_get(session, project_id, tenant_id=tenant_id, company_id=company_id)
     if existing is None:
         raise HTTPException(404, "Project not found")
 

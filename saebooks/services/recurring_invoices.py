@@ -200,18 +200,26 @@ async def get(
     ri_id: uuid.UUID,
     *,
     tenant_id: uuid.UUID | None = None,
+    company_id: uuid.UUID | None = None,
 ) -> RecurringInvoice | None:
     """Fetch a single recurring invoice template with its lines.
 
     When ``tenant_id`` is supplied the lookup is filtered by tenant —
-    a foreign-tenant id returns ``None`` even if the row exists.
+    a foreign-tenant id returns ``None`` even if the row exists. When
+    ``company_id`` is supplied the lookup is also filtered by company
+    (Layer 2 cross-company isolation guard, 2026-05-24).
     """
-    if tenant_id is None:
+    if tenant_id is None and company_id is None:
         return await _get_with_lines(session, ri_id)
+    clauses = [RecurringInvoice.id == ri_id]
+    if tenant_id is not None:
+        clauses.append(RecurringInvoice.tenant_id == tenant_id)
+    if company_id is not None:
+        clauses.append(RecurringInvoice.company_id == company_id)
     result = await session.execute(
         select(RecurringInvoice)
         .options(selectinload(RecurringInvoice.lines))
-        .where(RecurringInvoice.id == ri_id, RecurringInvoice.tenant_id == tenant_id)
+        .where(*clauses)
     )
     return result.scalar_one_or_none()
 

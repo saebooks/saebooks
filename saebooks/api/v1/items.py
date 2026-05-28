@@ -115,9 +115,10 @@ async def get_item(
     request: Request,
     item_id: UUID,
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> ItemOut:
     tenant_id = resolve_tenant_id(request)
-    item = await svc.get(session, item_id, tenant_id=tenant_id)
+    item = await svc.get(session, item_id, tenant_id=tenant_id, company_id=company_id)
     if item is None:
         raise HTTPException(404, "Item not found")
     return ItemOut.model_validate(item)
@@ -182,6 +183,7 @@ async def update_item(
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
@@ -189,7 +191,7 @@ async def update_item(
 
     tenant_id = resolve_tenant_id(request)
     # Belt-and-braces: verify item belongs to this tenant
-    if await svc.get(session, item_id, tenant_id=tenant_id) is None:
+    if await svc.get(session, item_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Item not found")
 
     try:
@@ -237,9 +239,10 @@ async def archive_item(
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
     hard: bool = Depends(hard_delete_admin_gate),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
-    existing = await svc.get(session, item_id, tenant_id=tenant_id)
+    existing = await svc.get(session, item_id, tenant_id=tenant_id, company_id=company_id)
     if existing is None:
         raise HTTPException(404, "Item not found")
 
@@ -285,6 +288,7 @@ async def get_item_stock(
     request: Request,
     item_id: UUID,
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> StockOut:
     """Return current stock levels for an inventory-type item.
 
@@ -292,7 +296,7 @@ async def get_item_stock(
     Also returns 404 if the item does not exist or is archived.
     """
     tenant_id = resolve_tenant_id(request)
-    item = await svc.get(session, item_id, tenant_id=tenant_id)
+    item = await svc.get(session, item_id, tenant_id=tenant_id, company_id=company_id)
     if item is None or item.archived_at is not None:
         raise HTTPException(404, "Item not found")
     # item_type is stored as String — may come back as str or StrEnum

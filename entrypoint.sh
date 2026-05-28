@@ -12,4 +12,5 @@ fi
 if [ "${SAEBOOKS_RUN_CASHBOOK_DEMO_SEED:-false}" = "true" ]; then
     python -m saebooks.cli.seed_cashbook_demo
 fi
-exec uvicorn saebooks.main:app --host 0.0.0.0 --port 8000
+WORKERS="${SAEBOOKS_UVICORN_WORKERS:-1}"
+exec uvicorn saebooks.main:app --host 0.0.0.0 --port 8000 --workers "$WORKERS"

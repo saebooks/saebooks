@@ -130,12 +130,23 @@ async def api_get(
     session: AsyncSession,
     rule_id: uuid.UUID,
     tenant_id: uuid.UUID,
+    *,
+    company_id: uuid.UUID | None = None,
 ) -> AllocationRule | None:
+    """Fetch a single allocation rule.
+
+    ``company_id`` is the cross-company isolation guard (Layer 2 fix,
+    2026-05-24): when supplied, a sibling-company id within the same
+    tenant returns ``None``.
+    """
+    clauses = [
+        AllocationRule.id == rule_id,
+        AllocationRule.tenant_id == tenant_id,
+    ]
+    if company_id is not None:
+        clauses.append(AllocationRule.company_id == company_id)
     result = await session.execute(
-        select(AllocationRule).where(
-            AllocationRule.id == rule_id,
-            AllocationRule.tenant_id == tenant_id,
-        )
+        select(AllocationRule).where(*clauses)
     )
     return result.scalars().first()
 

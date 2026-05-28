@@ -144,9 +144,10 @@ async def get_bank_statement_line(
     request: Request,
     line_id: UUID,
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> BankStatementLineOut:
     tenant_id = resolve_tenant_id(request)
-    line = await svc.api_get(session, line_id, tenant_id=tenant_id)
+    line = await svc.api_get(session, line_id, tenant_id=tenant_id, company_id=company_id)
     if line is None or line.archived_at is not None:
         raise HTTPException(404, "Bank statement line not found")
     return BankStatementLineOut.model_validate(line)
@@ -241,6 +242,7 @@ async def update_bank_statement_line(
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
@@ -254,7 +256,7 @@ async def update_bank_statement_line(
 
     tenant_id = resolve_tenant_id(request)
     # Belt-and-braces: verify line belongs to this tenant
-    if await svc.api_get(session, line_id, tenant_id=tenant_id) is None:
+    if await svc.api_get(session, line_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Bank statement line not found")
 
     if key is not None:
@@ -327,9 +329,10 @@ async def delete_bank_statement_line(
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
     hard: bool = Depends(hard_delete_admin_gate),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
-    existing = await svc.api_get(session, line_id, tenant_id=tenant_id)
+    existing = await svc.api_get(session, line_id, tenant_id=tenant_id, company_id=company_id)
     if existing is None:
         raise HTTPException(404, "Bank statement line not found")
 
@@ -378,6 +381,7 @@ async def match_bank_statement_line(
     payload: BankStatementLineMatchRequest,
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     """Match a bank statement line to a payment or journal entry.
 
@@ -385,7 +389,7 @@ async def match_bank_statement_line(
     and bumps the version.
     """
     tenant_id = resolve_tenant_id(request)
-    if await svc.api_get(session, line_id, tenant_id=tenant_id) is None:
+    if await svc.api_get(session, line_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Bank statement line not found")
 
     try:
@@ -417,6 +421,7 @@ async def unmatch_bank_statement_line(
     line_id: UUID,
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     """Clear the reconciliation match on a bank statement line.
 
@@ -424,7 +429,7 @@ async def unmatch_bank_statement_line(
     matched_entry_id, matched_at, matched_by.
     """
     tenant_id = resolve_tenant_id(request)
-    if await svc.api_get(session, line_id, tenant_id=tenant_id) is None:
+    if await svc.api_get(session, line_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Bank statement line not found")
 
     try:

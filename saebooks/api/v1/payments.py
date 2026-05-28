@@ -132,9 +132,10 @@ async def get_payment(
     payment_id: UUID,
     request: Request,
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> PaymentOut:
     tenant_id = resolve_tenant_id(request)
-    payment = await svc.api_get(session, payment_id, tenant_id=tenant_id)
+    payment = await svc.api_get(session, payment_id, tenant_id=tenant_id, company_id=company_id)
     if payment is None:
         raise HTTPException(404, "Payment not found")
     return PaymentOut.model_validate(payment)
@@ -234,13 +235,14 @@ async def update_payment(
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
     force: bool = Depends(edit_force_admin_gate),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with payment version is required")
 
     tenant_id = resolve_tenant_id(request)
-    if await svc.api_get(session, payment_id, tenant_id=tenant_id) is None:
+    if await svc.api_get(session, payment_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Payment not found")
 
     direction_enum: PaymentDirection | None = None
@@ -315,9 +317,10 @@ async def void_payment(
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
     hard: bool = Depends(hard_delete_admin_gate),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
-    existing = await svc.api_get(session, payment_id, tenant_id=tenant_id)
+    existing = await svc.api_get(session, payment_id, tenant_id=tenant_id, company_id=company_id)
     if existing is None:
         raise HTTPException(404, "Payment not found")
 
@@ -373,6 +376,7 @@ async def post_payment_endpoint(
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     """Transition payment DRAFT → POSTED, generating the GL journal entry.
 
@@ -415,7 +419,7 @@ async def post_payment_endpoint(
                 status_code=claim.response_status or 200,
             )
 
-    if await svc.api_get(session, payment_id, tenant_id=tenant_id) is None:
+    if await svc.api_get(session, payment_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Payment not found")
 
     try:

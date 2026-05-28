@@ -154,6 +154,7 @@ async def get(
     tax_code_id: uuid.UUID,
     *,
     tenant_id: uuid.UUID | None = None,
+    company_id: uuid.UUID | None = None,
 ) -> TaxCode | None:
     """Fetch a tax code by id.
 
@@ -163,13 +164,15 @@ async def get(
     and optional so existing internal callers keep working unchanged;
     the API layer always supplies it.
     """
-    if tenant_id is None:
+    if tenant_id is None and company_id is None:
         return await session.get(TaxCode, tax_code_id)
+    clauses = [TaxCode.id == tax_code_id]
+    if tenant_id is not None:
+        clauses.append(TaxCode.tenant_id == tenant_id)
+    if company_id is not None:
+        clauses.append(TaxCode.company_id == company_id)
     result = await session.execute(
-        select(TaxCode).where(
-            TaxCode.id == tax_code_id,
-            TaxCode.tenant_id == tenant_id,
-        )
+        select(TaxCode).where(*clauses)
     )
     return result.scalars().first()
 

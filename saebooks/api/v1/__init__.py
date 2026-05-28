@@ -27,6 +27,7 @@ from saebooks.api.v1.admin import router as admin_router
 from saebooks.api.v1.admin_inspect import router as admin_inspect_router
 from saebooks.api.v1.admin_tenants import router as admin_tenants_router
 from saebooks.api.v1.api_tokens import router as api_tokens_router
+from saebooks.api.v1.webauthn import router as webauthn_router
 from saebooks.api.v1.ai_extraction import router as ai_extraction_router
 from saebooks.api.v1.allocations import router as allocations_router
 from saebooks.api.v1.attachments import router as attachments_router
@@ -37,6 +38,7 @@ from saebooks.api.v1.bank_rules import router as bank_rules_router
 from saebooks.api.v1.bank_statement_lines import router as bank_statement_lines_router
 from saebooks.api.v1.billing import router as billing_router
 from saebooks.api.v1.bills import router as bills_router
+from saebooks.api.v1.branches import router as branches_router
 from saebooks.api.v1.employees import router as employees_router
 from saebooks.api.v1.expenses import router as expenses_router
 from saebooks.api.v1.leave import router as leave_router
@@ -126,6 +128,7 @@ router.include_router(journal_entries_router)
 router.include_router(invoices_router)
 router.include_router(journal_templates_router)
 router.include_router(bills_router)
+router.include_router(branches_router)
 router.include_router(expenses_router)
 router.include_router(time_entries_router)
 # Payroll Phase 1A foundations
@@ -183,5 +186,10 @@ router.include_router(pay_run_router)
 router.include_router(cashbook_router)
 # Self-serve Personal Access Tokens — list/create/revoke own tokens.
 # See saebooks/services/pat_tokens.py and migration 0111.
+
+# WebAuthn / FIDO2 — native passkey support at the app layer, removes
+# the dependency on Authentik / CF Access for FIDO2-bound login. Default
+# on; per-instance config via SAEBOOKS_WEBAUTHN_RP_ID / _ORIGIN env vars.
+router.include_router(webauthn_router)
 
 __all__ = ["router"]
