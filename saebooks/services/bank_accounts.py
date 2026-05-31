@@ -19,6 +19,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import func as sa_func, select
@@ -42,6 +43,9 @@ _BANK_KINDS: tuple[str, ...] = (
 # other bank kinds default to ASSET (debit-normal).
 _LIABILITY_KINDS: frozenset[str] = frozenset({"CREDIT_CARD", "BANK_LOAN"})
 
+# Sentinel for api_update: distinguishes "omit (no change)" from "set NULL".
+_UNSET: object = object()
+
 
 def _kind_to_account_type(kind: str) -> AccountType:
     """Map account_kind → AccountType (debit/credit-normal classification)."""
@@ -63,6 +67,8 @@ _BA_COLUMNS: tuple[str, ...] = (
     "apca_user_id",
     "bank_abbreviation",
     "is_trust_account",
+    "credit_limit",
+    "credit_limit_kind",
     "version",
     "created_at",
     "archived_at",
@@ -110,6 +116,8 @@ def _serialise(account: Account) -> dict[str, Any]:
     for key in _BA_COLUMNS:
         val = getattr(account, key, None)
         if isinstance(val, uuid.UUID):
+            val = str(val)
+        elif isinstance(val, Decimal):
             val = str(val)
         elif isinstance(val, datetime):
             val = val.isoformat()
@@ -217,6 +225,8 @@ async def api_create(
     apca_user_id: str | None = None,
     bank_abbreviation: str | None = None,
     is_trust_account: bool = False,
+    credit_limit: Decimal | None = None,
+    credit_limit_kind: str = "soft",
 ) -> Account:
     """Create a new bank-side account row.
 
@@ -251,12 +261,18 @@ async def api_create(
         skip_validation=True,
     )
     # Patch the bank-specific fields the accounts.create() doesn't expose
+    if credit_limit_kind not in ("soft", "hard"):
+        raise BankAccountError(
+            f"Invalid credit_limit_kind {credit_limit_kind!r}. Must be soft or hard."
+        )
     account.account_kind = account_kind
     account.bsb = bsb
     account.bank_account_number = bank_account_number
     account.bank_account_title = bank_account_title
     account.apca_user_id = apca_user_id
     account.bank_abbreviation = bank_abbreviation
+    account.credit_limit = credit_limit
+    account.credit_limit_kind = credit_limit_kind
     # accounts.create already committed; open a new flush for the extra fields
     await session.flush()
     await session.refresh(account)
@@ -292,8 +308,15 @@ async def api_update(
     apca_user_id: str | None = None,
     bank_abbreviation: str | None = None,
     is_trust_account: bool | None = None,
+    credit_limit: Decimal | None = _UNSET,
+    credit_limit_kind: str | None = None,
 ) -> Account:
-    """Update bank-account fields with optimistic locking + change_log."""
+    """Update bank-account fields with optimistic locking + change_log.
+
+    ``credit_limit`` uses a sentinel default (``_UNSET``) so that an
+    explicit ``None`` clears the limit while omitting the field leaves it
+    unchanged. ``credit_limit_kind`` is only applied when non-None.
+    """
     account = await session.get(Account, bank_account_id)
     if account is None or not _is_bank_account(account):
         raise BankAccountError(f"BankAccount {bank_account_id} not found")
@@ -325,6 +348,14 @@ async def api_update(
         account.bank_abbreviation = bank_abbreviation
     if is_trust_account is not None:
         account.is_trust_account = is_trust_account
+    if credit_limit is not _UNSET:
+        account.credit_limit = credit_limit
+    if credit_limit_kind is not None:
+        if credit_limit_kind not in ("soft", "hard"):
+            raise BankAccountError(
+                f"Invalid credit_limit_kind {credit_limit_kind!r}. Must be soft or hard."
+            )
+        account.credit_limit_kind = credit_limit_kind
 
     account.version = account.version + 1
     await session.flush()

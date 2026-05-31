@@ -1,6 +1,7 @@
 import enum
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
@@ -9,6 +10,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Integer,
+    Numeric,
     String,
     UniqueConstraint,
     func,
@@ -107,6 +109,23 @@ class Account(CompanyScoped, Base):
         ),
         nullable=True,
         comment="One of BANK_CHECKING / BANK_SAVINGS / CREDIT_CARD / BANK_LOAN / CASH / OTHER",
+    )
+    # Credit limit — populated on bank-side accounts that have one (chiefly
+    # CREDIT_CARD, optionally BANK_LOAN). NULL means no limit set.
+    # ``credit_limit_kind`` mirrors the soft/hard precedent of SeatCapKind in
+    # services/licence/caps.py: soft (default) warns when exceeded but never
+    # blocks data entry; hard is a stronger state. Backed by a CHECK
+    # constraint (ck_accounts_credit_limit_kind) added in migration 0141.
+    credit_limit: Mapped[Decimal | None] = mapped_column(
+        Numeric(18, 2),
+        nullable=True,
+        comment="Credit limit for this account; NULL = no limit set",
+    )
+    credit_limit_kind: Mapped[str | None] = mapped_column(
+        String(4),
+        server_default="soft",
+        nullable=True,
+        comment="soft (warn only) | hard — mirrors SeatCapKind soft/hard",
     )
     extra: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # Optimistic-locking version — bumped on every write through the API.
