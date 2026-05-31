@@ -81,23 +81,43 @@ async def persist_bank_lines(
     if tenant_id is None:
         raise ValueError(f"Company {company_id} not found — cannot resolve tenant for bank import")
 
-    fingerprints = [_fingerprint(account_id, ln) for ln in lines]
+    # Intra-batch occurrence index. Bank CSV exports (notably Westpac) carry
+    # no per-line reference, so genuinely-distinct rows that happen to share
+    # (date, amount, description) hash to the SAME base fingerprint. The old
+    # code added every emitted fingerprint to ``existing_set`` and skipped the
+    # rest, silently collapsing those legitimate duplicates (e.g. three $25
+    # iiNet refunds on one day folded into one, losing $50). Instead we make
+    # the external_id distinguish the Nth occurrence of a base fingerprint
+    # WITHIN this batch: the 1st keeps the bare fingerprint (backward
+    # compatible), the 2nd gets ``:n2``, the 3rd ``:n3`` and so on. Re-importing
+    # the same file replays the same occurrence sequence -> the same
+    # external_ids -> they all already exist -> zero new rows (still
+    # idempotent). Distinct collisions get distinct ids -> all preserved.
+    seen_counts: dict[str, int] = {}
+    candidate_ids: list[str] = []
+    for ln in lines:
+        base = _fingerprint(account_id, ln)
+        n = seen_counts.get(base, 0) + 1
+        seen_counts[base] = n
+        candidate_ids.append(base if n == 1 else f"{base}:n{n}")
 
     existing = (
         await session.execute(
             select(BankStatementLine.external_id).where(
                 BankStatementLine.account_id == account_id,
-                BankStatementLine.external_id.in_(fingerprints),
+                BankStatementLine.external_id.in_(candidate_ids),
             )
         )
     ).scalars().all()
     existing_set = set(existing)
 
     new_rows = []
-    for fp, parsed in zip(fingerprints, lines, strict=True):
-        if fp in existing_set:
+    for external_id, parsed in zip(candidate_ids, lines, strict=True):
+        # Across-batch existence check (re-import of the same file). The
+        # occurrence index already disambiguates within this batch, so we do
+        # NOT re-add to existing_set here.
+        if external_id in existing_set:
             continue
-        existing_set.add(fp)  # guard against intra-batch dups
         new_rows.append(
             BankStatementLine(
                 company_id=company_id,
@@ -107,7 +127,7 @@ async def persist_bank_lines(
                 amount=parsed.amount,
                 description=parsed.description,
                 reference=parsed.reference,
-                external_id=fp,
+                external_id=external_id,
                 status=StatementLineStatus.UNMATCHED,
             )
         )

@@ -35,6 +35,7 @@ from saebooks.api.v1.schemas import (
     ExpenseUpdate,
 )
 from saebooks.models.expense import ExpenseStatus
+from saebooks.models.journal import JournalEntry
 from saebooks.services import expenses as svc
 from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
@@ -291,9 +292,23 @@ async def archive_expense(
         raise HTTPException(404, "Expense not found")
 
     if hard:
-        await hard_delete_with_audit(
-            session, existing, "expenses", getattr(request.state, "user", None)
-        )
+        # Cascade-delete the journal entries this expense points at. Each
+        # post creates a fresh JE; void creates another. journal_lines are
+        # FK CASCADE on journal_entries, so they go automatically. expenses'
+        # journal_entry_id / void_journal_entry_id are ON DELETE SET NULL,
+        # so deleting the JE first won't trip the expense FK.
+        actor = getattr(request.state, "user", None)
+        for je_id in (existing.journal_entry_id, existing.void_journal_entry_id):
+            if je_id is None:
+                continue
+            je = await session.get(JournalEntry, je_id)
+            if je is not None:
+                await hard_delete_with_audit(
+                    session, je, "journal_entries", actor,
+                    reason=f"cascade from expense {existing.id}",
+                )
+
+        await hard_delete_with_audit(session, existing, "expenses", actor)
         await session.commit()
         return Response(status_code=204)
 
