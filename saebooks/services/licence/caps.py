@@ -9,7 +9,8 @@ hook can never drift apart.
 Representation
 --------------
 
-* ``None`` means **unlimited** (Enterprise). Treat every ``cap or 0``
+* ``None`` means **unlimited** (Enterprise + the internal Developer
+  edition). Treat every ``cap or 0``
   check with care — use the helpers in ``enforcement.py``.
 * ``seat_cap_kind`` is ``"hard"`` or ``"soft"`` per §12.2. Soft caps
   show a warning banner but do not block user creation; hard caps
@@ -32,7 +33,8 @@ SeatCapKind = Literal["hard", "soft"]
 class EditionCaps:
     """Caps contract for a single edition.
 
-    ``None`` means unlimited (only Enterprise uses this).
+    ``None`` means unlimited (Enterprise and the internal Developer
+    edition).
     """
 
     admin_seats: int | None
@@ -69,6 +71,17 @@ TIER_CAPS: dict[str, EditionCaps] = {
         admin_seats=5, employee_seats=10, companies=3, seat_cap_kind="hard"
     ),
     "enterprise": EditionCaps(
+        admin_seats=None,
+        employee_seats=None,
+        companies=None,
+        seat_cap_kind="hard",
+    ),
+    # Internal-only dev edition (CHARTER 12.4). Mirrors enterprise:
+    # unlimited admin/employee seats + unlimited companies, hard cap kind.
+    # Never offered as a billable subscription -- only activated via
+    # SAEBOOKS_EDITION=developer on instances the owner controls directly.
+    # Pairs with the always-on _DEVELOPER_FLAGS set in services.features.
+    "developer": EditionCaps(
         admin_seats=None,
         employee_seats=None,
         companies=None,

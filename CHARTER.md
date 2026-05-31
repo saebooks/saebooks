@@ -759,6 +759,34 @@ Admin vs employee mapping to permission roles is fixed in §6.7.
 | Pro | 3 | Hard |
 | Enterprise | ∞ | N/A |
 
+### 12.4 Internal Developer edition (non-commercial)
+
+There is one further edition that is **never offered to customers** and
+**never appears in the matrices above, the pricing site, or any
+edition-picker UI**: the **Developer** edition, activated only via
+`SAEBOOKS_EDITION=developer` on an instance the project owner controls
+directly (e.g. the maintainer's own books).
+
+Developer is a strict superset of Enterprise: every feature flag is on
+(including the dev-only affordances `hard_delete`, `dev_tools`,
+`edit_frozen_state`, `raw_json_inspector`, `tenant_switcher`,
+`skip_audit_trail`), and all seat/company caps are **unlimited**, exactly
+like Enterprise:
+
+| Edition | Admin seats | Employee seats | Company cap | Seat/company enforcement |
+|---|---|---|---|---|
+| Developer (internal) | ∞ | ∞ | ∞ | N/A |
+
+It exists so the maintainer can run the codebase as its own development
+surface with the ATO-retention guardrails off (e.g. hard-deleting throwaway
+test rows, editing frozen-state entities). The dev-only flags MUST NOT
+ship in any commercial tier; that boundary is pinned by
+`test_developer_only_flags_disabled_on_enterprise` and
+`test_enterprise_is_developer_minus_dev_only_flags` in
+`tests/services/test_features.py`. The unlimited caps are pinned by
+`test_developer_caps_are_unlimited` in
+`tests/services/licence/test_caps.py`.
+
 ## 13. Plugin integration guidelines
 
 The product must feel like one application, not a skinned aggregator
