@@ -4,16 +4,39 @@ Maps the engine's computed BAS figures (``tax_engine.au.BASReport``, or the
 ``figures`` JSONB persisted on a ``tax_returns`` row) onto an XBRL instance
 suitable for the lodge-server's ``/api/v1/bas/lodge`` route.
 
-⚠ CONFORMANCE STATUS — read before trusting the output
-------------------------------------------------------
-The label→figure mapping below (G1, G2, G3, G10, G11, 1A, 1B, 9) uses the
-**public, stable BAS label codes**. The ``_AS_CONCEPTS`` element local-names,
-the taxonomy namespace, and the schemaRef href are **PLACEHOLDERS** — the real
-values come from the ATO SBR Activity Statement taxonomy + MIG (DSP-gated) and
-MUST be dropped in and validated against the ATO EVTE before any real
-lodgement. The XBRL *structure* is correct; the concept *names* are not yet.
-The golden-file test pins the current structure so swapping the real concepts
-in is a mechanical, reviewable diff.
+⚠ CONFORMANCE STATUS (A5 harvest, verified live 2026-06-02) — read first
+------------------------------------------------------------------------
+The ``_AS_CONCEPTS`` local-names, ``AS_TAXONOMY_NS`` and ``AS_SCHEMA_REF`` are
+STILL PLACEHOLDERS, deliberately. A5 surfaced two blockers that make wiring the
+"obvious" values WRONG:
+
+  1. **AS.0004 (2025) migrated from XBRL to plain XML** (per the public AS BIG
+     §4.2). This file builds an *XBRL* instance. The public SBR taxonomy server
+     only hosts the older **AS.0001 v02.00 (2014)** XBRL artefact; the AS.0004
+     XML namespace / schemaRef / element names are DSP-gated (SBR ShareFile, reg
+     ticket uHkeDp0cepzOr8Uw) and may not be XBRL QNames at all. Whether the XML
+     form even reuses the dotted-PascalCase concept names is UNCONFIRMED.
+  2. The BAS-label→concept *bindings* for G1/G3/G10/G11 were **refuted** during
+     A5: the underlying elements are real, but the "G3 - Other GST-free sales"
+     style label evidence binding them to those fields was fabricated by the
+     harvest model and does not exist in any authoritative SBR artefact.
+
+Public AS.0001 reference values (authoritative, for the eventual swap):
+  ns      http://sbr.gov.au/rprt/ato/as.0001.02.00.data
+  schema  …/sbr_au_reports/ato/as/as_0001/as.0001.lodge.request.02.00.report.xsd
+Per-label status (verified element QName / binding confidence):
+  1A  GoodsAndServicesTax.Payable.Amount         (DE3139)  STRONG  — label linkbase corroborates
+  1B  GoodsAndServicesTax.ClaimableCredits.Amount(DE752)   STRONG  — label linkbase corroborates
+  G2  GoodsAndServicesTax.ExportSales.Amount     (DE652)   element real; binding natural (sibling of G3)
+  9   Report.Statement.Summary.Net.Amount        (DE645)   candidate; confirm 9→DE645 in AS label linkbase
+  G1  Income.SaleOfGoodsAndServices.Whole.Amount (DE661)   element real; G1 BINDING UNPROVEN
+  G3  GoodsAndServicesTax.ExemptSales.Amount     (DE658)   element real; binding REFUTED
+  G10 Expense.Capital.Amount    (DE650, generic bafpr dict) binding REFUTED (not a GST-form concept)
+  G11 Expense.NonCapital.Amount (DE657, generic bafpr dict) binding REFUTED
+Keystone to finish: the AS.0004 2025 MIG/MST/XSD (DSP hub) + EVTE validation.
+See ~/.claude/plans/a5-artefact-harvest-result.json for full evidence/sources.
+The golden-file test pins the current structure so the real-concept swap stays
+a mechanical, reviewable diff.
 """
 from __future__ import annotations
 
@@ -27,13 +50,18 @@ from saebooks.services.lodgement.sbr.xbrl import (
     build_instance,
 )
 
-# ⚠ PLACEHOLDERS pending the SBR Activity Statement taxonomy + MIG.
-AS_TAXONOMY_NS = "http://sbr.gov.au/PLACEHOLDER/ato/as"  # TODO(MIG): real AS taxonomy ns
+# ⚠ PLACEHOLDERS — gated on the AS.0004 2025 XML MIG/XSD (see module docstring).
+# Public AS.0001 reference (authoritative, NOT the AS.0004 XML target):
+#   AS_TAXONOMY_NS = "http://sbr.gov.au/rprt/ato/as.0001.02.00.data"
+#   AS_SCHEMA_REF  = ".../as_0001/as.0001.lodge.request.02.00.report.xsd"
+AS_TAXONOMY_NS = "http://sbr.gov.au/PLACEHOLDER/ato/as"  # TODO(MIG): AS.0004 XML ns (gated)
 AS_TAXONOMY_PREFIX = "as"
-AS_SCHEMA_REF = "http://sbr.gov.au/PLACEHOLDER/ato/as.xsd"  # TODO(MIG): real schemaRef
+AS_SCHEMA_REF = "http://sbr.gov.au/PLACEHOLDER/ato/as.xsd"  # TODO(MIG): AS.0004 schemaRef (gated)
 
-# ⚠ PLACEHOLDER concept local-names — modelled on the public BAS label codes.
-# Replace each value with the authoritative AS taxonomy concept from the MIG.
+# ⚠ PLACEHOLDER concept local-names. Verified AS.0001-era candidates + their A5
+# binding-confidence are in the module docstring; 1A/1B are STRONG, G3/G10/G11
+# bindings were REFUTED. Do NOT promote any of these to live until the AS.0004
+# MIG confirms the XML element names + bindings and EVTE validates.
 _AS_CONCEPTS: dict[str, str] = {
     "G1": "TotalSalesIncludingGST",
     "G2": "ExportSales",

@@ -41,7 +41,9 @@ LINK = "http://www.xbrl.org/2003/linkbase"
 XLINK = "http://www.w3.org/1999/xlink"
 ISO4217 = "http://www.xbrl.org/2003/iso4217"
 
-# ATO uses the ABN as the entity identifier scheme.
+# ATO uses the ABN as the XBRL entity identifier scheme. CONFIRMED verbatim
+# (A5, 2026-06-02) from the SBR "XBRL Fundamentals" learning module:
+#   <xbrli:identifier scheme="http://www.ato.gov.au/abn">…</xbrli:identifier>
 ABN_SCHEME = "http://www.ato.gov.au/abn"
 
 

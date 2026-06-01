@@ -13,14 +13,24 @@ PAYEVNTEMP record per payee. In XBRL that's one **employer context** plus one
 **context per payee** (all sharing the payer ABN entity + the report period),
 with each payee's facts emitted under their own context.
 
-⚠ CONFORMANCE STATUS — read before trusting the output
-------------------------------------------------------
+⚠ CONFORMANCE STATUS (A5 harvest, verified live 2026-06-02)
+------------------------------------------------------------
 The field→figure MAPPING uses the real STP2 payload structure, but the
-``_PAYEVNT_CONCEPTS`` / ``_PAYEVNTEMP_CONCEPTS`` element local-names, the
-namespace and the schemaRef are **PLACEHOLDERS**. The authoritative PAYEVNT.0004
-taxonomy concepts (and whether payees are modelled as XBRL tuples / typed
-dimensions rather than per-payee contexts) come from the ATO STP2 MIG
-(DSP-gated) and MUST be validated against the ATO EVTE before real lodgement.
+``_PAYEVNT_CONCEPTS`` / ``_PAYEVNTEMP_CONCEPTS`` local-names, the namespace and
+the schemaRef remain **PLACEHOLDERS**. A5 confirmed the artefact filenames but
+the contents are genuinely gated — the public SBR2 report-taxonomy server does
+NOT expose the Employer Obligations (payevnt) subtree (404):
+  CONFIRMED (PAYEVNT.0004 2020 BIG): the records are defined by
+    payer  -> ATO.PAYEVNT.0004.2020.01.00.xsd      (employer header)
+    payee  -> ATO.PAYEVNTEMP.0004.2020.01.00.xsd    (one per payee)
+  Interaction tokens: submit (mandatory) + update (mandatory) + adjust
+  (optional); the on-the-wire ebMS3 Action is "Submit.004.00" (Service
+  http://sbr.gov.au/ato/payevnt/2020) — see lodge_server perform._ROUTE_COLLAB.
+  ⚠ GATED: PAYEVNT_TAXONOMY_NS, PAYEVNT_SCHEMA_REF and every concept local-name
+  live ONLY in those XSDs + the MST .xlsx, in the DSP-gated EO package
+  (employer-obligations-eo / STP Phase 2 doc library, DSP-login; reg ticket
+  uHkeDp0cepzOr8Uw). Read them verbatim from the XSD — do NOT guess. Whether
+  payees are tuples / typed-dimensions vs per-payee contexts is also gated.
 The XBRL *structure* is sound; the concept *names* are not yet.
 
 TFN: the engine payload carries ``tfn_status`` and an encrypted ref, NOT the
@@ -34,10 +44,13 @@ from typing import Any
 
 from saebooks.services.lodgement.sbr.xbrl import XbrlInstance
 
-# ⚠ PLACEHOLDERS pending the ATO STP2 PAYEVNT.0004 taxonomy + MIG.
-PAYEVNT_TAXONOMY_NS = "http://sbr.gov.au/PLACEHOLDER/ato/payevnt"  # TODO(MIG)
+# ⚠ PLACEHOLDERS — gated in the EO package (see docstring). The real ns +
+# schemaRef are the targetNamespace/schemaLocation inside
+# ATO.PAYEVNT.0004.2020.01.00.xsd (payer) + ATO.PAYEVNTEMP.0004.2020.01.00.xsd
+# (payee). Read verbatim from the gated XSD; do NOT guess.
+PAYEVNT_TAXONOMY_NS = "http://sbr.gov.au/PLACEHOLDER/ato/payevnt"  # TODO(MIG): gated EO XSD
 PAYEVNT_TAXONOMY_PREFIX = "payevnt"
-PAYEVNT_SCHEMA_REF = "http://sbr.gov.au/PLACEHOLDER/ato/payevnt.xsd"  # TODO(MIG)
+PAYEVNT_SCHEMA_REF = "http://sbr.gov.au/PLACEHOLDER/ato/payevnt.xsd"  # TODO(MIG): gated EO XSD
 
 # Employer (PAYEVNT) level — TODO(MIG): replace local-names with taxonomy concepts.
 _PAYEVNT_CONCEPTS: dict[str, str] = {
