@@ -39,6 +39,56 @@ router = APIRouter(
 )
 
 
+async def _build_bas_envelope(
+    session: AsyncSession,
+    *,
+    company_id: UUID,
+    period_id: Any,
+    figures: dict[str, Any],
+) -> bytes:
+    """Build the SBR BAS/IAS XBRL business document for a tax return.
+
+    Resolves the reporting period (``tax_periods``) and the lodging entity's
+    ABN (``companies``), maps the return's ``figures`` JSONB onto BAS labels,
+    and renders the XBRL instance. Raises 422 if the period is missing or the
+    company has no ABN — we never emit a knowingly-invalid lodgement envelope.
+    """
+    from saebooks.services.lodgement.sbr import (
+        BasFigures,
+        ReportingContext,
+        build_bas_document,
+    )
+
+    prow = (
+        await session.execute(
+            text(
+                "SELECT period_start, period_end FROM tax_periods "
+                "WHERE id = :p AND company_id = :c"
+            ),
+            {"p": str(period_id), "c": str(company_id)},
+        )
+    ).first()
+    if prow is None:
+        raise HTTPException(422, "Tax period not found for this return")
+
+    crow = (
+        await session.execute(
+            text("SELECT abn FROM companies WHERE id = :c"),
+            {"c": str(company_id)},
+        )
+    ).first()
+    abn = crow[0] if crow else None
+    if not abn:
+        raise HTTPException(
+            422,
+            "Company ABN is required to lodge a BAS/IAS — set it in company settings.",
+        )
+
+    figs = BasFigures.from_figures_json(figures)
+    ctx = ReportingContext(abn=abn, period_start=prow[0], period_end=prow[1])
+    return build_bas_document(figs, ctx)
+
+
 def _serialise_return(row: Any) -> dict[str, Any]:
     return {
         "id": str(row[0]),
@@ -222,12 +272,31 @@ async def lodge_tax_return(
         raise HTTPException(422, f"Cannot lodge return in status '{row[4]}'")
 
     return_type = row[1]
+    figures = row[5] if isinstance(row[5], dict) else {}
     envelope_b64 = payload.get("envelope_b64")
     if envelope_b64:
+        # Caller supplied a pre-built envelope (e.g. an external generator).
         envelope = base64.b64decode(envelope_b64)
+    elif return_type in ("BAS", "IAS"):
+        # Generate the SBR Activity-Statement XBRL from the return's figures.
+        envelope = await _build_bas_envelope(
+            session,
+            company_id=company_id,
+            period_id=row[3],
+            figures=figures,
+        )
+    elif return_type == "STP_PAYEVENT" and figures.get("payees") is not None:
+        # STP normally lodges via the StpSubmission flow, not tax_returns; this
+        # branch only fires if a caller persisted a build_pay_event payload as
+        # the return's figures.
+        from saebooks.services.lodgement.sbr import build_stp_pay_event_document
+
+        envelope = build_stp_pay_event_document(figures)
     else:
+        # No generator for this return_type yet (TPAR / SuperStream / foreign).
         envelope = (
-            b"<!-- placeholder envelope; real SBR3 XML from tax_engine pending -->"
+            b"<!-- placeholder envelope; SBR generator not available for "
+            b"this return_type -->"
         )
 
     metadata = {
