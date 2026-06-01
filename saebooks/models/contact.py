@@ -88,11 +88,9 @@ class Contact(CompanyScoped, Base):
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # TPAR: flag this contact as a sub-contractor for TPAR reporting (CIVL-5).
     is_tpar_supplier: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    # One-off/walk-in counterparty — hidden from the main contacts list.
-    is_one_off: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    # Monotonic version counter for optimistic-locking via the API's
+    # Monotonic version counter for optimistic locking via the API's
     # ``If-Match: <version>`` header. Bumped on every write that goes
-    # through the new ``saebooks.api.v1`` router; legacy Jinja writes
-    # also route through the same service layer so the counter stays
-    # authoritative. See alembic/versions/0036_phase0_api_scaffolding.py.
+    # through ``saebooks.api.v1``; legacy Jinja writes also route
+    # through the same service layer so the counter stays authoritative.
     version: Mapped[int] = mapped_column(default=1, nullable=False)
+

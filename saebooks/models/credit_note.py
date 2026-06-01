@@ -58,10 +58,14 @@ class CreditNote(CompanyScoped, Base):
         ForeignKey("companies.id", ondelete="CASCADE"),
         nullable=False,
     )
-    contact_id: Mapped[uuid.UUID] = mapped_column(
+    contact_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("contacts.id", ondelete="RESTRICT"),
         nullable=False,
+    )
+    one_off_customer_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("one_off_customers.id", ondelete="RESTRICT"),
     )
     number: Mapped[str | None] = mapped_column(String(32))
     issue_date: Mapped[date]
@@ -129,6 +133,16 @@ class CreditNote(CompanyScoped, Base):
         cascade="all, delete-orphan",
         order_by="CreditNoteLine.line_no",
     )
+    one_off_customer: Mapped["OneOffCustomer | None"] = relationship(
+        "OneOffCustomer",
+        foreign_keys=[one_off_customer_id],
+        lazy="raise",
+    )
+
+    @property
+    def one_off_customer_name(self) -> str | None:
+        oc = self.__dict__.get("one_off_customer")
+        return oc.name if oc is not None else None
 
 
 class CreditNoteLine(Base):

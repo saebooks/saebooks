@@ -58,10 +58,14 @@ class Bill(CompanyScoped, Base):
         ForeignKey("companies.id", ondelete="CASCADE"),
         nullable=False,
     )
-    contact_id: Mapped[uuid.UUID] = mapped_column(
+    contact_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("contacts.id", ondelete="RESTRICT"),
         nullable=False,
+    )
+    one_off_vendor_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("one_off_vendors.id", ondelete="RESTRICT"),
     )
     number: Mapped[str | None] = mapped_column(String(32))
     supplier_reference: Mapped[str | None] = mapped_column(String(64))
@@ -148,6 +152,16 @@ class Bill(CompanyScoped, Base):
         cascade="all, delete-orphan",
         order_by="BillLine.line_no",
     )
+    one_off_vendor: Mapped["OneOffVendor | None"] = relationship(
+        "OneOffVendor",
+        foreign_keys=[one_off_vendor_id],
+        lazy="raise",
+    )
+
+    @property
+    def one_off_vendor_name(self) -> str | None:
+        ov = self.__dict__.get("one_off_vendor")
+        return ov.name if ov is not None else None
 
 
 class BillLine(Base):

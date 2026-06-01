@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import text, Boolean, Date, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import text, Boolean, Date, DateTime, Enum, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -73,8 +73,30 @@ class Company(Base):
     # entity_type: COMPANY | TRUST | INDIVIDUAL | PARTNERSHIP | SUPER_FUND
     # trades: false for pure trustee companies that hold no ABN
     # trustee_company_id: on a TRUST row, points at the trustee Company
+    # entity_type is a Postgres ENUM (``entity_type_enum``) created by
+    # migration 0133, NOT a varchar. Mapping it as String(32) made asyncpg
+    # bind the parameter as ``$n::VARCHAR``, which Postgres refuses to cast
+    # implicitly to the enum type ("column is of type entity_type_enum but
+    # expression is of type character varying") — every create_company 500'd.
+    # ``create_type=False`` because the type already exists in every deployed
+    # DB; SQLAlchemy must reference it, never try to CREATE TYPE it.
+    # ``native_enum=True`` + string-valued labels keep the Python interface a
+    # plain str ("COMPANY" etc.) so callers and serialisation are unchanged.
     entity_type: Mapped[str] = mapped_column(
-        String(32), nullable=False, server_default="COMPANY", default="COMPANY",
+        Enum(
+            "COMPANY",
+            "TRUST",
+            "INDIVIDUAL",
+            "PARTNERSHIP",
+            "SUPER_FUND",
+            name="entity_type_enum",
+            native_enum=True,
+            create_type=False,
+            validate_strings=True,
+        ),
+        nullable=False,
+        server_default="COMPANY",
+        default="COMPANY",
     )
     trades: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true"), default=True,

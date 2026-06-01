@@ -34,6 +34,7 @@ from sqlalchemy.orm import selectinload
 
 from saebooks.models.account import Account
 from saebooks.models.bill import Bill, BillStatus
+from saebooks.models.contact import Contact
 from saebooks.models.credit_note import CreditNote, CreditNoteStatus
 from saebooks.models.invoice import Invoice, InvoiceStatus
 from saebooks.models.payment import (
@@ -75,6 +76,56 @@ async def _get_control_account(
     if acct is None:
         raise PaymentError(f"Control account {code} not found — re-run the seed")
     return acct
+
+
+async def _validate_party_company_and_tenant(
+    session: AsyncSession,
+    *,
+    company_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    contact_id: uuid.UUID | None,
+    bank_account_id: uuid.UUID,
+) -> None:
+    """Reject payment input whose ``contact_id`` or ``bank_account_id``
+    belongs to a different company (Layer-2 cross-company isolation).
+
+    Round-2 critic 09 caught the equivalent gap on /contacts/{id} READ
+    (fixed in 26f99fc); Round-3 probe surfaced it on POST /payments,
+    where the X-Company-Id was honoured but the FK targets were not.
+    Without this guard a tenant can post a payment whose bank account
+    or contact belongs to a sibling company — silent cross-company
+    write.
+    """
+    if contact_id is not None:
+        c_row = (
+            await session.execute(
+                select(Contact.id, Contact.company_id, Contact.tenant_id)
+                .where(Contact.id == contact_id)
+            )
+        ).first()
+        if (
+            c_row is None
+            or c_row.company_id != company_id
+            or c_row.tenant_id != tenant_id
+        ):
+            raise PaymentError(
+                f"contact {contact_id} does not belong to this company"
+            )
+
+    b_row = (
+        await session.execute(
+            select(Account.id, Account.company_id, Account.tenant_id)
+            .where(Account.id == bank_account_id)
+        )
+    ).first()
+    if (
+        b_row is None
+        or b_row.company_id != company_id
+        or b_row.tenant_id != tenant_id
+    ):
+        raise PaymentError(
+            f"bank_account {bank_account_id} does not belong to this company"
+        )
 
 
 async def create_draft(
@@ -119,7 +170,11 @@ async def create_draft(
 async def get(session: AsyncSession, payment_id: uuid.UUID) -> Payment:
     result = await session.execute(
         select(Payment)
-        .options(selectinload(Payment.allocations))
+        .options(
+            selectinload(Payment.allocations),
+            selectinload(Payment.one_off_vendor),
+            selectinload(Payment.one_off_customer),
+        )
         .where(Payment.id == payment_id)
     )
     pay = result.scalar_one_or_none()
@@ -141,7 +196,11 @@ async def list_payments(
 ) -> list[Payment]:
     stmt = (
         select(Payment)
-        .options(selectinload(Payment.allocations))
+        .options(
+            selectinload(Payment.allocations),
+            selectinload(Payment.one_off_vendor),
+            selectinload(Payment.one_off_customer),
+        )
         .where(Payment.company_id == company_id)
     )
     if not include_archived:
@@ -893,7 +952,11 @@ async def _get_with_allocations(
 ) -> Payment | None:
     result = await session.execute(
         select(Payment)
-        .options(selectinload(Payment.allocations))
+        .options(
+            selectinload(Payment.allocations),
+            selectinload(Payment.one_off_vendor),
+            selectinload(Payment.one_off_customer),
+        )
         .where(Payment.id == payment_id)
     )
     return result.scalar_one_or_none()
@@ -935,7 +998,11 @@ async def list_active(
 
     stmt = (
         select(Payment)
-        .options(selectinload(Payment.allocations))
+        .options(
+            selectinload(Payment.allocations),
+            selectinload(Payment.one_off_vendor),
+            selectinload(Payment.one_off_customer),
+        )
         .where(*base_where)
         .order_by(Payment.payment_date.desc(), Payment.created_at.desc())
         .limit(limit)
@@ -969,7 +1036,11 @@ async def api_get(
         clauses.append(Payment.company_id == company_id)
     result = await session.execute(
         select(Payment)
-        .options(selectinload(Payment.allocations))
+        .options(
+            selectinload(Payment.allocations),
+            selectinload(Payment.one_off_vendor),
+            selectinload(Payment.one_off_customer),
+        )
         .where(*clauses)
     )
     return result.scalar_one_or_none()
@@ -1001,6 +1072,17 @@ async def api_create(
     """Create a payment draft with version=1 and a change_log row."""
     if amount <= Decimal("0"):
         raise PaymentError("Payment amount must be positive")
+    # Layer-2 cross-company isolation — Round-3 probe finding (mirrors
+    # Round-2 critic 09 fix on /contacts/{id}). X-Company-Id has already
+    # narrowed the caller's scope to ``company_id``; this guard rejects
+    # FK injection of a contact or bank account from a sibling company.
+    await _validate_party_company_and_tenant(
+        session,
+        company_id=company_id,
+        tenant_id=tenant_id,
+        contact_id=contact_id,
+        bank_account_id=bank_account_id,
+    )
     rate = fx_rate if fx_rate is not None else Decimal("1")
     pay = Payment(
         company_id=company_id,

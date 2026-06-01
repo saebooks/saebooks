@@ -2,7 +2,7 @@
 
 Two tables: ``invoices`` and ``invoice_lines``. Lifecycle:
 
-    DRAFT  -->  POSTED  -->  VOIDED
+    DRAFT  -->  POSTED  -->  VOIDED / WRITTEN_OFF
 
 A DRAFT is editable and has no GL impact. Posting generates the
 invoice number (via ``services/numbering.py``), debits the AR control
@@ -47,6 +47,7 @@ class InvoiceStatus(enum.StrEnum):
     DRAFT = "DRAFT"
     POSTED = "POSTED"
     VOIDED = "VOIDED"
+    WRITTEN_OFF = "WRITTEN_OFF"
 
 
 class Invoice(CompanyScoped, Base):
@@ -63,10 +64,14 @@ class Invoice(CompanyScoped, Base):
         ForeignKey("companies.id", ondelete="CASCADE"),
         nullable=False,
     )
-    contact_id: Mapped[uuid.UUID] = mapped_column(
+    contact_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("contacts.id", ondelete="RESTRICT"),
         nullable=False,
+    )
+    one_off_customer_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("one_off_customers.id", ondelete="RESTRICT"),
     )
     number: Mapped[str | None] = mapped_column(String(32))
     issue_date: Mapped[date]
@@ -131,6 +136,10 @@ class Invoice(CompanyScoped, Base):
         UUID(as_uuid=True),
         ForeignKey("journal_entries.id", ondelete="SET NULL"),
     )
+    write_off_journal_entry_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("journal_entries.id", ondelete="SET NULL"),
+    )
     external_id: Mapped[str | None] = mapped_column(String(255))
     external_source: Mapped[str | None] = mapped_column(String(64))
     external_etag: Mapped[str | None] = mapped_column(String(255))
@@ -174,6 +183,16 @@ class Invoice(CompanyScoped, Base):
         cascade="all, delete-orphan",
         order_by="InvoiceLine.line_no",
     )
+    one_off_customer: Mapped["OneOffCustomer | None"] = relationship(
+        "OneOffCustomer",
+        foreign_keys=[one_off_customer_id],
+        lazy="raise",
+    )
+
+    @property
+    def one_off_customer_name(self) -> str | None:
+        oc = self.__dict__.get("one_off_customer")
+        return oc.name if oc is not None else None
 
 
 class InvoiceLine(Base):

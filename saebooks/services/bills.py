@@ -291,7 +291,7 @@ async def get(
     """
     stmt = (
         select(Bill)
-        .options(selectinload(Bill.lines))
+        .options(selectinload(Bill.lines), selectinload(Bill.one_off_vendor))
         .where(Bill.id == bill_id)
     )
     if tenant_id is not None:
@@ -315,7 +315,7 @@ async def list_bills(
 ) -> list[Bill]:
     stmt = (
         select(Bill)
-        .options(selectinload(Bill.lines))
+        .options(selectinload(Bill.lines), selectinload(Bill.one_off_vendor))
         .where(Bill.company_id == company_id)
     )
     if not include_archived:
@@ -676,7 +676,7 @@ async def _get_with_lines(
 ) -> Bill | None:
     result = await session.execute(
         select(Bill)
-        .options(selectinload(Bill.lines))
+        .options(selectinload(Bill.lines), selectinload(Bill.one_off_vendor))
         .where(Bill.id == bill_id)
     )
     return result.scalar_one_or_none()
@@ -718,7 +718,7 @@ async def list_active(
 
     stmt = (
         select(Bill)
-        .options(selectinload(Bill.lines))
+        .options(selectinload(Bill.lines), selectinload(Bill.one_off_vendor))
         .where(*base_where)
         .order_by(Bill.issue_date.desc(), Bill.created_at.desc())
         .limit(limit)
@@ -752,7 +752,7 @@ async def api_get(
         clauses.append(Bill.company_id == company_id)
     result = await session.execute(
         select(Bill)
-        .options(selectinload(Bill.lines))
+        .options(selectinload(Bill.lines), selectinload(Bill.one_off_vendor))
         .where(*clauses)
     )
     return result.scalar_one_or_none()

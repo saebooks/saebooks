@@ -72,6 +72,10 @@ class Expense(CompanyScoped, Base):
         UUID(as_uuid=True),
         ForeignKey("contacts.id", ondelete="RESTRICT"),
     )
+    one_off_vendor_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("one_off_vendors.id", ondelete="RESTRICT"),
+    )
     payment_account_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("accounts.id", ondelete="RESTRICT"),
@@ -147,6 +151,16 @@ class Expense(CompanyScoped, Base):
         cascade="all, delete-orphan",
         order_by="ExpenseLine.line_no",
     )
+    one_off_vendor: Mapped["OneOffVendor | None"] = relationship(
+        "OneOffVendor",
+        foreign_keys=[one_off_vendor_id],
+        lazy="raise",
+    )
+
+    @property
+    def one_off_vendor_name(self) -> str | None:
+        ov = self.__dict__.get("one_off_vendor")
+        return ov.name if ov is not None else None
 
 
 class ExpenseLine(Base):

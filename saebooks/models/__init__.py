@@ -25,6 +25,8 @@ from saebooks.models.distribution import (
 )
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
+from saebooks.models.one_off_vendor import OneOffVendor
+from saebooks.models.one_off_customer import OneOffCustomer
 from saebooks.models.department import CostCentre, Department
 from saebooks.models.depreciation_model import DepreciationModel
 from saebooks.models.fixed_asset import FixedAsset
@@ -68,6 +70,8 @@ __all__ = [
     "Company",
     "Contact",
     "ContactType",
+    "OneOffVendor",
+    "OneOffCustomer",
     "CostCentre",
     "CostMethod",
     "Department",

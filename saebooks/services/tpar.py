@@ -1,127 +1,306 @@
-"""TPAR (Taxable Payments Annual Report) service.
+"""TPAR (Taxable Payments Annual Report) aggregator.
 
-Generates a summary of all POSTED bills paid to contacts flagged as
-is_tpar_supplier, scoped to a financial year period.  The ATO threshold
-for civil contractors is $20k ex-GST per payee per year — we include all
-payees regardless and let the caller filter if desired.
+For a given financial year + company, walks paid bills and expenses to
+contacts flagged ``is_tpar_supplier=true`` and produces one
+``tpar_lines`` row per payee with the gross + GST totals for the FY.
+
+Australian FY runs 1 July → 30 June. ATO TPAR is due 28 August
+following the FY end.
+
+A "payment" toward the TPAR total is a bill or expense that:
+* is in POSTED status (not draft, not voided)
+* has a non-null contact_id (the supplier — one-off vendors can be
+  filtered separately if `tpar_one_offs=true` ever lands)
+* payment_date (for expenses) or issue_date (for bills) falls in
+  [fy_start, fy_end]
+* the contact has ``is_tpar_supplier = true``
+
+Caveat: this counts the **bill issue date** rather than the cash-paid
+date — closer to the ATO accrual basis used by most builders.
+A cash-basis variant can be added by joining payment_allocations.
 """
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from saebooks.models.bill import Bill, BillStatus
 from saebooks.models.contact import Contact
 
 
-@dataclass
-class TparPayee:
-    contact_id: uuid.UUID
-    contact_name: str
-    abn: str | None
-    total_excl_gst: Decimal
-    total_gst: Decimal
-    total_incl_gst: Decimal
-
-
-@dataclass
-class TparReport:
-    from_date: date
-    to_date: date
-    payees: list[TparPayee]
-    grand_total_excl_gst: Decimal
-    grand_total_gst: Decimal
-    grand_total_incl_gst: Decimal
-
-
-_THRESHOLD = Decimal("20000.00")
-
-
-async def tpar_report(
+async def build_tpar_run(
     session: AsyncSession,
-    company_id: uuid.UUID,
     *,
-    from_date: date | None = None,
-    to_date: date | None = None,
-) -> TparReport:
-    """Return TPAR payee list for the period.
+    tenant_id: uuid.UUID,
+    company_id: uuid.UUID,
+    fy_start: date,
+    fy_end: date,
+    notes: str | None = None,
+) -> uuid.UUID:
+    """Create (or replace DRAFT of) a TPAR run for the given FY.
 
-    Uses bill issue_date to assign the payment to a period (consistent
-    with how BAS and aged-AP work).  Only POSTED bills against contacts
-    with is_tpar_supplier=True are included.
+    If a DRAFT run already exists for this company+fy_start, it is
+    DELETEd first so the new aggregation is fresh. FINALISED / LODGED
+    runs cannot be replaced — caller must void them first.
+
+    Returns the new tpar_run id.
     """
-    today = date.today()
-    fd = from_date or date(today.year - 1, 7, 1)
-    td = to_date or date(today.year, 6, 30)
-
-    # Fetch TPAR-flagged contacts for this company
-    tpar_contacts = (
+    # Refuse to overwrite a finalised/lodged run.
+    existing = (
         await session.execute(
-            select(Contact).where(
-                Contact.company_id == company_id,
-                Contact.is_tpar_supplier.is_(True),
-                Contact.archived_at.is_(None),
+            text(
+                """
+                SELECT id, status FROM tpar_runs
+                WHERE company_id = :c AND fy_start = :s AND tenant_id = :t
+                """
+            ),
+            {"c": str(company_id), "s": fy_start, "t": str(tenant_id)},
+        )
+    ).first()
+    if existing is not None:
+        if existing[1] not in ("DRAFT", "VOIDED"):
+            raise ValueError(
+                f"TPAR run for FY{fy_start.year} already in status "
+                f"{existing[1]} — void it before regenerating"
             )
-        )
-    ).scalars().all()
-
-    tpar_ids = {c.id for c in tpar_contacts}
-    contact_by_id = {c.id: c for c in tpar_contacts}
-
-    if not tpar_ids:
-        return TparReport(
-            from_date=fd,
-            to_date=td,
-            payees=[],
-            grand_total_excl_gst=Decimal("0"),
-            grand_total_gst=Decimal("0"),
-            grand_total_incl_gst=Decimal("0"),
-        )
-
-    bills = (
+        # Drop the old DRAFT and its lines (CASCADE).
         await session.execute(
-            select(Bill).where(
-                Bill.company_id == company_id,
-                Bill.contact_id.in_(tpar_ids),
-                Bill.status == BillStatus.POSTED,
-                Bill.issue_date >= fd,
-                Bill.issue_date <= td,
-                Bill.archived_at.is_(None),
+            text("DELETE FROM tpar_runs WHERE id = :id"),
+            {"id": str(existing[0])},
+        )
+
+    # Create the new run with placeholder totals — populated below.
+    new_id = uuid.uuid4()
+    await session.execute(
+        text(
+            """
+            INSERT INTO tpar_runs
+              (id, company_id, tenant_id, fy_start, fy_end, status, notes)
+            VALUES
+              (:id, :c, :t, :s, :e, 'DRAFT', :n)
+            """
+        ),
+        {
+            "id": str(new_id), "c": str(company_id), "t": str(tenant_id),
+            "s": fy_start, "e": fy_end,
+            "n": notes,
+        },
+    )
+
+    # Aggregate bills + expenses per reportable contact via a single SQL
+    # statement — avoids N+1 with thousands of rows.
+    await session.execute(
+        text(
+            """
+            INSERT INTO tpar_lines (
+                id, tpar_run_id, contact_id, tenant_id,
+                payee_name, payee_abn,
+                payee_address_line1, payee_address_line2,
+                payee_city, payee_state, payee_postcode, payee_country,
+                gross_paid, gst_paid, bill_count, expense_count
             )
-        )
-    ).scalars().all()
+            SELECT
+                gen_random_uuid(),
+                :run_id,
+                c.id,
+                :t,
+                c.name,
+                c.abn,
+                c.address_line1,
+                c.address_line2,
+                c.city,
+                c.state,
+                c.postcode,
+                c.country,
+                COALESCE(SUM(src.total), 0)     AS gross_paid,
+                COALESCE(SUM(src.tax_total), 0) AS gst_paid,
+                COUNT(*) FILTER (WHERE src.kind = 'bill')    AS bill_count,
+                COUNT(*) FILTER (WHERE src.kind = 'expense') AS expense_count
+            FROM contacts c
+            JOIN (
+                SELECT contact_id, total, tax_total, issue_date AS doc_date, 'bill' AS kind
+                  FROM bills
+                 WHERE company_id = :c AND tenant_id = :t
+                   AND status = 'POSTED'
+                   AND archived_at IS NULL
+                   AND issue_date BETWEEN :s AND :e
+                UNION ALL
+                SELECT contact_id, total, tax_total, expense_date, 'expense'
+                  FROM expenses
+                 WHERE company_id = :c AND tenant_id = :t
+                   AND status = 'POSTED'
+                   AND archived_at IS NULL
+                   AND expense_date BETWEEN :s AND :e
+            ) src ON src.contact_id = c.id
+            WHERE c.company_id = :c
+              AND c.tenant_id  = :t
+              AND c.is_tpar_supplier = TRUE
+            GROUP BY c.id
+            HAVING COALESCE(SUM(src.total), 0) > 0
+            """
+        ),
+        {
+            "run_id": str(new_id), "c": str(company_id), "t": str(tenant_id),
+            "s": fy_start, "e": fy_end,
+        },
+    )
 
-    # Aggregate per contact using base (AUD) amounts
-    totals: dict[uuid.UUID, list[Decimal]] = {}
-    for bill in bills:
-        if bill.contact_id not in totals:
-            totals[bill.contact_id] = [Decimal("0"), Decimal("0"), Decimal("0")]
-        totals[bill.contact_id][0] += bill.base_subtotal
-        totals[bill.contact_id][1] += bill.base_tax_total
-        totals[bill.contact_id][2] += bill.base_total
+    # Update the run totals from the inserted lines.
+    await session.execute(
+        text(
+            """
+            UPDATE tpar_runs r
+               SET total_payee_count = sub.n,
+                   total_gross_amount = sub.g,
+                   total_gst_amount = sub.gst
+              FROM (
+                SELECT
+                  COUNT(*) AS n,
+                  COALESCE(SUM(gross_paid),0) AS g,
+                  COALESCE(SUM(gst_paid),0) AS gst
+                FROM tpar_lines WHERE tpar_run_id = :id
+              ) sub
+             WHERE r.id = :id
+            """
+        ),
+        {"id": str(new_id)},
+    )
+    await session.commit()
+    return new_id
 
-    payees = [
-        TparPayee(
-            contact_id=cid,
-            contact_name=contact_by_id[cid].name,
-            abn=contact_by_id[cid].abn,
-            total_excl_gst=sums[0],
-            total_gst=sums[1],
-            total_incl_gst=sums[2],
+
+async def finalise_tpar_run(
+    session: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    run_id: uuid.UUID,
+    finalised_by: str,
+) -> None:
+    """Move a DRAFT run to FINALISED. Locks subsequent edits."""
+    result = await session.execute(
+        text(
+            """
+            UPDATE tpar_runs
+               SET status = 'FINALISED',
+                   finalised_at = now(),
+                   finalised_by = :by,
+                   version = version + 1
+             WHERE id = :id
+               AND tenant_id = :t
+               AND status = 'DRAFT'
+            RETURNING id
+            """
+        ),
+        {"id": str(run_id), "t": str(tenant_id), "by": finalised_by},
+    )
+    if result.first() is None:
+        raise ValueError("TPAR run not found or not in DRAFT status")
+    await session.commit()
+
+
+async def get_tpar_run(
+    session: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    company_id: uuid.UUID,
+    run_id: uuid.UUID,
+) -> dict | None:
+    row = (
+        await session.execute(
+            text(
+                """
+                SELECT id, fy_start, fy_end, status, generated_at,
+                       finalised_at, finalised_by, lodged_at, lodged_reference,
+                       total_payee_count, total_gross_amount, total_gst_amount,
+                       notes, version
+                  FROM tpar_runs
+                 WHERE id = :id AND company_id = :c AND tenant_id = :t
+                """
+            ),
+            {"id": str(run_id), "c": str(company_id), "t": str(tenant_id)},
         )
-        for cid, sums in sorted(totals.items(), key=lambda kv: contact_by_id[kv[0]].name)
+    ).first()
+    if row is None:
+        return None
+    return {
+        "id": str(row[0]), "fy_start": row[1].isoformat(), "fy_end": row[2].isoformat(),
+        "status": row[3], "generated_at": row[4].isoformat() if row[4] else None,
+        "finalised_at": row[5].isoformat() if row[5] else None,
+        "finalised_by": row[6],
+        "lodged_at": row[7].isoformat() if row[7] else None,
+        "lodged_reference": row[8],
+        "total_payee_count": row[9],
+        "total_gross_amount": str(row[10]),
+        "total_gst_amount": str(row[11]),
+        "notes": row[12], "version": row[13],
+    }
+
+
+async def list_tpar_lines(
+    session: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    run_id: uuid.UUID,
+) -> list[dict]:
+    rows = (
+        await session.execute(
+            text(
+                """
+                SELECT contact_id, payee_name, payee_abn,
+                       payee_address_line1, payee_address_line2,
+                       payee_city, payee_state, payee_postcode, payee_country,
+                       gross_paid, gst_paid, bill_count, expense_count
+                  FROM tpar_lines
+                 WHERE tpar_run_id = :id AND tenant_id = :t
+                 ORDER BY gross_paid DESC
+                """
+            ),
+            {"id": str(run_id), "t": str(tenant_id)},
+        )
+    ).all()
+    return [
+        {
+            "contact_id": str(r[0]), "payee_name": r[1], "payee_abn": r[2],
+            "payee_address_line1": r[3], "payee_address_line2": r[4],
+            "payee_city": r[5], "payee_state": r[6],
+            "payee_postcode": r[7], "payee_country": r[8],
+            "gross_paid": str(r[9]), "gst_paid": str(r[10]),
+            "bill_count": r[11], "expense_count": r[12],
+        }
+        for r in rows
     ]
 
-    return TparReport(
-        from_date=fd,
-        to_date=td,
-        payees=payees,
-        grand_total_excl_gst=sum((p.total_excl_gst for p in payees), Decimal("0")),
-        grand_total_gst=sum((p.total_gst for p in payees), Decimal("0")),
-        grand_total_incl_gst=sum((p.total_incl_gst for p in payees), Decimal("0")),
-    )
+
+def lines_to_csv(lines: list[dict]) -> bytes:
+    """Render TPAR lines to a basic CSV. NOT the ATO-spec TPAR file — that
+    requires a specific .tpar format produced by ATO portal-compatible
+    software. This is the bookkeeper-friendly export for reconciliation
+    before manual data entry into the ATO portal.
+    """
+    import csv
+    from io import StringIO
+    buf = StringIO()
+    w = csv.writer(buf)
+    w.writerow([
+        "Payee name", "ABN",
+        "Address line 1", "Address line 2", "City", "State", "Postcode",
+        "Gross paid (inc GST)", "GST paid",
+        "Bill count", "Expense count",
+    ])
+    for ln in lines:
+        w.writerow([
+            ln["payee_name"], ln["payee_abn"] or "",
+            ln["payee_address_line1"] or "",
+            ln["payee_address_line2"] or "",
+            ln["payee_city"] or "",
+            ln["payee_state"] or "",
+            ln["payee_postcode"] or "",
+            ln["gross_paid"],
+            ln["gst_paid"],
+            ln["bill_count"],
+            ln["expense_count"],
+        ])
+    return buf.getvalue().encode("utf-8")

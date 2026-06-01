@@ -43,6 +43,9 @@ from saebooks.api.v1.employees import router as employees_router
 from saebooks.api.v1.expenses import router as expenses_router
 from saebooks.api.v1.leave import router as leave_router
 from saebooks.api.v1.stp import router as stp_router
+from saebooks.api.v1.tpar import router as tpar_router
+from saebooks.api.v1.super_lodgements import router as super_lodgements_router
+from saebooks.api.v1.tax_returns import router as tax_returns_router
 from saebooks.api.v1.super_funds import router as super_funds_router
 from saebooks.api.v1.time_entries import router as time_entries_router
 from saebooks.api.v1.budgets import router as budgets_router
@@ -51,6 +54,8 @@ from saebooks.api.v1.changes import router as changes_router
 from saebooks.api.v1.companies import router as companies_router
 from saebooks.api.v1.contact_public import router as contact_public_router
 from saebooks.api.v1.contacts import router as contacts_router
+from saebooks.api.v1.one_off_vendors import router as one_off_vendors_router
+from saebooks.api.v1.one_off_customers import router as one_off_customers_router
 from saebooks.api.v1.credit_notes import router as credit_notes_router
 from saebooks.api.v1.depreciation_models import router as depreciation_models_router
 from saebooks.api.v1.fixed_assets import router as fixed_assets_router
@@ -110,6 +115,8 @@ router.include_router(lodgement_router)
 # Public contact form — unauthenticated, rate-limited per IP/hour.
 router.include_router(contact_public_router)
 router.include_router(contacts_router)
+router.include_router(one_off_vendors_router)
+router.include_router(one_off_customers_router)
 router.include_router(account_ranges_router)
 router.include_router(accounts_router)
 router.include_router(ato_sbr_router)
@@ -191,5 +198,9 @@ router.include_router(cashbook_router)
 # the dependency on Authentik / CF Access for FIDO2-bound login. Default
 # on; per-instance config via SAEBOOKS_WEBAUTHN_RP_ID / _ORIGIN env vars.
 router.include_router(webauthn_router)
+router.include_router(tpar_router)
+# Payday Super Phase 1 — SAFF generation + lodgement tracking
+router.include_router(super_lodgements_router)
+router.include_router(tax_returns_router)
 
 __all__ = ["router"]
