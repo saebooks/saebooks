@@ -121,6 +121,7 @@ async def _find_default_bank_account(
         .where(
             Account.company_id == company_id,
             Account.account_type == AccountType.ASSET,
+            Account.is_header.is_(False),
         )
         .order_by(Account.code)
     )
@@ -257,6 +258,7 @@ async def _first_income_account(
             .where(
                 Account.company_id == company_id,
                 Account.account_type == AccountType.INCOME,
+                Account.is_header.is_(False),
             )
             .order_by(Account.code)
         )
