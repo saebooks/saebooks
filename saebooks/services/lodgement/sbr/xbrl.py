@@ -123,6 +123,100 @@ def build_instance(
     )
 
 
+def _amount(value: Decimal, decimals: str) -> str:
+    """Format a monetary value to ``decimals`` places (e.g. "2" for STP cents)."""
+    places = int(decimals)
+    q = Decimal(1) if places <= 0 else Decimal(1).scaleb(-places)
+    return str(Decimal(value).quantize(q))
+
+
+@dataclass
+class _BuilderContext:
+    context_id: str
+    abn: str
+    period_start: date
+    period_end: date
+
+
+class XbrlInstance:
+    """Builder for an XBRL instance with one-or-more contexts and mixed facts.
+
+    Unlike ``build_instance`` (single context, all-monetary — used by BAS),
+    this supports multiple contexts (e.g. PAYEVNT employer context + one per
+    payee) and both monetary facts (``add_money`` → carries ``unitRef`` +
+    ``decimals``) and non-monetary item facts (``add_text`` → no unit, for
+    names/dates/codes; XBRL forbids a unit on non-numeric items).
+    """
+
+    def __init__(
+        self, *, taxonomy_ns: str, taxonomy_prefix: str, schema_ref: str, unit_id: str = "AUD"
+    ) -> None:
+        self.taxonomy_ns = taxonomy_ns
+        self.taxonomy_prefix = taxonomy_prefix
+        self.schema_ref = schema_ref
+        self.unit_id = unit_id
+        self._contexts: dict[str, _BuilderContext] = {}
+        # facts: (concept_name, text, context_id, is_monetary, decimals|None)
+        self._facts: list[tuple[str, str, str, bool, str | None]] = []
+        self._any_monetary = False
+
+    def add_context(
+        self, context_id: str, *, abn: str, period_start: date, period_end: date
+    ) -> str:
+        self._contexts[context_id] = _BuilderContext(context_id, abn, period_start, period_end)
+        return context_id
+
+    def add_money(
+        self, concept_name: str, value: Any, *, context_id: str, decimals: str = "2"
+    ) -> None:
+        if value is None:
+            return
+        self._any_monetary = True
+        self._facts.append((concept_name, _amount(Decimal(str(value)), decimals), context_id, True, decimals))
+
+    def add_text(self, concept_name: str, value: Any, *, context_id: str) -> None:
+        if value is None or value == "":
+            return
+        self._facts.append((concept_name, str(value), context_id, False, None))
+
+    def to_bytes(self) -> bytes:
+        nsmap = {
+            "xbrli": XBRLI,
+            "link": LINK,
+            "xlink": XLINK,
+            "iso4217": ISO4217,
+            self.taxonomy_prefix: self.taxonomy_ns,
+        }
+        root = etree.Element(etree.QName(XBRLI, "xbrl"), nsmap=nsmap)
+        sref = etree.SubElement(root, etree.QName(LINK, "schemaRef"))
+        sref.set(etree.QName(XLINK, "type"), "simple")
+        sref.set(etree.QName(XLINK, "href"), self.schema_ref)
+
+        for ctx in self._contexts.values():
+            c = etree.SubElement(root, etree.QName(XBRLI, "context"), id=ctx.context_id)
+            entity = etree.SubElement(c, etree.QName(XBRLI, "entity"))
+            ident = etree.SubElement(entity, etree.QName(XBRLI, "identifier"), scheme=ABN_SCHEME)
+            ident.text = ctx.abn
+            period = etree.SubElement(c, etree.QName(XBRLI, "period"))
+            etree.SubElement(period, etree.QName(XBRLI, "startDate")).text = ctx.period_start.isoformat()
+            etree.SubElement(period, etree.QName(XBRLI, "endDate")).text = ctx.period_end.isoformat()
+
+        if self._any_monetary:
+            unit = etree.SubElement(root, etree.QName(XBRLI, "unit"), id=self.unit_id)
+            etree.SubElement(unit, etree.QName(XBRLI, "measure")).text = "iso4217:AUD"
+
+        for name, text, context_id, monetary, decimals in self._facts:
+            el = etree.SubElement(
+                root, etree.QName(self.taxonomy_ns, name), contextRef=context_id
+            )
+            if monetary:
+                el.set("unitRef", self.unit_id)
+                el.set("decimals", decimals or "2")
+            el.text = text
+
+        return etree.tostring(root, xml_declaration=True, encoding="UTF-8", pretty_print=True)
+
+
 def envelope_parts(document: bytes) -> tuple[str, str]:
     """Return ``(envelope_b64, envelope_sha256_hex)`` for the lodge-server body.
 

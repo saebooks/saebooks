@@ -13,9 +13,13 @@ from saebooks.services.lodgement.sbr.bas import (
     BasFigures,
     build_bas_document,
 )
+from saebooks.services.lodgement.sbr.stp import (
+    build_stp_pay_event_document,
+)
 from saebooks.services.lodgement.sbr.xbrl import (
     Fact,
     ReportingContext,
+    XbrlInstance,
     build_instance,
     envelope_parts,
 )
@@ -23,8 +27,10 @@ from saebooks.services.lodgement.sbr.xbrl import (
 __all__ = [
     "BasFigures",
     "build_bas_document",
+    "build_stp_pay_event_document",
     "Fact",
     "ReportingContext",
+    "XbrlInstance",
     "build_instance",
     "envelope_parts",
 ]
