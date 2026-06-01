@@ -10,6 +10,8 @@ laptop, your NAS, a VPS you rent, or our hosted offering. Same code everywhere.
 The web UI is a thin client over a public REST API, so anything you can do in a
 browser your scripts can do too — same endpoints, same auth, same OpenAPI schema.
 
+**▶ Self-host it — [saebooks.com.au/self-host](https://saebooks.com.au/self-host)** · [Live demo](https://cashbook-demo.saebooks.com.au) · [Quickstart](https://dev.saebooks.com.au/getting-started/quickstart/)
+
 ## Status
 
 | | |
@@ -114,6 +116,7 @@ Charter §6.
 ## Links
 
 - [Charter](./CHARTER.md) — strategic decisions, the senior doc
+- **Self-host & install — [saebooks.com.au/self-host](https://saebooks.com.au/self-host)**
 - Marketing — [saebooks.com.au](https://saebooks.com.au)
 - API docs — [dev.saebooks.com.au](https://dev.saebooks.com.au)
 - Community — [discourse.saebooks.com.au](https://discourse.saebooks.com.au)
