@@ -420,3 +420,96 @@ async def test_pre_auth_routes_unaffected() -> None:
     assert "get_web_session" not in src, (
         "health router should not depend on get_web_session"
     )
+
+
+async def test_active_company_resolution_needs_guc_under_nobypass(
+    two_tenants_with_data: dict[str, uuid.UUID],
+) -> None:
+    """Linchpin proof for the web-side RLS flip.
+
+    ``ActiveCompanyMiddleware`` resolves the active company by reading the
+    ``companies`` table, which is FORCE-RLS with a ``tenant_isolation`` policy
+    keyed on ``app.current_tenant``. Under the production NOBYPASSRLS
+    ``saebooks_app`` role, if the middleware does NOT stamp the tenant on its
+    session, the lookup returns zero rows and every HTML page 500s
+    "No active company". This test proves, as a real NOBYPASSRLS role, BOTH:
+
+    * the failure mode the linchpin fixes — with no GUC set, even an explicit
+      ``WHERE id = ...`` returns zero ``companies`` rows (FORCE RLS AND's its
+      predicate); and
+    * the fix — with the GUC set (what ``ActiveCompanyMiddleware`` now does via
+      ``session.info["tenant_id"]``), the tenant's own company is visible and
+      the other tenant's is not.
+
+    Mirrors ``test_rls_blocks_cross_tenant_when_role_lacks_bypass`` but targets
+    ``companies`` (the table active-company resolution reads). Skipped where the
+    test role can't create roles.
+    """
+    role = f"test_norole_{uuid.uuid4().hex[:8]}"
+    async with AsyncSessionLocal() as session:
+        try:
+            await session.execute(text(f'CREATE ROLE "{role}" NOBYPASSRLS LOGIN PASSWORD \'x\''))
+            await session.execute(text(f'GRANT SELECT ON companies TO "{role}"'))
+            await session.execute(text(f'GRANT USAGE ON SCHEMA public TO "{role}"'))
+            await session.commit()
+        except Exception as exc:
+            await session.rollback()
+            pytest.skip(f"cannot create non-bypass role on this DB ({exc!r})")
+
+    try:
+        import asyncpg
+        from urllib.parse import urlparse, urlunparse
+
+        from saebooks.config import settings
+
+        url = settings.app_database_url or settings.database_url
+        dsn = url.replace("postgresql+asyncpg://", "postgresql://")
+        parsed = urlparse(dsn)
+        new_netloc = f"{role}:x@{parsed.hostname}:{parsed.port or 5432}"
+        new_dsn = urlunparse(parsed._replace(netloc=new_netloc))
+
+        try:
+            conn = await asyncpg.connect(new_dsn)
+        except Exception as exc:
+            pytest.skip(f"cannot connect as transient role ({exc!r})")
+
+        both = [two_tenants_with_data["company_a"], two_tenants_with_data["company_b"]]
+        try:
+            # Failure mode: no GUC -> zero companies even with an explicit id
+            # filter. This is exactly why the unstamped middleware 500'd.
+            await conn.execute("RESET app.current_tenant")
+            try:
+                rows_none = await conn.fetch(
+                    "SELECT id FROM companies WHERE id = ANY($1::uuid[])", both
+                )
+                assert [str(r["id"]) for r in rows_none] == [], (
+                    "RLS leak: companies visible with no app.current_tenant GUC"
+                )
+            except asyncpg.exceptions.DataError:
+                pass  # empty-GUC uuid cast — also a hard block, no leak
+
+            # The fix: GUC set to tenant A -> A's company visible, B's not.
+            await conn.execute(
+                f"SET app.current_tenant = '{two_tenants_with_data['tenant_a']}'"
+            )
+            ids_a = [
+                str(r["id"])
+                for r in await conn.fetch(
+                    "SELECT id FROM companies WHERE id = ANY($1::uuid[])", both
+                )
+            ]
+            assert str(two_tenants_with_data["company_a"]) in ids_a, (
+                "linchpin broken: tenant A's own company invisible with the GUC "
+                "set -> ActiveCompanyMiddleware would 500 'No active company'"
+            )
+            assert str(two_tenants_with_data["company_b"]) not in ids_a, (
+                "RLS leak: tenant A saw tenant B's company"
+            )
+        finally:
+            await conn.close()
+    finally:
+        async with AsyncSessionLocal() as session:
+            await session.execute(text(f'REVOKE ALL ON companies FROM "{role}"'))
+            await session.execute(text(f'REVOKE USAGE ON SCHEMA public FROM "{role}"'))
+            await session.execute(text(f'DROP ROLE "{role}"'))
+            await session.commit()

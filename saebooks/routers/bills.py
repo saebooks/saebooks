@@ -20,14 +20,13 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import resolve_tenant_id
 from saebooks.config import settings
-from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
 from saebooks.models.bill import BillStatus
 from saebooks.models.company import Company
@@ -38,6 +37,7 @@ from saebooks.services import bills as svc
 from saebooks.services import numbering
 from saebooks.web import templates
 from saebooks.services import active_company as active_svc
+from saebooks.routers.deps import get_web_session
 
 router = APIRouter(prefix="/bills")
 
@@ -203,26 +203,26 @@ async def bills_list(
     request: Request,
     status: str = Query("all"),
     q: str | None = Query(None),
+    session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:
     company = await _first_company()
     filter_status: BillStatus | None = None
     if status.upper() in BillStatus.__members__:
         filter_status = BillStatus(status.upper())
 
-    async with AsyncSessionLocal() as session:
-        bills = await svc.list_bills(
-            session,
-            company.id,
-            status=filter_status,
-            include_archived=(status == "archived"),
+    bills = await svc.list_bills(
+        session,
+        company.id,
+        status=filter_status,
+        include_archived=(status == "archived"),
+    )
+    contact_map: dict[uuid.UUID, str] = {}
+    contact_ids = {b.contact_id for b in bills}
+    if contact_ids:
+        r = await session.execute(
+            select(Contact.id, Contact.name).where(Contact.id.in_(contact_ids))
         )
-        contact_map: dict[uuid.UUID, str] = {}
-        contact_ids = {b.contact_id for b in bills}
-        if contact_ids:
-            r = await session.execute(
-                select(Contact.id, Contact.name).where(Contact.id.in_(contact_ids))
-            )
-            contact_map = {row[0]: row[1] for row in r.all()}
+        contact_map = {row[0]: row[1] for row in r.all()}
 
     if q:
         q_lower = q.lower()
@@ -254,11 +254,13 @@ async def bills_list(
 
 
 @router.get("/new", response_class=HTMLResponse)
-async def bills_new(request: Request) -> HTMLResponse:
+async def bills_new(
+    request: Request,
+    session: AsyncSession = Depends(get_web_session),
+) -> HTMLResponse:
     company = await _first_company()
-    async with AsyncSessionLocal() as session:
-        dropdowns = await _form_dropdowns(session, company.id)
-        preview_number = await numbering.peek_next(session, company.id, "bill")
+    dropdowns = await _form_dropdowns(session, company.id)
+    preview_number = await numbering.peek_next(session, company.id, "bill")
     today = date.today()
     return templates.TemplateResponse(
         request,
@@ -277,7 +279,10 @@ async def bills_new(request: Request) -> HTMLResponse:
 
 
 @router.post("", response_model=None)
-async def bills_create(request: Request) -> RedirectResponse | HTMLResponse:
+async def bills_create(
+    request: Request,
+    session: AsyncSession = Depends(get_web_session),
+) -> RedirectResponse | HTMLResponse:
     company = await _first_company()
     form = dict(await request.form())
     try:
@@ -292,15 +297,14 @@ async def bills_create(request: Request) -> RedirectResponse | HTMLResponse:
         }
         if not kwargs["lines"]:
             raise svc.BillError("At least one line with description is required")
-        async with AsyncSessionLocal() as session:
-            await _validate_fks(
-                session, company.id, kwargs["contact_id"], kwargs["lines"]
-            )
-            bill = await svc.create_draft(session, company_id=company.id, **kwargs)
+        await _validate_fks(
+            session, company.id, kwargs["contact_id"], kwargs["lines"]
+        )
+        bill = await svc.create_draft(session, company_id=company.id, **kwargs)
     except (ValueError, svc.BillError) as exc:
-        async with AsyncSessionLocal() as session:
-            dropdowns = await _form_dropdowns(session, company.id)
-            preview_number = await numbering.peek_next(session, company.id, "bill")
+        await session.rollback()
+        dropdowns = await _form_dropdowns(session, company.id)
+        preview_number = await numbering.peek_next(session, company.id, "bill")
         return templates.TemplateResponse(
             request,
             "bills/form.html",
@@ -325,29 +329,32 @@ async def bills_create(request: Request) -> RedirectResponse | HTMLResponse:
 
 
 @router.get("/{bill_id}", response_class=HTMLResponse)
-async def bills_detail(request: Request, bill_id: UUID) -> HTMLResponse:
+async def bills_detail(
+    request: Request,
+    bill_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> HTMLResponse:
     tenant_id = resolve_tenant_id(request)
-    async with AsyncSessionLocal() as session:
-        try:
-            bill = await svc.get(session, bill_id, tenant_id=tenant_id)
-        except svc.BillError as exc:
-            raise HTTPException(404, "Bill not found") from exc
-        company = await session.get(Company, bill.company_id)
-        contact = await session.get(Contact, bill.contact_id)
-        account_ids = {ln.account_id for ln in bill.lines}
-        tax_code_ids = {ln.tax_code_id for ln in bill.lines if ln.tax_code_id}
-        account_map: dict[uuid.UUID, Account] = {}
-        tax_map: dict[uuid.UUID, TaxCode] = {}
-        if account_ids:
-            r = await session.execute(
-                select(Account).where(Account.id.in_(account_ids))
-            )
-            account_map = {a.id: a for a in r.scalars().all()}
-        if tax_code_ids:
-            r2 = await session.execute(
-                select(TaxCode).where(TaxCode.id.in_(tax_code_ids))
-            )
-            tax_map = {t.id: t for t in r2.scalars().all()}
+    try:
+        bill = await svc.get(session, bill_id, tenant_id=tenant_id)
+    except svc.BillError as exc:
+        raise HTTPException(404, "Bill not found") from exc
+    company = await session.get(Company, bill.company_id)
+    contact = await session.get(Contact, bill.contact_id)
+    account_ids = {ln.account_id for ln in bill.lines}
+    tax_code_ids = {ln.tax_code_id for ln in bill.lines if ln.tax_code_id}
+    account_map: dict[uuid.UUID, Account] = {}
+    tax_map: dict[uuid.UUID, TaxCode] = {}
+    if account_ids:
+        r = await session.execute(
+            select(Account).where(Account.id.in_(account_ids))
+        )
+        account_map = {a.id: a for a in r.scalars().all()}
+    if tax_code_ids:
+        r2 = await session.execute(
+            select(TaxCode).where(TaxCode.id.in_(tax_code_ids))
+        )
+        tax_map = {t.id: t for t in r2.scalars().all()}
     return templates.TemplateResponse(
         request,
         "bills/detail.html",
@@ -363,15 +370,18 @@ async def bills_detail(request: Request, bill_id: UUID) -> HTMLResponse:
 
 
 @router.get("/{bill_id}/edit", response_class=HTMLResponse)
-async def bills_edit(request: Request, bill_id: UUID) -> HTMLResponse:
+async def bills_edit(
+    request: Request,
+    bill_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> HTMLResponse:
     tenant_id = resolve_tenant_id(request)
-    async with AsyncSessionLocal() as session:
-        try:
-            bill = await svc.get(session, bill_id, tenant_id=tenant_id)
-        except svc.BillError as exc:
-            raise HTTPException(404, "Bill not found") from exc
-        company = await session.get(Company, bill.company_id)
-        dropdowns = await _form_dropdowns(session, bill.company_id)
+    try:
+        bill = await svc.get(session, bill_id, tenant_id=tenant_id)
+    except svc.BillError as exc:
+        raise HTTPException(404, "Bill not found") from exc
+    company = await session.get(Company, bill.company_id)
+    dropdowns = await _form_dropdowns(session, bill.company_id)
     if bill.status != BillStatus.DRAFT:
         raise HTTPException(400, f"Cannot edit bill in state {bill.status}")
     return templates.TemplateResponse(
@@ -392,36 +402,37 @@ async def bills_edit(request: Request, bill_id: UUID) -> HTMLResponse:
 
 @router.post("/{bill_id}", response_model=None)
 async def bills_update(
-    request: Request, bill_id: UUID
+    request: Request,
+    bill_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse | HTMLResponse:
     tenant_id = resolve_tenant_id(request)
     form = dict(await request.form())
     try:
         contact_id = uuid.UUID(str(form["contact_id"]))
         lines = _parse_lines_from_form(form)
-        async with AsyncSessionLocal() as session:
-            existing = await svc.get(session, bill_id, tenant_id=tenant_id)
-            await _validate_fks(session, existing.company_id, contact_id, lines)
-            await svc.update_draft(
-                session,
-                bill_id,
-                tenant_id=tenant_id,
-                contact_id=contact_id,
-                issue_date=_parse_date(str(form["issue_date"]), "issue_date"),
-                due_date=_parse_date(str(form["due_date"]), "due_date"),
-                supplier_reference=str(form.get("supplier_reference") or "").strip()
-                or None,
-                notes=str(form.get("notes") or "").strip() or None,
-                lines=lines,
-            )
+        existing = await svc.get(session, bill_id, tenant_id=tenant_id)
+        await _validate_fks(session, existing.company_id, contact_id, lines)
+        await svc.update_draft(
+            session,
+            bill_id,
+            tenant_id=tenant_id,
+            contact_id=contact_id,
+            issue_date=_parse_date(str(form["issue_date"]), "issue_date"),
+            due_date=_parse_date(str(form["due_date"]), "due_date"),
+            supplier_reference=str(form.get("supplier_reference") or "").strip()
+            or None,
+            notes=str(form.get("notes") or "").strip() or None,
+            lines=lines,
+        )
     except (ValueError, svc.BillError) as exc:
-        async with AsyncSessionLocal() as session:
-            try:
-                bill = await svc.get(session, bill_id, tenant_id=tenant_id)
-            except svc.BillError as bexc:
-                raise HTTPException(404, "Bill not found") from bexc
-            company = await session.get(Company, bill.company_id)
-            dropdowns = await _form_dropdowns(session, bill.company_id)
+        await session.rollback()
+        try:
+            bill = await svc.get(session, bill_id, tenant_id=tenant_id)
+        except svc.BillError as bexc:
+            raise HTTPException(404, "Bill not found") from bexc
+        company = await session.get(Company, bill.company_id)
+        dropdowns = await _form_dropdowns(session, bill.company_id)
         return templates.TemplateResponse(
             request,
             "bills/form.html",
@@ -446,27 +457,34 @@ async def bills_update(
 
 
 @router.post("/{bill_id}/post")
-async def bills_post(bill_id: UUID) -> RedirectResponse:
-    async with AsyncSessionLocal() as session:
-        await svc.post_bill(session, bill_id, posted_by="web")
+async def bills_post(
+    bill_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> RedirectResponse:
+    await svc.post_bill(session, bill_id, posted_by="web")
     return RedirectResponse(f"/bills/{bill_id}", status_code=303)
 
 
 @router.post("/{bill_id}/void")
-async def bills_void(bill_id: UUID) -> RedirectResponse:
-    async with AsyncSessionLocal() as session:
-        await svc.void_bill(session, bill_id, posted_by="web")
+async def bills_void(
+    bill_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> RedirectResponse:
+    await svc.void_bill(session, bill_id, posted_by="web")
     return RedirectResponse(f"/bills/{bill_id}", status_code=303)
 
 
 @router.post("/{bill_id}/archive")
-async def bills_archive(request: Request, bill_id: UUID) -> RedirectResponse:
+async def bills_archive(
+    request: Request,
+    bill_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> RedirectResponse:
     tenant_id = resolve_tenant_id(request)
-    async with AsyncSessionLocal() as session:
-        try:
-            await svc.archive(session, bill_id, tenant_id=tenant_id)
-        except svc.BillError:
-            # Cross-tenant or already-archived: silently no-op so users
-            # never learn whether the bill exists in another tenant.
-            pass
+    try:
+        await svc.archive(session, bill_id, tenant_id=tenant_id)
+    except svc.BillError:
+        # Cross-tenant or already-archived: silently no-op so users
+        # never learn whether the bill exists in another tenant.
+        pass
     return RedirectResponse("/bills", status_code=303)

@@ -3,12 +3,12 @@ import uuid
 from collections.abc import Sequence
 from datetime import date
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.config import settings
-from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.services import assets_reports as assets_reports_svc
@@ -23,6 +23,7 @@ from saebooks.services.fx import reval as fx_reval_svc
 from saebooks.web import templates
 from saebooks.services import active_company as active_svc
 from saebooks.api.v1.auth import resolve_tenant_id
+from saebooks.routers.deps import get_web_session
 
 router = APIRouter(prefix="/reports")
 
@@ -50,11 +51,11 @@ async def reports_index(request: Request) -> HTMLResponse:
 async def trial_balance(
     request: Request,
     as_of: str | None = Query(None),
+    session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:
     company = await _first_company()
     as_of_date = _parse_date(as_of)
-    async with AsyncSessionLocal() as session:
-        sections = await svc.trial_balance(session, company.id, as_of=as_of_date)
+    sections = await svc.trial_balance(session, company.id, as_of=as_of_date)
     total_dr = sum(s.total_debit for s in sections)
     total_cr = sum(s.total_credit for s in sections)
     return templates.TemplateResponse(
@@ -76,14 +77,14 @@ async def profit_loss(
     request: Request,
     from_date: str | None = Query(None, alias="from"),
     to_date: str | None = Query(None, alias="to"),
+    session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:
     company = await _first_company()
     fd = _parse_date(from_date)
     td = _parse_date(to_date)
-    async with AsyncSessionLocal() as session:
-        sections, net_profit = await svc.profit_and_loss(
-            session, company.id, from_date=fd, to_date=td
-        )
+    sections, net_profit = await svc.profit_and_loss(
+        session, company.id, from_date=fd, to_date=td
+    )
     return templates.TemplateResponse(
         request,
         "reports/profit_loss.html",
@@ -103,6 +104,7 @@ async def bas_report(
     request: Request,
     from_date: str | None = Query(None, alias="from"),
     to_date: str | None = Query(None, alias="to"),
+    session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:
     company = await _first_company()
 
@@ -130,8 +132,7 @@ async def bas_report(
         if fd is None or fd < company.gst_effective_date:
             fd = company.gst_effective_date
 
-    async with AsyncSessionLocal() as session:
-        report = await bas_svc.bas_report(session, company.id, from_date=fd, to_date=td)
+    report = await bas_svc.bas_report(session, company.id, from_date=fd, to_date=td)
     return templates.TemplateResponse(
         request,
         "reports/bas.html",
@@ -150,13 +151,13 @@ async def bas_report(
 async def balance_sheet_report(
     request: Request,
     as_of: str | None = Query(None),
+    session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:
     company = await _first_company()
     as_of_date = _parse_date(as_of)
-    async with AsyncSessionLocal() as session:
-        sections, net_assets = await svc.balance_sheet(
-            session, company.id, as_of=as_of_date
-        )
+    sections, net_assets = await svc.balance_sheet(
+        session, company.id, as_of=as_of_date
+    )
     return templates.TemplateResponse(
         request,
         "reports/balance_sheet.html",
@@ -175,11 +176,11 @@ async def aged_ar_report(
     request: Request,
     as_at: str | None = Query(None),
     format: str = Query("html"),
+    session: AsyncSession = Depends(get_web_session),
 ) -> Response:
     company = await _first_company()
     cutoff = _parse_date(as_at) or date.today()
-    async with AsyncSessionLocal() as session:
-        report = await svc.aged_ar(session, company.id, as_at=cutoff)
+    report = await svc.aged_ar(session, company.id, as_at=cutoff)
 
     if format == "csv":
         csv_text = svc.aged_ar_csv(report)
@@ -211,11 +212,11 @@ async def aged_ap_report(
     request: Request,
     as_at: str | None = Query(None),
     format: str = Query("html"),
+    session: AsyncSession = Depends(get_web_session),
 ) -> Response:
     company = await _first_company()
     cutoff = _parse_date(as_at) or date.today()
-    async with AsyncSessionLocal() as session:
-        report = await svc.aged_ap(session, company.id, as_at=cutoff)
+    report = await svc.aged_ap(session, company.id, as_at=cutoff)
 
     if format == "csv":
         csv_text = svc.aged_ap_csv(report)
@@ -247,6 +248,7 @@ async def close_year_form(
     request: Request,
     through: str | None = Query(None),
     retained_earnings_account_id: str | None = Query(None),
+    session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:
     """Preview the year-end close. No state change here.
 
@@ -261,32 +263,31 @@ async def close_year_form(
     company = await _first_company()
     through_date = _parse_date(through) or _default_fy_end(company)
 
-    async with AsyncSessionLocal() as session:
-        equity_accounts = (
-            await session.execute(
-                select(Account)
-                .where(
-                    Account.company_id == company.id,
-                    Account.account_type == AccountType.EQUITY,
-                    Account.archived_at.is_(None),
-                )
-                .order_by(Account.code)
+    equity_accounts = (
+        await session.execute(
+            select(Account)
+            .where(
+                Account.company_id == company.id,
+                Account.account_type == AccountType.EQUITY,
+                Account.archived_at.is_(None),
             )
-        ).scalars().all()
-
-        retained_id = (
-            _uuid_or_none(retained_earnings_account_id)
-            or _default_retained_earnings(equity_accounts)
+            .order_by(Account.code)
         )
+    ).scalars().all()
 
-        preview = None
-        if retained_id is not None:
-            preview = await period_close_svc.preview_close(
-                session,
-                company.id,
-                through_date=through_date,
-                retained_earnings_account_id=retained_id,
-            )
+    retained_id = (
+        _uuid_or_none(retained_earnings_account_id)
+        or _default_retained_earnings(equity_accounts)
+    )
+
+    preview = None
+    if retained_id is not None:
+        preview = await period_close_svc.preview_close(
+            session,
+            company.id,
+            through_date=through_date,
+            retained_earnings_account_id=retained_id,
+        )
 
     return templates.TemplateResponse(
         request,
@@ -303,7 +304,10 @@ async def close_year_form(
 
 
 @router.post("/close-year", response_model=None)
-async def close_year_submit(request: Request) -> RedirectResponse:
+async def close_year_submit(
+    request: Request,
+    session: AsyncSession = Depends(get_web_session),
+) -> RedirectResponse:
     """Post the year-end close journal, then lock the period."""
     company = await _first_company()
     form = await request.form()
@@ -318,15 +322,14 @@ async def close_year_submit(request: Request) -> RedirectResponse:
 
     tenant_id = resolve_tenant_id(request)
 
-    async with AsyncSessionLocal() as session:
-        entry = await period_close_svc.close_year(
-            session,
-            company.id,
-            tenant_id=tenant_id,
-            through_date=through_date,
-            retained_earnings_account_id=retained_id,
-            posted_by=posted_by,
-        )
+    entry = await period_close_svc.close_year(
+        session,
+        company.id,
+        tenant_id=tenant_id,
+        through_date=through_date,
+        retained_earnings_account_id=retained_id,
+        posted_by=posted_by,
+    )
 
     if entry is None:
         return RedirectResponse(
@@ -377,16 +380,16 @@ async def pl_by_segment_report(
     from_date: str | None = Query(None, alias="from"),
     to_date: str | None = Query(None, alias="to"),
     segment: str = Query("project"),
+    session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:
     """P&L grouped by segment (project for v1)."""
     company = await _first_company()
     fd = _parse_date(from_date)
     td = _parse_date(to_date)
-    async with AsyncSessionLocal() as session:
-        segments = await svc.pl_by_segment(
-            session, company.id,
-            from_date=fd, to_date=td, segment=segment,
-        )
+    segments = await svc.pl_by_segment(
+        session, company.id,
+        from_date=fd, to_date=td, segment=segment,
+    )
     return templates.TemplateResponse(
         request,
         "reports/pl_by_segment.html",
@@ -405,12 +408,12 @@ async def pl_by_segment_report(
 async def budget_vs_actual_report(
     request: Request,
     year: int | None = Query(None),
+    session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:
     """Budget vs actual per P&L account for a calendar year."""
     company = await _first_company()
     year_val = year or date.today().year
-    async with AsyncSessionLocal() as session:
-        report = await svc.budget_vs_actual(session, company.id, year=year_val)
+    report = await svc.budget_vs_actual(session, company.id, year=year_val)
     month_labels = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun",
         "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
@@ -435,17 +438,17 @@ async def cashflow_forecast_report(
     request: Request,
     horizon: int = Query(90),
     as_of: str | None = Query(None),
+    session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:
     """Rolling cash-flow forecast: open AR + AP + recurring, weekly roll-up."""
     company = await _first_company()
     as_of_date = _parse_date(as_of) or date.today()
     horizon_days = max(7, min(365, horizon))
-    async with AsyncSessionLocal() as session:
-        report = await svc.cashflow_forecast(
-            session, company.id,
-            horizon_days=horizon_days,
-            as_of=as_of_date,
-        )
+    report = await svc.cashflow_forecast(
+        session, company.id,
+        horizon_days=horizon_days,
+        as_of=as_of_date,
+    )
     return templates.TemplateResponse(
         request,
         "reports/cashflow_forecast.html",
@@ -465,6 +468,7 @@ async def depreciation_schedule_report(
     as_at: str | None = Query(None),
     include_disposed: bool = Query(False),
     format: str = Query("html"),
+    session: AsyncSession = Depends(get_web_session),
 ) -> Response:
     """Fixed-asset depreciation schedule with book vs tax overlay.
 
@@ -474,13 +478,12 @@ async def depreciation_schedule_report(
     """
     company = await _first_company()
     cutoff = _parse_date(as_at) or date.today()
-    async with AsyncSessionLocal() as session:
-        schedule = await assets_reports_svc.depreciation_schedule(
-            session,
-            company.id,
-            as_at=cutoff,
-            include_disposed=include_disposed,
-        )
+    schedule = await assets_reports_svc.depreciation_schedule(
+        session,
+        company.id,
+        as_at=cutoff,
+        include_disposed=include_disposed,
+    )
 
     if format == "csv":
         csv_text = assets_reports_svc.depreciation_schedule_csv(schedule)
@@ -510,6 +513,7 @@ async def depreciation_schedule_report(
 async def fx_revalue_form(
     request: Request,
     through: str | None = Query(None),
+    session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:
     """Preview open foreign-currency AR/AP + the revalued base position.
 
@@ -523,15 +527,14 @@ async def fx_revalue_form(
 
     preview: list[fx_reval_svc.CurrencyReval] = []
     rate_error: str | None = None
-    async with AsyncSessionLocal() as session:
-        try:
-            preview = await fx_reval_svc.preview_company(
-                session,
-                company_id=company.id,
-                through_date=through_date,
-            )
-        except fx_rates_svc.FxRateError as exc:
-            rate_error = str(exc)
+    try:
+        preview = await fx_reval_svc.preview_company(
+            session,
+            company_id=company.id,
+            through_date=through_date,
+        )
+    except fx_rates_svc.FxRateError as exc:
+        rate_error = str(exc)
 
     return templates.TemplateResponse(
         request,
@@ -547,7 +550,10 @@ async def fx_revalue_form(
 
 
 @router.post("/fx-revalue", response_model=None)
-async def fx_revalue_submit(request: Request) -> RedirectResponse:
+async def fx_revalue_submit(
+    request: Request,
+    session: AsyncSession = Depends(get_web_session),
+) -> RedirectResponse:
     """Post the adjusting + reversing pair per foreign currency."""
     company = await _first_company()
     form = await request.form()
@@ -559,14 +565,13 @@ async def fx_revalue_submit(request: Request) -> RedirectResponse:
     tenant_id = resolve_tenant_id(request)
 
     try:
-        async with AsyncSessionLocal() as session:
-            result = await fx_reval_svc.revalue_company(
-                session,
-                company_id=company.id,
-                tenant_id=tenant_id,
-                through_date=through_date,
-                posted_by=posted_by,
-            )
+        result = await fx_reval_svc.revalue_company(
+            session,
+            company_id=company.id,
+            tenant_id=tenant_id,
+            through_date=through_date,
+            posted_by=posted_by,
+        )
     except (fx_rates_svc.FxRateError, fx_reval_svc.FxRevalError) as exc:
         return RedirectResponse(
             f"/reports/fx-revalue?through={through_date.isoformat()}"
@@ -586,13 +591,13 @@ async def trust_cashbook_report(
     request: Request,
     from_date: str | None = Query(None, alias="from"),
     to_date: str | None = Query(None, alias="to"),
+    session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:
     """Trust Account Receipts & Payments Cash Book (NSW PSAA 2002 s.105)."""
     company = await _first_company()
     fd = _parse_date(from_date)
     td = _parse_date(to_date)
-    async with AsyncSessionLocal() as session:
-        reports = await trust_svc.trust_cashbook(session, company.id, from_date=fd, to_date=td)
+    reports = await trust_svc.trust_cashbook(session, company.id, from_date=fd, to_date=td)
     return templates.TemplateResponse(
         request,
         "reports/trust_cashbook.html",
@@ -610,14 +615,14 @@ async def trust_cashbook_report(
 async def trust_balances_report(
     request: Request,
     as_of: str | None = Query(None),
+    session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:
     """Unreconciled Trust Balances — liability to beneficiaries (NSW PSAA 2002)."""
     company = await _first_company()
     as_of_date = _parse_date(as_of)
-    async with AsyncSessionLocal() as session:
-        report = await trust_svc.unreconciled_trust_balances(
-            session, company.id, as_of=as_of_date
-        )
+    report = await trust_svc.unreconciled_trust_balances(
+        session, company.id, as_of=as_of_date
+    )
     return templates.TemplateResponse(
         request,
         "reports/trust_balances.html",
@@ -635,13 +640,13 @@ async def tpar_report(
     request: Request,
     from_date: str | None = Query(None, alias="from"),
     to_date: str | None = Query(None, alias="to"),
+    session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:
     """Taxable Payments Annual Report — sub-contractor payments for ATO lodgement."""
     company = await _first_company()
     fd = _parse_date(from_date)
     td = _parse_date(to_date)
-    async with AsyncSessionLocal() as session:
-        report = await tpar_svc.tpar_report(session, company.id, from_date=fd, to_date=td)
+    report = await tpar_svc.tpar_report(session, company.id, from_date=fd, to_date=td)
     return templates.TemplateResponse(
         request,
         "reports/tpar.html",
@@ -656,7 +661,10 @@ async def tpar_report(
 
 
 @router.post("/bas/settle", response_model=None)
-async def bas_settle(request: Request) -> RedirectResponse:
+async def bas_settle(
+    request: Request,
+    session: AsyncSession = Depends(get_web_session),
+) -> RedirectResponse:
     """Create a BAS settlement journal entry."""
     company = await _first_company()
     form = await request.form()
@@ -670,15 +678,14 @@ async def bas_settle(request: Request) -> RedirectResponse:
 
     tenant_id = resolve_tenant_id(request)
 
-    async with AsyncSessionLocal() as session:
-        entry = await gst_svc.settle_bas(
-            session,
-            company.id,
-            tenant_id=tenant_id,
-            settlement_date=settlement_date,
-            from_date=from_date,
-            to_date=to_date,
-        )
+    entry = await gst_svc.settle_bas(
+        session,
+        company.id,
+        tenant_id=tenant_id,
+        settlement_date=settlement_date,
+        from_date=from_date,
+        to_date=to_date,
+    )
 
     if entry:
         return RedirectResponse(f"/journal/{entry.id}", status_code=303)

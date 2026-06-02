@@ -3,18 +3,19 @@ import uuid
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import resolve_tenant_id
 from saebooks.config import settings
-from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account
 from saebooks.models.company import Company
 from saebooks.models.journal import EntryStatus, JournalEntry
 from saebooks.models.project import Project, ProjectStatus
 from saebooks.models.tax_code import TaxCode
+from saebooks.routers.deps import get_web_session
 from saebooks.services import journal as svc
 from saebooks.services.journal import PostingError
 from saebooks.web import templates
@@ -28,50 +29,50 @@ async def _first_company() -> Company:
 
 
 async def _accounts_and_tax_codes(
+    session: AsyncSession,
     company_id: uuid.UUID,
 ) -> tuple[list[Account], list[TaxCode], list[Project]]:
-    async with AsyncSessionLocal() as session:
-        accts = await session.execute(
-            select(Account)
-            .where(Account.company_id == company_id, Account.archived_at.is_(None))
-            .order_by(Account.code)
+    accts = await session.execute(
+        select(Account)
+        .where(Account.company_id == company_id, Account.archived_at.is_(None))
+        .order_by(Account.code)
+    )
+    tcs = await session.execute(
+        select(TaxCode)
+        .where(TaxCode.company_id == company_id, TaxCode.archived_at.is_(None))
+        .order_by(TaxCode.code)
+    )
+    projs = await session.execute(
+        select(Project)
+        .where(
+            Project.company_id == company_id,
+            Project.archived_at.is_(None),
+            Project.status == ProjectStatus.ACTIVE,
         )
-        tcs = await session.execute(
-            select(TaxCode)
-            .where(TaxCode.company_id == company_id, TaxCode.archived_at.is_(None))
-            .order_by(TaxCode.code)
-        )
-        projs = await session.execute(
-            select(Project)
-            .where(
-                Project.company_id == company_id,
-                Project.archived_at.is_(None),
-                Project.status == ProjectStatus.ACTIVE,
-            )
-            .order_by(Project.code)
-        )
-        return (
-            list(accts.scalars().all()),
-            list(tcs.scalars().all()),
-            list(projs.scalars().all()),
-        )
+        .order_by(Project.code)
+    )
+    return (
+        list(accts.scalars().all()),
+        list(tcs.scalars().all()),
+        list(projs.scalars().all()),
+    )
 
 
 @router.get("", response_class=HTMLResponse)
 async def journal_list(
     request: Request,
     status: str | None = Query(None),
+    session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:
     company = await _first_company()
     filter_status = EntryStatus(status) if status else None
-    async with AsyncSessionLocal() as session:
-        entries = await svc.list_entries(session, company.id, status=filter_status)
-        total = await session.execute(
-            select(func.count())
-            .select_from(JournalEntry)
-            .where(JournalEntry.company_id == company.id)
-        )
-        count = total.scalar_one()
+    entries = await svc.list_entries(session, company.id, status=filter_status)
+    total = await session.execute(
+        select(func.count())
+        .select_from(JournalEntry)
+        .where(JournalEntry.company_id == company.id)
+    )
+    count = total.scalar_one()
     return templates.TemplateResponse(
         request,
         "journal/list.html",
@@ -86,11 +87,13 @@ async def journal_list(
 
 
 @router.get("/new", response_class=HTMLResponse)
-async def journal_new(request: Request) -> HTMLResponse:
+async def journal_new(
+    request: Request,
+    session: AsyncSession = Depends(get_web_session),
+) -> HTMLResponse:
     company = await _first_company()
-    accounts, tax_codes, projects = await _accounts_and_tax_codes(company.id)
-    async with AsyncSessionLocal() as session:
-        ref = await svc.next_ref(session)
+    accounts, tax_codes, projects = await _accounts_and_tax_codes(session, company.id)
+    ref = await svc.next_ref(session)
     return templates.TemplateResponse(
         request,
         "journal/form.html",
@@ -108,7 +111,11 @@ async def journal_new(request: Request) -> HTMLResponse:
 
 
 @router.get("/{entry_id}", response_class=HTMLResponse)
-async def journal_detail(request: Request, entry_id: uuid.UUID) -> HTMLResponse:
+async def journal_detail(
+    request: Request,
+    entry_id: uuid.UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> HTMLResponse:
     # Use the company tenant_id for the lookup rather than resolving from the
     # bearer JWT. The list route uses the same pattern. The legacy /journal
     # router has no require_bearer dependency, so request.state.jwt_claims is
@@ -117,12 +124,11 @@ async def journal_detail(request: Request, entry_id: uuid.UUID) -> HTMLResponse:
     # the real tenant isolation; the company.tenant_id check here is belt-and-
     # braces at the application layer.
     company = await _first_company()
-    accounts, tax_codes, projects = await _accounts_and_tax_codes(company.id)
-    async with AsyncSessionLocal() as session:
-        try:
-            entry = await svc.get(session, entry_id, tenant_id=company.tenant_id)
-        except ValueError as exc:
-            raise HTTPException(404, "Journal entry not found") from exc
+    accounts, tax_codes, projects = await _accounts_and_tax_codes(session, company.id)
+    try:
+        entry = await svc.get(session, entry_id, tenant_id=company.tenant_id)
+    except ValueError as exc:
+        raise HTTPException(404, "Journal entry not found") from exc
     return templates.TemplateResponse(
         request,
         "journal/form.html",
@@ -183,7 +189,10 @@ def _parse_lines(form: dict[str, object]) -> list[dict[str, object]]:
 
 
 @router.post("/save", response_model=None)
-async def journal_save(request: Request) -> RedirectResponse | HTMLResponse:
+async def journal_save(
+    request: Request,
+    session: AsyncSession = Depends(get_web_session),
+) -> RedirectResponse | HTMLResponse:
     tenant_id = resolve_tenant_id(request)
     form: dict[str, object] = dict(await request.form())
     company = await _first_company()
@@ -202,87 +211,93 @@ async def journal_save(request: Request) -> RedirectResponse | HTMLResponse:
     lines = _parse_lines(form)
 
     error = None
-    async with AsyncSessionLocal() as session:
-        try:
-            if entry_id:
-                entry = await svc.update_draft(
-                    session,
-                    uuid.UUID(str(entry_id)),
-                    tenant_id=tenant_id,
-                    entry_date=entry_date,
-                    description=description or None,
-                    ref=ref or None,
-                    lines=lines,
-                    performed_by="web",
-                )
-            else:
-                entry = await svc.create_draft(
-                    session,
-                    company_id=company.id,
-                    entry_date=entry_date,
-                    description=description or None,
-                    ref=ref or None,
-                    lines=lines,
-                    tenant_id=tenant_id,
-                )
-
-            if action == "post":
-                override = str(form.get("override_reason", "")).strip() or None
-                entry = await svc.post(
-                    session,
-                    entry.id,
-                    posted_by="web",
-                    override_reason=override,
-                    tenant_id=tenant_id,
-                )
-
-        except PostingError as exc:
-            error = str(exc)
-            accounts, tax_codes, projects = await _accounts_and_tax_codes(company.id)
-            return templates.TemplateResponse(
-                request,
-                "journal/form.html",
-                {
-                    "edition": settings.edition,
-                    "company_name": company.name,
-                    "entry": None,
-                    "ref": ref,
-                    "accounts": accounts,
-                    "tax_codes": tax_codes,
-                    "projects": projects,
-                    "error": error,
-                },
-                status_code=422,
+    try:
+        if entry_id:
+            entry = await svc.update_draft(
+                session,
+                uuid.UUID(str(entry_id)),
+                tenant_id=tenant_id,
+                entry_date=entry_date,
+                description=description or None,
+                ref=ref or None,
+                lines=lines,
+                performed_by="web",
             )
+        else:
+            entry = await svc.create_draft(
+                session,
+                company_id=company.id,
+                entry_date=entry_date,
+                description=description or None,
+                ref=ref or None,
+                lines=lines,
+                tenant_id=tenant_id,
+            )
+
+        if action == "post":
+            override = str(form.get("override_reason", "")).strip() or None
+            entry = await svc.post(
+                session,
+                entry.id,
+                posted_by="web",
+                override_reason=override,
+                tenant_id=tenant_id,
+            )
+
+    except PostingError as exc:
+        await session.rollback()
+        error = str(exc)
+        accounts, tax_codes, projects = await _accounts_and_tax_codes(session, company.id)
+        return templates.TemplateResponse(
+            request,
+            "journal/form.html",
+            {
+                "edition": settings.edition,
+                "company_name": company.name,
+                "entry": None,
+                "ref": ref,
+                "accounts": accounts,
+                "tax_codes": tax_codes,
+                "projects": projects,
+                "error": error,
+            },
+            status_code=422,
+        )
 
     return RedirectResponse(f"/journal/{entry.id}", status_code=303)
 
 
 @router.post("/{entry_id}/reverse")
-async def journal_reverse(request: Request, entry_id: uuid.UUID) -> RedirectResponse:
+async def journal_reverse(
+    request: Request,
+    entry_id: uuid.UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> RedirectResponse:
     tenant_id = resolve_tenant_id(request)
-    async with AsyncSessionLocal() as session:
-        try:
-            reversal = await svc.reverse(
-                session, entry_id, posted_by="web", tenant_id=tenant_id
-            )
-        except PostingError as exc:
-            raise HTTPException(400, str(exc)) from exc
-        except ValueError as exc:
-            raise HTTPException(404, "Journal entry not found") from exc
+    try:
+        reversal = await svc.reverse(
+            session, entry_id, posted_by="web", tenant_id=tenant_id
+        )
+    except PostingError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(404, "Journal entry not found") from exc
     return RedirectResponse(f"/journal/{reversal.id}", status_code=303)
 
 
 @router.post("/{entry_id}/delete")
-async def journal_delete(request: Request, entry_id: uuid.UUID) -> RedirectResponse:
+async def journal_delete(
+    request: Request,
+    entry_id: uuid.UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> RedirectResponse:
     tenant_id = resolve_tenant_id(request)
-    async with AsyncSessionLocal() as session:
-        try:
-            await svc.delete(
-                session, entry_id, performed_by="web", tenant_id=tenant_id
-            )
-        except ValueError:
-            # Cross-tenant or non-existent: silently no-op so users
-            # never learn whether the entry exists in another tenant.
-            pass
+    try:
+        await svc.delete(
+            session, entry_id, performed_by="web", tenant_id=tenant_id
+        )
+    except ValueError:
+        # Cross-tenant or non-existent: silently no-op so users
+        # never learn whether the entry exists in another tenant.
+        pass
     return RedirectResponse("/journal", status_code=303)

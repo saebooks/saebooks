@@ -9,15 +9,16 @@ from __future__ import annotations
 from datetime import date
 from uuid import UUID
 
-from fastapi import APIRouter, Form, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import resolve_tenant_id
 from saebooks.config import settings
-from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 from saebooks.models.project import ProjectStatus
+from saebooks.routers.deps import get_web_session
 from saebooks.services import projects as svc
 from saebooks.web import templates
 from saebooks.services import active_company as active_svc
@@ -58,18 +59,18 @@ async def projects_list(
     status: str | None = Query(None),
     q: str | None = Query(None),
     archived: str | None = Query(None),
+    session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:
     company = await _first_company()
     filter_status = _parse_status(status)
     include_archived = archived in ("1", "true", "on", "yes")
-    async with AsyncSessionLocal() as session:
-        projects = await svc.list_active(
-            session,
-            company.id,
-            status=filter_status,
-            search=q or None,
-            include_archived=include_archived,
-        )
+    projects = await svc.list_active(
+        session,
+        company.id,
+        status=filter_status,
+        search=q or None,
+        include_archived=include_archived,
+    )
     return templates.TemplateResponse(
         request,
         "projects/list.html",
@@ -115,6 +116,7 @@ async def projects_create(
     start_date: str = Form(""),
     end_date: str = Form(""),
     notes: str = Form(""),
+    session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse | HTMLResponse:
     company = await _first_company()
     try:
@@ -122,17 +124,16 @@ async def projects_create(
     except ValueError as exc:
         raise HTTPException(400, f"Invalid status: {status}") from exc
     try:
-        async with AsyncSessionLocal() as session:
-            project = await svc.create(
-                session,
-                company.id,
-                code=code,
-                name=name,
-                status=status_enum,
-                start_date=_parse_date(start_date),
-                end_date=_parse_date(end_date),
-                notes=notes.strip() or None,
-            )
+        project = await svc.create(
+            session,
+            company.id,
+            code=code,
+            name=name,
+            status=status_enum,
+            start_date=_parse_date(start_date),
+            end_date=_parse_date(end_date),
+            notes=notes.strip() or None,
+        )
     except ValueError as exc:
         return templates.TemplateResponse(
             request,
@@ -155,13 +156,16 @@ async def projects_create(
 
 
 @router.get("/{project_id}", response_class=HTMLResponse)
-async def projects_detail(request: Request, project_id: UUID) -> HTMLResponse:
+async def projects_detail(
+    request: Request,
+    project_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> HTMLResponse:
     tenant_id = resolve_tenant_id(request)
-    async with AsyncSessionLocal() as session:
-        project = await svc.get(session, project_id, tenant_id=tenant_id)
-        if project is None:
-            raise HTTPException(404, "Project not found")
-        company = await session.get(Company, project.company_id)
+    project = await svc.get(session, project_id, tenant_id=tenant_id)
+    if project is None:
+        raise HTTPException(404, "Project not found")
+    company = await session.get(Company, project.company_id)
     return templates.TemplateResponse(
         request,
         "projects/detail.html",
@@ -174,13 +178,16 @@ async def projects_detail(request: Request, project_id: UUID) -> HTMLResponse:
 
 
 @router.get("/{project_id}/edit", response_class=HTMLResponse)
-async def projects_edit(request: Request, project_id: UUID) -> HTMLResponse:
+async def projects_edit(
+    request: Request,
+    project_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> HTMLResponse:
     tenant_id = resolve_tenant_id(request)
-    async with AsyncSessionLocal() as session:
-        project = await svc.get(session, project_id, tenant_id=tenant_id)
-        if project is None:
-            raise HTTPException(404, "Project not found")
-        company = await session.get(Company, project.company_id)
+    project = await svc.get(session, project_id, tenant_id=tenant_id)
+    if project is None:
+        raise HTTPException(404, "Project not found")
+    company = await session.get(Company, project.company_id)
     return templates.TemplateResponse(
         request,
         "projects/form.html",
@@ -204,6 +211,7 @@ async def projects_update(
     start_date: str = Form(""),
     end_date: str = Form(""),
     notes: str = Form(""),
+    session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse | HTMLResponse:
     try:
         status_enum = ProjectStatus(status)
@@ -211,25 +219,24 @@ async def projects_update(
         raise HTTPException(400, f"Invalid status: {status}") from exc
     tenant_id = resolve_tenant_id(request)
     try:
-        async with AsyncSessionLocal() as session:
-            await svc.update(
-                session,
-                project_id,
-                tenant_id=tenant_id,
-                performed_by="web",
-                code=code,
-                name=name,
-                status=status_enum,
-                start_date=_parse_date(start_date),
-                end_date=_parse_date(end_date),
-                notes=notes.strip() or None,
-            )
+        await svc.update(
+            session,
+            project_id,
+            tenant_id=tenant_id,
+            performed_by="web",
+            code=code,
+            name=name,
+            status=status_enum,
+            start_date=_parse_date(start_date),
+            end_date=_parse_date(end_date),
+            notes=notes.strip() or None,
+        )
     except ValueError as exc:
-        async with AsyncSessionLocal() as session:
-            project = await svc.get(session, project_id, tenant_id=tenant_id)
-            if project is None:
-                raise HTTPException(404, "Project not found") from exc
-            company = await session.get(Company, project.company_id)
+        await session.rollback()
+        project = await svc.get(session, project_id, tenant_id=tenant_id)
+        if project is None:
+            raise HTTPException(404, "Project not found") from exc
+        company = await session.get(Company, project.company_id)
         return templates.TemplateResponse(
             request,
             "projects/form.html",
@@ -251,8 +258,11 @@ async def projects_update(
 
 
 @router.post("/{project_id}/archive")
-async def projects_archive(request: Request, project_id: UUID) -> RedirectResponse:
+async def projects_archive(
+    request: Request,
+    project_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> RedirectResponse:
     tenant_id = resolve_tenant_id(request)
-    async with AsyncSessionLocal() as session:
-        await svc.archive(session, project_id, tenant_id=tenant_id, performed_by="web")
+    await svc.archive(session, project_id, tenant_id=tenant_id, performed_by="web")
     return RedirectResponse("/projects", status_code=303)

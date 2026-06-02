@@ -11,13 +11,14 @@ Two routes:
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.config import settings
-from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
+from saebooks.routers.deps import get_web_session
 from saebooks.services import search as svc
 from saebooks.web import templates
 from saebooks.services import active_company as active_svc
@@ -33,11 +34,11 @@ async def _first_company() -> Company:
 async def search_page(
     request: Request,
     q: str = Query(""),
+    session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:
     """Full-page search, or HTMX fragment when the header is set."""
     company = await _first_company()
-    async with AsyncSessionLocal() as session:
-        hits = await svc.search_all(session, company.id, q)
+    hits = await svc.search_all(session, company.id, q)
 
     template_name = (
         "search/_results.html"

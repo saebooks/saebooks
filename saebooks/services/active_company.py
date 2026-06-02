@@ -42,7 +42,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import resolve_tenant_id
-from saebooks.db import AsyncSessionLocal
+from saebooks.db import LoginSessionLocal
 from saebooks.models.company import Company
 
 COOKIE_NAME = "active_company_id"
@@ -77,8 +77,19 @@ def reset_active_company(token: contextvars.Token) -> None:
 
 
 async def _first_by_created_fallback(*, allow_none: bool) -> Company | None:
-    """Legacy first-by-created-at lookup. Internal — used by ``first_company_compat``."""
-    async with AsyncSessionLocal() as session:
+    """Legacy first-by-created-at lookup. Internal — used by ``first_company_compat``.
+
+    Runs on the owner-role ``LoginSessionLocal`` (BYPASSRLS) because this is a
+    deliberately tenant-agnostic fallback: it has no tenant_id in scope and is
+    only reached when ``ActiveCompanyMiddleware`` did NOT bind the contextvar
+    (tests / non-HTML / probe paths). Under the runtime NOBYPASSRLS
+    ``saebooks_app`` role with no ``app.current_tenant`` set this query would
+    return zero rows and 500. Using the owner role preserves the exact legacy
+    single-company behaviour after the web-side RLS flip. Real HTML requests
+    never reach here — the middleware binds the contextvar (and now stamps the
+    tenant GUC), so ``first_company_compat`` returns the contextvar company.
+    """
+    async with LoginSessionLocal() as session:
         result = await session.execute(
             select(Company)
             .where(Company.archived_at.is_(None))

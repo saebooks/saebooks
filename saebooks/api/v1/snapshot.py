@@ -91,9 +91,17 @@ def _dump(schema_instance) -> str:
     return schema_instance.model_dump_json()
 
 
-async def _generate(company_id, max_id: int, limit: int) -> AsyncGenerator[str, None]:
+async def _generate(
+    company_id, max_id: int, limit: int, tenant_id
+) -> AsyncGenerator[str, None]:
     """Yield NDJSON lines for all entities then the cursor marker."""
     async with AsyncSessionLocal() as session:
+        # FORCE-RLS: this generator opens its OWN session (the request-scoped
+        # one closes when the response starts streaming), so it must stamp the
+        # tenant itself — the process-wide after_begin listener then issues
+        # SET LOCAL app.current_tenant. Without this, under the NOBYPASSRLS
+        # saebooks_app role every entity below streams zero rows.
+        session.info["tenant_id"] = str(tenant_id)
         # ------------------------------------------------------------------ #
         # 1. companies — the current company (single row, no company_id filter
         #    needed; we already resolved company_id from it)
@@ -377,11 +385,12 @@ async def snapshot(
     company_id = company.id
 
     # _generate opens its own AsyncSessionLocal — async generators cannot
-    # share the request-scoped session after it closes at response end.
-    # company_id was resolved above from a tenant-scoped query (three-layer
-    # defence: GUC + explicit tenant filter + RLS).
+    # share the request-scoped session after it closes at response end. It
+    # therefore re-stamps the tenant on its own session (see _generate); we
+    # pass the already-resolved tenant_id through so the GUC + explicit tenant
+    # filter + RLS all hold on the streamed transaction.
     return StreamingResponse(
-        _generate(company_id, max_id, limit),
+        _generate(company_id, max_id, limit, tenant_id),
         media_type="application/x-ndjson",
         headers={"X-Cursor-Next": str(max_id)},
     )

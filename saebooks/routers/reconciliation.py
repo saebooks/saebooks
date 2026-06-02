@@ -1,12 +1,13 @@
 """Bank reconciliation routes."""
 import uuid
 
-from fastapi import APIRouter, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.config import settings
-from saebooks.db import AsyncSessionLocal
 from saebooks.models.bank_statement import BankStatementLine, StatementLineStatus
+from saebooks.routers.deps import get_web_session
 from saebooks.routers.reports import _first_company
 from saebooks.services import bank_rules as rules_svc
 from saebooks.services import reconciliation as svc
@@ -16,11 +17,13 @@ router = APIRouter(prefix="/reconciliation")
 
 
 @router.get("", response_class=HTMLResponse)
-async def reconciliation_index(request: Request) -> HTMLResponse:
+async def reconciliation_index(
+    request: Request,
+    session: AsyncSession = Depends(get_web_session),
+) -> HTMLResponse:
     """Choose a bank account to reconcile."""
     company = await _first_company()
-    async with AsyncSessionLocal() as session:
-        accounts = await svc.bank_accounts(session, company.id)
+    accounts = await svc.bank_accounts(session, company.id)
     return templates.TemplateResponse(
         request,
         "reconciliation/index.html",
@@ -36,6 +39,7 @@ async def reconciliation_account(
     request: Request,
     account_id: uuid.UUID,
     status_filter: str | None = Query(None, alias="status"),
+    session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:
     """Show statement lines for a bank account with matching UI."""
     company = await _first_company()
@@ -45,32 +49,31 @@ async def reconciliation_account(
     elif status_filter == "matched":
         status = StatementLineStatus.MATCHED
 
-    async with AsyncSessionLocal() as session:
-        accounts = await svc.bank_accounts(session, company.id)
-        account = next((a for a in accounts if a.id == account_id), None)
-        if account is None:
-            return HTMLResponse("Account not found", status_code=404)
+    accounts = await svc.bank_accounts(session, company.id)
+    account = next((a for a in accounts if a.id == account_id), None)
+    if account is None:
+        return HTMLResponse("Account not found", status_code=404)
 
-        lines = await svc.statement_lines(
-            session, company.id, account_id, status=status
+    lines = await svc.statement_lines(
+        session, company.id, account_id, status=status
+    )
+
+    # Build rule suggestions for unmatched lines
+    suggestions = await rules_svc.find_suggestions_for_lines(
+        session, company.id, lines
+    )
+
+    # Resolve account names for the suggested rules
+    suggested_acct_ids = {r.account_id for r in suggestions.values()}
+    sugg_accounts = {}
+    if suggested_acct_ids:
+        from sqlalchemy import select
+
+        from saebooks.models.account import Account
+        res = await session.execute(
+            select(Account).where(Account.id.in_(suggested_acct_ids))
         )
-
-        # Build rule suggestions for unmatched lines
-        suggestions = await rules_svc.find_suggestions_for_lines(
-            session, company.id, lines
-        )
-
-        # Resolve account names for the suggested rules
-        suggested_acct_ids = {r.account_id for r in suggestions.values()}
-        sugg_accounts = {}
-        if suggested_acct_ids:
-            from sqlalchemy import select
-
-            from saebooks.models.account import Account
-            res = await session.execute(
-                select(Account).where(Account.id.in_(suggested_acct_ids))
-            )
-            sugg_accounts = {a.id: a for a in res.scalars().all()}
+        sugg_accounts = {a.id: a for a in res.scalars().all()}
 
     return templates.TemplateResponse(
         request,
@@ -92,18 +95,18 @@ async def apply_rule(
     account_id: uuid.UUID,
     line_id: uuid.UUID,
     rule_id: uuid.UUID,
+    session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse:
     """Apply a bank rule to a single line — creates and posts the journal."""
-    async with AsyncSessionLocal() as session:
-        try:
-            await rules_svc.apply_rule_to_line(
-                session, line_id, rule_id, posted_by="rule-suggested"
-            )
-        except Exception as exc:
-            return RedirectResponse(
-                f"/reconciliation/{account_id}?error={exc}",
-                status_code=303,
-            )
+    try:
+        await rules_svc.apply_rule_to_line(
+            session, line_id, rule_id, posted_by="rule-suggested"
+        )
+    except Exception as exc:
+        return RedirectResponse(
+            f"/reconciliation/{account_id}?error={exc}",
+            status_code=303,
+        )
     return RedirectResponse(f"/reconciliation/{account_id}", status_code=303)
 
 
@@ -111,13 +114,13 @@ async def apply_rule(
 async def run_auto_for_account(
     request: Request,
     account_id: uuid.UUID,
+    session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse:
     """Apply all auto-create rules to unmatched lines for THIS bank account."""
     company = await _first_company()
-    async with AsyncSessionLocal() as session:
-        counts = await rules_svc.auto_apply_rules(
-            session, company.id, only_account_id=account_id,
-        )
+    counts = await rules_svc.auto_apply_rules(
+        session, company.id, only_account_id=account_id,
+    )
     return RedirectResponse(
         f"/reconciliation/{account_id}?ran={counts['created']}",
         status_code=303,
@@ -129,14 +132,14 @@ async def import_csv(
     request: Request,
     account_id: uuid.UUID,
     file: UploadFile,
+    session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse:
     """Import CSV bank statement."""
     company = await _first_company()
     content = await file.read()
     csv_text = content.decode("utf-8-sig")  # handle BOM from Excel exports
 
-    async with AsyncSessionLocal() as session:
-        count = await svc.import_csv(session, company.id, account_id, csv_text)
+    count = await svc.import_csv(session, company.id, account_id, csv_text)
 
     return RedirectResponse(
         f"/reconciliation/{account_id}?imported={count}",
@@ -149,17 +152,17 @@ async def match_candidates(
     request: Request,
     account_id: uuid.UUID,
     line_id: uuid.UUID,
+    session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:
     """Show candidate journal entries for matching."""
     company = await _first_company()
-    async with AsyncSessionLocal() as session:
-        stmt_line = await session.get(BankStatementLine, line_id)
-        if stmt_line is None:
-            return HTMLResponse("Line not found", status_code=404)
+    stmt_line = await session.get(BankStatementLine, line_id)
+    if stmt_line is None:
+        return HTMLResponse("Line not found", status_code=404)
 
-        candidates = await svc.candidate_entries(
-            session, company.id, account_id, stmt_line
-        )
+    candidates = await svc.candidate_entries(
+        session, company.id, account_id, stmt_line
+    )
 
     return templates.TemplateResponse(
         request,
@@ -178,13 +181,13 @@ async def do_match(
     request: Request,
     account_id: uuid.UUID,
     line_id: uuid.UUID,
+    session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse:
     """Match a statement line to a journal entry."""
     form = await request.form()
     entry_id = uuid.UUID(str(form["entry_id"]))
 
-    async with AsyncSessionLocal() as session:
-        await svc.match_line(session, line_id, entry_id)
+    await svc.match_line(session, line_id, entry_id)
 
     return RedirectResponse(
         f"/reconciliation/{account_id}",
@@ -197,10 +200,10 @@ async def do_unmatch(
     request: Request,
     account_id: uuid.UUID,
     line_id: uuid.UUID,
+    session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse:
     """Remove match from a statement line."""
-    async with AsyncSessionLocal() as session:
-        await svc.unmatch_line(session, line_id)
+    await svc.unmatch_line(session, line_id)
 
     return RedirectResponse(
         f"/reconciliation/{account_id}",
