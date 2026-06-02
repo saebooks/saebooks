@@ -47,7 +47,11 @@ class UserWebauthnCredential(Base):
     public_key: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     sign_count: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
     transports: Mapped[list[str]] = mapped_column(
-        ARRAY(String(16)), nullable=False, server_default=sa.text("ARRAY[]::varchar[]"),
+        # No PG-array server_default in the model: ARRAY[]::varchar[] does not
+        # narrow to SQLite and breaks the offline Cashbook schema bootstrap.
+        # PG keeps its DB-level default via migration 0135; default=list sets
+        # [] on insert cross-dialect (guarded by the cashbook strict-subset test).
+        ARRAY(String(16)), nullable=False, default=list,
     )
     aaguid: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     friendly_name: Mapped[str] = mapped_column(String(64), nullable=False, server_default="Security key")
