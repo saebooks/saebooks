@@ -54,7 +54,7 @@ from typing import Any
 from connecpy.code import Code
 from connecpy.exceptions import ConnecpyException
 
-from saebooks.db import AsyncSessionLocal
+from saebooks.db import AsyncSessionLocal, LoginSessionLocal
 from saebooks.grpc_gen import saebooks_connecpy, saebooks_pb2
 from saebooks.models.bill import BillStatus
 from saebooks.models.contact import ContactType
@@ -206,7 +206,12 @@ class BearerAuthInterceptor:
 
         if bearer.startswith(TOKEN_PREFIX_HEADER):
             try:
-                async with AsyncSessionLocal() as session:
+                # Pre-auth lookup BY TOKEN — tenant discovered from the row,
+                # so unknown here. api_tokens is FORCE-RLS (0136); under the
+                # NOBYPASSRLS saebooks_app runtime role the unbound SELECT
+                # returns zero rows and every saebk_* auth fails. Use the
+                # BYPASSRLS owner role (LoginSessionLocal). Mirrors login.py.
+                async with LoginSessionLocal() as session:
                     token_row = await verify_api_token(session, bearer)
                     await session.commit()
             except TokenVerifyError as exc:
@@ -452,6 +457,7 @@ class SAEBooksConnectImpl(saebooks_connecpy.SAEBooks):
             raise _bad_uuid("contact", request.id) from exc
 
         async with AsyncSessionLocal() as session:
+            await _bind_request_tenant(session)
             contact = await contact_svc.get(session, contact_id)
 
         if contact is None or contact.archived_at is not None:
@@ -606,6 +612,7 @@ class SAEBooksConnectImpl(saebooks_connecpy.SAEBooks):
             raise _bad_uuid("invoice", request.id) from exc
 
         async with AsyncSessionLocal() as session:
+            await _bind_request_tenant(session)
             try:
                 invoice = await invoice_svc.get(session, invoice_id)
             except invoice_svc.InvoiceError as exc:
@@ -669,6 +676,7 @@ class SAEBooksConnectImpl(saebooks_connecpy.SAEBooks):
             raise _bad_uuid("bill", request.id) from exc
 
         async with AsyncSessionLocal() as session:
+            await _bind_request_tenant(session)
             try:
                 bill = await bill_svc.get(session, bill_id)
             except bill_svc.BillError as exc:
@@ -731,6 +739,7 @@ class SAEBooksConnectImpl(saebooks_connecpy.SAEBooks):
             raise _bad_uuid("payment", request.id) from exc
 
         async with AsyncSessionLocal() as session:
+            await _bind_request_tenant(session)
             try:
                 payment = await payment_svc.get(session, payment_id)
             except payment_svc.PaymentError as exc:
@@ -796,6 +805,7 @@ class SAEBooksConnectImpl(saebooks_connecpy.SAEBooks):
             raise _bad_uuid("journal_entry", request.id) from exc
 
         async with AsyncSessionLocal() as session:
+            await _bind_request_tenant(session)
             entry = await je_svc.get(session, entry_id)
 
         if entry is None or entry.archived_at is not None:

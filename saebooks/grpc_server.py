@@ -31,7 +31,7 @@ from typing import Any
 import grpc
 from grpc import aio
 
-from saebooks.db import AsyncSessionLocal
+from saebooks.db import AsyncSessionLocal, LoginSessionLocal
 from saebooks.grpc_gen import saebooks_pb2, saebooks_pb2_grpc
 from saebooks.models.change_log import ChangeLog
 from saebooks.models.company import Company
@@ -275,6 +275,7 @@ class SAEBooksServicer(saebooks_pb2_grpc.SAEBooksServicer):
             return saebooks_pb2.ContactResponse()
 
         async with AsyncSessionLocal() as session:
+            await _bind_request_tenant(session)
             contact = await contact_svc.get(session, contact_id)
 
         if contact is None or contact.archived_at is not None:
@@ -447,6 +448,7 @@ class SAEBooksServicer(saebooks_pb2_grpc.SAEBooksServicer):
             return saebooks_pb2.InvoiceResponse()
 
         async with AsyncSessionLocal() as session:
+            await _bind_request_tenant(session)
             try:
                 invoice = await invoice_svc.get(session, invoice_id)
             except invoice_svc.InvoiceError:
@@ -518,6 +520,7 @@ class SAEBooksServicer(saebooks_pb2_grpc.SAEBooksServicer):
             return saebooks_pb2.BillResponse()
 
         async with AsyncSessionLocal() as session:
+            await _bind_request_tenant(session)
             try:
                 bill = await bill_svc.get(session, bill_id)
             except bill_svc.BillError:
@@ -589,6 +592,7 @@ class SAEBooksServicer(saebooks_pb2_grpc.SAEBooksServicer):
             return saebooks_pb2.PaymentResponse()
 
         async with AsyncSessionLocal() as session:
+            await _bind_request_tenant(session)
             try:
                 payment = await payment_svc.get(session, payment_id)
             except payment_svc.PaymentError:
@@ -662,6 +666,7 @@ class SAEBooksServicer(saebooks_pb2_grpc.SAEBooksServicer):
             return saebooks_pb2.JournalEntryResponse()
 
         async with AsyncSessionLocal() as session:
+            await _bind_request_tenant(session)
             entry = await je_svc.get(session, entry_id)
 
         if entry is None or entry.archived_at is not None:
@@ -686,6 +691,7 @@ class SAEBooksServicer(saebooks_pb2_grpc.SAEBooksServicer):
 
         while not context.cancelled():
             async with AsyncSessionLocal() as session:
+                await _bind_request_tenant(session)
                 rows = await change_log_svc.since(
                     session, cursor=cursor, limit=batch_size
                 )
@@ -933,7 +939,30 @@ class BearerAuthInterceptor(aio.ServerInterceptor):
             decode_access_token,
         )
         try:
-            decode_access_token(bearer)
+            claims = decode_access_token(bearer)
+            # Stamp the tenant (and user/company) from the JWT so the
+            # handlers' _bind_request_tenant binds the RIGHT tenant — not
+            # the contextvar default. Without this a JWT user in any
+            # non-default tenant gets zero rows from every FORCE-RLS query.
+            # Mirrors connect_app.BearerAuthInterceptor._stamp_from_jwt.
+            sub = claims.get("sub")
+            if sub:
+                try:
+                    _current_user_id.set(uuid.UUID(str(sub)))
+                except (ValueError, TypeError):
+                    pass
+            tenant_claim = claims.get("tenant_id")
+            if tenant_claim:
+                try:
+                    _current_tenant_id.set(uuid.UUID(str(tenant_claim)))
+                except (ValueError, TypeError):
+                    pass
+            company_claim = claims.get("company_id")
+            if company_claim:
+                try:
+                    _current_company_id.set(uuid.UUID(str(company_claim)))
+                except (ValueError, TypeError):
+                    pass
             return await continuation(handler_call_details)
         except JWTError:
             pass
@@ -946,7 +975,14 @@ class BearerAuthInterceptor(aio.ServerInterceptor):
         )
         if bearer.startswith(TOKEN_PREFIX_HEADER):
             try:
-                async with AsyncSessionLocal() as session:
+                # Pre-auth lookup BY TOKEN — the tenant is discovered FROM the
+                # api_tokens row, so it is unknown here. api_tokens is FORCE-RLS
+                # (migration 0136); under the NOBYPASSRLS saebooks_app runtime
+                # role the unbound SELECT returns zero rows and EVERY saebk_*
+                # API-token auth fails with "unknown api token". Use the
+                # BYPASSRLS owner role (LoginSessionLocal) for this lookup,
+                # mirroring api/v1/login.py and webhooks_resend.py.
+                async with LoginSessionLocal() as session:
                     token_row = await verify_api_token(session, bearer)
                     await session.commit()
                 _current_user_id.set(token_row.user_id)
