@@ -77,7 +77,6 @@ _CONTACT_COLUMNS: tuple[str, ...] = (
     "updated_at",
     "archived_at",
     "is_tpar_supplier",
-    "is_one_off",
     "version",
 )
 
@@ -111,15 +110,12 @@ async def list_active(
     tenant_id: uuid.UUID | None = None,
     contact_type: ContactType | None = None,
     search: str | None = None,
-    is_one_off: bool | None = None,
     limit: int = 200,
     offset: int = 0,
 ) -> list[Contact]:
     """List active contacts, optionally filtered by type, search term, or one-off flag.
 
-    ``is_one_off=None`` (default) returns rows regardless of the flag —
-    keeps existing API/grpc callers unchanged. The Jinja UI passes
-    ``True`` to show only one-offs and ``False`` to hide them.
+        ``True`` to show only one-offs and ``False`` to hide them.
     """
     stmt = (
         select(Contact)
@@ -129,8 +125,6 @@ async def list_active(
         stmt = stmt.where(Contact.tenant_id == tenant_id)
     if contact_type is not None:
         stmt = stmt.where(Contact.contact_type == contact_type)
-    if is_one_off is not None:
-        stmt = stmt.where(Contact.is_one_off.is_(is_one_off))
     if search:
         pattern = f"%{search}%"
         stmt = stmt.where(
@@ -146,6 +140,7 @@ async def get(
     contact_id: uuid.UUID,
     *,
     tenant_id: uuid.UUID | None = None,
+    company_id: uuid.UUID | None = None,
 ) -> Contact | None:
     """Fetch a contact by id.
 
@@ -161,13 +156,15 @@ async def get(
     fetch the detail. With ``tenant_id`` supplied we now reject those
     lookups defensively, on top of the FORCE-RLS gate at the DB layer.
     """
-    if tenant_id is None:
+    if tenant_id is None and company_id is None:
         return await session.get(Contact, contact_id)
+    clauses = [Contact.id == contact_id]
+    if tenant_id is not None:
+        clauses.append(Contact.tenant_id == tenant_id)
+    if company_id is not None:
+        clauses.append(Contact.company_id == company_id)
     result = await session.execute(
-        select(Contact).where(
-            Contact.id == contact_id,
-            Contact.tenant_id == tenant_id,
-        )
+        select(Contact).where(*clauses)
     )
     return result.scalars().first()
 
@@ -200,7 +197,6 @@ async def create(
     share_percentage: object = None,
     default_income_classification: str | None = None,
     is_tpar_supplier: bool = False,
-    is_one_off: bool = False,
 ) -> Contact:
     """Create a new contact. Validate ABN format if provided (11 digits)."""
     if abn is not None:
@@ -228,7 +224,6 @@ async def create(
         share_percentage=share_percentage,
         default_income_classification=default_income_classification,
         is_tpar_supplier=is_tpar_supplier,
-        is_one_off=is_one_off,
         version=1,
     )
     session.add(contact)
@@ -288,8 +283,7 @@ async def update(
         "country", "notes", "default_account_id", "default_tax_code",
         "currency_code",
         "tfn", "share_percentage", "default_income_classification",
-        "is_tpar_supplier", "is_one_off",
-    }
+        "is_tpar_supplier", }
 
     before = audit_svc.capture(contact)
     for key, value in kwargs.items():

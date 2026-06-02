@@ -123,9 +123,10 @@ async def get_expense(
     expense_id: UUID,
     request: Request,
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> ExpenseOut:
     tenant_id = resolve_tenant_id(request)
-    expense = await svc.api_get(session, expense_id, tenant_id=tenant_id)
+    expense = await svc.api_get(session, expense_id, tenant_id=tenant_id, company_id=company_id)
     if expense is None:
         raise HTTPException(404, "Expense not found")
     return ExpenseOut.model_validate(expense)
@@ -214,13 +215,14 @@ async def update_expense(
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
     force: bool = Depends(edit_force_admin_gate),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
         raise HTTPException(428, "If-Match header with expense version is required")
 
     tenant_id = resolve_tenant_id(request)
-    if await svc.api_get(session, expense_id, tenant_id=tenant_id) is None:
+    if await svc.api_get(session, expense_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Expense not found")
 
     try:
@@ -281,9 +283,10 @@ async def archive_expense(
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
     hard: bool = Depends(hard_delete_admin_gate),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
-    existing = await svc.api_get(session, expense_id, tenant_id=tenant_id)
+    existing = await svc.api_get(session, expense_id, tenant_id=tenant_id, company_id=company_id)
     if existing is None:
         raise HTTPException(404, "Expense not found")
 
@@ -339,6 +342,7 @@ async def post_expense(
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
@@ -368,7 +372,7 @@ async def post_expense(
                 status_code=claim.response_status or 200,
             )
 
-    if await svc.api_get(session, expense_id, tenant_id=tenant_id) is None:
+    if await svc.api_get(session, expense_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Expense not found")
 
     try:
@@ -420,6 +424,7 @@ async def void_expense_transition(
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
@@ -449,7 +454,7 @@ async def void_expense_transition(
                 status_code=claim.response_status or 200,
             )
 
-    if await svc.api_get(session, expense_id, tenant_id=tenant_id) is None:
+    if await svc.api_get(session, expense_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Expense not found")
 
     try:

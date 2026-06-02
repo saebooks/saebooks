@@ -45,25 +45,41 @@ async def _validate_line_accounts(
     *,
     tenant_id: uuid.UUID | None = None,
 ) -> None:
-    """Raise PostingError if any line account belongs to a different company or tenant."""
+    """Raise PostingError if any line account belongs to a different
+    company / tenant, or is a header (group) account.
+
+    Header accounts are CoA scaffolding — they can carry sub-accounts but
+    are not themselves postable. A JE that lands on a header silently
+    skews the balance roll-up because reports aggregate leaves only.
+    """
     if not lines:
         return
     ids = [uuid.UUID(str(ln["account_id"])) for ln in lines]
     result = await session.execute(
-        select(Account.id, Account.company_id, Account.tenant_id).where(Account.id.in_(ids))
+        select(Account.id, Account.company_id, Account.tenant_id, Account.is_header)
+        .where(Account.id.in_(ids))
     )
     rows = {r.id: r for r in result.all()}
-    bad = []
+    bad_company: list[uuid.UUID] = []
+    bad_header: list[uuid.UUID] = []
     for i in ids:
         row = rows.get(i)
         if row is None or row.company_id != company_id:
-            bad.append(i)
+            bad_company.append(i)
         elif tenant_id is not None and row.tenant_id != tenant_id:
-            bad.append(i)
-    if bad:
+            bad_company.append(i)
+        elif row.is_header:
+            bad_header.append(i)
+    if bad_company:
         raise PostingError(
             "Account(s) do not belong to this company: "
-            + ", ".join(str(i) for i in bad)
+            + ", ".join(str(i) for i in bad_company)
+        )
+    if bad_header:
+        raise PostingError(
+            "Cannot post to header (group) account(s) — these are CoA "
+            "scaffolding for sub-accounts and must not carry their own "
+            "journal lines: " + ", ".join(str(i) for i in bad_header)
         )
 
 

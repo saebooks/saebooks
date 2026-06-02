@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import text, Boolean, Date, DateTime, Enum, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -68,6 +68,44 @@ class Company(Base):
         nullable=True,
     )
     cashbook_categories: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
+    # Legal-entity model (migration 0133, 2026-05-24).
+    # entity_type: COMPANY | TRUST | INDIVIDUAL | PARTNERSHIP | SUPER_FUND
+    # trades: false for pure trustee companies that hold no ABN
+    # trustee_company_id: on a TRUST row, points at the trustee Company
+    # entity_type is a Postgres ENUM (``entity_type_enum``) created by
+    # migration 0133, NOT a varchar. Mapping it as String(32) made asyncpg
+    # bind the parameter as ``$n::VARCHAR``, which Postgres refuses to cast
+    # implicitly to the enum type ("column is of type entity_type_enum but
+    # expression is of type character varying") — every create_company 500'd.
+    # ``create_type=False`` because the type already exists in every deployed
+    # DB; SQLAlchemy must reference it, never try to CREATE TYPE it.
+    # ``native_enum=True`` + string-valued labels keep the Python interface a
+    # plain str ("COMPANY" etc.) so callers and serialisation are unchanged.
+    entity_type: Mapped[str] = mapped_column(
+        Enum(
+            "COMPANY",
+            "TRUST",
+            "INDIVIDUAL",
+            "PARTNERSHIP",
+            "SUPER_FUND",
+            name="entity_type_enum",
+            native_enum=True,
+            create_type=False,
+            validate_strings=True,
+        ),
+        nullable=False,
+        server_default="COMPANY",
+        default="COMPANY",
+    )
+    trades: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true"), default=True,
+    )
+    trustee_company_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("companies.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
 
     # Optimistic-locking version — bumped on every write through the API.
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)

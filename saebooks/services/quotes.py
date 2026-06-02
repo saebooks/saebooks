@@ -312,17 +312,20 @@ async def api_get(
     quote_id: uuid.UUID,
     *,
     tenant_id: uuid.UUID | None = None,
+    company_id: uuid.UUID | None = None,
 ) -> Quote | None:
     """Fetch a quote with lines. Returns None if not found / wrong tenant."""
-    if tenant_id is None:
+    if tenant_id is None and company_id is None:
         return await _get_with_lines(session, quote_id)
+    clauses = [Quote.id == quote_id]
+    if tenant_id is not None:
+        clauses.append(Quote.tenant_id == tenant_id)
+    if company_id is not None:
+        clauses.append(Quote.company_id == company_id)
     result = await session.execute(
         select(Quote)
         .options(selectinload(Quote.lines))
-        .where(
-            Quote.id == quote_id,
-            Quote.tenant_id == tenant_id,
-        )
+        .where(*clauses)
     )
     return result.scalar_one_or_none()
 
@@ -619,6 +622,19 @@ async def api_accept(
     if quote.status != QuoteStatus.SENT:
         raise QuoteError(
             f"Quote {quote.id} is {quote.status.value}; accept requires SENT"
+        )
+
+    # A quote can't be accepted with line(s) missing account_id — the
+    # downstream convert-to-invoice path requires account_id on every
+    # line, and an ACCEPTED quote that can't be invoiced is a dead-end
+    # (Round-2 critic 15). Surface the error here instead of leaving the
+    # quote stuck in ACCEPTED.
+    missing = [ln.line_no for ln in quote.lines if ln.account_id is None]
+    if missing:
+        line_list = ", ".join(str(n) for n in missing)
+        raise QuoteError(
+            f"Cannot accept quote: line(s) {line_list} are missing account_id. "
+            "Edit the quote to assign GL accounts to every line, then accept."
         )
 
     quote.status = QuoteStatus.ACCEPTED

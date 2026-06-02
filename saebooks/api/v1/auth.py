@@ -36,11 +36,107 @@ from __future__ import annotations
 import logging
 import os
 import secrets
+import time
 import uuid
+from types import SimpleNamespace
 
 from fastapi import Depends, Header, HTTPException, Request, status
 
 logger = logging.getLogger("saebooks.api.auth")
+
+# ---------------------------------------------------------------------------
+# JWT user cache — per-worker process-local. Skips the user DB lookup on
+# every authenticated request (was the dominant cost in the ~350ms post-pool
+# floor — DB round trip + ORM hydrate per request). Keyed by (sub, pwv) so
+# a password change naturally invalidates entries: the new JWT will carry a
+# higher pwv and miss the cache. TTL bounds the staleness window for other
+# attribute changes (role flip, archive). 30s is short enough that role
+# revocation is felt within an admin's UI session, long enough to absorb
+# bursts.
+# Override with SAEBOOKS_USER_CACHE_TTL=0 to disable (e.g. during tests).
+# ---------------------------------------------------------------------------
+_USER_CACHE_TTL = float(os.environ.get("SAEBOOKS_USER_CACHE_TTL", "30") or "30")
+# {(user_id_str, pwv_int): (expires_at_monotonic, role_str, username, archived_at)}
+_USER_CACHE: dict[tuple[str, int], tuple[float, str, str | None, object | None]] = {}
+_USER_CACHE_MAX = 4096  # opportunistic cap; pruned in _user_cache_get on overflow
+
+
+def _user_cache_get(sub: str, pwv: int) -> tuple[str, str | None, object | None] | None:
+    if _USER_CACHE_TTL <= 0:
+        return None
+    entry = _USER_CACHE.get((sub, pwv))
+    if entry is None:
+        return None
+    expires, role, username, archived_at = entry
+    if expires <= time.monotonic():
+        _USER_CACHE.pop((sub, pwv), None)
+        return None
+    return role, username, archived_at
+
+
+def _user_cache_put(sub: str, pwv: int, role: str, username: str | None, archived_at: object | None) -> None:
+    if _USER_CACHE_TTL <= 0:
+        return
+    if len(_USER_CACHE) >= _USER_CACHE_MAX:
+        # Cheap eviction: drop ~half of the oldest entries.
+        cutoff = time.monotonic()
+        for k, v in list(_USER_CACHE.items())[: _USER_CACHE_MAX // 2]:
+            if v[0] <= cutoff:
+                _USER_CACHE.pop(k, None)
+    _USER_CACHE[(sub, pwv)] = (
+        time.monotonic() + _USER_CACHE_TTL, role, username, archived_at,
+    )
+
+
+def _user_cache_clear() -> None:
+    """Testing hook + admin endpoint backstop."""
+    _USER_CACHE.clear()
+
+
+# ---------------------------------------------------------------------------
+# API token cache — same idea as the user cache but keyed by a hash of the
+# presented token. Saves a DB lookup + commit per request on the saebk_
+# bearer path (used by the saebooks-verify CLI, MCP server, and any
+# automation). Keys are sha256 hashes so we don't keep the raw secret hot.
+# Same TTL as the user cache.
+# ---------------------------------------------------------------------------
+_API_TOKEN_CACHE: dict[str, tuple[float, uuid.UUID, uuid.UUID, uuid.UUID, str, str | None]] = {}
+
+
+def _api_token_cache_get(
+    token_hash: str,
+) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID, str, str | None] | None:
+    if _USER_CACHE_TTL <= 0:
+        return None
+    entry = _API_TOKEN_CACHE.get(token_hash)
+    if entry is None:
+        return None
+    expires, user_id, tenant_id, company_id, role, username = entry
+    if expires <= time.monotonic():
+        _API_TOKEN_CACHE.pop(token_hash, None)
+        return None
+    return user_id, tenant_id, company_id, role, username
+
+
+def _api_token_cache_put(
+    token_hash: str,
+    *,
+    user_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    company_id: uuid.UUID,
+    role: str,
+    username: str | None,
+) -> None:
+    if _USER_CACHE_TTL <= 0:
+        return
+    if len(_API_TOKEN_CACHE) >= _USER_CACHE_MAX:
+        cutoff = time.monotonic()
+        for k, v in list(_API_TOKEN_CACHE.items())[: _USER_CACHE_MAX // 2]:
+            if v[0] <= cutoff:
+                _API_TOKEN_CACHE.pop(k, None)
+    _API_TOKEN_CACHE[token_hash] = (
+        time.monotonic() + _USER_CACHE_TTL, user_id, tenant_id, company_id, role, username,
+    )
 
 _ENV_VAR = "SAEBOOKS_DEV_API_TOKEN"
 _TENANT_ENV_VAR = "SAEBOOKS_DEV_TENANT_ID"
@@ -89,9 +185,28 @@ async def _stamp_user_from_sub(request: Request, claims: dict[str, object]) -> N
     sub = claims.get("sub")
     if not sub:
         return
+    sub_str = str(sub)
     try:
-        user_id = uuid.UUID(str(sub))
+        user_id = uuid.UUID(sub_str)
     except (ValueError, TypeError):
+        return
+
+    # Cache hit fast path — skip the per-request DB lookup. Keyed by
+    # (sub, pwv) so password resets invalidate naturally. Stamps a
+    # SimpleNamespace shaped enough for the downstream admin gates and
+    # role checks. Cache miss falls through to the live lookup below.
+    token_pwv_pre = int(claims.get("pwv", 0) or 0)
+    cached = _user_cache_get(sub_str, token_pwv_pre)
+    if cached is not None:
+        role, username, archived_at = cached
+        if archived_at is not None:
+            return
+        request.state.user = SimpleNamespace(
+            id=user_id, role=role, username=username,
+            archived_at=archived_at, password_version=token_pwv_pre,
+        )
+        request.state.role = role
+        request.state.username = username
         return
 
     # Local imports to avoid circulars at module load time.
@@ -135,6 +250,14 @@ async def _stamp_user_from_sub(request: Request, claims: dict[str, object]) -> N
 
     request.state.user = user
     request.state.role = user.role
+    request.state.username = getattr(user, "username", None)
+    # Populate cache so the next request in the TTL window skips the DB.
+    _user_cache_put(
+        sub_str, user_pwv,
+        role=user.role,
+        username=getattr(user, "username", None),
+        archived_at=user.archived_at,
+    )
 
 
 def _is_dev_env() -> bool:
@@ -275,6 +398,27 @@ async def require_bearer(
         verify as verify_api_token,
     )
     if presented.startswith(TOKEN_PREFIX_HEADER):
+        # Cache key is a sha256 of the presented token so we never store
+        # the raw secret in process memory longer than the verify call.
+        import hashlib
+        token_cache_key = hashlib.sha256(presented.encode()).hexdigest()
+        cached_t = _api_token_cache_get(token_cache_key)
+        if cached_t is not None:
+            user_id, tenant_id, company_id, role, username = cached_t
+            request.state.jwt_claims = {
+                "sub": str(user_id),
+                "tenant_id": str(tenant_id),
+                "company_id": str(company_id),
+                "api_token": True,
+            }
+            request.state.user = SimpleNamespace(
+                id=user_id, role=role, username=username,
+                archived_at=None, password_version=0,
+            )
+            request.state.role = role
+            request.state.username = username
+            return presented
+
         from saebooks.db import AsyncSessionLocal  # noqa: PLC0415
         try:
             async with AsyncSessionLocal() as session:
@@ -300,6 +444,14 @@ async def require_bearer(
         request.state.user = token_row.user
         request.state.role = getattr(token_row.user, "role", None)
         request.state.username = getattr(token_row.user, "username", None)
+        _api_token_cache_put(
+            token_cache_key,
+            user_id=token_row.user_id,
+            tenant_id=token_row.tenant_id,
+            company_id=token_row.company_id,
+            role=getattr(token_row.user, "role", None),
+            username=getattr(token_row.user, "username", None),
+        )
         return presented
 
     # Fall back to static dev token (scripts, tests, direct API access).

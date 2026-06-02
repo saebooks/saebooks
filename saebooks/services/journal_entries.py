@@ -271,6 +271,7 @@ async def get(
     entry_id: uuid.UUID,
     *,
     tenant_id: uuid.UUID | None = None,
+    company_id: uuid.UUID | None = None,
 ) -> JournalEntry | None:
     """Fetch a single journal entry with its lines. Returns None if not found.
 
@@ -279,16 +280,21 @@ async def get(
     ``None`` even if the row exists. The parameter is keyword-only
     and optional so existing internal callers keep working unchanged;
     the API layer always supplies it.
+
+    Layer 2 cross-company isolation: when ``company_id`` is supplied
+    the lookup is also filtered by company (2026-05-24).
     """
-    if tenant_id is None:
+    if tenant_id is None and company_id is None:
         return await _get_with_lines(session, entry_id)
+    clauses = [JournalEntry.id == entry_id]
+    if tenant_id is not None:
+        clauses.append(JournalEntry.tenant_id == tenant_id)
+    if company_id is not None:
+        clauses.append(JournalEntry.company_id == company_id)
     result = await session.execute(
         select(JournalEntry)
         .options(selectinload(JournalEntry.lines).selectinload(JournalLine.account))
-        .where(
-            JournalEntry.id == entry_id,
-            JournalEntry.tenant_id == tenant_id,
-        )
+        .where(*clauses)
     )
     return result.scalar_one_or_none()
 

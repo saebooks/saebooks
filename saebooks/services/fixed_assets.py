@@ -184,11 +184,14 @@ async def get(
     asset_id: uuid.UUID,
     *,
     tenant_id: uuid.UUID | None = None,
+    company_id: uuid.UUID | None = None,
 ) -> FixedAsset | None:
     """Fetch a single fixed asset by primary key (with depreciation model eager-loaded).
 
     When ``tenant_id`` is supplied the lookup is filtered by tenant —
-    a foreign-tenant id returns ``None`` even if the row exists.
+    a foreign-tenant id returns ``None`` even if the row exists. When
+    ``company_id`` is supplied the lookup is also filtered by company
+    (Layer 2 cross-company isolation guard, 2026-05-24).
     """
     stmt = (
         select(FixedAsset)
@@ -197,6 +200,8 @@ async def get(
     )
     if tenant_id is not None:
         stmt = stmt.where(FixedAsset.tenant_id == tenant_id)
+    if company_id is not None:
+        stmt = stmt.where(FixedAsset.company_id == company_id)
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
 

@@ -128,9 +128,10 @@ async def get_recurring_invoice(
     request: Request,
     ri_id: UUID,
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> RecurringInvoiceOut:
     tenant_id = resolve_tenant_id(request)
-    ri = await svc.get(session, ri_id, tenant_id=tenant_id)
+    ri = await svc.get(session, ri_id, tenant_id=tenant_id, company_id=company_id)
     if ri is None:
         raise HTTPException(404, "Recurring invoice not found")
     return RecurringInvoiceOut.model_validate(ri)
@@ -223,6 +224,7 @@ async def update_recurring_invoice(
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
@@ -231,7 +233,7 @@ async def update_recurring_invoice(
 
     tenant_id = resolve_tenant_id(request)
     # Belt-and-braces: verify template belongs to this tenant
-    if await svc.get(session, ri_id, tenant_id=tenant_id) is None:
+    if await svc.get(session, ri_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Recurring invoice not found")
 
     if key is not None:
@@ -323,9 +325,10 @@ async def delete_recurring_invoice(
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
     hard: bool = Depends(hard_delete_admin_gate),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
-    existing = await svc.get(session, ri_id, tenant_id=tenant_id)
+    existing = await svc.get(session, ri_id, tenant_id=tenant_id, company_id=company_id)
     if existing is None:
         raise HTTPException(404, "Recurring invoice not found")
 
@@ -380,6 +383,7 @@ async def pause_recurring_invoice(
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     """Transition ACTIVE → PAUSED."""
     expected = _parse_if_match(if_match)
@@ -387,7 +391,7 @@ async def pause_recurring_invoice(
         raise HTTPException(428, "If-Match header with template version is required")
 
     tenant_id = resolve_tenant_id(request)
-    if await svc.get(session, ri_id, tenant_id=tenant_id) is None:
+    if await svc.get(session, ri_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Recurring invoice not found")
 
     try:
@@ -425,6 +429,7 @@ async def resume_recurring_invoice(
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     """Transition PAUSED → ACTIVE."""
     expected = _parse_if_match(if_match)
@@ -432,7 +437,7 @@ async def resume_recurring_invoice(
         raise HTTPException(428, "If-Match header with template version is required")
 
     tenant_id = resolve_tenant_id(request)
-    if await svc.get(session, ri_id, tenant_id=tenant_id) is None:
+    if await svc.get(session, ri_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Recurring invoice not found")
 
     try:
@@ -470,6 +475,7 @@ async def end_recurring_invoice(
     if_match: str | None = Header(default=None, alias="If-Match"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     """Transition any non-ENDED status → ENDED (terminal)."""
     expected = _parse_if_match(if_match)
@@ -477,7 +483,7 @@ async def end_recurring_invoice(
         raise HTTPException(428, "If-Match header with template version is required")
 
     tenant_id = resolve_tenant_id(request)
-    if await svc.get(session, ri_id, tenant_id=tenant_id) is None:
+    if await svc.get(session, ri_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Recurring invoice not found")
 
     try:
@@ -524,6 +530,7 @@ async def generate_invoice(
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     """Manually materialise one invoice from an ACTIVE recurring template.
 
@@ -563,7 +570,7 @@ async def generate_invoice(
                 status_code=claim.response_status or 201,
             )
 
-    ri = await svc.get(session, ri_id, tenant_id=tenant_id)
+    ri = await svc.get(session, ri_id, tenant_id=tenant_id, company_id=company_id)
     if ri is None:
         raise HTTPException(404, "Recurring invoice not found")
 

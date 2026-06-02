@@ -1,0 +1,4777 @@
+{
+  "/home/sauer/projects/saebooks/entrypoint.sh": {
+    "mtime": 1779800248.5097146,
+    "ast_hash": "75e0018909729b4855c202b6618bae15",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/mcp/server.py": {
+    "mtime": 1779537365.9419687,
+    "ast_hash": "a296e52aeb0bbea7b07d4805e771bc21",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/mcp/scripts/with-saebooks-env": {
+    "mtime": 1779430754.839659,
+    "ast_hash": "ff8af327f67257baad7eea274d7770cc",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/cli/main.go": {
+    "mtime": 1779430754.837659,
+    "ast_hash": "2ab4e9e9b64f4b9fecb4d7274b263888",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/cli/cmd/invoice.go": {
+    "mtime": 1779430754.8346589,
+    "ast_hash": "d56bef5ec0c61e7b9c8d7e1941055267",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/cli/cmd/payment.go": {
+    "mtime": 1779430754.8346589,
+    "ast_hash": "1bf35285ef22eb0cc14bf8cad2f5d30c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/cli/cmd/auth.go": {
+    "mtime": 1779430754.8346589,
+    "ast_hash": "595e4c32e69478f45e99bf56a247797b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/cli/cmd/bill.go": {
+    "mtime": 1779430754.8346589,
+    "ast_hash": "34eae3cef1017571627b95457ce0c538",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/cli/cmd/root.go": {
+    "mtime": 1779430754.8356588,
+    "ast_hash": "b8b359f419fa088783ea5799b4b4492d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/cli/cmd/customer.go": {
+    "mtime": 1779430754.8346589,
+    "ast_hash": "8437021da3260880ace54bb3a0516361",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/cli/cmd/je.go": {
+    "mtime": 1779430754.8346589,
+    "ast_hash": "d9e30cd0fe72cf9c46e1cc6a00e7c61a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/cli/cmd/vendor.go": {
+    "mtime": 1779430754.8356588,
+    "ast_hash": "9720d2f860d671d55c81e90d5e78ee32",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/cli/internal/auth/auth.go": {
+    "mtime": 1779430754.836659,
+    "ast_hash": "17860f49ba8029903874315dbfe81e58",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/cli/internal/config/config.go": {
+    "mtime": 1779430754.837659,
+    "ast_hash": "5a7af7b92b6372149d28f54247240e16",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/cli/internal/client/client.go": {
+    "mtime": 1779430754.836659,
+    "ast_hash": "1bc5144b9908233dddd63d955c5cf22f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/cli/internal/output/output.go": {
+    "mtime": 1779430754.837659,
+    "ast_hash": "0188939e8ff5ee973592d9f1dbbdfb6e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/cli/gen/saebooks/saebooks.pb.go": {
+    "mtime": 1779430754.8356588,
+    "ast_hash": "d7259ab07f4570f684ffd7bc3108f813",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/cli/gen/saebooksconnect/saebooks.connect.go": {
+    "mtime": 1779430754.836659,
+    "ast_hash": "90f37d800dcbd3aaaabab9f28049b656",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/main.py": {
+    "mtime": 1779802772.805184,
+    "ast_hash": "f213f0d3390c3e971e7980e74f137dde",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/db.py": {
+    "mtime": 1779800248.4947147,
+    "ast_hash": "cd955aec75c9af2faa0e66959fd7262d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/web.py": {
+    "mtime": 1776768151.0,
+    "ast_hash": "11c55647df742841907e8be7dd8dba65",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/db_types.py": {
+    "mtime": 1779604033.8510122,
+    "ast_hash": "5024b5e4eaa554e3c13b2c91102ca620",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/config.py": {
+    "mtime": 1779531356.7939715,
+    "ast_hash": "e4b93a26fee6a17707740c0d093398ff",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/__init__.py": {
+    "mtime": 1779604033.8450122,
+    "ast_hash": "6d6e68ca508d736edac9e09958ce921d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/grpc_server.py": {
+    "mtime": 1779430754.843659,
+    "ast_hash": "3532723d33c54b198990be3eac7e31bc",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/connect_app.py": {
+    "mtime": 1779517830.449532,
+    "ast_hash": "3e19e06d0a8c78660dca815600eb9714",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/recurring_invoices.py": {
+    "mtime": 1779626649.7967947,
+    "ast_hash": "861e40332d07521701c7f90a53f3cdfd",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/projects.py": {
+    "mtime": 1779626649.7957945,
+    "ast_hash": "90c12ec8a2f436379afcea65ab158a15",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/hard_delete.py": {
+    "mtime": 1778252695.6213045,
+    "ast_hash": "317cbe0f542164c352f309971c2ecd53",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/sql_tool.py": {
+    "mtime": 1779604033.858012,
+    "ast_hash": "70a0785c1e1d8f71bb76b98e6a30f9d7",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/gst.py": {
+    "mtime": 1779604033.856012,
+    "ast_hash": "dca1a1913c46cb95fc0f6d2aa3814e6c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/pdf.py": {
+    "mtime": 1779527395.514561,
+    "ast_hash": "02a3f61d60af5b7bd36f1fa266e03ca9",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/journal.py": {
+    "mtime": 1779883569.101305,
+    "ast_hash": "4eccce9eb7263d075a6bc1f342b77d0b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/edition.py": {
+    "mtime": 1779554872.1277094,
+    "ast_hash": "b86e0c53d4b2198b8be6f202bb2749cb",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/aba.py": {
+    "mtime": 1776725786.0,
+    "ast_hash": "f932cd934e4763a33c20037a464d55ad",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/vault.py": {
+    "mtime": 1778169003.301476,
+    "ast_hash": "b0f03ae129e9b97b47a275905a2d3299",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/pay_runs.py": {
+    "mtime": 1780096053.604651,
+    "ast_hash": "400996302d531dde61e5bbb41700dfc6",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/cashbook.py": {
+    "mtime": 1779883569.129305,
+    "ast_hash": "9aa107bea3d602d281e26e3ae3535b73",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/credit_notes.py": {
+    "mtime": 1779883732.0220075,
+    "ast_hash": "84eef9b36b845c223b93ffba1ed88e44",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/change_log.py": {
+    "mtime": 1779530607.7410364,
+    "ast_hash": "a28f2132b3e215a9990e5868ec4dcacf",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/mailer.py": {
+    "mtime": 1776696153.5747736,
+    "ast_hash": "b2d13f853414c6c189d199d95a76a3e4",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/period_close.py": {
+    "mtime": 1779604033.858012,
+    "ast_hash": "c34bf6446905908cc604e594ac52aaa4",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/budgets.py": {
+    "mtime": 1779626649.7927945,
+    "ast_hash": "fb3c2228227f131d35d523de3c51238c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/bank_statement_lines.py": {
+    "mtime": 1779626649.7927945,
+    "ast_hash": "8178ce8126f4fd37bda50d39aabc4e8c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/time_entries.py": {
+    "mtime": 1779530919.8650222,
+    "ast_hash": "0dbec5bd521a9310c3fea2a37fb9692a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/payments.py": {
+    "mtime": 1779884208.391329,
+    "ast_hash": "91d2ecd69fb277ac983cec69aa73b43a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/deferred_revenue.py": {
+    "mtime": 1779554872.1277094,
+    "ast_hash": "e8b2714d9736a2e3a7f0f32c11d766c8",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/payslip.py": {
+    "mtime": 1779430754.8486588,
+    "ast_hash": "da37ac87700209f369ffe9ee62e91899",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/quotes.py": {
+    "mtime": 1779883569.115305,
+    "ast_hash": "ea474aae1630e85d938fd5f2b924b75d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/invoices.py": {
+    "mtime": 1779816467.3506436,
+    "ast_hash": "cc20f61cf56908c9ef9d6f3b11546b8c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/expenses.py": {
+    "mtime": 1779815717.0684507,
+    "ast_hash": "4df7d4331b3701aee6b6a055473b358a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/distributions.py": {
+    "mtime": 1779554872.1277094,
+    "ast_hash": "24ceefebb4529481a59bb6b2bcc596e2",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/idempotency.py": {
+    "mtime": 1777188692.0,
+    "ast_hash": "675af486407db9727c6f37505fb79d2c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/features.py": {
+    "mtime": 1779530181.9813066,
+    "ast_hash": "1d6b38dce4425cf19ebb87ab7b1b43ab",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/authz.py": {
+    "mtime": 1777124185.0,
+    "ast_hash": "3eff657df6c6752879fb0d1116c4785b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/crypto.py": {
+    "mtime": 1776812397.0,
+    "ast_hash": "59e7d4f94e1bfd4e5d265ff21f12995b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/tpar.py": {
+    "mtime": 1779806466.159106,
+    "ast_hash": "6e2d219e80bdca77f82ca2ee1c73da11",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/accounts.py": {
+    "mtime": 1779626649.7917945,
+    "ast_hash": "357c7899ddc0d2ca196ecfba37f18b1a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/bank_rules.py": {
+    "mtime": 1779554872.1257093,
+    "ast_hash": "b672d68c46fe9f61284fcad8e34f8f0e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/tax_codes.py": {
+    "mtime": 1779626649.7967947,
+    "ast_hash": "d66b0b30e95ef1114316ab45d2f2ad62",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/cashbook_categories.py": {
+    "mtime": 1778193395.6562777,
+    "ast_hash": "752bfddd1d1a08bbf8c537e0ea3b7c74",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/pay_runs_v2.py": {
+    "mtime": 1780096062.5833902,
+    "ast_hash": "f0bab63aa8695ef8c7dffc61b995e133",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/pay_run.py": {
+    "mtime": 1776724460.0,
+    "ast_hash": "9150fe6bc4acacfa39040b8cafa3b2e5",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/users.py": {
+    "mtime": 1777601749.3976274,
+    "ast_hash": "0233b0279430c6ee5c0b9d0f76850770",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/super_calc.py": {
+    "mtime": 1779430754.8486588,
+    "ast_hash": "d02c5425690f12bcd9c68ffb983b0162",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/theme.py": {
+    "mtime": 1776846146.0,
+    "ast_hash": "f5f2a75f25977f99e6094bbddaa2c03a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/companies.py": {
+    "mtime": 1777505416.7306836,
+    "ast_hash": "2bd48d3c122562901bc25ef82faac166",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/departments.py": {
+    "mtime": 1779604033.8550122,
+    "ast_hash": "3df5ff1f978a0c1514c1c947bfc20768",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/fido2_service.py": {
+    "mtime": 1777601749.3976274,
+    "ast_hash": "2df581a80e6b4dad26ff0b9d981c7a8c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/allocations.py": {
+    "mtime": 1779626649.7917945,
+    "ast_hash": "200f000519631b6ffd1d141d75864e3c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/journal_templates.py": {
+    "mtime": 1779604033.857012,
+    "ast_hash": "e8e8c5121a2499c50df1f5bfa0972b45",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/statements.py": {
+    "mtime": 1779805490.55537,
+    "ast_hash": "5f65587bf84685b63e30b3ace8abc2eb",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/one_off_vendors.py": {
+    "mtime": 1779816785.9684823,
+    "ast_hash": "6299c9572cc7a65fa0e9c5f8da961553",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/customer_email.py": {
+    "mtime": 1779531356.7699716,
+    "ast_hash": "957469df1b62f0f46b0e40cf0a83c617",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/assets_reports.py": {
+    "mtime": 1776777848.0,
+    "ast_hash": "44e857d34e373ab880be7081c1f48b2d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/payg.py": {
+    "mtime": 1779604033.857012,
+    "ast_hash": "c51796e8e69b567ab3a5d98043a5cbf6",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/__init__.py": {
+    "mtime": 1778252718.5532773,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/employees.py": {
+    "mtime": 1779430754.8466587,
+    "ast_hash": "a6887d0dee094e7ca03c4fefee98b4d4",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/search.py": {
+    "mtime": 1776728553.0,
+    "ast_hash": "0f387c5d75be901d369537016520e52a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/launch_promo.py": {
+    "mtime": 1778246918.072832,
+    "ast_hash": "5da176224fbc111778363476274f6aca",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/leave.py": {
+    "mtime": 1779430754.8466587,
+    "ast_hash": "584ff898664ea2ac1f60fcf86a1f6a18",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/fixed_assets.py": {
+    "mtime": 1779626649.7947946,
+    "ast_hash": "f8093afaf9472db966132ee30a71aaeb",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/assets.py": {
+    "mtime": 1779554872.1257093,
+    "ast_hash": "7e52f666b4a204b322ad7361bfaa133f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/email.py": {
+    "mtime": 1777601749.3976274,
+    "ast_hash": "b084ecb9a5c946b318dc629960428c57",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/magic_link_service.py": {
+    "mtime": 1777877573.4049745,
+    "ast_hash": "711c01b7ba67c8237c2f794bc241c100",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/metrics.py": {
+    "mtime": 1776727083.0,
+    "ast_hash": "209b8b87a7149d3602055c267fc5e274",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/journal_entries.py": {
+    "mtime": 1779626649.7947946,
+    "ast_hash": "1f3714077e605e0c1828a69c137a152d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/contacts.py": {
+    "mtime": 1779803573.6346416,
+    "ast_hash": "3eff71f85031e94a60b0d4c7c2c071e4",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/super_stream.py": {
+    "mtime": 1780096225.357671,
+    "ast_hash": "d80ee7e4cb72be66023d1ca262644cf7",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/trust_reports.py": {
+    "mtime": 1777352671.899433,
+    "ast_hash": "1b6d7577a0d6dcd33d939efb1df744e2",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/reports.py": {
+    "mtime": 1777415010.6238854,
+    "ast_hash": "00ab205aebdb4fa9c410a3f45fc90de1",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/audit.py": {
+    "mtime": 1776734121.0,
+    "ast_hash": "533e0c664b752a8c906caf895c52cd1f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/bank_accounts.py": {
+    "mtime": 1779626649.7917945,
+    "ast_hash": "c2d5d16ccfe32af908d749737d9b0079",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/super_funds.py": {
+    "mtime": 1779430754.8486588,
+    "ast_hash": "da14b4ab909936abaf774b1bc8b38ac3",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/purchase_orders.py": {
+    "mtime": 1779626649.7957945,
+    "ast_hash": "40c61addd7788564b246d92995411181",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/oauth_service.py": {
+    "mtime": 1778038880.4697995,
+    "ast_hash": "4b96be2f4e5369764305eda630d98dc4",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/permissions.py": {
+    "mtime": 1776779330.0,
+    "ast_hash": "faa41cfa62124fb03949bf127496efeb",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/stp.py": {
+    "mtime": 1779430754.8486588,
+    "ast_hash": "84d13ab0d29bd9284b649ab7cb288937",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/recurrence.py": {
+    "mtime": 1777217461.2632551,
+    "ast_hash": "f63247926ab67d9665e1544e08fbd80f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/active_company.py": {
+    "mtime": 1779600481.9949558,
+    "ast_hash": "001b3b3cb9963b989ad424e15c1c6c76",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/backups.py": {
+    "mtime": 1776356655.0,
+    "ast_hash": "141dc41a7189dcb27bc78481d9285f0a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/settings.py": {
+    "mtime": 1776356252.0,
+    "ast_hash": "76408282481110a1278c9d9ffdfab6cb",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/items.py": {
+    "mtime": 1779626649.7947946,
+    "ast_hash": "5cbda6e02724b29ccd7ed8743d850250",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/observability.py": {
+    "mtime": 1776727705.0,
+    "ast_hash": "8975b7e1b665d54588e4e3c8a67cdc84",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/reconciliation.py": {
+    "mtime": 1779538658.7972066,
+    "ast_hash": "80a15d951a7b195ea4e9271d121b0c45",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/bas.py": {
+    "mtime": 1779604033.854012,
+    "ast_hash": "ff838e301f56a9ad17254f648061f385",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/tenant.py": {
+    "mtime": 1776751702.9450762,
+    "ast_hash": "75efcc971920508d424f8559c902ce13",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/dashboard.py": {
+    "mtime": 1779604033.8550122,
+    "ast_hash": "700454464c85f6b13d1e8c005e2c8407",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/assets_import.py": {
+    "mtime": 1776775072.0,
+    "ast_hash": "51c6aab1503e86c6e4474e96c6b6d6b4",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/bills.py": {
+    "mtime": 1779816007.078233,
+    "ast_hash": "09a42625f70dc29e5762a0a870657352",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/one_off_customers.py": {
+    "mtime": 1779816785.983482,
+    "ast_hash": "cdac01762f5f8df14f30b3332576056b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/proration.py": {
+    "mtime": 1778211070.0166147,
+    "ast_hash": "4401b443f31ff8d71c378830845b3dc2",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/ai_extraction.py": {
+    "mtime": 1777085721.0,
+    "ast_hash": "6fb57bb2258a738ff3171346983295f7",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/dev_context.py": {
+    "mtime": 1779531629.1080003,
+    "ast_hash": "ab998f655116137ca3328c8d97f1c345",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/numbering.py": {
+    "mtime": 1779430754.8476589,
+    "ast_hash": "c5616486bf53651a3b45ed5ea061306f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/reference/__init__.py": {
+    "mtime": 1778320971.0748599,
+    "ast_hash": "58b2835d2a1d8cd5b2776e96af3353e4",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/reference/loader.py": {
+    "mtime": 1778320971.0748599,
+    "ast_hash": "0f3062e0e4c6d70e9d680cf838edb6ad",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/integrations/stripe_links.py": {
+    "mtime": 1777087016.0,
+    "ast_hash": "cb1a79fd0a70e7a9e8989ee43f4a1ee3",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/integrations/customer_stripe.py": {
+    "mtime": 1777934466.8564758,
+    "ast_hash": "228920047696ede5083faa969c8cafa1",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/integrations/ato_prefill.py": {
+    "mtime": 1776731096.0,
+    "ast_hash": "99e99797bc18cacbaef5ce855746bd08",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/integrations/stripe.py": {
+    "mtime": 1776731079.0,
+    "ast_hash": "bf761060fcf7c0906b10872c560038ef",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/integrations/__init__.py": {
+    "mtime": 1777087029.0,
+    "ast_hash": "a0fddf58e8dd6039ca4c86d821e402b2",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/integrations/paperless.py": {
+    "mtime": 1776731398.0,
+    "ast_hash": "a15d54084536260886b6e5d79b440581",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/integrations/stripe_billing.py": {
+    "mtime": 1777877573.4039743,
+    "ast_hash": "25857bd08da001c614753c69532d81ac",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/integrations/companies_house/client.py": {
+    "mtime": 1776782260.0,
+    "ast_hash": "8087a14d6c1290678367f466f801a6a3",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/integrations/companies_house/__init__.py": {
+    "mtime": 1776782232.0,
+    "ast_hash": "af4f063cd6c3cb931a3dcddd12cd4921",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/integrations/companies_house/enrich.py": {
+    "mtime": 1776782317.0,
+    "ast_hash": "8897748c800b21ab8a7734f208245166",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/integrations/lei/client.py": {
+    "mtime": 1776730986.0,
+    "ast_hash": "c1a45565706e466fe7047278e18358f2",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/integrations/lei/__init__.py": {
+    "mtime": 1776730968.0,
+    "ast_hash": "60f2203a2040a995cfcf4982e861fbe2",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/integrations/lei/enrich.py": {
+    "mtime": 1776731012.0,
+    "ast_hash": "b4ef00062fa5ff47c85b397c4ec6a9f9",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/bank_feeds/health.py": {
+    "mtime": 1776683928.0,
+    "ast_hash": "b802c0fdfb1d7aaa3e22c5a449ec5ac5",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/bank_feeds/exceptions.py": {
+    "mtime": 1777934466.8564758,
+    "ast_hash": "9a3e3836e6783ac36f62c3bd8fa7ecf0",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/bank_feeds/export.py": {
+    "mtime": 1776683909.0,
+    "ast_hash": "e9eb3e4988ae57e682f82ad57b3b10f5",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/bank_feeds/remote.py": {
+    "mtime": 1777934466.8564758,
+    "ast_hash": "d40d1bf1d8ba6ec7a8b2753f01fe2054",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/bank_feeds/onboarding.py": {
+    "mtime": 1777079978.0,
+    "ast_hash": "3966baa7a83ae7ce52cb554ed3829f0e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/bank_feeds/errors.py": {
+    "mtime": 1776358964.0,
+    "ast_hash": "d289c11a93f2a8218463086e54987f06",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/bank_feeds/client.py": {
+    "mtime": 1777079916.0,
+    "ast_hash": "743f7feaacbcfb07610436461074a4cf",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/bank_feeds/__init__.py": {
+    "mtime": 1777934466.856251,
+    "ast_hash": "a910f434f8a06f30f2779a2d29ff701e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/bank_feeds/endpoints.py": {
+    "mtime": 1776683737.0,
+    "ast_hash": "61a48efca7dc829329c1091f9dd4c019",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/bank_feeds/reconcile.py": {
+    "mtime": 1776770910.0,
+    "ast_hash": "6d5acd07d6fb7bde45675037477578fc",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/bank_feeds/repo.py": {
+    "mtime": 1776368708.0,
+    "ast_hash": "e9cfe570494795d58a80a8f698fce091",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/tax_engine/__init__.py": {
+    "mtime": 1778342924.5254326,
+    "ast_hash": "c7b8147073a1e4a513b8a57fd09d645d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/tax_engine/types.py": {
+    "mtime": 1778342906.4723892,
+    "ast_hash": "fea20c5fb7a4d5da0d648fc46eb9cbd6",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/tax_engine/au.py": {
+    "mtime": 1779554872.1307094,
+    "ast_hash": "86adc232d3212c4054cb226666969ecd",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/abr/client.py": {
+    "mtime": 1776684580.0,
+    "ast_hash": "9359776a1c28fb791b61682a039d985f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/abr/__init__.py": {
+    "mtime": 1776684561.0,
+    "ast_hash": "9c0a5f41b56825da0785f88157938349",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/abr/enrich.py": {
+    "mtime": 1776684894.0,
+    "ast_hash": "1c35fa481d21526955fb202a05ca6248",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/lodgement/null.py": {
+    "mtime": 1778337923.6283967,
+    "ast_hash": "e49284c8b8e7813e76b080bddc9073ba",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/lodgement/factory.py": {
+    "mtime": 1778344128.3660865,
+    "ast_hash": "2828c5a4393a681cc3da6413dfffbfaa",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/lodgement/exceptions.py": {
+    "mtime": 1778337923.6283967,
+    "ast_hash": "002279eaa25480dd91f345955a81564d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/lodgement/remote.py": {
+    "mtime": 1778337923.6283967,
+    "ast_hash": "43840d082affcc96e1511a66d1027770",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/lodgement/__init__.py": {
+    "mtime": 1778344128.3650866,
+    "ast_hash": "0ca1b611da5d9a46d8b6f682360fd268",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/lodgement/base.py": {
+    "mtime": 1778337923.6283967,
+    "ast_hash": "33d59c4e79b7e52a6feeb62913033d53",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/lodgement/adapters/ee.py": {
+    "mtime": 1778343866.7373853,
+    "ast_hash": "6c4648353726940990f4128fef82b162",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/lodgement/adapters/nz.py": {
+    "mtime": 1778343857.650366,
+    "ast_hash": "f1c0a3083536692ea051a37e3d6f8588",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/lodgement/adapters/__init__.py": {
+    "mtime": 1778343836.3163207,
+    "ast_hash": "134e7b03f61d2da1185b3ce286c2edc9",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/lodgement/adapters/uk.py": {
+    "mtime": 1778343861.9743752,
+    "ast_hash": "4b8d65974dfcb70c08df52ab110cb792",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/lodgement/adapters/au.py": {
+    "mtime": 1778343851.9083538,
+    "ast_hash": "721b409158b49c9553c888bd374cdd23",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/imports/bank_csv.py": {
+    "mtime": 1776729516.0,
+    "ast_hash": "5449db94f615b4476713cc2254d7007c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/imports/bank_ofx.py": {
+    "mtime": 1776730175.0,
+    "ast_hash": "1680835c2e1856af6f6fd325268328ce",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/imports/persist.py": {
+    "mtime": 1779500668.615543,
+    "ast_hash": "b125d5a4df1080805f4c76a7652430dc",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/imports/__init__.py": {
+    "mtime": 1776729475.0,
+    "ast_hash": "1e3329c3c44dc537fb318e956a888fda",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/imports/coa.py": {
+    "mtime": 1776730010.0,
+    "ast_hash": "4a080bfdac8cd44a2dd7e3e2e566a53f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/imports/qbo.py": {
+    "mtime": 1776729641.0,
+    "ast_hash": "7a38ad9cb94957251b348ed1f34c33a2",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/ato_sbr/onboarding.py": {
+    "mtime": 1776821395.0,
+    "ast_hash": "e4d65de156df0d3d9b94f3d70e116aa2",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/ato_sbr/__init__.py": {
+    "mtime": 1776821395.0,
+    "ast_hash": "a1e2f43d50ff31fc433d1f93a75c9fdb",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/ato_sbr/ping.py": {
+    "mtime": 1776821395.0,
+    "ast_hash": "7ce0f47df808064f94cdffe3a45127a9",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/ato_sbr/keystore.py": {
+    "mtime": 1777102794.0,
+    "ast_hash": "4777408e70af3840de53d81f968a0ce5",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/licence/usb.py": {
+    "mtime": 1776848628.0,
+    "ast_hash": "2ccb97b514c423d257ade5dcec45ba93",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/licence/jwt.py": {
+    "mtime": 1777877573.4039743,
+    "ast_hash": "c13bff80d9e212b63fe73dc8dd124512",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/licence/caps.py": {
+    "mtime": 1776844275.0,
+    "ast_hash": "f46d68ad37ca5011f28d1064b79105bd",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/licence/service.py": {
+    "mtime": 1777877573.4039743,
+    "ast_hash": "0d65dd7c67ff987c39e175c3d15993c0",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/licence/__init__.py": {
+    "mtime": 1778312993.2307916,
+    "ast_hash": "51de54832d2d9df1d583da235ad35384",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/licence/resolver.py": {
+    "mtime": 1778312993.2327914,
+    "ast_hash": "2935b1a0e682873d27c8c9054a0e3e2c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/licence/enforcement.py": {
+    "mtime": 1776844392.0,
+    "ast_hash": "ade3022781d5a878df775a33f5317b83",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/licence/models.py": {
+    "mtime": 1776844293.0,
+    "ast_hash": "fb9bf03b1f1f4d98773a2b37d9f6699b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/exports/__init__.py": {
+    "mtime": 1776733293.0,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/exports/company.py": {
+    "mtime": 1776733980.0,
+    "ast_hash": "5213ca2ce3f230861c2175a1eccd8f9d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/fx/reval.py": {
+    "mtime": 1779554872.1287093,
+    "ast_hash": "582358464a41405444726648cad45ac3",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/fx/__init__.py": {
+    "mtime": 1776752127.0,
+    "ast_hash": "27e269f7a18c5bfba82bd1c06b29d362",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/fx/settle.py": {
+    "mtime": 1776753747.0,
+    "ast_hash": "e19854f7691ab784066e992f3d9962d1",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/services/fx/rates.py": {
+    "mtime": 1776752156.0,
+    "ast_hash": "4e9227ed3a0a7b720d4b272dc5c89171",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/errors.py": {
+    "mtime": 1777934466.8534758,
+    "ast_hash": "0d6d88046549636531204dbd41959575",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/__init__.py": {
+    "mtime": 1776867327.0,
+    "ast_hash": "e1538c1dfb54948060189b986e3d4804",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/webhooks/stripe.py": {
+    "mtime": 1777934466.856251,
+    "ast_hash": "a645c4f6213876bb98fa2560c5eefbf8",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/webhooks/__init__.py": {
+    "mtime": 1777934466.8561943,
+    "ast_hash": "7de12adec2c09a9d339682f9a2603010",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/recurring_invoices.py": {
+    "mtime": 1779626649.7897947,
+    "ast_hash": "ba1e7b28d8560e100b631938c8e6ed7c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/projects.py": {
+    "mtime": 1779626649.7887945,
+    "ast_hash": "5436720cc992b050d808c3bfa8d06806",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/integrations.py": {
+    "mtime": 1779604033.8480122,
+    "ast_hash": "c2df126869cde28c4b8ed482c4bb0da1",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/health.py": {
+    "mtime": 1777877573.3985152,
+    "ast_hash": "8379991021a0a38f559e44ee9372c112",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/license.py": {
+    "mtime": 1778246918.1098316,
+    "ast_hash": "ad22a34a9825b4aea621dd17edd1aaec",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/cashbook.py": {
+    "mtime": 1779495282.2887003,
+    "ast_hash": "f71edccea1f7134b7a05c2ca2de94ab1",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/credit_notes.py": {
+    "mtime": 1779665842.1183732,
+    "ast_hash": "c2c882e5f28d04fa606025dba1218a6c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/lodgement.py": {
+    "mtime": 1777877573.3989744,
+    "ast_hash": "b4ffe41dfa6481077d929e42ee295766",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/budgets.py": {
+    "mtime": 1779626649.7867947,
+    "ast_hash": "9780af1ffc556cfd168f625dcddce152",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/billing.py": {
+    "mtime": 1777877573.3985152,
+    "ast_hash": "fbd5e769facdd83ff2fa8cceedaad805",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/_wizard.py": {
+    "mtime": 1777934466.854476,
+    "ast_hash": "e82c16e887f47c03ec9fbeb35258514e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/bank_statement_lines.py": {
+    "mtime": 1779626649.7867947,
+    "ast_hash": "0f7fee645426ee6bd5cb5d571d001335",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/time_entries.py": {
+    "mtime": 1779531539.599652,
+    "ast_hash": "6d78efc84b30df37c6596d34b392f2bc",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/payments.py": {
+    "mtime": 1779626649.7887945,
+    "ast_hash": "0c28bbf731c5516f65a509aa30fc61cf",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/attachments.py": {
+    "mtime": 1778169003.301476,
+    "ast_hash": "cb0f494b569c49a279f4ea055e12087f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/tax_returns.py": {
+    "mtime": 1779806798.0928285,
+    "ast_hash": "0516ba9c0c6c0fa0e4bd3c43e8584a2b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/webhooks_resend.py": {
+    "mtime": 1779531871.9674428,
+    "ast_hash": "14ab4d21eb842bab5d1b6e931ff37472",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/quotes.py": {
+    "mtime": 1779626649.7897947,
+    "ast_hash": "af48aa715c7b524e9dcaa1f1b84d01fb",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/invoices.py": {
+    "mtime": 1779801172.4381998,
+    "ast_hash": "b06110b57a2a9d98246be828f9f4f1b7",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/admin_tenants.py": {
+    "mtime": 1779531763.083735,
+    "ast_hash": "d1c5a98f94f708ffffe0a810b4b54c2a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/expenses.py": {
+    "mtime": 1780095600.401876,
+    "ast_hash": "310f505bb546675e36a14a1ab0a2e860",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/changes.py": {
+    "mtime": 1779494894.8526943,
+    "ast_hash": "3b4690bca4d34ed8df0f831b224f2e5f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/auth.py": {
+    "mtime": 1779804857.1736782,
+    "ast_hash": "6820259c7a069df000798a7544f093ea",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/tpar.py": {
+    "mtime": 1779805823.2195954,
+    "ast_hash": "a0fa39fe1becc8c1aacee44497f15664",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/accounts.py": {
+    "mtime": 1779626649.7857947,
+    "ast_hash": "e55c5f58cab91c486b07d684c7c35770",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/bank_rules.py": {
+    "mtime": 1779604033.846012,
+    "ast_hash": "25eb197d8be095f7fcd21a1f6a312c24",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/edit_force_gate.py": {
+    "mtime": 1779530880.9512832,
+    "ast_hash": "ad0604e3a7acfe08818c6d7f82c889a0",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/ato_sbr.py": {
+    "mtime": 1777934466.854476,
+    "ast_hash": "fbdf45197f4fe61c13058d692a7fba0a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/tax_codes.py": {
+    "mtime": 1779626649.7897947,
+    "ast_hash": "cebfd938f29f9fe6f533ec960430f48a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/pay_run.py": {
+    "mtime": 1779626649.7887945,
+    "ast_hash": "d84f462940079e7ba2a8cbae0f9f3609",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/contact_public.py": {
+    "mtime": 1778625538.9529777,
+    "ast_hash": "6eda1fc68874b38969b484009b90cef7",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/users.py": {
+    "mtime": 1777877573.3989744,
+    "ast_hash": "bafd7926ce510935c2c119665e76f43a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/login.py": {
+    "mtime": 1779624546.919552,
+    "ast_hash": "54712238fa9f70c9f38b4c01836303e5",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/signup.py": {
+    "mtime": 1779430754.8416588,
+    "ast_hash": "bea711de247242842bf6fad0b1ac3c8d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/companies.py": {
+    "mtime": 1779604033.847012,
+    "ast_hash": "81e4e551d36765524eced7a87e948228",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/deps.py": {
+    "mtime": 1779604033.8480122,
+    "ast_hash": "2197cfccfc1e00235eb4c0194f2eef7f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/allocations.py": {
+    "mtime": 1779626649.7857947,
+    "ast_hash": "fdfd1ff0ed87e832bb2450b3e50ed509",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/journal_templates.py": {
+    "mtime": 1779604033.8490121,
+    "ast_hash": "f57fa1c3dc572b773534dabeb581df47",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/one_off_vendors.py": {
+    "mtime": 1779816785.9974818,
+    "ast_hash": "61e7da4b2cb13e7c5bd37b07ba6efb82",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/email_log.py": {
+    "mtime": 1779533873.2797773,
+    "ast_hash": "95368ad958a95ac67e825f40e30ec02c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/__init__.py": {
+    "mtime": 1780095994.800359,
+    "ast_hash": "0918db8968109b2d83e8ae4fdcc6f17f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/employees.py": {
+    "mtime": 1779528207.969694,
+    "ast_hash": "d098fbeb9ee7e68b6193af7f40849680",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/search.py": {
+    "mtime": 1779604033.850012,
+    "ast_hash": "2a48aceecdf1186391dadd30dd63d065",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/super_lodgements.py": {
+    "mtime": 1780095987.0345848,
+    "ast_hash": "03f0cda0ab2c29ae69cf15640f519ce9",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/leave.py": {
+    "mtime": 1779430754.840659,
+    "ast_hash": "3b7fa8e243dc430776afcceb6ac89480",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/fixed_assets.py": {
+    "mtime": 1779626649.7887945,
+    "ast_hash": "6c1b138183491c7983ff63c58713af60",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/snapshot.py": {
+    "mtime": 1779604033.850012,
+    "ast_hash": "99d998a645c6045a9dbf5193e1e7a023",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/bank_feeds.py": {
+    "mtime": 1777934466.854476,
+    "ast_hash": "2aac690119bf83383973446141a6617b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/journal_entries.py": {
+    "mtime": 1779626649.7887945,
+    "ast_hash": "21a1d3f05abd72b6196cc829050d84ea",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/imports.py": {
+    "mtime": 1779500813.015465,
+    "ast_hash": "a9748ba811ea1f3bbabc385e88e318bd",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/contacts.py": {
+    "mtime": 1779805503.8812587,
+    "ast_hash": "3ab82b498781056a3dfbb0b29c43e5a1",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/branches.py": {
+    "mtime": 1779618937.6182237,
+    "ast_hash": "47887e35f20911f0659d64a6ec131285",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/reports.py": {
+    "mtime": 1779494894.8536942,
+    "ast_hash": "bd269d00d825a419028a6b47587a0550",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/bank_accounts.py": {
+    "mtime": 1779626649.7857947,
+    "ast_hash": "e4c14f0249269c8504c454aaa2b6f70f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/depreciation_models.py": {
+    "mtime": 1777137230.0,
+    "ast_hash": "356aef419ddf74c979a75620779c1ce3",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/webauthn.py": {
+    "mtime": 1779634396.1910148,
+    "ast_hash": "7371bc0d4b8db44a83d461a5b3e5bfa1",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/super_funds.py": {
+    "mtime": 1779528215.7826123,
+    "ast_hash": "fe1504749906be0d55ff343117426503",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/purchase_orders.py": {
+    "mtime": 1779626649.7897947,
+    "ast_hash": "059c28eaee89b3e3749a1ba6fd5c95a2",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/stp.py": {
+    "mtime": 1779430754.8426588,
+    "ast_hash": "d07a8fc35f343592a768205fb15f9d61",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/schemas.py": {
+    "mtime": 1779869545.7385604,
+    "ast_hash": "b455f13dc79cf87c91b2c9c4098f3b8b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/account_ranges.py": {
+    "mtime": 1779604033.8450122,
+    "ast_hash": "9faeeb2c557c9f719c95a6ef6c312019",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/admin.py": {
+    "mtime": 1779604033.846012,
+    "ast_hash": "3cfba10f2ac2d6fe8b7bf509d1a0c80c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/items.py": {
+    "mtime": 1779626649.7887945,
+    "ast_hash": "dd7e842c9f779a67105edd8ffc9c4f94",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/reconciliation.py": {
+    "mtime": 1779604033.8490121,
+    "ast_hash": "b24b17425c3a1e0324d992748b71f53f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/hard_delete_gate.py": {
+    "mtime": 1777415010.6378853,
+    "ast_hash": "bede0e041d28404604370d291155242a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/admin_inspect.py": {
+    "mtime": 1779531763.083735,
+    "ast_hash": "d15bab3cba514671367c5354075b05bc",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/bills.py": {
+    "mtime": 1779801172.4381998,
+    "ast_hash": "cccce30f82fb21eac2d688b0b9cec933",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/one_off_customers.py": {
+    "mtime": 1779816786.0114818,
+    "ast_hash": "1eb0a385321e82268e01bf00dad7d888",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/proration.py": {
+    "mtime": 1779554872.1247094,
+    "ast_hash": "b09926020341ce471df70bd0fe7687a4",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/api/v1/ai_extraction.py": {
+    "mtime": 1777085773.0,
+    "ast_hash": "62a7ccf4738d9117aa85db420ec74db6",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/mcp/__init__.py": {
+    "mtime": 1779537365.9029691,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/mcp/server.py": {
+    "mtime": 1779604033.8520122,
+    "ast_hash": "eb5974eb3429846816440a22ce9d12af",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/cli/__main__.py": {
+    "mtime": 1777877573.3989744,
+    "ast_hash": "b2a5f1228dcaef318f464812e88d7c5a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/cli/seed_cashbook_demo.py": {
+    "mtime": 1778391283.6742296,
+    "ast_hash": "7db1a12562a1412e42bbadee679cb0c4",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/cli/seed_dev.py": {
+    "mtime": 1777074143.0,
+    "ast_hash": "7e4b71919f910e8427f97996a214b0c0",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/cli/__init__.py": {
+    "mtime": 1779604033.8510122,
+    "ast_hash": "9bf74e89bd64b70b2f86a19df7479095",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/cli/cleanup_default_tenant_junk.py": {
+    "mtime": 1777131782.0,
+    "ast_hash": "473ac678fe9940e562abfb9760447e9d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/integrations.py": {
+    "mtime": 1777934466.856251,
+    "ast_hash": "759838d0ba6ffd365aafc44a99357b73",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/document_counter.py": {
+    "mtime": 1776751150.0,
+    "ast_hash": "f4d1e8e100bcff50e6850bac1412683a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/journal.py": {
+    "mtime": 1779604033.8520122,
+    "ast_hash": "70e8eb5de67cba35c429c523dece4b00",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/employee.py": {
+    "mtime": 1779430754.843659,
+    "ast_hash": "8d208612c86ab91c66eb7056edf369e3",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/lodgement_record.py": {
+    "mtime": 1778320971.0698597,
+    "ast_hash": "ace9909430ce70f320121fe3645c4ecc",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/audit_log.py": {
+    "mtime": 1777415010.6388855,
+    "ast_hash": "8865d8f0ea4dc47cfeefccc5279001f7",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/change_log.py": {
+    "mtime": 1779494894.8536942,
+    "ast_hash": "6ebddafbcc66cf0b0fc366ba3fc18638",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/_scope.py": {
+    "mtime": 1776751016.0,
+    "ast_hash": "c59ee5643208c4fe8c558621c7771209",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/bank_feed_external.py": {
+    "mtime": 1777934466.856251,
+    "ast_hash": "557fc5332a65c50559a50bb35a7e36e8",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/bank_rule.py": {
+    "mtime": 1777877573.3999743,
+    "ast_hash": "ef82531f68f706d671abcf1be3e4c644",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/bill.py": {
+    "mtime": 1779816007.064233,
+    "ast_hash": "1a1147745f8d37ff8f9b22ce9c2478ce",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/budget.py": {
+    "mtime": 1776923466.0,
+    "ast_hash": "b81323462e41118ee371f68b2d5361bd",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/user.py": {
+    "mtime": 1778246918.0968318,
+    "ast_hash": "09e69bf78afcf919e9a5ed4d3dfc635d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/bank_statement.py": {
+    "mtime": 1777877573.3999743,
+    "ast_hash": "03abdf11b265e0b5b34ae8711a2a88cf",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/invoice.py": {
+    "mtime": 1779816467.3376439,
+    "ast_hash": "f584ca01ae0d239ffbd3f4d4a72a99ff",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/tax_period.py": {
+    "mtime": 1778320971.0728598,
+    "ast_hash": "d627093fc54d0945ff95d628b52d024a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/purchase_order.py": {
+    "mtime": 1778210093.9079587,
+    "ast_hash": "9c107f57dd408ad8d9255fa7a08f39fc",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/department.py": {
+    "mtime": 1777362676.9666417,
+    "ast_hash": "035f840165e6ff8bf91c0884c70b8b3e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/permission.py": {
+    "mtime": 1776778772.0,
+    "ast_hash": "f988482de873a28c023d8b0551b17625",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/payment.py": {
+    "mtime": 1779869425.2427053,
+    "ast_hash": "842c1eb86eb187be02d7755b9b12a943",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/ato_sbr.py": {
+    "mtime": 1776821395.0,
+    "ast_hash": "9461b4d91527e4ab927f61f6d47c6d73",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/stp_submission.py": {
+    "mtime": 1779430754.8446589,
+    "ast_hash": "3604b0c5eb4fdaa05ebef3401d71f716",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/one_off_vendor.py": {
+    "mtime": 1779803382.3803303,
+    "ast_hash": "0124d69dc102788ff94ea3670fe14bfc",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/pay_run.py": {
+    "mtime": 1779430754.8446589,
+    "ast_hash": "c9e424f9d092242f3e20771032212fd2",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/tax_return.py": {
+    "mtime": 1778320971.0738597,
+    "ast_hash": "be44e5393b375dd1094d1d183c018be2",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/depreciation_model.py": {
+    "mtime": 1776778294.0,
+    "ast_hash": "324d5ec5e33502505e1eada4b33e194a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/credit_note.py": {
+    "mtime": 1779869425.2597053,
+    "ast_hash": "a32523f19e5c48b889a9be1d551164c2",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/super_fund.py": {
+    "mtime": 1779430754.8446589,
+    "ast_hash": "a735f782840826c64d4614a2c410bca1",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/allocation_rule.py": {
+    "mtime": 1777363086.9964874,
+    "ast_hash": "6685645d6c0ab284c35a0062fe7943f2",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/payg.py": {
+    "mtime": 1779430754.8446589,
+    "ast_hash": "6839afede4d7ed961925e8c768b14435",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/__init__.py": {
+    "mtime": 1779803481.4354506,
+    "ast_hash": "bc60b190b5ee9f9c6ef6fa1fa38a4987",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/distribution.py": {
+    "mtime": 1777877573.3999743,
+    "ast_hash": "73ba06d058e9d058e958b95d02bd1007",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/bank_feed.py": {
+    "mtime": 1776751101.0,
+    "ast_hash": "d629a9cf1c878fe3151b2d0719aea3d7",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/account_range.py": {
+    "mtime": 1777877573.3999743,
+    "ast_hash": "ab058fcb48f5c15d41dae0e043cab18f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/leave.py": {
+    "mtime": 1779430754.8446589,
+    "ast_hash": "7918ef4ced10b61c4a12c53713526cac",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/branch.py": {
+    "mtime": 1779618881.0255501,
+    "ast_hash": "f781b5808d92c7b26a59d47245102188",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/sql_query.py": {
+    "mtime": 1776356561.0,
+    "ast_hash": "2348a1f6f1efb1c3679ebaa3127dad2d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/journal_template.py": {
+    "mtime": 1777877573.3999743,
+    "ast_hash": "74bad8ea32225a99a8669154446fe4cb",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/one_off_customer.py": {
+    "mtime": 1779803382.3913302,
+    "ast_hash": "cbf213ef789f4fe184b382f5476837ae",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/contact.py": {
+    "mtime": 1779816210.1687016,
+    "ast_hash": "1c554cd43158369c8de18349cb8538d4",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/recurring_invoice.py": {
+    "mtime": 1776922344.0,
+    "ast_hash": "54ba0cd0fcb30c8d9920acc15da041a9",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/audit_snapshot.py": {
+    "mtime": 1776356252.0,
+    "ast_hash": "8feb37fc256f1c0316fffabbf40ed35f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/idempotency_key.py": {
+    "mtime": 1777133393.0,
+    "ast_hash": "956f16f68e8d5507ebba056ca87e678a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/tax_code.py": {
+    "mtime": 1776904737.0,
+    "ast_hash": "836355c5c57bf3eebf05c542c44ca05a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/oauth.py": {
+    "mtime": 1777877573.3999743,
+    "ast_hash": "d80b440aba8238171c7b2503659713b5",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/quote.py": {
+    "mtime": 1779527395.4245617,
+    "ast_hash": "b42fc85227bb56507748a669ca994423",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/item.py": {
+    "mtime": 1776904737.0,
+    "ast_hash": "ed173dca4cfb6eea974b9950278c4fe0",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/account.py": {
+    "mtime": 1779500668.5885432,
+    "ast_hash": "d2c802339ff7d467fc7705a49afffcdb",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/project.py": {
+    "mtime": 1776915910.0,
+    "ast_hash": "fd5096347b45649879679a7fc1bf0906",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/settings.py": {
+    "mtime": 1776266697.0,
+    "ast_hash": "7518abe6ba47177d1d75a9de4679d8a6",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/fixed_asset.py": {
+    "mtime": 1776921924.0,
+    "ast_hash": "8007de21b8376cac046e55a49485aac2",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/company.py": {
+    "mtime": 1779619079.2283857,
+    "ast_hash": "6339101b2945da25b3c9946f70f318a2",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/expense.py": {
+    "mtime": 1779815717.0564506,
+    "ast_hash": "f3810601ceef660057297d75ef9484bc",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/tenant.py": {
+    "mtime": 1777505416.7246838,
+    "ast_hash": "ab9fe2d6c790d138d8505ae6434317dd",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/fx_rate_snapshot.py": {
+    "mtime": 1776752095.0,
+    "ast_hash": "400c34f7e7edd575b621673104763af4",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/bsl_match.py": {
+    "mtime": 1777877573.3999743,
+    "ast_hash": "d10ad8bc1dee8c4b54863b91df3ce59c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/time_entry.py": {
+    "mtime": 1779430754.8456588,
+    "ast_hash": "707223f7f3733181cfa36022e70d00f3",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/reference/tax_rule.py": {
+    "mtime": 1778320971.0728598,
+    "ast_hash": "7f5baf0354cf66577706e4c0d6b9f645",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/reference/fiscal_year_definition.py": {
+    "mtime": 1778320971.07086,
+    "ast_hash": "8c78cb51679444b3d8adb7fbf0bd8bfc",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/reference/fuel_tax_credit_rate.py": {
+    "mtime": 1778320971.07086,
+    "ast_hash": "72da6aad39c8839c587c6b08b34fd63b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/reference/super_contribution_cap.py": {
+    "mtime": 1778320971.0728598,
+    "ast_hash": "4b45f87ed1c1b410b7674ae64f574782",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/reference/bsb_directory.py": {
+    "mtime": 1778320971.0698597,
+    "ast_hash": "e33d2495838513fbc89f9bce353ee35a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/reference/tax_offset.py": {
+    "mtime": 1778320971.0728598,
+    "ast_hash": "89ed3f302fa3bea4109c2b8ee1fb373b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/reference/gst_registration_threshold.py": {
+    "mtime": 1778320971.0718598,
+    "ast_hash": "2dba27f20237b32284b2b6c7be66b387",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/reference/medicare_levy.py": {
+    "mtime": 1778320971.0718598,
+    "ast_hash": "9a75464b7b7028cd426dd01f3caead28",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/reference/stamp_duty_rate.py": {
+    "mtime": 1778320971.0728598,
+    "ast_hash": "3ff8ab1d0731d2e937a7212c97322631",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/reference/income_tax_bracket.py": {
+    "mtime": 1778320971.0718598,
+    "ast_hash": "5b7561036753f7f180193b3a67d32137",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/reference/chart_template.py": {
+    "mtime": 1778320971.07086,
+    "ast_hash": "e8be932dd6cb59dce3c010c1d33e3978",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/reference/ato_interest_rate.py": {
+    "mtime": 1778320971.0698597,
+    "ast_hash": "fb391aee13023dd374370cfa3522f460",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/reference/__init__.py": {
+    "mtime": 1778320971.0698597,
+    "ast_hash": "e58c75ba98404043e010b187afd8ebae",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/reference/currency.py": {
+    "mtime": 1778320971.07086,
+    "ast_hash": "bae299404fd4c488758d88c1214cd3b6",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/reference/payg_withholding_scale.py": {
+    "mtime": 1778320971.0718598,
+    "ast_hash": "8e0b35a855bf1e0c847fee98a9f7e303",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/reference/depreciation_effective_life.py": {
+    "mtime": 1778320971.07086,
+    "ast_hash": "e1aa252d1b529baa913be8476956d8da",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/reference/country.py": {
+    "mtime": 1778320971.07086,
+    "ast_hash": "ee2b0f3d4dad03df61a6d053fce342f5",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/reference/industry_code.py": {
+    "mtime": 1778320971.0718598,
+    "ast_hash": "37bc810c47340fe3a0815205e7e0e3d8",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/reference/tax_code.py": {
+    "mtime": 1778320971.0728598,
+    "ast_hash": "2e788beb14bbe0118366ef37a79b0de0",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/reference/holiday_calendar.py": {
+    "mtime": 1778320971.0718598,
+    "ast_hash": "5ca51530e9063eb0b13e17f583e8e9b3",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/reference/super_guarantee_rate.py": {
+    "mtime": 1778320971.0728598,
+    "ast_hash": "bb6223b0f0da94bd7bdfc10b7eff5050",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/reference/tax_return_box_definition.py": {
+    "mtime": 1778320971.0728598,
+    "ast_hash": "cb3d74eaa34b29e828a323c0427d9121",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/reference/jurisdiction.py": {
+    "mtime": 1778320971.0718598,
+    "ast_hash": "da3dd89116ce8c47ccdcd2cf4f8d0af6",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/reference/payroll_tax_rate.py": {
+    "mtime": 1778320971.0718598,
+    "ast_hash": "da1ed978bfcbbadb8c06ef061cd6ece0",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/reference/fbt_rate.py": {
+    "mtime": 1778320971.07086,
+    "ast_hash": "52c9b7b6c7795f5b40ec4b25333afa53",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/reference/tax_id_validation_pattern.py": {
+    "mtime": 1778320971.0728598,
+    "ast_hash": "34562bdb87d5a379e2060d0d45889317",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/reference/fx_rate_snapshot.py": {
+    "mtime": 1778320971.07086,
+    "ast_hash": "de52362ce27ea5f9dc9d321e91c91e53",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/models/reference/schema_meta.py": {
+    "mtime": 1778320971.0718598,
+    "ast_hash": "e087d86542457147ece6fb5562c43810",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/middleware/auth.py": {
+    "mtime": 1779537365.8859692,
+    "ast_hash": "f10d461ecac5cdd93441eca19a7384c7",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/middleware/__init__.py": {
+    "mtime": 1777505416.7246838,
+    "ast_hash": "925fa0d217207e970eb4e8c382227208",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/middleware/rate_limit.py": {
+    "mtime": 1778625529.7241297,
+    "ast_hash": "925b1fd489ee416c7afebd6b3e622c2d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/middleware/active_company.py": {
+    "mtime": 1779604033.8520122,
+    "ast_hash": "1831ffbc712ea6d46657e1a3bd71628e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/middleware/request_id.py": {
+    "mtime": 1777187736.0,
+    "ast_hash": "0a85828788768b269b909ddd2ebd0e5c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/middleware/skip_audit.py": {
+    "mtime": 1779533161.2702267,
+    "ast_hash": "4ff92e9c895c0ec60fe604421c2ce6be",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/seed/load_au_coa.py": {
+    "mtime": 1778344135.6219273,
+    "ast_hash": "383a9d53cd6c356d208279e5a75ec615",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/seed/seed_company.py": {
+    "mtime": 1776266821.0,
+    "ast_hash": "0ae911b45d3719c66dc2640455e1a304",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/seed/__init__.py": {
+    "mtime": 1776266816.0,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/routers/recurring_invoices.py": {
+    "mtime": 1779389000.3288078,
+    "ast_hash": "97b51539abbfbdb05cffd9f31fe629e6",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/routers/projects.py": {
+    "mtime": 1779389000.3288078,
+    "ast_hash": "bda26505f46f3a2297c6941944178792",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/routers/health.py": {
+    "mtime": 1776266451.0,
+    "ast_hash": "3a59458fd7d0d40d69b37b9e38a646a2",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/routers/journal.py": {
+    "mtime": 1779604033.853012,
+    "ast_hash": "7d3af5e385016d94d96a28d42abe93df",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/routers/credit_notes.py": {
+    "mtime": 1779389000.327808,
+    "ast_hash": "e7786891302b0349e974bfaa07c0c0e3",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/routers/budgets.py": {
+    "mtime": 1777877573.4009745,
+    "ast_hash": "28bbbd3474a85d33cce5b990a242cb9f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/routers/templates.py": {
+    "mtime": 1777877573.4029744,
+    "ast_hash": "738d19da3938900881bdd752e94bc431",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/routers/payments.py": {
+    "mtime": 1779604033.853012,
+    "ast_hash": "937ef00c0599dd0d8b60b3361cd3d7e2",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/routers/invoices.py": {
+    "mtime": 1779389000.327808,
+    "ast_hash": "d1e3e3f06a1ef7ac2e1e1138ce8fdeac",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/routers/distributions.py": {
+    "mtime": 1777877573.4019744,
+    "ast_hash": "74a0f7bd7a037f24fbad31eb3e28543f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/routers/auth.py": {
+    "mtime": 1779490630.2871869,
+    "ast_hash": "ff4301980ab2bf22ac71800e742040a4",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/routers/accounts.py": {
+    "mtime": 1777877573.4009745,
+    "ast_hash": "48bc099503b94e81de0a4dfa7f99183b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/routers/bank_rules.py": {
+    "mtime": 1777877573.4009745,
+    "ast_hash": "7af15ed6c6a240d97681f824b51b3210",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/routers/tax_codes.py": {
+    "mtime": 1777877573.4029744,
+    "ast_hash": "d91ffaf6f46007fddee1e0f521bc8b11",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/routers/companies.py": {
+    "mtime": 1777601749.3976274,
+    "ast_hash": "85c1e2f71c1587a27f5464514e287dd2",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/routers/deps.py": {
+    "mtime": 1777877573.4019744,
+    "ast_hash": "94127db5ec8222e5abe0ccff0e1f0a26",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/routers/__init__.py": {
+    "mtime": 1776266448.0,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/routers/search.py": {
+    "mtime": 1777877573.4029744,
+    "ast_hash": "c38987bfdb4525eabb05d53263c919be",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/routers/assets.py": {
+    "mtime": 1779389000.3268077,
+    "ast_hash": "d43be10750bc05fa1c829c1060b6934c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/routers/contacts.py": {
+    "mtime": 1779803678.2057343,
+    "ast_hash": "1924c9f6c4f59b34023e9e84e48e7926",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/routers/reports.py": {
+    "mtime": 1779604033.853012,
+    "ast_hash": "416bc8062b7e0791ff7ad2aef945f3bd",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/routers/items.py": {
+    "mtime": 1779389000.327808,
+    "ast_hash": "5d3b12a25d113122444268ba272f6ff4",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/routers/ranges.py": {
+    "mtime": 1777877573.4029744,
+    "ast_hash": "95162ae816db5b7889a12574e7c31798",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/routers/reconciliation.py": {
+    "mtime": 1776759140.0,
+    "ast_hash": "d9b5e4c91aa962b8545d19d59e87bd92",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/routers/dashboard.py": {
+    "mtime": 1777877573.4019744,
+    "ast_hash": "70bead8b177120b1731adaddaa959f17",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/routers/bills.py": {
+    "mtime": 1779802772.805184,
+    "ast_hash": "97b5d7d6f6f8651c32ee8eeaabf7f2c3",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/env.py": {
+    "mtime": 1779604033.843012,
+    "ast_hash": "5b76d230e0bc76bfafa6a37ecb32e91f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0004_tax_codes.py": {
+    "mtime": 1776285776.0,
+    "ast_hash": "4b9b444b36451817e008ea932ed5aafd",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0130_wizard_state_with_check.py": {
+    "mtime": 1779604033.8440123,
+    "ast_hash": "8d756aa1ebba9eae1e58c998c0e5060d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0025_user_roles.py": {
+    "mtime": 1776733109.0,
+    "ast_hash": "e0014ffe99bbf88d06c96dda3d92a428",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0016_bank_feed_connections.py": {
+    "mtime": 1778698919.403429,
+    "ast_hash": "4e96eb6f33b26ac797b398508ef75540",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0032_asset_tax_model.py": {
+    "mtime": 1778698919.405429,
+    "ast_hash": "5170ba63c40fd8cabfd17d658510f671",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0124_email_log_b_and_c.py": {
+    "mtime": 1779531038.6542125,
+    "ast_hash": "00bc605169a2686d2460a5f2ce09d309",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0056_split_db_role.py": {
+    "mtime": 1778698919.407429,
+    "ast_hash": "c79125c54175b98283cf741cbade7811",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0119_account_kind.py": {
+    "mtime": 1779500668.587543,
+    "ast_hash": "9fe0db4a0c3152fc62d8655e70538f88",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0096_launch_promo.py": {
+    "mtime": 1778257298.4919186,
+    "ast_hash": "541873f715389be1cf938145ed2f5248",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0049_fixed_assets_version_tenant.py": {
+    "mtime": 1776921914.0,
+    "ast_hash": "05b0be822d8d946f712597cee4e58b53",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0041_add_tenant_id.py": {
+    "mtime": 1776902943.0,
+    "ast_hash": "743414e886d872aa3653b2124cb9ce75",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0086_bank_feed_external_creds.py": {
+    "mtime": 1777934466.8534758,
+    "ast_hash": "2f242e500bb372d58ffbb76668569466",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0005_journal_entries.py": {
+    "mtime": 1778698919.401429,
+    "ast_hash": "b432a0f01a3dc74f7e10095a75d90fb4",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0116_merge_payroll_into_main.py": {
+    "mtime": 1779430754.833659,
+    "ast_hash": "9f108ef79a3db06715ffd400e359995b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0011_audit_snapshots.py": {
+    "mtime": 1776356252.0,
+    "ast_hash": "402355832592f5a19a6020d0cb83c8d0",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0132_gst_system_managed_backfill.py": {
+    "mtime": 1779604033.8440123,
+    "ast_hash": "1adff2e4a634faac9a87051f208ec882",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0117_contact_is_one_off.py": {
+    "mtime": 1779494894.8526943,
+    "ast_hash": "08b82162cbe6c9307fbe55a6f7061a1c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0043_invoices_version_tenant.py": {
+    "mtime": 1776909408.0,
+    "ast_hash": "693f9faf4212f0aae3eb85a2ecf93754",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0030_asset_register_v2_dv.py": {
+    "mtime": 1776773159.0,
+    "ast_hash": "4bde2881c27d03990d698fc47a4f82a9",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0036_phase0_api_scaffolding.py": {
+    "mtime": 1776867195.0,
+    "ast_hash": "738126f83ecb6f37aa99c844303e4837",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0067_retention_pct_on_bill_lines.py": {
+    "mtime": 1777361292.2960975,
+    "ast_hash": "2b5a35e2e9a52c6e03cbad866e3f86e8",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0037_phase1_version_columns.py": {
+    "mtime": 1776870158.0,
+    "ast_hash": "274c8cee1b7ed4436cba6a88a1b78fcc",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/zzzz_local_merge_m0_branches.py": {
+    "mtime": 1779430754.833659,
+    "ast_hash": "2ad3256ed275cc196b12103082f59762",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0129_pay_runs_rls.py": {
+    "mtime": 1779604033.8440123,
+    "ast_hash": "343bc38f98e6af57f4b31b170be0cbd9",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0083_close_tenant_rls_gaps.py": {
+    "mtime": 1777877573.3979745,
+    "ast_hash": "93a2f2255d82046485a4508d0184dd92",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0101_je_balance_trigger.py": {
+    "mtime": 1778698919.410429,
+    "ast_hash": "14b0ded5264d3dee7c11e97e3a0027a4",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0133_entity_types.py": {
+    "mtime": 1779800017.5263126,
+    "ast_hash": "e509634379258a2742a5ab4aebc8d588",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0031_asset_partial_disposal.py": {
+    "mtime": 1778698919.405429,
+    "ast_hash": "d7075aa5a0346b845411cdd3f0f7e623",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0071_trade_in_on_invoice_lines.py": {
+    "mtime": 1777365037.5782173,
+    "ast_hash": "149deaba7fdc1717a7a4450f86a7c495",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0065_gst_fields_on_companies.py": {
+    "mtime": 1777354535.18266,
+    "ast_hash": "7e0ad44a2de13e8e06531244038c3a38",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0085_close_remaining_rls_gaps.py": {
+    "mtime": 1778698919.408429,
+    "ast_hash": "fce343aaff6f2cd5bb6ee01958b5b84a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0074_tpar_supplier_flag.py": {
+    "mtime": 1777415010.6208854,
+    "ast_hash": "d042db0e8f87954bf6d0f43c45e8512c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0120_payg_tax_scales_fy25_26.py": {
+    "mtime": 1779500668.5885432,
+    "ast_hash": "5f63b785798e6978cc8fa7596086fbe7",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0080_contact_messages.py": {
+    "mtime": 1777505416.7236836,
+    "ast_hash": "18fb9dfe46881dc8bd684d58522da6f2",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0087_saebooks_sql_ro_role.py": {
+    "mtime": 1778698919.408429,
+    "ast_hash": "53a056a8ca11da79747dcec7215662d6",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0078_tenant_edition.py": {
+    "mtime": 1777505416.7236836,
+    "ast_hash": "99315f2034535632db411af6083b20d7",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0007_bank_statement_lines.py": {
+    "mtime": 1776289860.0,
+    "ast_hash": "f2611538d75f8a879cec0e4a6c83ad95",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0055_force_rls_and_complete_policies.py": {
+    "mtime": 1778698919.4064288,
+    "ast_hash": "8002f2c3d41833e2073fa598461ab2de",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0047_bank_statement_lines_version_tenant.py": {
+    "mtime": 1776914082.0,
+    "ast_hash": "912f2c53a90e85aa805d1d0675fdf66b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0026_projects_budgets.py": {
+    "mtime": 1778698919.404429,
+    "ast_hash": "79c31cfc41784350c3d6267604421ba7",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0046_credit_notes_version_tenant.py": {
+    "mtime": 1776911765.0,
+    "ast_hash": "5ce97e3bde081342c07104026c5cb38b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0022_bills.py": {
+    "mtime": 1776703401.0,
+    "ast_hash": "2f36b38ed4cfb729adcff5b3a9cc6533",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0113_payg_tables.py": {
+    "mtime": 1779430754.832659,
+    "ast_hash": "67e52013fda968616daf95dba4de53a8",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0131_tenant_id_coherence_trigger.py": {
+    "mtime": 1779604033.8440123,
+    "ast_hash": "9eca28d6726bd5260253d26e2f49a090",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0064_margin_acq_cost_on_invoice_lines.py": {
+    "mtime": 1777353773.0084038,
+    "ast_hash": "dd99fb32a507a003cc883f334caeaa81",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0075_tracking_vehicle_id_on_bill_lines.py": {
+    "mtime": 1777415010.6208854,
+    "ast_hash": "5e6067e57697a6b43050bb2144146ca2",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0121_quote_title.py": {
+    "mtime": 1779519318.477997,
+    "ast_hash": "2868cc0e819607fb0c2191949084a24b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0132a_backfill_missing_tables.py": {
+    "mtime": 1779800003.1744351,
+    "ast_hash": "b9b86d9b1b0d859dcd298044dcdded32",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0089_wizard_state.py": {
+    "mtime": 1777934466.8534758,
+    "ast_hash": "92281b2830203c82853b66fd910f110c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0001_settings.py": {
+    "mtime": 1776267136.0,
+    "ast_hash": "276590d0660ec5b3379cf13b65589104",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0010_hyphenated_account_codes.py": {
+    "mtime": 1776356130.0,
+    "ast_hash": "72ab645dbc7595ec1dd763da6f7f5d3a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0008_account_ranges.py": {
+    "mtime": 1776296424.0,
+    "ast_hash": "811f91335cb19759b071595140fb784c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0015_sql_queries.py": {
+    "mtime": 1776356561.0,
+    "ast_hash": "8ab29e2b6413290dc0bed03f288bb9b7",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0019_invoices.py": {
+    "mtime": 1776696417.0,
+    "ast_hash": "84effce77176d614f89fe1a38adc4a10",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0003_accounts.py": {
+    "mtime": 1776267136.0,
+    "ast_hash": "e72b98bbd12837f9dcb3bbb294563493",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0115_leave_balances.py": {
+    "mtime": 1779430754.832659,
+    "ast_hash": "7a74e4b9bbf5d33f0ff8fc755bf5222c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0076_audit_log.py": {
+    "mtime": 1777415010.6368854,
+    "ast_hash": "07b34996ff8d38418cc06272212e381d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0079_user_signup_plan.py": {
+    "mtime": 1777505416.7236836,
+    "ast_hash": "1e98697e232893c83ca0b8949b20e6f3",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0028_inventory.py": {
+    "mtime": 1778698919.404429,
+    "ast_hash": "759b9882d6436ffd6c0f3005257f0b6a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0017_fixed_asset_register.py": {
+    "mtime": 1776680710.0,
+    "ast_hash": "706ab4468228ca018f57f666b046293a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0002_companies.py": {
+    "mtime": 1776267136.0,
+    "ast_hash": "14a83a0974498eb934c6fd5a7b229a70",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0082_bsl_matches.py": {
+    "mtime": 1777877573.3979745,
+    "ast_hash": "e097a6240ecf170bb564e10a80888c4d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0141_super_lodgements.py": {
+    "mtime": 1780095813.229646,
+    "ast_hash": "e4fc7bb8073b421d0429141b7d3ee990",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0066_retention_pct_on_invoice_lines.py": {
+    "mtime": 1777360445.0670025,
+    "ast_hash": "5c4c169e44756742609dfe990f90ab29",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0081_oauth_and_fido2.py": {
+    "mtime": 1777601749.3956273,
+    "ast_hash": "b56b30b56fe31128ee9d15826f86bcba",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0090_pay_run_tables.py": {
+    "mtime": 1777934466.8534758,
+    "ast_hash": "17635e9d9be44b8572c8e77df7b46c7c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0072_contact_currency_code.py": {
+    "mtime": 1777415010.6208854,
+    "ast_hash": "9a47ca57cf12972e5a77a019be13974d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0123_email_send_log.py": {
+    "mtime": 1779527748.7870278,
+    "ast_hash": "492139649c13f168eaf55eea8ea30462",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0062_deferred_revenue_on_invoice_lines.py": {
+    "mtime": 1777351066.4041324,
+    "ast_hash": "04916b34551889bbbeb78687b33f1463",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0073_psi_status_on_companies.py": {
+    "mtime": 1777415010.6208854,
+    "ast_hash": "89ed9b113ccc6c7aaa32643765671f58",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0006_journal_templates.py": {
+    "mtime": 1776289294.0,
+    "ast_hash": "8899045516e7fba48d88525ad70edd0c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0042_journal_entries_version_tenant.py": {
+    "mtime": 1776907448.0,
+    "ast_hash": "a9fef0ac7e14576e3c21a6f5430a2cb4",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0140_payments_one_off_customer.py": {
+    "mtime": 1779806906.2362766,
+    "ast_hash": "cdbcc390ffff40f8d8ace7fd59a467ff",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0070_invoice_settlement_date.py": {
+    "mtime": 1777364245.261881,
+    "ast_hash": "a98a1cb9c981d081dc74bd455b76e95a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0009_gst_system_accounts.py": {
+    "mtime": 1776301185.0,
+    "ast_hash": "769d5119628e9a91a83022bd6b3cd812",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0084_bank_feeds_secdef_enum.py": {
+    "mtime": 1778698919.407429,
+    "ast_hash": "72d5f0d2a3a38c4827f4118b053834f1",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0102_alloc_invariants.py": {
+    "mtime": 1778698919.410429,
+    "ast_hash": "5a9d66eed2314d5fb53afd837f915089",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0092_external_ids_subledger.py": {
+    "mtime": 1778162437.9854422,
+    "ast_hash": "22e36bd93f0b9de1b8060ba50964a85e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0125_email_log_tamper.py": {
+    "mtime": 1779533797.049061,
+    "ast_hash": "dc8e1a617b01fc09bfbe4c269c64ead0",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0111_employees_and_super_funds.py": {
+    "mtime": 1779430754.832659,
+    "ast_hash": "63fd3e48d507b8b330956d25b8f4fe16",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0051_budgets_tenant_version.py": {
+    "mtime": 1776923451.0,
+    "ast_hash": "ebf8dfdaa706a13d157a075df91cb06d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0069_allocation_rules.py": {
+    "mtime": 1777364464.5334153,
+    "ast_hash": "24d1ea2286d890bc69266db6ae12651b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0061_franking_credits.py": {
+    "mtime": 1777346981.2472103,
+    "ast_hash": "f3236d67920a96e05eb932805d75ef3b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0024_aba_bank_details.py": {
+    "mtime": 1776724325.0,
+    "ast_hash": "90cc992c356b8143698a638dbe9d5e58",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0091_wizard_state_force_rls.py": {
+    "mtime": 1778698919.4094288,
+    "ast_hash": "cdb9a271d04f4e0b6f12c677c8aa41f3",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0029_user_preferred_theme.py": {
+    "mtime": 1776759053.0,
+    "ast_hash": "8978a811342a496da633d50331ca1c31",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0112_pay_run_lines_extension.py": {
+    "mtime": 1779430754.832659,
+    "ast_hash": "5c0735827c38f19edcf5c47c96c70972",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0021_recurring_invoices.py": {
+    "mtime": 1776701510.0,
+    "ast_hash": "4ac82b36c47ccb6f005ef7b088ca261b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0063_trust_account_flag.py": {
+    "mtime": 1777351723.7997534,
+    "ast_hash": "99e586e9b60ba6e1296dea9d656003d0",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0052_bsl_reconciliation.py": {
+    "mtime": 1776993970.0,
+    "ast_hash": "9643e34977d9196b70ac3446338af3b3",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0118_change_log_tenant_id.py": {
+    "mtime": 1779494894.8526943,
+    "ast_hash": "c741a194cd5a0063b053e52f4e1de5ea",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0095_sync_state_tables.py": {
+    "mtime": 1778312986.423875,
+    "ast_hash": "815c8bdf2538a22f239cd3d998e9e362",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0027_foreign_currency.py": {
+    "mtime": 1776752041.0,
+    "ast_hash": "edd266c1cc88657b8898b17ca71044f0",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0138_tpar.py": {
+    "mtime": 1779806333.257362,
+    "ast_hash": "f2de939bc9138946f234f5bf27119f48",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0013_contacts.py": {
+    "mtime": 1778698919.4024289,
+    "ast_hash": "d839d7cf4bb42b5f8d1b1d4b82921514",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0122_quote_structured_fields.py": {
+    "mtime": 1779525243.8849673,
+    "ast_hash": "599c740c26891cdb0e35d781e19fc574",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0033_permissions.py": {
+    "mtime": 1776779235.0,
+    "ast_hash": "50ef4a33b6c420071125acc57e1476b8",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0040_tenants.py": {
+    "mtime": 1776902804.0,
+    "ast_hash": "7268c20eeb27d1da25ff41cef95fec61",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0035_ato_sbr_config.py": {
+    "mtime": 1776821395.0,
+    "ast_hash": "deb218dab1379db021987e7ef0d0ba15",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0094_purchase_orders.py": {
+    "mtime": 1778210283.6659229,
+    "ast_hash": "6fbe8523e4780194fc2003be8f77fe26",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0044_bills_version_tenant.py": {
+    "mtime": 1778698919.4064288,
+    "ast_hash": "d482fb76f4287cf1748bbed3b812b7e3",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0045_payments_version_tenant.py": {
+    "mtime": 1776911107.0,
+    "ast_hash": "fbd76214fd66d6a7d5e06890f896fae4",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0097_invoices_source_quote_id.py": {
+    "mtime": 1778312986.423875,
+    "ast_hash": "6c58f45d7e052988f9f6b0a0e37c44e1",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0060_beneficiary_contact_type.py": {
+    "mtime": 1778698919.407429,
+    "ast_hash": "89472f5331a73f2fd692d253ddeb83c6",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0109_time_entries.py": {
+    "mtime": 1779604033.843012,
+    "ast_hash": "a7145908322c4275690d7ae0f733a0e5",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0093_cashbook_mode.py": {
+    "mtime": 1778698919.4094288,
+    "ast_hash": "21d3e0d4a8c14a6e936ae554210c4603",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0059_trust_distributions.py": {
+    "mtime": 1777344831.9843073,
+    "ast_hash": "6e193787313bf5a065dabe0fc0a538df",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0039_phase1_item_version.py": {
+    "mtime": 1776885366.0,
+    "ast_hash": "0ed06f140738f0e7ab13f25231a2104a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0114_stp_submissions.py": {
+    "mtime": 1779430754.832659,
+    "ast_hash": "641c398433adfd684af76c12fa6f019e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0014_bank_rules.py": {
+    "mtime": 1778698919.4024289,
+    "ast_hash": "24abc8cf889719495b7b13cddc26638e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0034_company_siss_creds.py": {
+    "mtime": 1776812420.0,
+    "ast_hash": "81b7f83f106b36e9419032c34632d1ce",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0057_idempotency_storage.py": {
+    "mtime": 1777133034.0,
+    "ast_hash": "317e29b136d87bf7ddc4b4c3d155728c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0128_app_role.py": {
+    "mtime": 1779604033.843012,
+    "ast_hash": "7baea8698fe16c2b5bacb0965d50ce2d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0054_add_stripe_payment_link_to_invoices.py": {
+    "mtime": 1777087199.0,
+    "ast_hash": "4558422b1bddb36ab61e808bf6a1dec5",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0139_merge_heads.py": {
+    "mtime": 1779806362.1363225,
+    "ast_hash": "883739ca42f77e9f486f4ee6ae16f40a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0038_phase1_user_version.py": {
+    "mtime": 1776872266.0,
+    "ast_hash": "cec7f02a5f16efee535fdae3ad4b4604",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0023_bill_allocations.py": {
+    "mtime": 1778698919.403429,
+    "ast_hash": "3a379d43b6e3be60e6aeb2bea84a06d3",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0134_branches.py": {
+    "mtime": 1779618724.6854205,
+    "ast_hash": "b313be6edd474c16b15fb55783663853",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0104_journal_lines_tax_treatment.py": {
+    "mtime": 1778388691.0575447,
+    "ast_hash": "e08cecbdeff7215f679c18e45c75abdb",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0126_cashbook_default_bank_check.py": {
+    "mtime": 1779604033.843012,
+    "ast_hash": "95acd6d921c2bd4b13a60e025a237e70",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0050_recurring_invoices_version_tenant.py": {
+    "mtime": 1776922336.0,
+    "ast_hash": "81318ca741b406188565a17cdb949ad9",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0095_quotes_tables.py": {
+    "mtime": 1778287050.1693606,
+    "ast_hash": "b071fd1830d155bf8511a76c99082f6f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0137_one_off_parties.py": {
+    "mtime": 1779803263.0894082,
+    "ast_hash": "f834759cf33663be42a726dde030dfe8",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0020_payments_credit_notes.py": {
+    "mtime": 1776697805.0,
+    "ast_hash": "7f1dc13d57cfd98fb3ec668d0e25e98a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0048_projects_version_tenant.py": {
+    "mtime": 1776915925.0,
+    "ast_hash": "769c4181404d7b58bf8b83a7caa68fb1",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0068_department_cost_centre.py": {
+    "mtime": 1778698919.407429,
+    "ast_hash": "41bf5838a6f466c411640ab8d81a8e26",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0018_document_counters.py": {
+    "mtime": 1776695756.0,
+    "ast_hash": "c27d7768390f4916583c43ac2c09c9ea",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0058_user_tenant_memberships.py": {
+    "mtime": 1777259090.658213,
+    "ast_hash": "75f64f30b9d4a3ff0f50ea6c63a92443",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0012_sub_header_accounts.py": {
+    "mtime": 1776356340.0,
+    "ast_hash": "10687f4ccf8a184691f0d6cc79922c8e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0127_drop_journal_tenant_default.py": {
+    "mtime": 1779604033.843012,
+    "ast_hash": "d96fcf12b3db3838b5d22bf803abe925",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic/versions/0100_multi_jurisdiction_company.py": {
+    "mtime": 1778320971.0658598,
+    "ast_hash": "cea1dffe46473f13908314ba5097d2b9",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_tenant_scope.py": {
+    "mtime": 1779604033.882012,
+    "ast_hash": "ad4b3a6e4dd8900291f16e22f63b90dd",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_cli.py": {
+    "mtime": 1777877573.4149745,
+    "ast_hash": "63073003eb64a600dcc38c3a36053bb2",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_retention_pct.py": {
+    "mtime": 1779604033.882012,
+    "ast_hash": "c75e2c60394087d28dc3170cbe4ec6cc",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_assets.py": {
+    "mtime": 1779604033.875012,
+    "ast_hash": "86e7fb88540c121563c90a332dbf1320",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_assets_partial_disposal.py": {
+    "mtime": 1779604033.8760118,
+    "ast_hash": "fe6b5a5cd0d6443b3ff5481dd9e0c6d8",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_n1_reconciliation.py": {
+    "mtime": 1779604033.8800118,
+    "ast_hash": "7c86c96142cfbe9e2f947c2e0b237b1a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_recurrence.py": {
+    "mtime": 1779604033.881012,
+    "ast_hash": "20d09fb298a96c6e91483aca70be627e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_payment_allocation_invariants.py": {
+    "mtime": 1779604033.8800118,
+    "ast_hash": "e90d1fdfffaba0ccc74612749f793b7c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_assets_page.py": {
+    "mtime": 1779604033.8760118,
+    "ast_hash": "4ba90a5ffec907f907745febb4b705ca",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_invoices_page.py": {
+    "mtime": 1779604033.8790119,
+    "ast_hash": "942248f3337ed213cf462995a50711c9",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_2026_05_25_void_route_regression.py": {
+    "mtime": 1779666161.5711317,
+    "ast_hash": "23197646ad9ebac87e453bf33756621c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_franking_credits.py": {
+    "mtime": 1779604033.878012,
+    "ast_hash": "62b713ff43edb8675e1152fa8d40118e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_journal_delete_audit.py": {
+    "mtime": 1779604033.8800118,
+    "ast_hash": "39b74679a55530e14e76c2c8eac78c90",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_dashboard.py": {
+    "mtime": 1779604033.8770118,
+    "ast_hash": "27f6f51953ccbcffc7adcc49e82af374",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_reports_bas_gate.py": {
+    "mtime": 1779604033.882012,
+    "ast_hash": "a4311c3fb622990375a04520af397ba6",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_classic_theme.py": {
+    "mtime": 1776846022.0,
+    "ast_hash": "a9b100c3da8b11c72fee7ab99752caad",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_pl_by_segment.py": {
+    "mtime": 1779604033.881012,
+    "ast_hash": "c4c20c974d96445fa9188f24b55da629",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_journal.py": {
+    "mtime": 1779604033.8790119,
+    "ast_hash": "4c50a08c354a8a6d3ebe9573ff8eb5d2",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_tax_treatment_snapshot.py": {
+    "mtime": 1779604033.882012,
+    "ast_hash": "60e31894ec732e79f74c3e9bbe469f7d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_beneficiaries.py": {
+    "mtime": 1779604033.8760118,
+    "ast_hash": "a8879320f8fd1fbde5509eec809771fd",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_audit_export.py": {
+    "mtime": 1777934466.8600006,
+    "ast_hash": "8bad8b61d8239e261cfbbf6a54a99afe",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_deferred_revenue.py": {
+    "mtime": 1779604033.878012,
+    "ast_hash": "dfbf0266b079b9ad911c4eb110d0f9d1",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_credit_notes_page.py": {
+    "mtime": 1779604033.8770118,
+    "ast_hash": "5092df7e2998e018dda3dae18592f0de",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_recurring_invoices_page.py": {
+    "mtime": 1779604033.881012,
+    "ast_hash": "d913ff78cce6f8bd93cc2cc9c47133e3",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_grpc_entities.py": {
+    "mtime": 1776978999.0,
+    "ast_hash": "8eea9a2509498a217b96bd849833c98d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_journal_balance_trigger.py": {
+    "mtime": 1779604033.8800118,
+    "ast_hash": "c35dd24952c7a78aba3b1654d4ab2348",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_cashflow_forecast.py": {
+    "mtime": 1779604033.8770118,
+    "ast_hash": "1ab97165afb0f6135e2567cdd3ce6fe3",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_m0_synthetic_nz_company.py": {
+    "mtime": 1778344057.6427991,
+    "ast_hash": "825a30faf898945e2f859222d1209e6e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_imports_qbo.py": {
+    "mtime": 1776729935.0,
+    "ast_hash": "1ae4ecc845cafb6f874eb8f148d21fda",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_bills_page.py": {
+    "mtime": 1779604033.8760118,
+    "ast_hash": "43c5c66acdea25fcb764b3075abf35e3",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_items.py": {
+    "mtime": 1779604033.8790119,
+    "ast_hash": "ba33da5f0f0f090624b2ef175bb6a979",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_grpc_presence.py": {
+    "mtime": 1776981375.0,
+    "ast_hash": "a55484af1591e6689781371c47b99fb8",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_imports_coa.py": {
+    "mtime": 1776730010.0,
+    "ast_hash": "f55de069d15f8c44bc6b7af6e2bcc989",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_payments_page.py": {
+    "mtime": 1779604033.881012,
+    "ast_hash": "fdca9e51079e70f6e7f2c5eb41397962",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_credit_notes.py": {
+    "mtime": 1779604033.8770118,
+    "ast_hash": "19c0ba59ec58f12f22d7fc2bec24ed06",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_metrics.py": {
+    "mtime": 1776727354.0,
+    "ast_hash": "5ace8041a1cf577447fab724ab85db69",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_mcp_mount.py": {
+    "mtime": 1779538074.2407694,
+    "ast_hash": "13730d06eba40e870504e711f8fbe5bb",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_active_company_compat.py": {
+    "mtime": 1779604033.875012,
+    "ast_hash": "69c276f268e6a4fd15446d12f89b8a74",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_aged_ar.py": {
+    "mtime": 1779604033.875012,
+    "ast_hash": "eec91eeaf1bb41593dcecd7d9e2c7cf5",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_assets_dv.py": {
+    "mtime": 1779604033.875012,
+    "ast_hash": "a65fdf0f861c6e68cfe6635798bdbb90",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_dashboard_page.py": {
+    "mtime": 1776726190.0,
+    "ast_hash": "a07361d8dce748a89705a37f7f273038",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_payments.py": {
+    "mtime": 1779604033.881012,
+    "ast_hash": "4f15e511aa1414cf0ebb3e4e436b03df",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_tax_codes.py": {
+    "mtime": 1779604033.882012,
+    "ast_hash": "d77015ffc0b8e4bfe4e165580871f1bb",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_company_export.py": {
+    "mtime": 1777934466.8600006,
+    "ast_hash": "7735ac1736efe9b2a08316bfc68a50f1",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_cross_company_fk.py": {
+    "mtime": 1779604033.8770118,
+    "ast_hash": "53586c2cb2d585bc43362e3181416354",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_fx.py": {
+    "mtime": 1779604033.878012,
+    "ast_hash": "2c95a91dedd333176c95badede0b5d41",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_pay_run.py": {
+    "mtime": 1779604033.8800118,
+    "ast_hash": "7f97a9766e66cd5a37ce81a397d1ab65",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_version_unification.py": {
+    "mtime": 1779604033.8830118,
+    "ast_hash": "795511ea0a8b2c91db18cf1f7d0a7613",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_search.py": {
+    "mtime": 1779604033.882012,
+    "ast_hash": "06969a9b3f24af433bd0fcda3723abb8",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_distributions.py": {
+    "mtime": 1779604033.878012,
+    "ast_hash": "d33301db649d8931cea253fbedfd6726",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/__init__.py": {
+    "mtime": 1776266520.0,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_accounts_page.py": {
+    "mtime": 1779604033.875012,
+    "ast_hash": "2a78b53aa41f80d7534e271b5aaea41b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_aged_ap.py": {
+    "mtime": 1779604033.875012,
+    "ast_hash": "baed0cb80c9790f6c5408879fd7873bb",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_bills.py": {
+    "mtime": 1779604033.8760118,
+    "ast_hash": "0e1924c38a0e9f37aa5fc30880072aec",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_budget_vs_actual.py": {
+    "mtime": 1779604033.8760118,
+    "ast_hash": "3f0446f89d511708c128667ba70977cb",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_multi_tenant.py": {
+    "mtime": 1776266986.0,
+    "ast_hash": "22494a36ddc6f68f56bac3e1de9665bd",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_aba.py": {
+    "mtime": 1776725790.0,
+    "ast_hash": "a9deaa9f6e084642f07f3b8a79a7ad2f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/conftest.py": {
+    "mtime": 1779604033.872012,
+    "ast_hash": "7ca30342f3eca1234f9fd7358ffcf740",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_trust_reports.py": {
+    "mtime": 1779604033.8830118,
+    "ast_hash": "163ff047c2d6237185428f537bed1c44",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_contacts_abr_page.py": {
+    "mtime": 1779604033.8770118,
+    "ast_hash": "87dc6262e3c52a83cc5d798f855bea28",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_observability.py": {
+    "mtime": 1779604033.8800118,
+    "ast_hash": "a2fa3b6e6dc2aad4950d777583386547",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_health.py": {
+    "mtime": 1777350201.2766993,
+    "ast_hash": "f9b47b27c81207f06bf3ed6603a88a21",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_dense_theme.py": {
+    "mtime": 1776846566.0,
+    "ast_hash": "177ddeaccfa94654b8e7a6094791e931",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_tpar.py": {
+    "mtime": 1779604033.8830118,
+    "ast_hash": "2cff9314b3ff9e7cf356732eae6f9016",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_fx_reval.py": {
+    "mtime": 1779604033.878012,
+    "ast_hash": "156a4ae17f052d3389058f8e5fd565eb",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_startup.py": {
+    "mtime": 1779604033.882012,
+    "ast_hash": "cf0d09d7841ef958ca37df2d2aa1c3fc",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_invoices.py": {
+    "mtime": 1779604033.8790119,
+    "ast_hash": "c4a968539576245f5a26919e73fc6375",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_classic_theme_rr2.py": {
+    "mtime": 1776760427.0,
+    "ast_hash": "ce46b454e5043d9845b70aa00d40c6c9",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_period_close.py": {
+    "mtime": 1779604033.881012,
+    "ast_hash": "7c6790c0c79e5f3cde6a4de109cbb37f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_depreciation_schedule.py": {
+    "mtime": 1779604033.878012,
+    "ast_hash": "8f33d96e4f812f66d79280156df5815e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_cloud_theme.py": {
+    "mtime": 1776846329.0,
+    "ast_hash": "f8e918d8a5bd190c7f369b3a762470ea",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_settings.py": {
+    "mtime": 1779604033.882012,
+    "ast_hash": "b4f7baad547242c9b6466cc5904b57bd",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_assets_import.py": {
+    "mtime": 1779604033.875012,
+    "ast_hash": "f4341f5c48bc2af762e94db811444d26",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_seed.py": {
+    "mtime": 1779604033.882012,
+    "ast_hash": "72395691e54929a71280d6d6e261e12b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_imports_bank.py": {
+    "mtime": 1776729972.0,
+    "ast_hash": "834509d2f6ed435af0b0a48a5828b210",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_cashbook_bank_constraint.py": {
+    "mtime": 1779604033.8760118,
+    "ast_hash": "c2998fc8ccb14285d66642203b2408f4",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_web_router_tenant_scope.py": {
+    "mtime": 1779604033.8830118,
+    "ast_hash": "bcf1ea5f942186955977d61515acc4e5",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/test_tenant_id_predicate_sweep.py": {
+    "mtime": 1779604033.874012,
+    "ast_hash": "2e2268a5265ef359f7c30e8b28e4937f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/test_features.py": {
+    "mtime": 1779604033.8730118,
+    "ast_hash": "b997bcbe3a5b6783668fc9947cb1cc66",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/test_theme.py": {
+    "mtime": 1776759365.0,
+    "ast_hash": "2076a67ca0a31dc5c5560bd98e3fa743",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/test_numbering.py": {
+    "mtime": 1776695821.0,
+    "ast_hash": "8ab0f20e4742e81b17f177425b83e01a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/test_companies_cap.py": {
+    "mtime": 1776981319.0,
+    "ast_hash": "f09136745363beb4e17e4fef447b93c2",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/test_tax_engine.py": {
+    "mtime": 1779604033.874012,
+    "ast_hash": "09b0ef67ee05ac9831d818f4b8c29490",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/test_cashbook.py": {
+    "mtime": 1779604033.8730118,
+    "ast_hash": "e2f90fe3950c9c5fd3192dda9db04ac7",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/test_sql_tool_role.py": {
+    "mtime": 1779604033.874012,
+    "ast_hash": "4ff09fecbfbee161d10c5b19736cae3b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/test_users_seat.py": {
+    "mtime": 1779604033.875012,
+    "ast_hash": "b4bfa464d661262324a2362b0a4eb4a6",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/test_tier_flip_integration.py": {
+    "mtime": 1779604033.874012,
+    "ast_hash": "7ccd7f993a4e243d3b1f97f9d8f6ab52",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/test_budgets.py": {
+    "mtime": 1779604033.8730118,
+    "ast_hash": "1e8d2c6f66207309d20ab451d045bd4c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/__init__.py": {
+    "mtime": 1776358865.0,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/test_projects.py": {
+    "mtime": 1779604033.874012,
+    "ast_hash": "a3778c29f436c7754e943fba2a9a3888",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/test_promo.py": {
+    "mtime": 1778246918.149831,
+    "ast_hash": "1b03eb225e035acffc7fd3534a93fd6e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/test_proration.py": {
+    "mtime": 1778211199.9107926,
+    "ast_hash": "919e8560517637cc49e01ff916235976",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/test_mailer.py": {
+    "mtime": 1776696219.0,
+    "ast_hash": "a690f902ece88055a9d08b9e0a8bc06e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/test_bank_feeds_remote.py": {
+    "mtime": 1777934466.8600006,
+    "ast_hash": "2cab44ca87b6cea602ac35500501f454",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/test_crypto.py": {
+    "mtime": 1776813467.0,
+    "ast_hash": "daaba869b96038fa3da90329a7a1c24e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/test_pdf.py": {
+    "mtime": 1776696011.0,
+    "ast_hash": "d98226150ffc76065a5cf00cf9722ffb",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/test_payg.py": {
+    "mtime": 1779604033.874012,
+    "ast_hash": "0531bcbf1069d5881e3d025447b01c06",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/integrations/test_stripe_billing.py": {
+    "mtime": 1777877573.4139745,
+    "ast_hash": "43cee3540aba458b9bc820400b5c7076",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/integrations/test_paperless.py": {
+    "mtime": 1779604033.8730118,
+    "ast_hash": "3d764f2d4771f5641e2fb7718cf6fac6",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/integrations/test_stripe.py": {
+    "mtime": 1776731702.0,
+    "ast_hash": "4b5ca3a77de4f0aca27dcd7f32e5042c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/integrations/__init__.py": {
+    "mtime": 1776731493.0,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/integrations/test_ato_prefill.py": {
+    "mtime": 1776731633.0,
+    "ast_hash": "0bc5f768f350558fff95efcec2580bec",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/integrations/companies_house/test_enrich.py": {
+    "mtime": 1776782661.0,
+    "ast_hash": "7ffc890ec09c7d231c25f66c5f39d39b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/integrations/companies_house/__init__.py": {
+    "mtime": 1776782597.0,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/integrations/companies_house/test_client.py": {
+    "mtime": 1776782744.0,
+    "ast_hash": "915b8bf43015b91ca167e18aae072330",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/integrations/lei/test_enrich.py": {
+    "mtime": 1776731683.0,
+    "ast_hash": "bd6425ba41792ea85bd05700d4601cd7",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/integrations/lei/__init__.py": {
+    "mtime": 1776731495.0,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/integrations/lei/test_client.py": {
+    "mtime": 1776731515.0,
+    "ast_hash": "20b2f1874d49fc4655c38c007bc343a5",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/bank_feeds/test_endpoints.py": {
+    "mtime": 1776369202.0,
+    "ast_hash": "80ea9ddb1939eb8944666095804c47a1",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/bank_feeds/test_errors.py": {
+    "mtime": 1776358878.0,
+    "ast_hash": "a074b4443b07fafc8f0da0a1519a8087",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/bank_feeds/test_sandbox_config.py": {
+    "mtime": 1777080020.0,
+    "ast_hash": "fe8f71b92ca3b4838f7e452ce315d103",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/bank_feeds/test_rls_cli.py": {
+    "mtime": 1778699090.3214278,
+    "ast_hash": "90327e7e992ceecbb01f4b4aa32139f0",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/bank_feeds/test_per_company_creds.py": {
+    "mtime": 1776813471.0,
+    "ast_hash": "28ebab481993610979fc9115e2eae01c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/bank_feeds/test_onboarding.py": {
+    "mtime": 1779604033.872012,
+    "ast_hash": "5fb4d90390355cc8824baca8816302f4",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/bank_feeds/__init__.py": {
+    "mtime": 1776358865.0,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/bank_feeds/test_repo.py": {
+    "mtime": 1779604033.8730118,
+    "ast_hash": "2971e6467a2726ab10657eec67f79ba6",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/bank_feeds/test_client.py": {
+    "mtime": 1776358961.0,
+    "ast_hash": "93053c7aed7670cb5fa806052b1a88f6",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/bank_feeds/conftest.py": {
+    "mtime": 1777934466.8600006,
+    "ast_hash": "169c505f4bb3c2cf89f66e083b10d3b7",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/bank_feeds/test_reconcile.py": {
+    "mtime": 1779604033.872012,
+    "ast_hash": "6dcc011aa19efa974b48fb2fe474da06",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/bank_feeds/test_rls_bank_feed_accounts.py": {
+    "mtime": 1778699097.6263463,
+    "ast_hash": "b6a4e5cdecfdbc92a93c9618429088c4",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/abr/test_enrich.py": {
+    "mtime": 1776684897.0,
+    "ast_hash": "d928ed86eaf1bafbe4ac5c3626374809",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/abr/__init__.py": {
+    "mtime": 1776684698.0,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/abr/test_client.py": {
+    "mtime": 1776684789.0,
+    "ast_hash": "dfc5839790f6bbbc0ca10b9b6277f00d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/lodgement/test_factory.py": {
+    "mtime": 1777877573.4147418,
+    "ast_hash": "cef6673a481957abd9ea7052de63b0ba",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/lodgement/test_remote_auth_error.py": {
+    "mtime": 1777877573.4147418,
+    "ast_hash": "97839dc785308d18e5b9b10d72912b14",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/lodgement/test_remote_upstream_5xx.py": {
+    "mtime": 1777877573.4149745,
+    "ast_hash": "80d1d3d0e8b592c4a84af4b0556d0b8a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/lodgement/test_null_service.py": {
+    "mtime": 1777877573.4147418,
+    "ast_hash": "fff9c125b114e30c8d8fb8d9439419e9",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/lodgement/__init__.py": {
+    "mtime": 1777877573.4139745,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/lodgement/test_remote_accepted.py": {
+    "mtime": 1777877573.4147418,
+    "ast_hash": "3730609656a501ca238b7f562f734470",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/lodgement/conftest.py": {
+    "mtime": 1777877573.4147418,
+    "ast_hash": "898ef74c689b75aabcd3c5a904684500",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/lodgement/test_envelope_hash.py": {
+    "mtime": 1777877573.4147418,
+    "ast_hash": "45bcc5dccd52d07cef3f180ab5137cfa",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/lodgement/test_remote_validation_error.py": {
+    "mtime": 1777877573.4149745,
+    "ast_hash": "47d3131db3fffd6b86889feec2eca63e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/lodgement/test_remote_edition_error.py": {
+    "mtime": 1777877573.4147418,
+    "ast_hash": "31ce853d8091b7db9e91e34590555437",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/lodgement/test_adapter_registry.py": {
+    "mtime": 1778343931.265524,
+    "ast_hash": "e0b9ab3e8bfd9f655c04fced348b0db8",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/lodgement/test_remote_stub.py": {
+    "mtime": 1777877573.4147418,
+    "ast_hash": "7ea6589f5a21a4c0913096791e1db6a2",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/ato_sbr/test_onboarding_svc.py": {
+    "mtime": 1776821395.0,
+    "ast_hash": "c42da20b873820f5f9116c070dcd78c3",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/ato_sbr/__init__.py": {
+    "mtime": 1776821395.0,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/ato_sbr/test_ping.py": {
+    "mtime": 1776821395.0,
+    "ast_hash": "12b208650a16ac04db4d2ed2dcc82029",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/ato_sbr/test_keystore.py": {
+    "mtime": 1777102875.0,
+    "ast_hash": "7d6ec062847512e39a1c32441e8db5fb",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/licence/test_usb_verify.py": {
+    "mtime": 1776848675.0,
+    "ast_hash": "2591f5b5608021496dd61f3df2bf86df",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/licence/test_resolver_per_user.py": {
+    "mtime": 1778312993.2327914,
+    "ast_hash": "851f4ca2f2a9ab0d3c942fa2c2d288b0",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/licence/test_caps.py": {
+    "mtime": 1776844428.0,
+    "ast_hash": "604b1a54861795b05df2cbf51d4df7bf",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/licence/test_enforcement.py": {
+    "mtime": 1776844446.0,
+    "ast_hash": "f5163f7be9da7f69797da6cc2e657084",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/licence/test_jwt_verify.py": {
+    "mtime": 1776848653.0,
+    "ast_hash": "a532294338fad31d6d64ae684b486473",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/licence/test_service.py": {
+    "mtime": 1777877573.4139745,
+    "ast_hash": "d177e89ef1886b1263189d011af481b0",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/licence/__init__.py": {
+    "mtime": 1776844411.0,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/services/licence/test_resolver.py": {
+    "mtime": 1776844467.0,
+    "ast_hash": "1fd9e8d3d3998d871e289bc41e4d44b9",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/__init__.py": {
+    "mtime": 1776867527.0,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/webhooks/test_stripe.py": {
+    "mtime": 1777934466.8600006,
+    "ast_hash": "6cf00f12b66564b6fb757140627ddba1",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/webhooks/__init__.py": {
+    "mtime": 1777934466.858476,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_invoices_transitions.py": {
+    "mtime": 1779604033.866012,
+    "ast_hash": "fe9137558c0e13cad2ff721d3148792b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_accounts.py": {
+    "mtime": 1779604033.8590121,
+    "ast_hash": "f46d5bd61190fa98cb27a5eb24f9546d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_bills_cross_tenant_write.py": {
+    "mtime": 1779604033.862012,
+    "ast_hash": "6071f72b070c31000a7f1c1a9c4be4f8",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_admin.py": {
+    "mtime": 1779604033.860012,
+    "ast_hash": "49b82de55157b3750847ae1e88daf5f3",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_bills_transitions.py": {
+    "mtime": 1779604033.862012,
+    "ast_hash": "90eca0214c4029e8e1eae6883ebdbdf1",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_stp_submissions.py": {
+    "mtime": 1779604033.871012,
+    "ast_hash": "280812d85ffab8df436e699828f38cc0",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_bank_feeds.py": {
+    "mtime": 1779604033.861012,
+    "ast_hash": "969b53d6bbf5fc2dbb56a9e49b67b011",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_reports_aged.py": {
+    "mtime": 1779604033.8690119,
+    "ast_hash": "7fa0cc39c4a6482a21ff0d61aab1a539",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_quotes.py": {
+    "mtime": 1779604033.868012,
+    "ast_hash": "9e4a61ada5002af2dce619ceefd07e85",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_ai_extraction.py": {
+    "mtime": 1779604033.860012,
+    "ast_hash": "ead7829594b04aee60005c9965e2dff8",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_reports_depreciation.py": {
+    "mtime": 1779604033.8690119,
+    "ast_hash": "06f3be9cf579c425711afc9da826b7c2",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_bank_accounts.py": {
+    "mtime": 1779604033.861012,
+    "ast_hash": "0b362c31d3b10aa122d2fceb51b07cfc",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_contacts.py": {
+    "mtime": 1779604033.863012,
+    "ast_hash": "b8dd44a0a5f10e61ac50d53d0ae4aeb6",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_auth_login.py": {
+    "mtime": 1779515964.2106931,
+    "ast_hash": "20d89dac4dcf4dd25d98bf5aea82fbd3",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_attachments.py": {
+    "mtime": 1779604033.860012,
+    "ast_hash": "a4d86509051bcb49f100f075e846d1a0",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_account_ranges.py": {
+    "mtime": 1779604033.8590121,
+    "ast_hash": "ceca41d2375fbeb0b76c1bb4e7ca5ed7",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_billing.py": {
+    "mtime": 1777877573.4059744,
+    "ast_hash": "c4a0cf43dcebe8e93089040a0a3f6090",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_reports_trial_balance.py": {
+    "mtime": 1779604033.870012,
+    "ast_hash": "a89cc78f3e8c05623495f4952d26050c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_reports_fx.py": {
+    "mtime": 1779604033.870012,
+    "ast_hash": "d012295aa0d24779b675000960d5fcd3",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_reports_bas_cashflow.py": {
+    "mtime": 1779604033.8690119,
+    "ast_hash": "7b482fcfafbe73fbfb0d9c3984e7ac82",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_bank_rules.py": {
+    "mtime": 1779604033.861012,
+    "ast_hash": "36a92cd04ffb29430c8b2ace76ce20f1",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_snapshot.py": {
+    "mtime": 1779604033.870012,
+    "ast_hash": "524c20c662ac1e6e6fd043e4645e2366",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_integrations_rls.py": {
+    "mtime": 1779604033.865012,
+    "ast_hash": "8e888d4c511a38d5be64a55dc71a5b42",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_purchase_orders.py": {
+    "mtime": 1779604033.868012,
+    "ast_hash": "41644e5e2ba6824d528d4a75ba52762e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_items.py": {
+    "mtime": 1779604033.866012,
+    "ast_hash": "a3d9e31c003c2dea4046c7138445bb20",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_bill_vehicle_tracking.py": {
+    "mtime": 1779604033.861012,
+    "ast_hash": "61008d23421aeb3a9ccb6ab351d06073",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_cashbook.py": {
+    "mtime": 1779604033.862012,
+    "ast_hash": "94c6da2566ec5f45cf438c755977a498",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_recurring_invoices.py": {
+    "mtime": 1779604033.8690119,
+    "ast_hash": "e779196d7e2a4aad7a580eafaa370bb6",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_auth_me_username_regression.py": {
+    "mtime": 1777934466.8564758,
+    "ast_hash": "6806071e6096636fcca6e5f28c0c8e66",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_depreciation_models.py": {
+    "mtime": 1779604033.864012,
+    "ast_hash": "d3c95c5e7a58f87268210fc1987fd1c7",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_admin_gate_jwt_role.py": {
+    "mtime": 1777415010.6388855,
+    "ast_hash": "f1396b695898c541f4029aba2c732ccc",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_credit_notes.py": {
+    "mtime": 1779604033.863012,
+    "ast_hash": "bbf9ef54204e7175adba6ee5d6f2f0b5",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_allocation_rules.py": {
+    "mtime": 1779604033.860012,
+    "ast_hash": "1dc10987bcb969f5db7683fdc7e8156c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_imports.py": {
+    "mtime": 1779604033.865012,
+    "ast_hash": "8a4a9995debb1d3b4c0b54de51de74bd",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_pay_run_v1.py": {
+    "mtime": 1779604033.867012,
+    "ast_hash": "45ac81e1fc1fc5594c2977281a87f905",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_bank_statement_lines.py": {
+    "mtime": 1779604033.861012,
+    "ast_hash": "7141ceea1a5cc96bc52cc11a6c33bcf5",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_contact.py": {
+    "mtime": 1779604033.863012,
+    "ast_hash": "3519a57e1cb9659e9d2fa96ee873fc9f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_payments.py": {
+    "mtime": 1779604033.867012,
+    "ast_hash": "f74beb51a3a0cef561dd35ff6d142f47",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_tax_codes.py": {
+    "mtime": 1779604033.871012,
+    "ast_hash": "a012ca39fafc7a0caae7df2e16661ee3",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_cross_tenant_web_regression.py": {
+    "mtime": 1779604033.864012,
+    "ast_hash": "61b3f2d5b0db128f2b000a80565da1a8",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_hard_delete_all_routes.py": {
+    "mtime": 1779604033.865012,
+    "ast_hash": "b1e641e397cc6795034e1a12dde09f5c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_search.py": {
+    "mtime": 1779604033.870012,
+    "ast_hash": "d1b8c2f45f401602245a46e602bfabdb",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_budgets.py": {
+    "mtime": 1779604033.862012,
+    "ast_hash": "02fa155d1d15b3b322a5865019d6d325",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/__init__.py": {
+    "mtime": 1776867527.0,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_reports_ytd_turnover.py": {
+    "mtime": 1779604033.870012,
+    "ast_hash": "518d3c5206f81a22b08fb5c5e5f46cc8",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_bills.py": {
+    "mtime": 1779604033.862012,
+    "ast_hash": "b06771337e05e4b31cbdffd9685d0b09",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_ato_sbr.py": {
+    "mtime": 1779604033.860012,
+    "ast_hash": "01e6410b4083dda94160a57bd0138126",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_changes.py": {
+    "mtime": 1779604033.863012,
+    "ast_hash": "b812db57ed3ccbef3868c5328f80c889",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_fixed_assets.py": {
+    "mtime": 1779604033.864012,
+    "ast_hash": "aa9934ea905f76c06ddc8c7e1abad26a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_reports_auth_regression.py": {
+    "mtime": 1777877573.4139745,
+    "ast_hash": "a228bd07e30d56e23a2fd75aadf339ef",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_x_company_id_sweep.py": {
+    "mtime": 1779604033.871012,
+    "ast_hash": "8a81c7e3ea78ed4eed3d6f106173dfec",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_projects.py": {
+    "mtime": 1779604033.868012,
+    "ast_hash": "2ab0ce70c8e08905ef690bd4bf1a3aa7",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_users.py": {
+    "mtime": 1779604033.871012,
+    "ast_hash": "6f45ae18f036b531726c0da524f8ae25",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_recurring_invoice_transitions.py": {
+    "mtime": 1779604033.868012,
+    "ast_hash": "98bf9bcd6e6ee92d6a30880f5f38f4e6",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_proration.py": {
+    "mtime": 1778211222.4298244,
+    "ast_hash": "b95961d8051cb499dba95d80ef892927",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_integrations.py": {
+    "mtime": 1777934466.857476,
+    "ast_hash": "9f34991aee7488d11ff08597d5acd337",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_problem_details.py": {
+    "mtime": 1777188552.0,
+    "ast_hash": "df301f4f55da97a2cbe102293f49d98d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_stripe_payment_link.py": {
+    "mtime": 1779604033.871012,
+    "ast_hash": "bd4cd486953ac1d4b97e932c2371d57d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_fixed_assets_convert_to_inventory.py": {
+    "mtime": 1779604033.864012,
+    "ast_hash": "f1efb8ba4cd476bcea17971c5b4d7fdf",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_auth_signup.py": {
+    "mtime": 1779604033.861012,
+    "ast_hash": "a2e9a61703aee91c3dbabdf329d8a558",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_hard_delete_company_cascade.py": {
+    "mtime": 1779604033.865012,
+    "ast_hash": "73029fc329e1d84922ac97e1134a8afa",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_hard_delete_audit_log.py": {
+    "mtime": 1779604033.865012,
+    "ast_hash": "a1932dab9f2118aba55bf866cb0f246c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_cashbook_e2e.py": {
+    "mtime": 1779604033.863012,
+    "ast_hash": "01cf167001dd7ef4fdf64513f178dc6d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_journal_templates.py": {
+    "mtime": 1777026593.0,
+    "ast_hash": "313dc186cf3774a4d2a48ea79b47d4ef",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_reports_pl_segment.py": {
+    "mtime": 1779604033.870012,
+    "ast_hash": "35a1b6667b72359e504d514b15081cb9",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_hard_delete_invoice.py": {
+    "mtime": 1779604033.865012,
+    "ast_hash": "6e53966d71546a2375501486cfe209f7",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_health.py": {
+    "mtime": 1777021252.0,
+    "ast_hash": "bef8e95b702f8c313d0a2a1346975db7",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_companies.py": {
+    "mtime": 1779604033.863012,
+    "ast_hash": "67a89f918e3d85d269720c20f14db180",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_leave.py": {
+    "mtime": 1779604033.867012,
+    "ast_hash": "a8ff35d07f19069e5720e9dfd94a0d05",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_cross_company_isolation.py": {
+    "mtime": 1779626649.8087945,
+    "ast_hash": "fba9b2959281e1571d747b75b71f9e2d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_reconciliation.py": {
+    "mtime": 1779604033.868012,
+    "ast_hash": "3f482f4b54e3216f6e0ce08bc61fe466",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_invoices.py": {
+    "mtime": 1779604033.866012,
+    "ast_hash": "a942a9236aef498894d479e6f78585a7",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_invoices_cross_tenant_write.py": {
+    "mtime": 1779604033.866012,
+    "ast_hash": "bd831d3ae2f73ad0d991e2b0798596b5",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_period_lock_invoices_bills.py": {
+    "mtime": 1779604033.867012,
+    "ast_hash": "8632ee623146625c989800510097a72c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_employees.py": {
+    "mtime": 1779604033.864012,
+    "ast_hash": "511f7d530bc464a57287cae66df963e8",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_cross_tenant_isolation.py": {
+    "mtime": 1779604033.864012,
+    "ast_hash": "9dbab45d797aafe1f046fd967657e4f8",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_reports_budget_vs_actual.py": {
+    "mtime": 1779604033.8690119,
+    "ast_hash": "6679a3af036e0556b964b708f45a26f6",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_journal_entries.py": {
+    "mtime": 1779604033.867012,
+    "ast_hash": "8fc64799b3bbe46a5d9e65aa1780bb4d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_super_funds.py": {
+    "mtime": 1779604033.871012,
+    "ast_hash": "863a4686d87054fc4314a57bb45e9047",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_payments_transitions.py": {
+    "mtime": 1779604033.867012,
+    "ast_hash": "0dc8a6eedb4e6879d6294c3f249053df",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_auth_promo.py": {
+    "mtime": 1779604033.860012,
+    "ast_hash": "3231b408879f37926383c6a1ac452669",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_reports_financial.py": {
+    "mtime": 1779604033.870012,
+    "ast_hash": "712ddf54699fe7a0fb13b4e0dd6abc5b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_wizard_helper.py": {
+    "mtime": 1779604033.871012,
+    "ast_hash": "116f3da60702ce401d33f6c5b12d2741",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_fixed_assets_disposal.py": {
+    "mtime": 1779604033.865012,
+    "ast_hash": "98306a9cbea7a5519a60b156c7874416",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/api/v1/test_je_cross_tenant_write_rles4.py": {
+    "mtime": 1779604033.866012,
+    "ast_hash": "09a5f04a9b489f2396bbb4d7e6449cbd",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/cli/__init__.py": {
+    "mtime": 1777074122.0,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/cli/test_seed_dev.py": {
+    "mtime": 1777074225.0,
+    "ast_hash": "ba5e305d5d0ce929cf73e29286a72927",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/integration/test_cross_db_join.py": {
+    "mtime": 1778320971.0758598,
+    "ast_hash": "e9ca3bc4a9459dcb39fee150f8ca28f8",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/integration/__init__.py": {
+    "mtime": 1778320971.0758598,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/seeds/test_jurisdiction_loader.py": {
+    "mtime": 1778320971.0758598,
+    "ast_hash": "d94dc7447c358cf6c651468dea03d937",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/seeds/__init__.py": {
+    "mtime": 1778320971.0758598,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/grpc/test_grpc_server.py": {
+    "mtime": 1776902884.0,
+    "ast_hash": "c890bc9302952ba319b4d01bee4866f4",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/grpc/__init__.py": {
+    "mtime": 1776902844.0,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/db/test_runtime_database_url_strict.py": {
+    "mtime": 1779604033.872012,
+    "ast_hash": "6a918919532dcba91722c333a3e538f5",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/db/__init__.py": {
+    "mtime": 1778320971.0748599,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/db/test_reference_connection_split.py": {
+    "mtime": 1778320971.0758598,
+    "ast_hash": "7a6b5a321962dfc894c4cdfc6ca3a18b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/middleware/test_idempotency_race.py": {
+    "mtime": 1779604033.872012,
+    "ast_hash": "6e902e80f35dfc00c0b8a645327a4775",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/middleware/__init__.py": {
+    "mtime": 1777133103.0,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/middleware/test_request_id.py": {
+    "mtime": 1777187801.0,
+    "ast_hash": "3c293226e178d5c74e08247a1621f986",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/test_grpc/conftest.py": {
+    "mtime": 1779604033.8790119,
+    "ast_hash": "1ef9c644be2c8efdbc3c90680a7a31f1",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/scripts/run-tests.sh": {
+    "mtime": 1779604033.8590121,
+    "ast_hash": "745cdafeb2d6c75156ce32fda5df6b12",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/scripts/backup.sh": {
+    "mtime": 1776356655.5159237,
+    "ast_hash": "bd9612a545d89e930be5c93da1930e8a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/scripts/regen_proto.sh": {
+    "mtime": 1779430754.8496587,
+    "ast_hash": "6aaffaa38d1d132a63b925efd656b1b3",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/scripts/poc_contacts_qt.py": {
+    "mtime": 1776867523.1424844,
+    "ast_hash": "c1235a54415e514d5c59ee6b574a10df",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/scripts/restore-test.sh": {
+    "mtime": 1776356655.5159237,
+    "ast_hash": "131d2b2c127ff0163aed7539595b7650",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/docker/test-initdb/01-test-roles.sql": {
+    "mtime": 1779490630.2471871,
+    "ast_hash": "8559ede7cae2e6a68b5495cde7a1c3b4",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic_reference/env.py": {
+    "mtime": 1778320971.0658598,
+    "ast_hash": "0566108202e5ece2f0089e66eebd5f15",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/alembic_reference/versions/0001_initial_reference_schema.py": {
+    "mtime": 1778320971.06686,
+    "ast_hash": "b4ef5c563a2669028bf4eac82fce9d3b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/payday-super-commit-msg.txt": {
+    "mtime": 1780096264.1535475,
+    "ast_hash": "4c3594c50e9b2dda205c395312e0086b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/docker-compose.test.yml": {
+    "mtime": 1779604033.8450122,
+    "ast_hash": "32688986be9fe85c5dfe2ab8101950b6",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/CLA.md": {
+    "mtime": 1777171609.3354998,
+    "ast_hash": "c345e0746ff390e6ceda486836a1f8cd",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/DEFERRED.md": {
+    "mtime": 1779430754.8316588,
+    "ast_hash": "88b9192820521b4cab6f9769b6b3ffde",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/SPEC-LICENSING.md": {
+    "mtime": 1776842803.4269392,
+    "ast_hash": "d30847bcd9b7efda85dd1af6ca8f6715",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/CONTRIBUTING.md": {
+    "mtime": 1776262344.101907,
+    "ast_hash": "032f8329739a361166a28ca9016515f8",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/CHARTER.md": {
+    "mtime": 1777846225.9255414,
+    "ast_hash": "ac69c2f502df9bb47b64118d1310116f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/README.md": {
+    "mtime": 1776262322.7821646,
+    "ast_hash": "947f8cca8cf05e82acd90fc5cd1f1593",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/docker-compose.yml": {
+    "mtime": 1777796067.1101506,
+    "ast_hash": "84ca4c1f837de7aacd0a6696ae45b739",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/TRADEMARK.md": {
+    "mtime": 1777171566.1367164,
+    "ast_hash": "6881a408fce8c51218ab231486a4e252",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/LICENSING.md": {
+    "mtime": 1777171509.1106794,
+    "ast_hash": "b75ccf52c603a5ea878a6d4b624fbfef",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/mcp/README.md": {
+    "mtime": 1779539668.6008377,
+    "ast_hash": "5b2f469cc869ef4d8884143a9c52972a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/mcp/docker-compose.yml": {
+    "mtime": 1779537365.9799685,
+    "ast_hash": "808f9a6f05ea8bdb9735ef5cfc872ae1",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/cli/buf.yaml": {
+    "mtime": 1779430754.833659,
+    "ast_hash": "e0cae95d8a40d501305c1931dd33c622",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/cli/buf.gen.yaml": {
+    "mtime": 1779430754.833659,
+    "ast_hash": "f192c39b25a98d9f31fc21d2d65cc42f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/cli/README.md": {
+    "mtime": 1779430754.833659,
+    "ast_hash": "4310f99776d2f5402a22532f1c36f543",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/seeds/jurisdictions/UK/fiscal_year_definitions.yaml": {
+    "mtime": 1778320971.0748599,
+    "ast_hash": "bb91acaa6850524816972a93b6ab6020",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/seeds/jurisdictions/NZ/fiscal_year_definitions.yaml": {
+    "mtime": 1778320971.0738597,
+    "ast_hash": "4ab13474682218a7c87a52daad1e4ff7",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/seeds/jurisdictions/EE/fiscal_year_definitions.yaml": {
+    "mtime": 1778320971.0738597,
+    "ast_hash": "329e683593a7b6eef899eed6542bfc77",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/seeds/jurisdictions/AU/chart_template.yaml": {
+    "mtime": 1778320971.0738597,
+    "ast_hash": "082abc20fbf010946159cb72a0f9b41b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/seeds/jurisdictions/AU/fiscal_year_definitions.yaml": {
+    "mtime": 1778320971.0738597,
+    "ast_hash": "d756b57ce56fb67c448f6c37fead42be",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/seeds/jurisdictions/AU/tax_codes.yaml": {
+    "mtime": 1778320971.0738597,
+    "ast_hash": "9b2526d9ec2e24ae2c681918cdfb3295",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/seeds/jurisdictions/_global/jurisdictions.yaml": {
+    "mtime": 1778320971.0748599,
+    "ast_hash": "3947ab445291cf54887e7914be0f1ad7",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/seeds/jurisdictions/_global/countries.yaml": {
+    "mtime": 1778320971.0748599,
+    "ast_hash": "b15914768dec6f0ed120d08f4c0012fc",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/seeds/jurisdictions/_global/currencies.yaml": {
+    "mtime": 1778320971.0748599,
+    "ast_hash": "9f83e973a06edcce8153672d2f313467",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/seed/au/README.md": {
+    "mtime": 1776266870.0,
+    "ast_hash": "f65b66a57315702dd75b2141552c3d46",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/base.html": {
+    "mtime": 1779802772.8061838,
+    "ast_hash": "26b0d672e2434b9ebb9e11253f4aa194",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/login.html": {
+    "mtime": 1777877573.4049745,
+    "ast_hash": "821f322fb02c2e2006df7950a5f75e4f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/integrations/_lei_applied.html": {
+    "mtime": 1776731216.0,
+    "ast_hash": "1f07afc766bbcd5116c47491d4370fc5",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/integrations/_ch_error.html": {
+    "mtime": 1776782402.0,
+    "ast_hash": "3080432000514751e9d89e8a01b017e2",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/integrations/_ch_result.html": {
+    "mtime": 1776782413.0,
+    "ast_hash": "35488a22b7c88ace5697004d6e723f07",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/integrations/index.html": {
+    "mtime": 1776782534.0,
+    "ast_hash": "0f5c7d1ffdf58ac220fdedfbcb6a3203",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/integrations/_lei_error.html": {
+    "mtime": 1776731208.0,
+    "ast_hash": "7f01559e8957edbe2806dc16fbec2220",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/integrations/_ch_applied.html": {
+    "mtime": 1776782524.0,
+    "ast_hash": "f12f461777a5896ec38b5e466c74c298",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/integrations/_lei_result.html": {
+    "mtime": 1776731204.0,
+    "ast_hash": "213bedf2bf6fe209f0e281b7342d90eb",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/emails/magic_link_email.html": {
+    "mtime": 1777601749.3987362,
+    "ast_hash": "c1f7613f9058a3ebdb38108e330c6d9a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/search/index.html": {
+    "mtime": 1776728576.0,
+    "ast_hash": "da58f2500f83b94e693bf9385aa8bc14",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/search/_results.html": {
+    "mtime": 1776728580.0,
+    "ast_hash": "ab0a21d31ce68dc4e67fd00a3f2f8ec3",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/reconciliation/index.html": {
+    "mtime": 1776289921.0,
+    "ast_hash": "5d00216e1b207eb7ba50f53cfc7e9126",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/reconciliation/match.html": {
+    "mtime": 1776289935.0,
+    "ast_hash": "c4438760c6f2a7cd889e687f7928ffed",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/reconciliation/account.html": {
+    "mtime": 1776356435.0,
+    "ast_hash": "4882d44e0828bec4f209d4c8bee2f2e6",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/reports/budget_vs_actual.html": {
+    "mtime": 1776750090.0,
+    "ast_hash": "b109a2222bb5f329322824e7a6a072f4",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/reports/pl_by_segment.html": {
+    "mtime": 1776750076.0,
+    "ast_hash": "5f4e74a8c357ee4446584e9d5a8a1f71",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/reports/aged_ap.html": {
+    "mtime": 1776704007.0,
+    "ast_hash": "b95fc1d0ba2a63d10a8e1180a5e4aed9",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/reports/cashflow_forecast.html": {
+    "mtime": 1776750102.0,
+    "ast_hash": "5982fe86e68d677e3096ccfbb02b595f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/reports/index.html": {
+    "mtime": 1777415010.6238854,
+    "ast_hash": "17c9d75b839197360df745928d4cae42",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/reports/bas.html": {
+    "mtime": 1776301291.0,
+    "ast_hash": "d8b73b113edae9dfac3f9b344a154782",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/reports/profit_loss.html": {
+    "mtime": 1776289653.0,
+    "ast_hash": "77a41a21c00a31981967b976302e2108",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/reports/trust_balances.html": {
+    "mtime": 1777352704.6458967,
+    "ast_hash": "b339561f3c1baba704d4163a2b7ee676",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/reports/trust_cashbook.html": {
+    "mtime": 1777352698.3808079,
+    "ast_hash": "a6804ec2e565e4609701bf043c6e077f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/reports/bas_not_registered.html": {
+    "mtime": 1779604033.8590121,
+    "ast_hash": "b394bb0dd6bd180a2dd35db7b51a5df1",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/reports/trial_balance.html": {
+    "mtime": 1776289506.0,
+    "ast_hash": "ce896135a41cdeba2af72c0b61af2385",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/reports/close_year.html": {
+    "mtime": 1776728052.0,
+    "ast_hash": "bdd428b0c79cfcb6b286c3b156a37057",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/reports/balance_sheet.html": {
+    "mtime": 1776289657.0,
+    "ast_hash": "55a8a3f296e4b88a1b7eceb854f9d8b6",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/reports/depreciation_schedule.html": {
+    "mtime": 1776777997.0,
+    "ast_hash": "99a8c969632d48735540a4d735d86bec",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/reports/aged_ar.html": {
+    "mtime": 1776702632.0,
+    "ast_hash": "da9ee6c24bf172c0123f669016598c0e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/reports/tpar.html": {
+    "mtime": 1777415010.6238854,
+    "ast_hash": "919a13518341fe0e3e050e25bccfe063",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/reports/fx_revalue.html": {
+    "mtime": 1776780664.0,
+    "ast_hash": "9427b622422f83079595990752ebb29c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/invoices/list.html": {
+    "mtime": 1779389000.3338077,
+    "ast_hash": "7cfe3f6df484647ef819fbab53387562",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/invoices/form.html": {
+    "mtime": 1777364378.0410373,
+    "ast_hash": "9dedfa83dfddfb0f242a9cba1ce3c409",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/invoices/detail.html": {
+    "mtime": 1776696620.0,
+    "ast_hash": "f342949bdadc6aa32ad027b8cadd888b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/contacts/list.html": {
+    "mtime": 1779802772.8061838,
+    "ast_hash": "64abc20bac433df714bb6a22c230c3d2",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/contacts/form.html": {
+    "mtime": 1779802772.8061838,
+    "ast_hash": "a5bfb5c1b0e1c8cc584f27b90940debc",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/contacts/_abr_result.html": {
+    "mtime": 1776684645.0,
+    "ast_hash": "7121569cb50087a6c885dd5b77a60196",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/contacts/_abr_applied.html": {
+    "mtime": 1776684651.0,
+    "ast_hash": "1cb1c0e1d741a63df5bd1691e195f733",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/contacts/_abr_error.html": {
+    "mtime": 1776684636.0,
+    "ast_hash": "80a82ad8cfd43fb612932866b7eee011",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/contacts/detail.html": {
+    "mtime": 1776356385.0,
+    "ast_hash": "c0fbb03793f1ab2b430d3652f82a8c1d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/contacts/beneficiaries.html": {
+    "mtime": 1777345452.147213,
+    "ast_hash": "cbb2e0b49843aa5b186a736e4efb18ce",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/bank_feeds/connect.html": {
+    "mtime": 1776683963.0,
+    "ast_hash": "a26821b5a583b146bcb7859d747db952",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/bank_feeds/health.html": {
+    "mtime": 1776770411.0,
+    "ast_hash": "4b672fc5989e1ecb67f89908a2476e02",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/bank_feeds/map.html": {
+    "mtime": 1776683981.0,
+    "ast_hash": "40635dddd7d58b0d94fc580355edf11b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/bank_feeds/index.html": {
+    "mtime": 1776813402.0,
+    "ast_hash": "fcf4d24eff8ca6ac8df000ddd9c540a4",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/bank_feeds/offboard.html": {
+    "mtime": 1776683992.0,
+    "ast_hash": "fd60e43c48cafbd5449e7cce0bdfb593",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/bank_feeds/connect_redirect.html": {
+    "mtime": 1776683971.0,
+    "ast_hash": "126cdadab90f31167383158cb0eaa743",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/imports/qbo_contacts_preview.html": {
+    "mtime": 1776729803.0,
+    "ast_hash": "381d9d7102695dc2b0044b0bcb39e82d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/imports/coa_preview.html": {
+    "mtime": 1776729784.0,
+    "ast_hash": "6586b846d9b04e65ea41a2ff7011e1d2",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/imports/bank.html": {
+    "mtime": 1776729743.0,
+    "ast_hash": "a596cf99afb90cf70f7a24607d0184f6",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/imports/qbo.html": {
+    "mtime": 1776729794.0,
+    "ast_hash": "86880a324387fc1ed9055c9fd20a8690",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/imports/coa.html": {
+    "mtime": 1776729771.0,
+    "ast_hash": "430cc84307a99b6d5e05d8518001d584",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/imports/index.html": {
+    "mtime": 1776729731.0,
+    "ast_hash": "8a77cbe3932397cba8a4985cb811b1de",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/imports/bank_preview.html": {
+    "mtime": 1776729753.0,
+    "ast_hash": "f5136642a0ad80e96484c08dd0c9008e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/imports/bank_done.html": {
+    "mtime": 1776729759.0,
+    "ast_hash": "db37b8d7271e7f7e6bccfc4b13a9c12e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/admin/company_export.html": {
+    "mtime": 1776733436.0,
+    "ast_hash": "5c9343f63454ecc3ad483182aa933a31",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/admin/license.html": {
+    "mtime": 1776843818.0,
+    "ast_hash": "7d509c244796d7a9cd5a396771e60db8",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/admin/settings.html": {
+    "mtime": 1776296470.0,
+    "ast_hash": "95d907397a537afcf20a9dd254bd480d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/admin/audit_list.html": {
+    "mtime": 1776356252.0,
+    "ast_hash": "1c94dd0be94045a72983559b47a9e253",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/admin/theme.html": {
+    "mtime": 1776759244.0,
+    "ast_hash": "f9c7fae247456e727ed4efb4c9720a8b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/admin/permissions_matrix.html": {
+    "mtime": 1776779040.0,
+    "ast_hash": "3aa782551ff588e6cffcef2e99e74514",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/admin/ranges.html": {
+    "mtime": 1776296452.0,
+    "ast_hash": "9431c073ab900f2b6fa64e9c24bd8ca3",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/admin/sql.html": {
+    "mtime": 1776356561.0,
+    "ast_hash": "1365c08ef34c66c2d82d1c8149032812",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/admin/backups.html": {
+    "mtime": 1776356655.0,
+    "ast_hash": "97de463b6baf768e435d5dc251217c62",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/admin/users_list.html": {
+    "mtime": 1777877573.4049745,
+    "ast_hash": "c330fae034e0febe1ca8c2d3697362aa",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/admin/audit_detail.html": {
+    "mtime": 1776356252.0,
+    "ast_hash": "faadded04ca52fe54ad037f83887cb17",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/budgets/index.html": {
+    "mtime": 1776739250.0,
+    "ast_hash": "32010e20638367457271cb2f5ac824f4",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/budgets/grid.html": {
+    "mtime": 1776739265.0,
+    "ast_hash": "39131705490701ee399efe14c4d98722",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/distributions/list.html": {
+    "mtime": 1777344903.8103414,
+    "ast_hash": "cd65eb27226dc84d805fddd88d738ab0",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/distributions/form.html": {
+    "mtime": 1777344930.7837298,
+    "ast_hash": "d20d6e9c9c86ac951f24b96d78159375",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/distributions/detail.html": {
+    "mtime": 1777344953.7430604,
+    "ast_hash": "c7cc3f9f8258bda9087b5b471dd5ed88",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/tax_codes/list.html": {
+    "mtime": 1776285871.0,
+    "ast_hash": "9c21b187f4f67dc418d5f363e9a52d61",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/tax_codes/edit.html": {
+    "mtime": 1776285881.0,
+    "ast_hash": "1d56ff5316b0a98cdfe8c8324c8a60c5",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/projects/list.html": {
+    "mtime": 1779389000.3338077,
+    "ast_hash": "d32dc00526cff5398007e0c0598ebace",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/projects/form.html": {
+    "mtime": 1776738977.0,
+    "ast_hash": "6ced1565eaef0a4409ab50fa83a5ddbe",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/projects/detail.html": {
+    "mtime": 1776738991.0,
+    "ast_hash": "dab3d99932d619f56614dacc86fa1324",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/ato_sbr/onboard.html": {
+    "mtime": 1776821395.0,
+    "ast_hash": "32a3259aeccb5ec492138b9b48c40b50",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/help/shortcuts.html": {
+    "mtime": 1776728589.0,
+    "ast_hash": "09bd273ad4aee9f2a123eeaf51dbfd2f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/companies/list.html": {
+    "mtime": 1777601749.3986704,
+    "ast_hash": "90954d024d6a5defbbe877c9907a1c93",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/companies/form.html": {
+    "mtime": 1777601749.3986223,
+    "ast_hash": "8c61517f088aaad16150e4e226a1f463",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/themes/cloud/base.html": {
+    "mtime": 1776846209.0,
+    "ast_hash": "426e4a917831ff163104f3f653187540",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/themes/cloud/dashboard/index.html": {
+    "mtime": 1776846221.0,
+    "ast_hash": "15c62169d4a8ccb9114de1ba7a592da2",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/themes/dense/base.html": {
+    "mtime": 1776846440.0,
+    "ast_hash": "ea751dd504280523726b4f0b601f8a69",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/themes/dense/dashboard/index.html": {
+    "mtime": 1776846453.0,
+    "ast_hash": "4f20e6c24def0421cee8f8a85906d5a4",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/themes/classic/base.html": {
+    "mtime": 1779802772.8071837,
+    "ast_hash": "ca554c50c744e246352e80ba155c2963",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/themes/classic/reports/index.html": {
+    "mtime": 1776760070.0,
+    "ast_hash": "d36c54c6463db1bfe7f1613bbeff818f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/themes/classic/reports/aged_ar.html": {
+    "mtime": 1777415010.6238854,
+    "ast_hash": "2ade8fde702a1057ce44ccf775025ca8",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/themes/classic/invoices/list.html": {
+    "mtime": 1776760005.0,
+    "ast_hash": "ac92d56e69bbde165851744d435c022f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/themes/classic/invoices/form.html": {
+    "mtime": 1777364382.2291045,
+    "ast_hash": "4d0cff536c45aeab3f99bf1a85ad088b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/themes/classic/invoices/detail.html": {
+    "mtime": 1776760331.0,
+    "ast_hash": "a40f6a309ddc0dbe46254ace366f52c3",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/themes/classic/contacts/list.html": {
+    "mtime": 1779581600.0567138,
+    "ast_hash": "3dfb7da25f60364fa7f701f48033b1b8",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/themes/classic/journal/list.html": {
+    "mtime": 1776760088.0,
+    "ast_hash": "ddc637729f30efdd32324dea74c0799c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/themes/classic/bills/list.html": {
+    "mtime": 1776760015.0,
+    "ast_hash": "40bc48dcd7eac480be779fae2dcdd11d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/themes/classic/bills/form.html": {
+    "mtime": 1776760303.3927052,
+    "ast_hash": "de1f9b91fc147cb5bb63d16451f82633",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/themes/classic/dashboard/index.html": {
+    "mtime": 1776845858.0,
+    "ast_hash": "16e86a2d96fd5a9bb7c0b6cd72cfadeb",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/journal/list.html": {
+    "mtime": 1779389000.3338077,
+    "ast_hash": "d0466da26fe3ff7ce9c427e50b62677b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/journal/form.html": {
+    "mtime": 1776749453.0,
+    "ast_hash": "9ee2c5fde61d6856262efd8a95306de5",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/accounts/delete.html": {
+    "mtime": 1776356360.0,
+    "ast_hash": "0b6f77c8eb95a936accf5ad6ea4dc9b4",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/accounts/list.html": {
+    "mtime": 1776356360.0,
+    "ast_hash": "96b4ac806ecf52c02e40127714afb566",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/accounts/edit.html": {
+    "mtime": 1776356252.0,
+    "ast_hash": "ec37d6ec15822677a1cb697d0f037805",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/accounts/detail.html": {
+    "mtime": 1776356360.0,
+    "ast_hash": "434fec77e338b3db0ee9da0746754d76",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/bills/list.html": {
+    "mtime": 1779389000.3328078,
+    "ast_hash": "851e22b545e8b6d6335a0fa7b446ae13",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/bills/form.html": {
+    "mtime": 1776749453.0473163,
+    "ast_hash": "ec34b8d707b843c0a5eee4e3370e1b14",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/bills/detail.html": {
+    "mtime": 1776703767.0,
+    "ast_hash": "3b3070b7d95c4e6b2159d5df57579f26",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/items/list.html": {
+    "mtime": 1779389000.3338077,
+    "ast_hash": "eca6cfaa73f4cf32bf30afdf83735328",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/items/form.html": {
+    "mtime": 1776756997.0,
+    "ast_hash": "2693667d2a0aebc24be5192eda703ec0",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/items/detail.html": {
+    "mtime": 1776757013.0,
+    "ast_hash": "9026e75de00a3637d8f096c93bb7502f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/pay_run/index.html": {
+    "mtime": 1776724529.0,
+    "ast_hash": "e3878a10ae5e9a839bb3d8bd9a1b046f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/bank_rules/list.html": {
+    "mtime": 1776356435.0,
+    "ast_hash": "97ca192749295b4098273d589f2c43e2",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/bank_rules/form.html": {
+    "mtime": 1776356435.0,
+    "ast_hash": "597d9fdb355360f1b0e11e73964dda91",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/credit_notes/list.html": {
+    "mtime": 1779389000.3328078,
+    "ast_hash": "7a2b4c8cb09c5a97ed63762de3817ce9",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/credit_notes/form.html": {
+    "mtime": 1776701029.0,
+    "ast_hash": "fe7c90d7228688ee6f75531fedda800a",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/credit_notes/detail.html": {
+    "mtime": 1776701048.0,
+    "ast_hash": "771fa68b6eab6cbb4adc65a1456e85d5",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/dashboard/_bank_balances.html": {
+    "mtime": 1779604033.8590121,
+    "ast_hash": "b5f5f63dc9638e1d8aa979020b515b27",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/dashboard/index.html": {
+    "mtime": 1776726072.0,
+    "ast_hash": "f644c9891246c51d11a79bd8daf4cf65",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/dashboard/_upcoming_recurring.html": {
+    "mtime": 1776726104.0,
+    "ast_hash": "91a88201b86f40b4630f3132e568bf91",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/dashboard/_cashflow.html": {
+    "mtime": 1776726098.0,
+    "ast_hash": "3b576b2d0a851264a8f8644bc706bf92",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/dashboard/_unmatched.html": {
+    "mtime": 1776726092.0,
+    "ast_hash": "e8cad81c283cf901b4238e38af408d81",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/dashboard/_aged_ar.html": {
+    "mtime": 1776726087.0,
+    "ast_hash": "eb5c9a69ff2245e5db4ade31d55d616e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/recurring_invoices/list.html": {
+    "mtime": 1779389000.3348076,
+    "ast_hash": "fddb0cd616d31b5095a7ca1e10afa42f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/recurring_invoices/form.html": {
+    "mtime": 1776701902.0,
+    "ast_hash": "f3a6e3f501f4f546d2484f13ac8e86ae",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/recurring_invoices/detail.html": {
+    "mtime": 1776701922.0,
+    "ast_hash": "2e757343c201381b8cdeb574331e6f5c",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/payments/list.html": {
+    "mtime": 1779389000.3338077,
+    "ast_hash": "a2336272f77675b4e5349aa035745391",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/payments/form.html": {
+    "mtime": 1776698408.0,
+    "ast_hash": "d769c5837a6c55e7f3b0d35ae82828a0",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/payments/detail.html": {
+    "mtime": 1776698425.0,
+    "ast_hash": "fe2c29631c386e31dcf733b8b4ad4e2f",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/templates/list.html": {
+    "mtime": 1776289333.0,
+    "ast_hash": "8ce0805ea242539c5328908d1f18b861",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/assets/dispose.html": {
+    "mtime": 1776681412.0,
+    "ast_hash": "f1127c715db76b24ee52491ea9a976f9",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/assets/list.html": {
+    "mtime": 1779389000.3328078,
+    "ast_hash": "79be6dd292452ae80a777534450ceb64",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/assets/import.html": {
+    "mtime": 1776774974.0,
+    "ast_hash": "147d1fd28ee0aaa53e9bb589b5585de4",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/assets/form.html": {
+    "mtime": 1776778020.0,
+    "ast_hash": "f60295c0be31163df669a624ddae1653",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/assets/dispose_partial.html": {
+    "mtime": 1776775938.0,
+    "ast_hash": "e812cb48a420c625a6aebd5c421516b8",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/assets/convert.html": {
+    "mtime": 1777382562.8056643,
+    "ast_hash": "55ac8dd92c3d512f45cc72500e3dd032",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/assets/import_preview.html": {
+    "mtime": 1776774988.0,
+    "ast_hash": "d79ac310bf706afb438a251e262869cc",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/templates/assets/show.html": {
+    "mtime": 1777382578.5056753,
+    "ast_hash": "fc767682a8c187dd1841e51c7a329cae",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/deploy/sap/README.md": {
+    "mtime": 1777043909.073173,
+    "ast_hash": "df418f05275f00bf3a6f5293938b711b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/deploy/sap/docker-compose.yml": {
+    "mtime": 1777043881.9905488,
+    "ast_hash": "225caa4eec4102a27b4d7961ec843b95",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/tests/TESTING.md": {
+    "mtime": 1779525604.8453372,
+    "ast_hash": "680d665da614edf44796e3284b47536e",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/.github/workflows/build-images.yml": {
+    "mtime": 1777043925.824556,
+    "ast_hash": "306168b443b813cad373a0416aab1e16",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/mcp-community/docker-compose.yml": {
+    "mtime": 1779537365.9999683,
+    "ast_hash": "406ce1454af2e24a17c86e64009fb211",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/grpcwebproxy/README.md": {
+    "mtime": 1779430754.8386588,
+    "ast_hash": "027d8e124ca3745105c803c56ac31539",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/docs/grpc-web.md": {
+    "mtime": 1779430754.837659,
+    "ast_hash": "c12ff909c168706f725324a1da6537a5",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/docs/payday-super-phase1-blockers.md": {
+    "mtime": 1780096121.18369,
+    "ast_hash": "68ab34c904d0da027adaee8e54c04205",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/docs/cashbook-gate-1-category-signoff.md": {
+    "mtime": 1778193959.8856766,
+    "ast_hash": "ed9c25d762fef48b3e0f4bf6d92735f7",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/docs/db-role-split.md": {
+    "mtime": 1779604033.8450122,
+    "ast_hash": "29cfe02cb9edbaf4be8fa283da48b008",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/docs/cashbook-edition-design.md": {
+    "mtime": 1778192711.7673664,
+    "ast_hash": "ffeb150af616828bc2740b05cc602433",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/docs/multi-jurisdiction.md": {
+    "mtime": 1778320971.06686,
+    "ast_hash": "30de9e3b6dba6c38705dc841a0562b3b",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/docs/webauthn.md": {
+    "mtime": 1779637876.24138,
+    "ast_hash": "e118022418a665f0f4b7cea6839ee539",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/docs/design/apply-credit-to-invoice.md": {
+    "mtime": 1779885514.7643,
+    "ast_hash": "ff38f26d24b99d8b0535e65c7efa66f7",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/docs/design/cashbook-tax-code-mapping.md": {
+    "mtime": 1779885514.7773,
+    "ast_hash": "00d29d79395f706eba7501af92d754b9",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/docs/design/audit-log-coverage.md": {
+    "mtime": 1779885514.7523,
+    "ast_hash": "c68bb53e61fdce0dff195c5cd00d2443",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/docs/contracts/lodge-server.md": {
+    "mtime": 1777796081.1969671,
+    "ast_hash": "16b679a0bba550b8b27de9bc7411f8e1",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/docs/contracts/license-server.md": {
+    "mtime": 1777796081.1969671,
+    "ast_hash": "39d94acfc37741a2fa3d857da4843b7d",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/docs/contracts/feeds-server.md": {
+    "mtime": 1777934475.2678742,
+    "ast_hash": "35ebf83ef13179aac0820d9e89947f62",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/docs/operations/rls-flip.md": {
+    "mtime": 1777846225.9265413,
+    "ast_hash": "44fa93dbc391ebfb60d40cd7dca1eee8",
+    "semantic_hash": ""
+  },
+  "/home/sauer/projects/saebooks/saebooks/assets/sae-logo.png": {
+    "mtime": 1779527010.4474845,
+    "ast_hash": "f7577c53164fd49685aef6da92e7eec6",
+    "semantic_hash": ""
+  }
+}

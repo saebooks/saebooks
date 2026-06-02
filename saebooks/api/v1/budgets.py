@@ -121,9 +121,10 @@ async def get_budget(
     request: Request,
     budget_id: UUID,
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> BudgetOut:
     tenant_id = resolve_tenant_id(request)
-    b = await svc.api_get(session, budget_id, tenant_id=tenant_id)
+    b = await svc.api_get(session, budget_id, tenant_id=tenant_id, company_id=company_id)
     if b is None:
         raise HTTPException(404, "Budget not found")
     return BudgetOut.model_validate(b)
@@ -209,6 +210,7 @@ async def update_budget(
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
@@ -217,7 +219,7 @@ async def update_budget(
 
     tenant_id = resolve_tenant_id(request)
     # Belt-and-braces: verify budget belongs to this tenant
-    if await svc.api_get(session, budget_id, tenant_id=tenant_id) is None:
+    if await svc.api_get(session, budget_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Budget not found")
 
     if key is not None:
@@ -292,9 +294,10 @@ async def delete_budget(
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
     hard: bool = Depends(hard_delete_admin_gate),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
-    existing = await svc.api_get(session, budget_id, tenant_id=tenant_id)
+    existing = await svc.api_get(session, budget_id, tenant_id=tenant_id, company_id=company_id)
     if existing is None:
         raise HTTPException(404, "Budget not found")
 

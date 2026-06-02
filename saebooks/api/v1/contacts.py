@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import date
 from typing import Any
 from uuid import UUID
 
@@ -54,7 +55,7 @@ from saebooks.api.v1.schemas import (
     ContactListOut,
     ContactOut,
     ContactUpdate,
-    OneOffBulkTagRequest,
+
 )
 from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.models.contact import Contact, ContactType
@@ -106,7 +107,6 @@ def _dump(contact: Contact) -> dict[str, Any]:
 async def list_contacts(
     contact_type: ContactType | None = Query(default=None, alias="type"),  # noqa: B008
     search: str | None = Query(default=None, alias="q"),
-    is_one_off: bool | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
@@ -120,8 +120,6 @@ async def list_contacts(
     )
     if contact_type is not None:
         count_stmt = count_stmt.where(Contact.contact_type == contact_type)
-    if is_one_off is not None:
-        count_stmt = count_stmt.where(Contact.is_one_off.is_(is_one_off))
     if search:
         pattern = f"%{search}%"
         count_stmt = count_stmt.where(
@@ -133,7 +131,6 @@ async def list_contacts(
         company_id,
         contact_type=contact_type,
         search=search,
-        is_one_off=is_one_off,
         limit=limit,
         offset=offset,
     )
@@ -155,9 +152,10 @@ async def get_contact(
     contact_id: UUID,
     request: Request,
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> ContactOut:
     tenant_id = resolve_tenant_id(request)
-    contact = await svc.get(session, contact_id, tenant_id=tenant_id)
+    contact = await svc.get(session, contact_id, tenant_id=tenant_id, company_id=company_id)
     if contact is None:
         raise HTTPException(404, "Contact not found")
     return ContactOut.model_validate(contact)
@@ -247,6 +245,7 @@ async def update_contact(
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     expected = _parse_if_match(if_match)
     if expected is None:
@@ -279,7 +278,7 @@ async def update_contact(
     # tenant before we attempt the update. RLS already enforces this,
     # but the service-layer ValueError message is friendlier than a
     # silent zero-rows update.
-    if await svc.get(session, contact_id, tenant_id=tenant_id) is None:
+    if await svc.get(session, contact_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Contact not found")
 
     try:
@@ -288,6 +287,7 @@ async def update_contact(
             contact_id,
             actor=f"api:{bearer[:8]}…",
             expected_version=expected,
+            tenant_id=tenant_id,
             **payload.model_dump(exclude_unset=True),
         )
     except svc.VersionConflict as exc:
@@ -334,10 +334,11 @@ async def archive_contact(
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
     hard: bool = Depends(hard_delete_admin_gate),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
     if hard:
-        existing = await svc.get(session, contact_id, tenant_id=tenant_id)
+        existing = await svc.get(session, contact_id, tenant_id=tenant_id, company_id=company_id)
         if existing is None:
             raise HTTPException(404, "Contact not found")
         await hard_delete_with_audit(
@@ -371,7 +372,7 @@ async def archive_contact(
                 status_code=claim.response_status or 204,
             )
 
-    if await svc.get(session, contact_id, tenant_id=tenant_id) is None:
+    if await svc.get(session, contact_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Contact not found")
 
     try:
@@ -380,6 +381,7 @@ async def archive_contact(
             contact_id,
             actor=f"api:{bearer[:8]}…",
             expected_version=expected,
+            tenant_id=tenant_id,
         )
     except svc.VersionConflict as exc:
         await session.refresh(exc.current)
@@ -400,53 +402,102 @@ async def archive_contact(
     return Response(status_code=204)
 
 # ---------------------------------------------------------------------------
-# Bulk-tag one-off — flip ``is_one_off`` on many contacts in one call.
+
+
+# ---------------------------------------------------------------------------
+# Customer statements (G3) — added 2026-05-27.
+# JSON + PDF surfaces for "this customer's AR activity in a date range".
+# Built on services.statements.build_statement.
 # ---------------------------------------------------------------------------
 
 
-@router.post(
-    "/bulk-tag-one-off",
-    response_model=None,
-)
-async def bulk_tag_one_off(
-    payload: OneOffBulkTagRequest,
+@router.get("/{contact_id}/statement")
+async def get_contact_statement(
+    contact_id: UUID,
     request: Request,
+    period_from: date = Query(..., alias="from", description="Statement period start (YYYY-MM-DD)"),
+    period_to:   date = Query(..., alias="to",   description="Statement period end (YYYY-MM-DD)"),
     bearer: str = Depends(require_bearer),
     session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
 ) -> JSONResponse:
-    """Set ``is_one_off`` on a list of contacts in one transaction.
+    """Return a customer statement as JSON for the given period."""
+    from saebooks.services.statements import build_statement
 
-    Body: ``{"contact_ids": [...], "is_one_off": true|false}``.
-
-    Each contact is fetched (tenant-scoped, archived rows skipped), its
-    ``is_one_off`` flag updated to the requested value if it differs,
-    a change_log row appended, and the version bumped. Already-correct
-    rows are skipped silently. Foreign-tenant ids (or non-existent ids)
-    are silently skipped — same shape as the existing per-row update
-    would yield a 404 individually.
-
-    Returns ``{"flipped": <count>}`` — number of rows whose flag actually
-    changed.
-    """
     tenant_id = resolve_tenant_id(request)
-    flipped = 0
-    for cid in payload.contact_ids:
-        existing = await svc.get(session, cid, tenant_id=tenant_id)
-        if existing is None or existing.archived_at is not None:
-            continue
-        if existing.is_one_off == payload.is_one_off:
-            continue
-        try:
-            await svc.update(
-                session,
-                cid,
-                actor=f"api:{bearer[:8]}…",
-                tenant_id=tenant_id,
-                is_one_off=payload.is_one_off,
-            )
-        except (ValueError, svc.VersionConflict):
-            # Skip a bad/conflicting row; the rest of the batch still proceeds.
-            continue
-        flipped += 1
-    return JSONResponse({"flipped": flipped}, status_code=200)
+    if period_to < period_from:
+        raise HTTPException(422, "'to' must not be before 'from'")
+    try:
+        statement = await build_statement(
+            session, contact_id,
+            tenant_id=tenant_id, company_id=company_id,
+            period_start=period_from, period_end=period_to,
+        )
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
+    return JSONResponse({
+        "contact_id":    str(statement.contact_id),
+        "contact_name":  statement.contact_name,
+        "contact_email": statement.contact_email,
+        "period": {
+            "from": statement.period_start.isoformat(),
+            "to":   statement.period_end.isoformat(),
+        },
+        "opening_balance":           str(statement.opening_balance),
+        "closing_balance":           str(statement.closing_balance),
+        "total_invoiced_in_period":  str(statement.total_invoiced_in_period),
+        "total_paid_in_period":      str(statement.total_paid_in_period),
+        "lines": [
+            {
+                "date":        ln.line_date.isoformat(),
+                "kind":        ln.kind,
+                "reference":   ln.reference,
+                "description": ln.description,
+                "amount_dr":   str(ln.amount_dr),
+                "amount_cr":   str(ln.amount_cr),
+                "balance":     str(ln.balance),
+            }
+            for ln in statement.lines
+        ],
+    })
+
+
+@router.get("/{contact_id}/statement.pdf")
+async def get_contact_statement_pdf(
+    contact_id: UUID,
+    request: Request,
+    period_from: date = Query(..., alias="from"),
+    period_to:   date = Query(..., alias="to"),
+    bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> Response:
+    """Return the customer statement as a PDF (engineering-style document)."""
+    from saebooks.services.statements import build_statement, render_statement_pdf
+    from saebooks.models.company import Company
+    from sqlalchemy import select as sa_select
+
+    tenant_id = resolve_tenant_id(request)
+    if period_to < period_from:
+        raise HTTPException(422, "'to' must not be before 'from'")
+    try:
+        statement = await build_statement(
+            session, contact_id,
+            tenant_id=tenant_id, company_id=company_id,
+            period_start=period_from, period_end=period_to,
+        )
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+    company = (
+        await session.execute(sa_select(Company).where(Company.id == company_id))
+    ).scalars().first()
+
+    pdf_bytes = render_statement_pdf(statement, company=company)
+    filename = f"statement-{statement.contact_name.replace(' ', '-')[:40]}-{period_from.isoformat()}-{period_to.isoformat()}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )

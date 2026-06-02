@@ -356,7 +356,7 @@ async def get(
     """
     stmt = (
         select(Invoice)
-        .options(selectinload(Invoice.lines))
+        .options(selectinload(Invoice.lines), selectinload(Invoice.one_off_customer))
         .where(Invoice.id == invoice_id)
     )
     if tenant_id is not None:
@@ -380,7 +380,7 @@ async def list_invoices(
 ) -> list[Invoice]:
     stmt = (
         select(Invoice)
-        .options(selectinload(Invoice.lines))
+        .options(selectinload(Invoice.lines), selectinload(Invoice.one_off_customer))
         .where(Invoice.company_id == company_id)
     )
     if not include_archived:
@@ -917,7 +917,7 @@ async def _get_with_lines(
 ) -> Invoice | None:
     result = await session.execute(
         select(Invoice)
-        .options(selectinload(Invoice.lines))
+        .options(selectinload(Invoice.lines), selectinload(Invoice.one_off_customer))
         .where(Invoice.id == invoice_id)
     )
     return result.scalar_one_or_none()
@@ -961,7 +961,7 @@ async def list_active(
 
     stmt = (
         select(Invoice)
-        .options(selectinload(Invoice.lines))
+        .options(selectinload(Invoice.lines), selectinload(Invoice.one_off_customer))
         .where(*base_where)
         .order_by(Invoice.issue_date.desc(), Invoice.created_at.desc())
         .limit(limit)
@@ -976,6 +976,7 @@ async def api_get(
     invoice_id: uuid.UUID,
     *,
     tenant_id: uuid.UUID | None = None,
+    company_id: uuid.UUID | None = None,
 ) -> Invoice | None:
     """Fetch a single invoice with its lines. Returns None if not found.
 
@@ -991,15 +992,17 @@ async def api_get(
     fetch the detail. With ``tenant_id`` supplied we now reject those
     lookups defensively, on top of the FORCE-RLS gate at the DB layer.
     """
-    if tenant_id is None:
+    if tenant_id is None and company_id is None:
         return await _get_with_lines(session, invoice_id)
+    clauses = [Invoice.id == invoice_id]
+    if tenant_id is not None:
+        clauses.append(Invoice.tenant_id == tenant_id)
+    if company_id is not None:
+        clauses.append(Invoice.company_id == company_id)
     result = await session.execute(
         select(Invoice)
-        .options(selectinload(Invoice.lines))
-        .where(
-            Invoice.id == invoice_id,
-            Invoice.tenant_id == tenant_id,
-        )
+        .options(selectinload(Invoice.lines), selectinload(Invoice.one_off_customer))
+        .where(*clauses)
     )
     return result.scalar_one_or_none()
 

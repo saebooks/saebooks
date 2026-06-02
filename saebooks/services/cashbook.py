@@ -444,12 +444,24 @@ async def record_cashbook_entry(
 
     # Post — runs GST auto-post + balance check + period-lock check
     # against the existing ``services.journal`` invariants.
-    posted = await journal_svc.post(
-        db,
-        draft.id,
-        posted_by=actor,
-        tenant_id=tenant_id,
-    )
+    #
+    # If post() raises (period lock, unbalanced lines, posting policy)
+    # the DRAFT row is already flushed and would survive the call —
+    # leaving an orphan that pollutes /journal-entries and counts
+    # toward sequence numbers (Round-2 critic 20). Roll back to the
+    # idempotency-key savepoint so the draft disappears AND the
+    # idempotency key is released, letting the client retry cleanly
+    # with the same key after fixing the underlying input.
+    try:
+        posted = await journal_svc.post(
+            db,
+            draft.id,
+            posted_by=actor,
+            tenant_id=tenant_id,
+        )
+    except Exception:
+        await db.rollback()
+        raise
 
     # Re-load with lines so callers see the full posted shape (incl.
     # any auto-posted GST line).

@@ -484,6 +484,7 @@ async def get(
     account_id: uuid.UUID,
     *,
     tenant_id: uuid.UUID | None = None,
+    company_id: uuid.UUID | None = None,
 ) -> Account | None:
     """Fetch an account by id.
 
@@ -494,13 +495,15 @@ async def get(
     services that already filtered by company) keep working unchanged;
     the API layer always supplies it.
     """
-    if tenant_id is None:
+    if tenant_id is None and company_id is None:
         return await session.get(Account, account_id)
+    clauses = [Account.id == account_id]
+    if tenant_id is not None:
+        clauses.append(Account.tenant_id == tenant_id)
+    if company_id is not None:
+        clauses.append(Account.company_id == company_id)
     result = await session.execute(
-        select(Account).where(
-            Account.id == account_id,
-            Account.tenant_id == tenant_id,
-        )
+        select(Account).where(*clauses)
     )
     return result.scalars().first()
 

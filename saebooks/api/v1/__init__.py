@@ -27,6 +27,7 @@ from saebooks.api.v1.admin import router as admin_router
 from saebooks.api.v1.admin_inspect import router as admin_inspect_router
 from saebooks.api.v1.admin_tenants import router as admin_tenants_router
 from saebooks.api.v1.api_tokens import router as api_tokens_router
+from saebooks.api.v1.webauthn import router as webauthn_router
 from saebooks.api.v1.ai_extraction import router as ai_extraction_router
 from saebooks.api.v1.allocations import router as allocations_router
 from saebooks.api.v1.attachments import router as attachments_router
@@ -37,10 +38,14 @@ from saebooks.api.v1.bank_rules import router as bank_rules_router
 from saebooks.api.v1.bank_statement_lines import router as bank_statement_lines_router
 from saebooks.api.v1.billing import router as billing_router
 from saebooks.api.v1.bills import router as bills_router
+from saebooks.api.v1.branches import router as branches_router
 from saebooks.api.v1.employees import router as employees_router
 from saebooks.api.v1.expenses import router as expenses_router
 from saebooks.api.v1.leave import router as leave_router
 from saebooks.api.v1.stp import router as stp_router
+from saebooks.api.v1.tpar import router as tpar_router
+from saebooks.api.v1.super_lodgements import router as super_lodgements_router
+from saebooks.api.v1.tax_returns import router as tax_returns_router
 from saebooks.api.v1.super_funds import router as super_funds_router
 from saebooks.api.v1.time_entries import router as time_entries_router
 from saebooks.api.v1.budgets import router as budgets_router
@@ -49,6 +54,8 @@ from saebooks.api.v1.changes import router as changes_router
 from saebooks.api.v1.companies import router as companies_router
 from saebooks.api.v1.contact_public import router as contact_public_router
 from saebooks.api.v1.contacts import router as contacts_router
+from saebooks.api.v1.one_off_vendors import router as one_off_vendors_router
+from saebooks.api.v1.one_off_customers import router as one_off_customers_router
 from saebooks.api.v1.credit_notes import router as credit_notes_router
 from saebooks.api.v1.depreciation_models import router as depreciation_models_router
 from saebooks.api.v1.fixed_assets import router as fixed_assets_router
@@ -108,6 +115,8 @@ router.include_router(lodgement_router)
 # Public contact form — unauthenticated, rate-limited per IP/hour.
 router.include_router(contact_public_router)
 router.include_router(contacts_router)
+router.include_router(one_off_vendors_router)
+router.include_router(one_off_customers_router)
 router.include_router(account_ranges_router)
 router.include_router(accounts_router)
 router.include_router(ato_sbr_router)
@@ -126,6 +135,7 @@ router.include_router(journal_entries_router)
 router.include_router(invoices_router)
 router.include_router(journal_templates_router)
 router.include_router(bills_router)
+router.include_router(branches_router)
 router.include_router(expenses_router)
 router.include_router(time_entries_router)
 # Payroll Phase 1A foundations
@@ -183,5 +193,14 @@ router.include_router(pay_run_router)
 router.include_router(cashbook_router)
 # Self-serve Personal Access Tokens — list/create/revoke own tokens.
 # See saebooks/services/pat_tokens.py and migration 0111.
+
+# WebAuthn / FIDO2 — native passkey support at the app layer, removes
+# the dependency on Authentik / CF Access for FIDO2-bound login. Default
+# on; per-instance config via SAEBOOKS_WEBAUTHN_RP_ID / _ORIGIN env vars.
+router.include_router(webauthn_router)
+router.include_router(tpar_router)
+# Payday Super Phase 1 — SAFF generation + lodgement tracking
+router.include_router(super_lodgements_router)
+router.include_router(tax_returns_router)
 
 __all__ = ["router"]
