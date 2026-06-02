@@ -56,6 +56,7 @@ from saebooks.config import settings
 from saebooks.models.bill import Bill
 from saebooks.models.contact import Contact
 from saebooks.models.invoice import Invoice
+from saebooks.models.journal import JournalEntry
 from saebooks.models.payment import Payment
 from saebooks.services import vault as vault_client
 
@@ -76,6 +77,10 @@ _ENTITY_MODELS: dict[str, type] = {
     "bill": Bill,
     "payment": Payment,
     "contact": Contact,
+    # Cashbook entries are journal entries (CashbookEntryOut.id ==
+    # JournalEntry.id), so receipts captured from a cashbook entry
+    # link against JournalEntry.
+    "journal_entry": JournalEntry,
 }
 
 
