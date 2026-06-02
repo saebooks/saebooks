@@ -31,8 +31,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0141_account_credit_limit"
-down_revision: str | None = "0140_payments_one_off_customer"
+revision: str = "0143_account_credit_limit"
+down_revision: str | None = "0142_invoice_written_off"
 branch_labels: Sequence[str] | None = None
 depends_on: Sequence[str] | None = None
 
