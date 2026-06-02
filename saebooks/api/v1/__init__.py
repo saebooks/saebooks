@@ -44,6 +44,7 @@ from saebooks.api.v1.expenses import router as expenses_router
 from saebooks.api.v1.leave import router as leave_router
 from saebooks.api.v1.stp import router as stp_router
 from saebooks.api.v1.tpar import router as tpar_router
+from saebooks.api.v1.super_lodgements import router as super_lodgements_router
 from saebooks.api.v1.tax_returns import router as tax_returns_router
 from saebooks.api.v1.super_funds import router as super_funds_router
 from saebooks.api.v1.time_entries import router as time_entries_router
@@ -198,6 +199,8 @@ router.include_router(cashbook_router)
 # on; per-instance config via SAEBOOKS_WEBAUTHN_RP_ID / _ORIGIN env vars.
 router.include_router(webauthn_router)
 router.include_router(tpar_router)
+# Payday Super Phase 1 — SAFF generation + lodgement tracking
+router.include_router(super_lodgements_router)
 router.include_router(tax_returns_router)
 
 __all__ = ["router"]

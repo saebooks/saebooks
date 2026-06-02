@@ -649,6 +649,19 @@ async def finalize_with_je(
         version=pay_run.version,
     )
     await session.commit()
+
+    # Payday Super Phase 1 — best-effort lodgement build. Gated by
+    # SAEBOOKS_PAYDAY_SUPER / SAEBOOKS_ENV. Failures are logged and
+    # swallowed; the pay-run finalise must not roll back if super
+    # lodgement generation fails.
+    from saebooks.services.super_stream import maybe_build_after_finalize
+
+    await maybe_build_after_finalize(
+        session,
+        tenant_id=tenant_id,
+        company_id=pay_run.company_id,
+        pay_run_id=pay_run.id,
+    )
     return pay_run
 
 

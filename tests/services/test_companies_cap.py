@@ -162,3 +162,43 @@ async def test_create_company_blocks_paid_tiers_at_cap(
     finally:
         await _purge_test_companies(f"CAP_TEST_filler_{tag}")
         await _purge_test_companies(f"CAP_TEST_over_{tag}")
+
+
+async def test_create_company_persists_valid_entity_type(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression for the entity_type enum/string drift 500.
+
+    ``companies.entity_type`` is a Postgres ENUM (``entity_type_enum``,
+    migration 0133). The ORM model previously mapped it as ``String(32)``,
+    so asyncpg bound the INSERT parameter as ``$n::VARCHAR`` and Postgres
+    refused the implicit varchar->enum cast — every ``create_company`` 500'd
+    with ``column "entity_type" is of type entity_type_enum but expression
+    is of type character varying``.
+
+    With the model mapped to the native enum, create_company must succeed
+    and the row must round-trip a valid enum label (the default ``COMPANY``).
+    """
+    monkeypatch.setattr(
+        companies_svc, "resolve_licence", lambda: _fake_licence("enterprise")
+    )
+    tag = uuid.uuid4().hex[:8]
+    name = f"CAP_TEST_entity_{tag}"
+    try:
+        async with AsyncSessionLocal() as session:
+            company = await companies_svc.create_company(session, name=name)
+            assert company.id is not None
+            # Default is COMPANY and must be a valid enum label.
+            assert company.entity_type == "COMPANY"
+
+        # Re-read in a fresh session to confirm it actually persisted as the
+        # enum (asyncpg returns the label as a str on SELECT).
+        async with AsyncSessionLocal() as session:
+            persisted = (
+                await session.execute(
+                    select(Company.entity_type).where(Company.name == name)
+                )
+            ).scalar_one()
+            assert persisted == "COMPANY"
+    finally:
+        await _purge_test_companies("CAP_TEST_entity_")

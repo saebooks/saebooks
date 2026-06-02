@@ -2,7 +2,7 @@
 
 Two tables: ``invoices`` and ``invoice_lines``. Lifecycle:
 
-    DRAFT  -->  POSTED  -->  VOIDED
+    DRAFT  -->  POSTED  -->  VOIDED / WRITTEN_OFF
 
 A DRAFT is editable and has no GL impact. Posting generates the
 invoice number (via ``services/numbering.py``), debits the AR control
@@ -47,6 +47,7 @@ class InvoiceStatus(enum.StrEnum):
     DRAFT = "DRAFT"
     POSTED = "POSTED"
     VOIDED = "VOIDED"
+    WRITTEN_OFF = "WRITTEN_OFF"
 
 
 class Invoice(CompanyScoped, Base):
@@ -132,6 +133,10 @@ class Invoice(CompanyScoped, Base):
         ForeignKey("journal_entries.id", ondelete="SET NULL"),
     )
     void_journal_entry_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("journal_entries.id", ondelete="SET NULL"),
+    )
+    write_off_journal_entry_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("journal_entries.id", ondelete="SET NULL"),
     )
