@@ -14,7 +14,7 @@ from typing import Any
 from sqlalchemy import select
 
 from saebooks.config import settings
-from saebooks.db import AsyncSessionLocal
+from saebooks.db import AsyncSessionLocal, LoginSessionLocal
 from saebooks.models.user import User, UserRole
 from saebooks.services.email import send_email
 
@@ -103,26 +103,38 @@ async def verify_magic_link(token: str) -> User:
 
     email = token_data["email"]
 
-    async with AsyncSessionLocal() as session:
-        # Try to find existing user by email
-        user_result = await session.execute(
-            select(User).where(User.email == email)
-        )
-        existing_user = user_result.scalars().first()
+    # Pre-auth lookup BY EMAIL — the tenant is not known yet, so this must
+    # use the BYPASSRLS owner role (LoginSessionLocal). Under the runtime
+    # NOBYPASSRLS saebooks_app role, FORCE RLS on ``users`` (migration 0055)
+    # would silently return zero rows for the unbound SELECT — the magic
+    # link would then create a DUPLICATE user on every login instead of
+    # finding the existing one. See db.py for the LoginSessionLocal rationale
+    # and api/v1/login.py::_user_by_email for the reference pattern.
+    async with LoginSessionLocal() as lookup_session:
+        existing_user = (
+            await lookup_session.execute(select(User).where(User.email == email))
+        ).scalars().first()
 
-        if existing_user and not existing_user.archived_at:
-            # Mark email as verified
-            if not existing_user.email_verified_at:
-                existing_user.email_verified_at = datetime.now(UTC)
-                session.add(existing_user)
-            # Mark token as used
-            _token_store[token]["used"] = True
+    if existing_user is not None and not existing_user.archived_at:
+        # Write path: mark email verified under the existing user's tenant.
+        # Stamp session.info so the after_begin listener issues SET LOCAL
+        # app.current_tenant, satisfying FORCE RLS on the UPDATE.
+        async with AsyncSessionLocal() as session:
+            session.info["tenant_id"] = str(existing_user.tenant_id)
+            db_user = await session.get(User, existing_user.id)
+            if db_user is not None and not db_user.email_verified_at:
+                db_user.email_verified_at = datetime.now(UTC)
             await session.commit()
-            return existing_user
+        _token_store[token]["used"] = True
+        return existing_user
 
-        # Create new user
+    # Create new user in the seed/default tenant. Bind that tenant so the
+    # INSERT passes the tenant_isolation WITH CHECK under FORCE RLS.
+    default_tenant_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+    async with AsyncSessionLocal() as session:
+        session.info["tenant_id"] = str(default_tenant_id)
         new_user = User(
-            tenant_id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
+            tenant_id=default_tenant_id,
             username=email.split("@")[0],  # Initial username from email
             email=email,
             role=UserRole.VIEWER.value,
@@ -132,8 +144,8 @@ async def verify_magic_link(token: str) -> User:
         await session.commit()
         await session.refresh(new_user)
 
-        # Mark token as used
-        _token_store[token]["used"] = True
+    # Mark token as used
+    _token_store[token]["used"] = True
 
-        logger.info(f"Created new user via magic link: {email}")
-        return new_user
+    logger.info(f"Created new user via magic link: {email}")
+    return new_user
