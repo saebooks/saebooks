@@ -44,6 +44,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -145,6 +146,38 @@ async def list_contacts(
 # ---------------------------------------------------------------------------
 # Get
 # ---------------------------------------------------------------------------
+
+
+class _BulkTagOneOffIn(BaseModel):
+    contact_ids: list[UUID]
+    is_one_off: bool
+
+
+@router.post("/bulk-tag-one-off")
+async def bulk_tag_one_off(
+    payload: _BulkTagOneOffIn,
+    request: Request,
+    bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> dict[str, int]:
+    """Flip ``is_one_off`` on the given contacts. Returns ``{"flipped": N}``
+    counting only contacts whose flag actually changed (idempotent). Defined
+    before /{contact_id} so the literal path wins the route match."""
+    tenant_id = resolve_tenant_id(request)
+    flipped = 0
+    for cid in payload.contact_ids:
+        contact = await svc.get(session, cid, tenant_id=tenant_id)
+        if contact is None or contact.archived_at is not None:
+            continue
+        if contact.is_one_off == payload.is_one_off:
+            continue
+        await svc.update(
+            session, cid, actor="api", tenant_id=tenant_id,
+            is_one_off=payload.is_one_off,
+        )
+        flipped += 1
+    return {"flipped": flipped}
 
 
 @router.get("/{contact_id}", response_model=ContactOut)

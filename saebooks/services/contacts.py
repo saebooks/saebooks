@@ -131,11 +131,8 @@ async def list_active(
         stmt = stmt.where(
             Contact.name.ilike(pattern) | Contact.email.ilike(pattern)
         )
-    # NOTE: one-off parties live in their own tables (one_off_customers /
-    # one_off_vendors, migration 0137), not in `contacts`, so there is no
-    # Contact.is_one_off column to filter on. The param is accepted (the web
-    # router passes it) and is currently a no-op pending one-off integration;
-    # this restores the contacts page, which 500'd on the missing kwarg.
+    if is_one_off is not None:
+        stmt = stmt.where(Contact.is_one_off == is_one_off)
     stmt = stmt.order_by(Contact.name).offset(offset).limit(limit)
     result = await session.execute(stmt)
     return list(result.scalars().all())
@@ -203,6 +200,7 @@ async def create(
     share_percentage: object = None,
     default_income_classification: str | None = None,
     is_tpar_supplier: bool = False,
+    is_one_off: bool = False,
 ) -> Contact:
     """Create a new contact. Validate ABN format if provided (11 digits)."""
     if abn is not None:
@@ -230,6 +228,7 @@ async def create(
         share_percentage=share_percentage,
         default_income_classification=default_income_classification,
         is_tpar_supplier=is_tpar_supplier,
+        is_one_off=is_one_off,
         version=1,
     )
     session.add(contact)
@@ -289,7 +288,7 @@ async def update(
         "country", "notes", "default_account_id", "default_tax_code",
         "currency_code",
         "tfn", "share_percentage", "default_income_classification",
-        "is_tpar_supplier", }
+        "is_tpar_supplier", "is_one_off", }
 
     before = audit_svc.capture(contact)
     for key, value in kwargs.items():

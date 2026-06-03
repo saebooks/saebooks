@@ -38,6 +38,7 @@ class ContactBase(BaseModel):
     bank_account_number: str | None = None
     bank_account_title: str | None = None
     currency_code: str | None = Field(default=None, max_length=3, description="ISO 4217 billing currency")
+    is_one_off: bool = False
 
 
 class ContactCreate(ContactBase):
@@ -68,6 +69,7 @@ class ContactUpdate(BaseModel):
     default_account_id: uuid.UUID | None = None
     default_tax_code: str | None = None
     currency_code: str | None = Field(default=None, max_length=3)
+    is_one_off: bool | None = None
 
 
 class ContactOut(ContactBase):
