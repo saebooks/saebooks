@@ -43,6 +43,7 @@ async def invoice_deps(api_client: AsyncClient) -> dict[str, str]:
                 select(Account).where(
                     Account.archived_at.is_(None),
                     Account.account_type == AccountType.INCOME,
+                    Account.is_header.is_(False),
                     Account.tenant_id == DEFAULT_TENANT_ID,
                 ).limit(1)
             )

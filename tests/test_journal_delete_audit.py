@@ -38,7 +38,7 @@ async def _ctx() -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
         accts = (
             await session.execute(
                 select(Account)
-                .where(Account.company_id == co.id)
+                .where(Account.company_id == co.id, Account.is_header.is_(False))
                 .order_by(Account.code)
                 .limit(2)
             )
