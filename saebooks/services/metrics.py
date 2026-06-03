@@ -34,7 +34,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.requests import Request
 from starlette.responses import Response
 
-from saebooks.db import AsyncSessionLocal
+from saebooks.db import LoginSessionLocal
 from saebooks.models.bank_statement import BankStatementLine, StatementLineStatus
 from saebooks.models.company import Company
 from saebooks.models.invoice import Invoice, InvoiceStatus
@@ -106,7 +106,10 @@ async def refresh_gauges() -> None:
     Runs inline on every /metrics scrape. Three index-backed
     ``COUNT(*)`` queries per company — cheap.
     """
-    async with AsyncSessionLocal() as session:
+    # Cross-tenant monitoring aggregate (all companies) — use the
+    # owner/BYPASSRLS role so FORCE RLS under the saebooks_app runtime
+    # role does not hide every company and zero out the gauges.
+    async with LoginSessionLocal() as session:
         companies = (
             await session.execute(
                 select(Company.id).where(Company.archived_at.is_(None))

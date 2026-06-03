@@ -122,6 +122,25 @@ def _set_current_tenant_on_begin(
 event.listen(Session, "after_begin", _set_current_tenant_on_begin)
 
 
+def _fill_tenant_id_on_flush(session, flush_context, instances):
+    # before_flush: backfill tenant_id on pending INSERTs from session.info —
+    # the same source after_begin uses for the GUC, so the filled value
+    # satisfies the tenant_isolation WITH CHECK under the NOBYPASSRLS app role.
+    # Fixes lazy create-paths (e.g. account_ranges seeding) that pass only
+    # company_id. Explicit tenant_ids are never overwritten; no-op for
+    # owner/pre-auth sessions whose info carries no tenant.
+    tid = session.info.get("tenant_id")
+    if tid is None:
+        return
+    tid_uuid = uuid.UUID(str(tid))
+    for obj in session.new:
+        if hasattr(obj, "tenant_id") and getattr(obj, "tenant_id", None) is None:
+            obj.tenant_id = tid_uuid
+
+
+event.listen(Session, "before_flush", _fill_tenant_id_on_flush)
+
+
 async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
     """Yield one ``AsyncSession`` per request with ``app.current_tenant`` set.
 
