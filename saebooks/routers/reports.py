@@ -24,6 +24,9 @@ from saebooks.web import templates
 from saebooks.services import active_company as active_svc
 from saebooks.api.v1.auth import resolve_tenant_id
 from saebooks.routers.deps import get_web_session
+from saebooks.services.authz import require_role, resolve_actor_role
+from saebooks.services.journal import PostingError
+from saebooks.models.user import UserRole
 
 router = APIRouter(prefix="/reports")
 
@@ -359,12 +362,25 @@ async def close_year_form(
     )
 
 
-@router.post("/close-year", response_model=None)
+@router.post(
+    "/close-year",
+    response_model=None,
+    dependencies=[Depends(require_role(UserRole.ADMIN))],
+)
 async def close_year_submit(
     request: Request,
     session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse:
-    """Post the year-end close journal, then lock the period."""
+    """Post the year-end close journal, then lock the period.
+
+    ADMIN-gated: closing a year locks the period and is a privileged,
+    effectively-irreversible action. ``actor_role`` is threaded into the
+    period-lock override gate so the close still succeeds when an earlier
+    lock already sits at/through the close date AND the admin supplies an
+    ``override_reason`` (F-04). Without an override the lock raises
+    ``PostingError`` — caught here and bounced back to the preview with the
+    reason so the admin can retry with one.
+    """
     company = await _first_company()
     form = await request.form()
     through_date = _parse_date(str(form.get("through", "")))
@@ -375,17 +391,33 @@ async def close_year_submit(
             400, "Both 'through' date and retained-earnings account are required"
         )
     posted_by = request.headers.get("remote-user") or None
+    override_reason = str(form.get("override_reason", "")).strip() or None
 
     tenant_id = resolve_tenant_id(request)
 
-    entry = await period_close_svc.close_year(
-        session,
-        company.id,
-        tenant_id=tenant_id,
-        through_date=through_date,
-        retained_earnings_account_id=retained_id,
-        posted_by=posted_by,
-    )
+    try:
+        entry = await period_close_svc.close_year(
+            session,
+            company.id,
+            tenant_id=tenant_id,
+            through_date=through_date,
+            retained_earnings_account_id=retained_id,
+            posted_by=posted_by,
+            override_reason=override_reason,
+            actor_role=resolve_actor_role(request),
+        )
+    except PostingError as exc:
+        await session.rollback()
+        # A lock already covers the close date. Send the admin back to the
+        # preview with the message; the form carries an override-reason
+        # input so the close can be retried with an acknowledgement.
+        from urllib.parse import quote
+
+        return RedirectResponse(
+            f"/reports/close-year?through={through_date.isoformat()}"
+            f"&error={quote(str(exc))}",
+            status_code=303,
+        )
 
     if entry is None:
         return RedirectResponse(

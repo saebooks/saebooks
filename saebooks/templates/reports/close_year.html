@@ -30,6 +30,15 @@
 <div class="notice">Nothing to close — every P&amp;L account is already zero for that period.</div>
 {% endif %}
 
+{% if request.query_params.get('error') %}
+<div class="alert alert-error">
+  {{ request.query_params.get('error') }}
+  <br><small>The period is already locked through the close date. Provide an
+  override reason below and post again to acknowledge closing into a locked
+  period.</small>
+</div>
+{% endif %}
+
 {% if preview %}
   {% if preview.has_anything_to_close %}
   <table class="report-table">
@@ -61,6 +70,11 @@
   <form method="post" class="form-actions" onsubmit="return confirm('Post the close-year journal and lock the period through {{ through }}? This cannot be undone without posting a manual adjustment with override reason.');">
     <input type="hidden" name="through" value="{{ through }}">
     <input type="hidden" name="retained_earnings_account_id" value="{{ retained_earnings_id }}">
+    <label class="dim" style="display:block;margin:0.4rem 0">
+      Override reason (only required if the period is already locked)
+      <input name="override_reason" value="{{ request.query_params.get('error') and 'Year-end close (locked-period override)' or '' }}"
+             placeholder="e.g. year-end close into an already-locked period">
+    </label>
     <button type="submit" class="btn-primary">Post close-year journal</button>
   </form>
   {% else %}
