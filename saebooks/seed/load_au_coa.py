@@ -13,7 +13,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from saebooks.db import AsyncSessionLocal
+from saebooks.db import LoginSessionLocal
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.services.companies import ensure_seed_company
@@ -298,7 +298,7 @@ async def _seed_period_locks(session: AsyncSession, company: Company) -> int:
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO)
-    async with AsyncSessionLocal() as session:
+    async with LoginSessionLocal() as session:
         company = await ensure_seed_company(session)
         tax_inserted = await ensure_tax_codes(session, company.id)
         logger.info("Tax codes: %d inserted", tax_inserted)

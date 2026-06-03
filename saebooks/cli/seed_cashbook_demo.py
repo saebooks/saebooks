@@ -31,7 +31,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from saebooks.db import AsyncSessionLocal
+from saebooks.db import LoginSessionLocal
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.models.journal import JournalEntry
@@ -447,7 +447,7 @@ async def main() -> None:
     logging.basicConfig(level=logging.INFO)
 
     # 1. Company (with default tenant_id)
-    async with AsyncSessionLocal() as session:
+    async with LoginSessionLocal() as session:
         company = await _seed_company(session)
         logger.info("Company: %s (%s)", company.name, company.id)
 
@@ -457,7 +457,7 @@ async def main() -> None:
     company_id = company.id
 
     # 3. Tax codes
-    async with AsyncSessionLocal() as session:
+    async with LoginSessionLocal() as session:
         company = (
             await session.execute(select(Company).where(Company.id == company_id))
         ).scalars().one()
@@ -465,12 +465,12 @@ async def main() -> None:
         logger.info("Tax codes seeded: %d new", n_tc)
 
     # 4. Demo user
-    async with AsyncSessionLocal() as session:
+    async with LoginSessionLocal() as session:
         user = await _seed_user(session)
         logger.info("User: %s (%s)", user.email, user.id)
 
     # 5. Pick bank account + flip company to cashbook mode
-    async with AsyncSessionLocal() as session:
+    async with LoginSessionLocal() as session:
         company = (
             await session.execute(select(Company).where(Company.id == company_id))
         ).scalars().one()
@@ -494,7 +494,7 @@ async def main() -> None:
             logger.info("Company already in cashbook mode.")
 
     # 6. Cashbook entries
-    async with AsyncSessionLocal() as session:
+    async with LoginSessionLocal() as session:
         existing = await _existing_demo_entry_count(
             session, company_id=company.id
         )
@@ -506,10 +506,10 @@ async def main() -> None:
 
 
     # 7. Sample invoices + quotes
-    async with AsyncSessionLocal() as session:
+    async with LoginSessionLocal() as session:
         n_inv = await _seed_invoices(session, company_id)
         logger.info("Demo invoices inserted/preserved: %d", n_inv)
-    async with AsyncSessionLocal() as session:
+    async with LoginSessionLocal() as session:
         n_q = await _seed_quotes(session, company_id)
         logger.info("Demo quotes inserted/preserved: %d", n_q)
 
