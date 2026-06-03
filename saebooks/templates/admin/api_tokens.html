@@ -59,7 +59,13 @@
   <label>
     Scopes (comma-separated)
     <input type="text" name="scopes"
-           placeholder="optional, e.g. read,invoices.write" autocomplete="off">
+           placeholder="read  |  write  |  blank = full access" autocomplete="off">
+    <small style="display:block; opacity:.75; margin-top:.25em">
+      Enforced read/write only. <code>read</code> = GET/read endpoints;
+      <code>write</code> = create/update/delete. Leave blank (or use
+      <code>*</code>) for full access — the default and what every
+      existing token has.
+    </small>
   </label>
   <button type="submit">Generate</button>
 </form>
@@ -92,7 +98,7 @@
     <tr{% if t.revoked_at %} class="archived"{% endif %}>
       <td>{{ t.name }}</td>
       <td><code>saebk_{{ t.token_prefix }}…</code></td>
-      <td>{{ ", ".join(t.scopes) if t.scopes else "—" }}</td>
+      <td>{{ ", ".join(t.scopes) if t.scopes else "full access" }}</td>
       <td>{{ t.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
       <td>{{ t.last_used_at.strftime("%Y-%m-%d %H:%M") if t.last_used_at else "—" }}</td>
       <td>{{ t.expires_at.strftime("%Y-%m-%d") if t.expires_at else "never" }}</td>
