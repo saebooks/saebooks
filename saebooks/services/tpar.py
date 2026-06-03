@@ -30,6 +30,33 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.models.contact import Contact
 
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class TparPayee:
+    """One TPAR payee row - gross/GST/net for a flagged supplier."""
+
+    contact_id: uuid.UUID
+    contact_name: str
+    abn: str | None
+    total_incl_gst: Decimal
+    total_gst: Decimal
+    total_excl_gst: Decimal
+
+
+@dataclass(frozen=True)
+class TparReport:
+    """Read-only TPAR report for a period. Jinja attribute access in
+    templates/reports/tpar.html resolves these fields directly."""
+
+    from_date: date
+    to_date: date
+    payees: list[TparPayee]
+    grand_total_incl_gst: Decimal
+    grand_total_gst: Decimal
+    grand_total_excl_gst: Decimal
+
 
 async def tpar_report(
     session: AsyncSession,
@@ -37,7 +64,7 @@ async def tpar_report(
     *,
     from_date: date | None = None,
     to_date: date | None = None,
-) -> dict:
+) -> TparReport:
     """Read-only Taxable Payments Annual Report for the period.
 
     Aggregates POSTED bills + expenses to TPAR-flagged suppliers
@@ -88,33 +115,33 @@ async def tpar_report(
         )
     ).all()
 
-    payees: list[dict] = []
+    payees: list[TparPayee] = []
     grand_incl = Decimal("0")
     grand_gst = Decimal("0")
     for r in rows:
         gross = Decimal(str(r[3]))
         gst = Decimal(str(r[4]))
         payees.append(
-            {
-                "contact_id": str(r[0]),
-                "contact_name": r[1],
-                "abn": r[2],
-                "total_incl_gst": gross,
-                "total_gst": gst,
-                "total_excl_gst": gross - gst,
-            }
+            TparPayee(
+                contact_id=uuid.UUID(str(r[0])),
+                contact_name=r[1],
+                abn=r[2],
+                total_incl_gst=gross,
+                total_gst=gst,
+                total_excl_gst=gross - gst,
+            )
         )
         grand_incl += gross
         grand_gst += gst
 
-    return {
-        "from_date": from_date,
-        "to_date": to_date,
-        "payees": payees,
-        "grand_total_incl_gst": grand_incl,
-        "grand_total_gst": grand_gst,
-        "grand_total_excl_gst": grand_incl - grand_gst,
-    }
+    return TparReport(
+        from_date=from_date,
+        to_date=to_date,
+        payees=payees,
+        grand_total_incl_gst=grand_incl,
+        grand_total_gst=grand_gst,
+        grand_total_excl_gst=grand_incl - grand_gst,
+    )
 
 
 async def build_tpar_run(
