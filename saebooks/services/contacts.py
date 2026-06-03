@@ -110,6 +110,7 @@ async def list_active(
     tenant_id: uuid.UUID | None = None,
     contact_type: ContactType | None = None,
     search: str | None = None,
+    is_one_off: bool | None = None,
     limit: int = 200,
     offset: int = 0,
 ) -> list[Contact]:
@@ -130,6 +131,11 @@ async def list_active(
         stmt = stmt.where(
             Contact.name.ilike(pattern) | Contact.email.ilike(pattern)
         )
+    # NOTE: one-off parties live in their own tables (one_off_customers /
+    # one_off_vendors, migration 0137), not in `contacts`, so there is no
+    # Contact.is_one_off column to filter on. The param is accepted (the web
+    # router passes it) and is currently a no-op pending one-off integration;
+    # this restores the contacts page, which 500'd on the missing kwarg.
     stmt = stmt.order_by(Contact.name).offset(offset).limit(limit)
     result = await session.execute(stmt)
     return list(result.scalars().all())
