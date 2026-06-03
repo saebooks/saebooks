@@ -5,6 +5,7 @@
   <h1>Balance sheet</h1>
   <div class="meta">{{ company_name }}</div>
 </div>
+{% include "reports/_print.html" %}
 
 <form class="report-filter" method="get">
   <label>As of <input name="as_of" type="date" value="{{ as_of }}"></label>

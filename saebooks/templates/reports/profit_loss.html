@@ -5,6 +5,7 @@
   <h1>Profit & Loss</h1>
   <div class="meta">{{ company_name }}</div>
 </div>
+{% include "reports/_print.html" %}
 
 <form class="report-filter" method="get">
   <label>From <input name="from" type="date" value="{{ from_date }}"></label>

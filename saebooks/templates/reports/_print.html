@@ -1,0 +1,18 @@
+{# Shared print/Save-as-PDF affordance for financial statements (Phase-1 #5,
+   interim zero-dependency export). The button triggers the browser print
+   dialog; the @media print rules strip app chrome so the statement prints
+   clean. A ReportLab server-side PDF is the heavier follow-up. #}
+<div class="print-actions no-print" style="margin:0.5rem 0">
+  <button type="button" class="btn-secondary" onclick="window.print()">🖨 Print / Save as PDF</button>
+</div>
+<style>
+@media print {
+  header.top, nav, .report-filter, .print-actions, .no-print,
+  .theme-toggle, .theme-bubble, footer { display: none !important; }
+  main { margin: 0 !important; padding: 0 !important; max-width: none !important; }
+  body { background: #fff !important; color: #000 !important; }
+  .report-table { width: 100%; border-collapse: collapse; }
+  .report-table th, .report-table td { color: #000 !important; }
+  @page { margin: 1.5cm; }
+}
+</style>
