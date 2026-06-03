@@ -36,6 +36,7 @@ from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact
 from saebooks.models.invoice import Invoice, InvoiceStatus
+from saebooks.models.bill import Bill, BillStatus
 from saebooks.models.payment import (
     PaymentDirection,
     PaymentMethod,
@@ -258,6 +259,7 @@ async def payments_detail(
     # Candidate invoices to allocate against (posted, same contact,
     # balance > 0, matching direction for incoming receipts).
     candidate_invoices: list[Invoice] = []
+    candidate_bills: list[Bill] = []
     if pay.direction == PaymentDirection.INCOMING:
         r = await session.execute(
             select(Invoice)
@@ -273,13 +275,29 @@ async def payments_detail(
             inv for inv in r.scalars().all()
             if (inv.total - inv.amount_paid) > Decimal("0")
         ]
+    elif pay.direction == PaymentDirection.OUTGOING:
+        r = await session.execute(
+            select(Bill)
+            .where(
+                Bill.company_id == pay.company_id,
+                Bill.contact_id == pay.contact_id,
+                Bill.status == BillStatus.POSTED,
+                Bill.archived_at.is_(None),
+            )
+            .order_by(Bill.issue_date)
+        )
+        candidate_bills = [
+            b for b in r.scalars().all()
+            if (b.total - b.amount_paid) > Decimal("0")
+        ]
 
-    # Build an allocation map so the form can show existing amounts.
-    allocated: dict[uuid.UUID, Decimal] = {
-        a.invoice_id: a.amount
-        for a in pay.allocations
-        if a.invoice_id is not None
-    }
+    # Allocation map for the form (invoice_id for receipts, bill_id for payments).
+    allocated: dict[uuid.UUID, Decimal] = {}
+    for a in pay.allocations:
+        if a.invoice_id is not None:
+            allocated[a.invoice_id] = a.amount
+        elif a.bill_id is not None:
+            allocated[a.bill_id] = a.amount
     total_allocated = sum(allocated.values(), Decimal("0"))
     remaining = pay.amount - total_allocated
     return templates.TemplateResponse(
@@ -292,6 +310,7 @@ async def payments_detail(
             "contact": contact,
             "bank": bank,
             "candidate_invoices": candidate_invoices,
+            "candidate_bills": candidate_bills,
             "allocated": allocated,
             "total_allocated": total_allocated,
             "remaining": remaining,
@@ -346,6 +365,7 @@ async def payments_allocate(
     validated (positive) before calling the service.
     """
     form = dict(await request.form())
+    pay = await svc.get(session, payment_id)
     allocations: list[tuple[uuid.UUID, Decimal]] = []
     try:
         for key, raw in form.items():
@@ -367,11 +387,14 @@ async def payments_allocate(
             except ValueError as exc:
                 raise ValueError(f"Invalid invoice id in {key}") from exc
             allocations.append((inv_id, amount))
-        await svc.allocate(
-            session,
-            payment_id,
-            invoice_allocations=allocations,
-        )
+        if pay.direction == PaymentDirection.OUTGOING:
+            await svc.allocate(
+                session, payment_id, bill_allocations=allocations
+            )
+        else:
+            await svc.allocate(
+                session, payment_id, invoice_allocations=allocations
+            )
     except (ValueError, svc.PaymentError) as exc:
         # Re-render the detail page with the error. Keep it simple —
         # just append the error as a query param the template picks up.
