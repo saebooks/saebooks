@@ -171,6 +171,62 @@ async def balance_sheet_report(
     )
 
 
+@router.get("/statement-pack", response_class=HTMLResponse)
+async def statement_pack(
+    request: Request,
+    as_of: str | None = Query(None),
+    from_date: str | None = Query(None, alias="from"),
+    to_date: str | None = Query(None, alias="to"),
+    session: AsyncSession = Depends(get_web_session),
+) -> HTMLResponse:
+    """Bundle P&L + Balance Sheet + Trial Balance into one dated pack with a
+    cover page and trustee declaration. Read-only render; use the page's
+    Print / Save-as-PDF button to produce the FY pack document (Phase-1 #6,
+    interim HTML+print form; the ReportLab pack is the heavier follow-up).
+    """
+    company = await _first_company()
+    fy_end = _parse_date(as_of) or _default_fy_end(company)
+    fy_month = company.fin_year_start_month or 7
+    default_from = (
+        date(fy_end.year, 1, 1)
+        if fy_month == 1
+        else date(fy_end.year - 1, fy_month, 1)
+    )
+    fd = _parse_date(from_date) or default_from
+    td = _parse_date(to_date) or fy_end
+
+    tb_sections = await svc.trial_balance(session, company.id, as_of=fy_end)
+    tb_debit = sum(sec.total_debit for sec in tb_sections)
+    tb_credit = sum(sec.total_credit for sec in tb_sections)
+    pl_sections, net_profit = await svc.profit_and_loss(
+        session, company.id, from_date=fd, to_date=td
+    )
+    bs_sections, net_assets = await svc.balance_sheet(
+        session, company.id, as_of=fy_end
+    )
+
+    return templates.TemplateResponse(
+        request,
+        "reports/statement_pack.html",
+        {
+            "edition": settings.edition,
+            "company": company,
+            "company_name": company.name,
+            "as_of": fy_end.isoformat(),
+            "from_date": fd.isoformat(),
+            "to_date": td.isoformat(),
+            "prepared": date.today().isoformat(),
+            "tb_sections": tb_sections,
+            "tb_debit": tb_debit,
+            "tb_credit": tb_credit,
+            "pl_sections": pl_sections,
+            "net_profit": net_profit,
+            "bs_sections": bs_sections,
+            "net_assets": net_assets,
+        },
+    )
+
+
 @router.get("/aged-ar", response_class=HTMLResponse)
 async def aged_ar_report(
     request: Request,
