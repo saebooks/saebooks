@@ -349,16 +349,19 @@ async def signup(body: SignupRequest) -> MessageResponse:
             _verification_email_html(_verification_url_for(raw_token)),
         )
     except Exception as exc:
+        # The account (tenant + owner user) is already committed atomically
+        # above; the verification email is best-effort and recoverable via
+        # /auth/resend-verification. Raising 500 here made a SUCCESSFUL signup
+        # look failed — and a client retry then hit 409 "already exists". Report
+        # 201 with a caveat so the caller knows the account exists and how to
+        # get a fresh link. (Never leak the mailer error string to the caller.)
         logger.error("signup: failed to send verification to %s: %s", body.email, exc)
-        # The user row exists; resend-verification will let them retry.
-        # Surface a 500 only if the failure is truly fatal — for outbox
-        # mode a filesystem error is fatal; for SMTP the retry path is
-        # /auth/resend-verification.
-        # Don't leak the SMTP error string to the caller.
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Account created but failed to send verification email — try /auth/resend-verification",
-        ) from exc
+        return MessageResponse(
+            message=(
+                "Account created. We couldn't send the verification email "
+                "right now — use resend verification to get a new link."
+            )
+        )
 
     return MessageResponse(message="Verification email sent.")
 
