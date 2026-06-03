@@ -63,6 +63,8 @@ from saebooks.services.lodgement.exceptions import (
 from saebooks.services.lodgement.factory import get_lodgement_service
 from saebooks.services.lodgement.null import NullLodgementService
 from saebooks.services.lodgement.remote import RemoteLodgementService
+from saebooks.services.lodgement.adapters.au import UnknownRoute
+from saebooks.services.lodgement.registry import UnknownJurisdiction, get_adapter
 
 __all__ = [
     "LodgementAuthError",
@@ -77,5 +79,8 @@ __all__ = [
     "LodgementValidationError",
     "NullLodgementService",
     "RemoteLodgementService",
+    "UnknownJurisdiction",
+    "UnknownRoute",
     "get_lodgement_service",
+    "get_adapter",
 ]
