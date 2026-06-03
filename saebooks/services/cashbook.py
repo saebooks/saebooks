@@ -23,6 +23,7 @@ read-side service.
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import date
@@ -37,6 +38,7 @@ from sqlalchemy.orm import selectinload
 from saebooks.models.account import Account
 from saebooks.models.company import Company
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
+from saebooks.models.tax_code import TaxCode
 from saebooks.services import journal as journal_svc
 from saebooks.services.cashbook_categories import (
     CashbookCategory,
@@ -44,6 +46,8 @@ from saebooks.services.cashbook_categories import (
     resolve_account_id_override,
     resolve_for_company,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -240,6 +244,71 @@ def _quantize_money(value: Decimal) -> Decimal:
 # ---------------------------------------------------------------------------
 
 
+async def _resolve_category_tax_code(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    category: CashbookCategory,
+) -> uuid.UUID | None:
+    """Resolve a cashbook category's ``tax_code`` to a ``TaxCode.id`` in
+    this company.
+
+    Exact ``code`` match first; if the named code is absent (tenant
+    renamed its codes) fall back to the first active code with the
+    category's ``reporting_type``. Returns ``None`` when the category is
+    not BAS-reportable (``tax_code is None``) or no code resolves — in
+    which case the JE line posts with a NULL ``tax_code_id`` and is
+    invisible to the BAS aggregator (logged at WARNING).
+
+    This is the C1 fix: cashbook JE lines previously carried no
+    ``tax_code_id`` at all, so every cashbook-originated supply was
+    invisible to BAS (G1/1A/G10/G11 read 0).
+    """
+    if category.tax_code is None:
+        return None
+    # 1. Exact code match.
+    row = (
+        await session.execute(
+            select(TaxCode).where(
+                TaxCode.company_id == company_id,
+                TaxCode.code == category.tax_code,
+                TaxCode.archived_at.is_(None),
+            )
+        )
+    ).scalars().first()
+    if row is not None:
+        return row.id
+    # 2. Reporting-type fallback.
+    row = (
+        await session.execute(
+            select(TaxCode)
+            .where(
+                TaxCode.company_id == company_id,
+                TaxCode.reporting_type == category.reporting_type,
+                TaxCode.archived_at.is_(None),
+            )
+            .order_by(TaxCode.code)
+            .limit(1)
+        )
+    ).scalars().first()
+    if row is not None:
+        logger.warning(
+            "cashbook category %s expected tax_code %r in company %s, "
+            "fell back to %r [reporting_type=%s]",
+            category.code, category.tax_code, company_id,
+            row.code, row.reporting_type,
+        )
+        return row.id
+    # 3. No match at all.
+    logger.warning(
+        "cashbook category %s: no tax_code %r or reporting_type=%s found "
+        "in company %s — JE line will post with NULL tax_code_id and be "
+        "invisible to BAS",
+        category.code, category.tax_code, category.reporting_type,
+        company_id,
+    )
+    return None
+
+
 async def record_cashbook_entry(
     *,
     db: AsyncSession,
@@ -331,6 +400,15 @@ async def record_cashbook_entry(
         direction=direction,
     )
 
+    # C1: resolve the category's tax_code to a per-company TaxCode.id so
+    # the BAS aggregator (services/tax_engine/au.py) can see this supply.
+    # NULL here = invisible to BAS, which is the bug this fixes. Stamped
+    # on the category (P&L/asset) line only; the bank counter-line and
+    # the auto-posted GST line are not BAS-reportable themselves.
+    category_tax_code_id = await _resolve_category_tax_code(
+        db, company.id, resolved.category
+    )
+
     # GST split. Non-registered traders never get a GST line; the JE
     # is a clean two-line entry. For registered traders, the GST
     # amount lives on the category line as ``gst_amount`` so
@@ -375,6 +453,7 @@ async def record_cashbook_entry(
                 "credit": net_amount,
                 "description": description,
                 "gst_amount": line_gst,
+                "tax_code_id": category_tax_code_id,
             },
         ]
     else:  # expense
@@ -385,6 +464,7 @@ async def record_cashbook_entry(
                 "credit": Decimal("0"),
                 "description": description,
                 "gst_amount": line_gst,
+                "tax_code_id": category_tax_code_id,
             },
             {
                 "account_id": bank_account_id,
