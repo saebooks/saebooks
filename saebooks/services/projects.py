@@ -85,6 +85,7 @@ async def get(
     project_id: uuid.UUID,
     *,
     tenant_id: uuid.UUID | None = None,
+    company_id: uuid.UUID | None = None,
 ) -> Project | None:
     """Fetch a project by id.
 

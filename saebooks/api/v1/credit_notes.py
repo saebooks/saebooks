@@ -299,13 +299,24 @@ async def void_credit_note(
         raise HTTPException(428, "If-Match header with credit note version is required")
 
     try:
-        await svc.api_void_credit_note(
-            session,
-            credit_note_id,
-            actor=f"api:{bearer[:8]}…",
-            expected_version=expected,
-            tenant_id=tenant_id,
-        )
+        if existing.status == svc.CreditNoteStatus.DRAFT:
+            # DELETE soft-deletes: a DRAFT archives (no JE reversal, op="archive").
+            # A POSTED credit note voids with a reversing JE. The POST /{id}/void
+            # action stays strict (api_void_credit_note rejects DRAFT with 422).
+            await svc.api_void(
+                session,
+                credit_note_id,
+                actor=f"api:{bearer[:8]}…",
+                expected_version=expected,
+            )
+        else:
+            await svc.api_void_credit_note(
+                session,
+                credit_note_id,
+                actor=f"api:{bearer[:8]}…",
+                expected_version=expected,
+                tenant_id=tenant_id,
+            )
     except svc.VersionConflict as exc:
         body = CreditNoteConflictBody(
             detail="version mismatch",

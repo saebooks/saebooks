@@ -26,7 +26,13 @@ async def _ctx() -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
         assert company is not None
 
         accts = await session.execute(
-            select(Account).where(Account.company_id == company.id).order_by(Account.code).limit(2)
+            select(Account)
+            .where(
+                Account.company_id == company.id,
+                Account.is_header.is_(False),
+            )
+            .order_by(Account.code)
+            .limit(2)
         )
         a, b = accts.scalars().all()
         return company.id, a.id, b.id
