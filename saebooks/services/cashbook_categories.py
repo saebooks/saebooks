@@ -78,6 +78,20 @@ class CashbookCategory:
     hint_text:
         Optional one-liner shown under the picker entry on selection —
         flagging substantiation requirements (logbook, sqm, etc.).
+    tax_code:
+        The ``tax_codes.code`` string to stamp on the category JE line
+        (e.g. ``"GST"``, ``"FRE"``, ``"CAP"``, ``"INP"``). Resolved to a
+        per-company ``TaxCode.id`` at JE-build time by
+        ``cashbook._resolve_category_tax_code``. ``None`` for categories
+        that are not BAS-reportable (drawings, transfers).
+    reporting_type:
+        Redundant BAS reporting hint (``"taxable"`` / ``"gst_free"`` /
+        ``"export"`` / ``"input_taxed"`` / ``"capital"``). Used by the
+        resolver fallback when the named ``tax_code`` is absent in a
+        tenant that renamed its codes, so the line still lands in the
+        right BAS box. The BAS aggregator
+        (``services/tax_engine/au.py``) keys every G-label off the
+        resolved code's ``reporting_type``.
     """
 
     code: str
@@ -87,6 +101,8 @@ class CashbookCategory:
     default_account_code: str | None
     gst_default: Decimal = field(default=Decimal("0.10"))
     hint_text: str | None = None
+    tax_code: str | None = None
+    reporting_type: str = "taxable"
 
 
 # Order is the picker order. Income at top, then expenses grouped
@@ -108,6 +124,8 @@ DEFAULT_CATEGORIES: tuple[CashbookCategory, ...] = (
         direction="income",
         default_account_code="4-2000",  # Wholesale Sales
         gst_default=Decimal("0.10"),
+        tax_code="GST",
+        reporting_type="taxable",
         hint_text="Goods sold to customers.",
     ),
     CashbookCategory(
@@ -119,6 +137,8 @@ DEFAULT_CATEGORIES: tuple[CashbookCategory, ...] = (
         # through to wholesale sales until Gate 1 decides to extend.
         default_account_code="4-2000",
         gst_default=Decimal("0.10"),
+        tax_code="GST",
+        reporting_type="taxable",
         hint_text="Labour or services billed to customers.",
     ),
     CashbookCategory(
@@ -128,6 +148,8 @@ DEFAULT_CATEGORIES: tuple[CashbookCategory, ...] = (
         direction="income",
         default_account_code="8-1000",  # Interest Income
         gst_default=Decimal("0"),
+        tax_code="INP",
+        reporting_type="input_taxed",
         hint_text="GST-free. Bank interest credited to your account.",
     ),
     CashbookCategory(
@@ -137,6 +159,8 @@ DEFAULT_CATEGORIES: tuple[CashbookCategory, ...] = (
         direction="income",
         default_account_code="4-6000",  # Miscellaneous Income
         gst_default=Decimal("0.10"),
+        tax_code="GST",
+        reporting_type="taxable",
         hint_text="Anything that doesn't fit Sales or Services.",
     ),
     # ---------- Expenses ----------
@@ -147,6 +171,8 @@ DEFAULT_CATEGORIES: tuple[CashbookCategory, ...] = (
         direction="expense",
         default_account_code="6-1200",  # Car & Truck Expenses
         gst_default=Decimal("0.10"),
+        tax_code="GST",
+        reporting_type="taxable",
         hint_text="Logbook or cents-per-km method — keep records.",
     ),
     CashbookCategory(
@@ -156,6 +182,8 @@ DEFAULT_CATEGORIES: tuple[CashbookCategory, ...] = (
         direction="expense",
         default_account_code="6-2120",  # Other Business Property
         gst_default=Decimal("0.10"),
+        tax_code="GST",
+        reporting_type="taxable",
         hint_text="Floor-area % or fixed-rate method — keep diary.",
     ),
     CashbookCategory(
@@ -165,6 +193,8 @@ DEFAULT_CATEGORIES: tuple[CashbookCategory, ...] = (
         direction="expense",
         default_account_code="6-1800",  # Insurance
         gst_default=Decimal("0.10"),
+        tax_code="GST",
+        reporting_type="taxable",
     ),
     CashbookCategory(
         code="EXP_PROFESSIONAL",
@@ -173,6 +203,8 @@ DEFAULT_CATEGORIES: tuple[CashbookCategory, ...] = (
         direction="expense",
         default_account_code="6-2200",  # Legal & Professional Services
         gst_default=Decimal("0.10"),
+        tax_code="GST",
+        reporting_type="taxable",
     ),
     CashbookCategory(
         code="EXP_MATERIALS",
@@ -181,6 +213,8 @@ DEFAULT_CATEGORIES: tuple[CashbookCategory, ...] = (
         direction="expense",
         default_account_code="5-5000",  # Materials & Supplies
         gst_default=Decimal("0.10"),
+        tax_code="GST",
+        reporting_type="taxable",
     ),
     CashbookCategory(
         code="EXP_SOFTWARE",
@@ -190,6 +224,8 @@ DEFAULT_CATEGORIES: tuple[CashbookCategory, ...] = (
         # GAP: AU CoA has no dedicated software-subscription line.
         default_account_code="6-2300",  # Office Expenses
         gst_default=Decimal("0.10"),
+        tax_code="GST",
+        reporting_type="taxable",
     ),
     CashbookCategory(
         code="EXP_TELCO",
@@ -198,6 +234,8 @@ DEFAULT_CATEGORIES: tuple[CashbookCategory, ...] = (
         direction="expense",
         default_account_code="6-2800",  # Telephone
         gst_default=Decimal("0.10"),
+        tax_code="GST",
+        reporting_type="taxable",
     ),
     CashbookCategory(
         code="EXP_SUPER",
@@ -206,6 +244,8 @@ DEFAULT_CATEGORIES: tuple[CashbookCategory, ...] = (
         direction="expense",
         default_account_code="6-2420",  # Superannuation (expense)
         gst_default=Decimal("0"),
+        tax_code="FRE",
+        reporting_type="gst_free",
         hint_text=(
             "GST-free. Lodge a notice of intent to claim with your "
             "fund before the BAS due date if you want the deduction."
@@ -219,6 +259,8 @@ DEFAULT_CATEGORIES: tuple[CashbookCategory, ...] = (
         # GAP: no training line in AU CoA.
         default_account_code="6-2450",  # Other Employer Expenses
         gst_default=Decimal("0.10"),
+        tax_code="GST",
+        reporting_type="taxable",
     ),
     CashbookCategory(
         code="EXP_TOOLS",
@@ -227,6 +269,8 @@ DEFAULT_CATEGORIES: tuple[CashbookCategory, ...] = (
         direction="expense",
         default_account_code="6-2110",  # Machinery & Equipment
         gst_default=Decimal("0.10"),
+        tax_code="GST",
+        reporting_type="taxable",
         hint_text=(
             "Under $300 = immediate deduction. Over $300 use Capital "
             "purchase instead."
@@ -239,6 +283,8 @@ DEFAULT_CATEGORIES: tuple[CashbookCategory, ...] = (
         direction="expense",
         default_account_code="6-3110",  # Travel
         gst_default=Decimal("0.10"),
+        tax_code="GST",
+        reporting_type="taxable",
     ),
     CashbookCategory(
         code="EXP_BANK",
@@ -248,6 +294,8 @@ DEFAULT_CATEGORIES: tuple[CashbookCategory, ...] = (
         # GAP: AU CoA has no bank-fees line; piggyback on "Other Interest".
         default_account_code="6-1930",
         gst_default=Decimal("0"),
+        tax_code="INP",
+        reporting_type="input_taxed",
         hint_text="GST-free.",
     ),
     CashbookCategory(
@@ -257,6 +305,8 @@ DEFAULT_CATEGORIES: tuple[CashbookCategory, ...] = (
         direction="expense",
         default_account_code="6-2300",  # Office Expenses
         gst_default=Decimal("0.10"),
+        tax_code="GST",
+        reporting_type="taxable",
     ),
     # ---------- Capital / Personal / Transfer ----------
     CashbookCategory(
@@ -266,6 +316,8 @@ DEFAULT_CATEGORIES: tuple[CashbookCategory, ...] = (
         direction="expense",
         default_account_code="1-3140",  # Manufacturing Plant at Cost
         gst_default=Decimal("0.10"),
+        tax_code="CAP",
+        reporting_type="capital",
         hint_text=(
             "Capital asset — depreciation rules apply. Add to asset "
             "register on full edition."
@@ -278,6 +330,8 @@ DEFAULT_CATEGORIES: tuple[CashbookCategory, ...] = (
         direction="expense",
         default_account_code="3-1200",  # Capital Drawings
         gst_default=Decimal("0"),
+        tax_code=None,
+        reporting_type="out_of_scope",
         hint_text=(
             "Not deductible. Money you took for personal use; flagged "
             "in BAS prep."
@@ -290,6 +344,8 @@ DEFAULT_CATEGORIES: tuple[CashbookCategory, ...] = (
         direction="transfer",
         default_account_code=None,  # routes to a second bank account
         gst_default=Decimal("0"),
+        tax_code=None,
+        reporting_type="out_of_scope",
         hint_text=(
             "P&L-neutral. Moves money between two of your bank "
             "accounts; not income or expense."
@@ -367,6 +423,8 @@ def resolve_for_company(
         default_account_code=base.default_account_code,
         gst_default=base.gst_default,
         hint_text=base.hint_text,
+        tax_code=base.tax_code,
+        reporting_type=base.reporting_type,
     )
 
 

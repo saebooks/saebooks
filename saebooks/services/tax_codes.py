@@ -69,7 +69,7 @@ AU_SEED: list[dict[str, object]] = [
         "code": "CAP",
         "name": "GST on capital acquisitions",
         "rate": Decimal("10.000"),
-        "reporting_type": "taxable",
+        "reporting_type": "capital",
         "description": "GST on capital purchases — reported separately (BAS G10)",
     },
     {
@@ -90,7 +90,7 @@ AU_SEED: list[dict[str, object]] = [
         "code": "EXP",
         "name": "Export (GST Free)",
         "rate": Decimal("0.000"),
-        "reporting_type": "gst_free",
+        "reporting_type": "export",
         "description": "Exports — GST-free when conditions met",
     },
     {
