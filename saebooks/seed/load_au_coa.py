@@ -73,7 +73,13 @@ def _parse_bool(val: str) -> bool:
 _SUB_HEADERS: list[tuple[str, str, AccountType]] = [
     ("1-1000", "Current Assets", AccountType.ASSET),
     ("1-1100", "Cash & Bank", AccountType.ASSET),
-    ("1-1200", "Receivables", AccountType.ASSET),
+    # NB: NO "1-1200 Receivables" group header. Code 1-1200 is the postable
+    # "Trade Debtors" AR control account in the CSV (au_11200) and is hard-coded
+    # as the AR control code across the services (invoices/payments/credit_notes/
+    # edition/fx). Seeding a header here first masks the CSV leaf (same code is
+    # skipped as a dup), leaving 1-1200 a header — then NO invoice/payment can
+    # post (PostingError: cannot post to header). Production escaped this only
+    # because its Trade Debtors leaf predates migration 0012. Keep 1-1200 a leaf.
     ("1-1300", "Inventory", AccountType.ASSET),
     ("1-2000", "Prepayments & Deposits", AccountType.ASSET),
     ("1-3000", "Property, Plant & Equipment", AccountType.ASSET),

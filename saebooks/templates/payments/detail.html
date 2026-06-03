@@ -43,7 +43,11 @@
   {% endif %}
 </table>
 
-{% if payment.direction.value == 'INCOMING' and payment.status != 'VOIDED' %}
+{% if payment.direction.value in ('INCOMING', 'OUTGOING') and payment.status != 'VOIDED' %}
+{% set is_incoming = payment.direction.value == 'INCOMING' %}
+{% set rows = candidate_invoices if is_incoming else candidate_bills %}
+{% set kind = 'Invoice' if is_incoming else 'Bill' %}
+{% set base = 'invoices' if is_incoming else 'bills' %}
 <h2>Allocations</h2>
 <p>
   Total allocated: <strong>${{ '{:,.2f}'.format(total_allocated) }}</strong>
@@ -54,7 +58,7 @@
   <table class="data">
     <thead>
       <tr>
-        <th>Invoice</th>
+        <th>{{ kind }}</th>
         <th>Issued</th>
         <th class="right">Total</th>
         <th class="right">Paid</th>
@@ -63,27 +67,27 @@
       </tr>
     </thead>
     <tbody>
-    {% for inv in candidate_invoices %}
-      {% set already = allocated.get(inv.id) %}
+    {% for row in rows %}
+      {% set already = allocated.get(row.id) %}
       <tr>
-        <td><a href="/invoices/{{ inv.id }}">{{ inv.number }}</a></td>
-        <td>{{ inv.issue_date }}</td>
-        <td class="right">${{ '{:,.2f}'.format(inv.total) }}</td>
-        <td class="right">${{ '{:,.2f}'.format(inv.amount_paid) }}</td>
-        <td class="right">${{ '{:,.2f}'.format(inv.total - inv.amount_paid) }}</td>
+        <td><a href="/{{ base }}/{{ row.id }}">{{ row.number }}</a></td>
+        <td>{{ row.issue_date }}</td>
+        <td class="right">${{ '{:,.2f}'.format(row.total) }}</td>
+        <td class="right">${{ '{:,.2f}'.format(row.amount_paid) }}</td>
+        <td class="right">${{ '{:,.2f}'.format(row.total - row.amount_paid) }}</td>
         <td class="right">
           <input type="number" step="0.01" min="0"
-                 name="allocate_{{ inv.id }}"
+                 name="allocate_{{ row.id }}"
                  value="{{ already if already else '' }}"
                  style="max-width: 9em;" />
         </td>
       </tr>
     {% else %}
-      <tr><td colspan="6" class="dim center">No open invoices for this contact.</td></tr>
+      <tr><td colspan="6" class="dim center">No open {{ base }} for this contact.</td></tr>
     {% endfor %}
     </tbody>
   </table>
-  {% if candidate_invoices %}
+  {% if rows %}
     <div class="toolbar">
       <button class="btn btn-primary" type="submit">Save allocations</button>
     </div>
