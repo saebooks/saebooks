@@ -31,6 +31,92 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from saebooks.models.contact import Contact
 
 
+async def tpar_report(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    *,
+    from_date: date | None = None,
+    to_date: date | None = None,
+) -> dict:
+    """Read-only Taxable Payments Annual Report for the period.
+
+    Aggregates POSTED bills + expenses to TPAR-flagged suppliers
+    (``contacts.is_tpar_supplier``) per payee. Pure SELECT — no run is
+    persisted (unlike ``build_tpar_run``), so viewing the report has no
+    side effects and never conflicts with a FINALISED/LODGED run. Tenant
+    scoping is enforced by RLS (``app.current_tenant``) and, defensively,
+    by ``company_id`` (a company belongs to exactly one tenant). Defaults
+    to the current Australian financial year (1 Jul – 30 Jun) when dates
+    are omitted. Shape matches templates/reports/tpar.html.
+    """
+    today = date.today()
+    fy_year = today.year if today.month >= 7 else today.year - 1
+    if from_date is None:
+        from_date = date(fy_year, 7, 1)
+    if to_date is None:
+        to_date = date(fy_year + 1, 6, 30)
+
+    rows = (
+        await session.execute(
+            text(
+                """
+                SELECT c.id, c.name, c.abn,
+                       COALESCE(SUM(src.total), 0)     AS gross,
+                       COALESCE(SUM(src.tax_total), 0) AS gst
+                  FROM contacts c
+                  JOIN (
+                        SELECT contact_id, total, tax_total
+                          FROM bills
+                         WHERE company_id = :c AND status = 'POSTED'
+                           AND archived_at IS NULL
+                           AND issue_date BETWEEN :s AND :e
+                        UNION ALL
+                        SELECT contact_id, total, tax_total
+                          FROM expenses
+                         WHERE company_id = :c AND status = 'POSTED'
+                           AND archived_at IS NULL
+                           AND expense_date BETWEEN :s AND :e
+                       ) src ON src.contact_id = c.id
+                 WHERE c.company_id = :c
+                   AND c.is_tpar_supplier = TRUE
+                 GROUP BY c.id
+                HAVING COALESCE(SUM(src.total), 0) > 0
+                 ORDER BY gross DESC
+                """
+            ),
+            {"c": str(company_id), "s": from_date, "e": to_date},
+        )
+    ).all()
+
+    payees: list[dict] = []
+    grand_incl = Decimal("0")
+    grand_gst = Decimal("0")
+    for r in rows:
+        gross = Decimal(str(r[3]))
+        gst = Decimal(str(r[4]))
+        payees.append(
+            {
+                "contact_id": str(r[0]),
+                "contact_name": r[1],
+                "abn": r[2],
+                "total_incl_gst": gross,
+                "total_gst": gst,
+                "total_excl_gst": gross - gst,
+            }
+        )
+        grand_incl += gross
+        grand_gst += gst
+
+    return {
+        "from_date": from_date,
+        "to_date": to_date,
+        "payees": payees,
+        "grand_total_incl_gst": grand_incl,
+        "grand_total_gst": grand_gst,
+        "grand_total_excl_gst": grand_incl - grand_gst,
+    }
+
+
 async def build_tpar_run(
     session: AsyncSession,
     *,
