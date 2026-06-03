@@ -175,17 +175,34 @@
     </form>
     {% endif %}
     <div class="spacer"></div>
-    <div class="override-group" id="override-group" style="display:none">
-      <label>Override reason <input name="override_reason" placeholder="e.g. BAS amendment"></label>
-    </div>
+    <details class="je-advanced" id="je-advanced">
+      <summary style="cursor:pointer;color:var(--muted,#8a94a6)">Period-end options</summary>
+      <div class="override-group" id="override-group" style="margin-top:0.5rem">
+        <label style="display:block">Override reason (post into a locked period)
+          <input name="override_reason" placeholder="e.g. BAS amendment / year-end adjustment">
+        </label>
+        <label style="display:block;margin-top:0.5rem">
+          <input type="checkbox" name="auto_reverse" id="auto-reverse" value="1"
+                 onchange="(function(cb){var rd=document.getElementById('reverse-date');if(cb.checked&&!rd.value){var d=document.querySelector('[name=entry_date]');var base=d&&d.value?new Date(d.value):new Date();var nm=new Date(base.getFullYear(),base.getMonth()+1,1);rd.value=nm.toISOString().slice(0,10);}})(this)">
+          Auto-reverse on post (accrual) &mdash; books the mirror reversal in one submit
+        </label>
+        <label style="display:block;margin-top:0.5rem">Reversal date
+          <input type="date" name="reverse_date" id="reverse-date">
+        </label>
+      </div>
+    </details>
     <button type="submit" name="action" value="draft" class="btn-secondary">Save draft</button>
     <button type="submit" name="action" value="post" class="btn">Post</button>
   </div>
   {% else %}
     <div class="je-actions">
       {% if entry.status == 'POSTED' %}
-      <form method="post" action="/journal/{{ entry.id }}/reverse" style="display:inline"
+      <form method="post" action="/journal/{{ entry.id }}/reverse"
+            style="display:inline-flex;gap:0.4rem;align-items:center"
             onsubmit="return confirm('Create reversal of {{ entry.ref }}?')">
+        <label class="dim" style="font-size:0.85em">Reversal date
+          <input type="date" name="reverse_date" title="Leave blank to reverse on the original entry date">
+        </label>
         <button type="submit" class="btn-warn">Reverse</button>
       </form>
       {% endif %}

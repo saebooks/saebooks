@@ -17,6 +17,7 @@ from saebooks.models.project import Project, ProjectStatus
 from saebooks.models.tax_code import TaxCode
 from saebooks.routers.deps import get_web_session
 from saebooks.services import journal as svc
+from saebooks.services.authz import resolve_actor_role
 from saebooks.services.journal import PostingError
 from saebooks.web import templates
 from saebooks.services import active_company as active_svc
@@ -236,13 +237,39 @@ async def journal_save(
 
         if action == "post":
             override = str(form.get("override_reason", "")).strip() or None
+            actor_role = resolve_actor_role(request)
             entry = await svc.post(
                 session,
                 entry.id,
                 posted_by="web",
                 override_reason=override,
+                actor_role=actor_role,
                 tenant_id=tenant_id,
             )
+
+            # Auto-reversing accrual: post the entry on its date, then
+            # immediately book the mirror reversal on ``reverse_date``
+            # (defaults to the day after the entry inside svc.reverse when
+            # left blank). One submit yields the 30-Jun accrual + 1-Jul
+            # reversal pair. svc.reverse copies lines with gst_amount=None,
+            # so no duplicate GST, and inherits the original tenant_id.
+            if str(form.get("auto_reverse", "")).strip():
+                rev_date_raw = str(form.get("reverse_date", "")).strip()
+                try:
+                    rev_date = (
+                        date.fromisoformat(rev_date_raw) if rev_date_raw else None
+                    )
+                except ValueError as exc:
+                    raise HTTPException(400, "Invalid reversal date") from exc
+                await svc.reverse(
+                    session,
+                    entry.id,
+                    posted_by="web",
+                    reversal_date=rev_date,
+                    override_reason=override,
+                    actor_role=actor_role,
+                    tenant_id=tenant_id,
+                )
 
     except PostingError as exc:
         await session.rollback()
@@ -274,9 +301,22 @@ async def journal_reverse(
     session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse:
     tenant_id = resolve_tenant_id(request)
+    form: dict[str, object] = dict(await request.form())
+    rev_date_raw = str(form.get("reverse_date", "")).strip()
+    try:
+        rev_date = date.fromisoformat(rev_date_raw) if rev_date_raw else None
+    except ValueError as exc:
+        raise HTTPException(400, "Invalid reversal date") from exc
+    override = str(form.get("override_reason", "")).strip() or None
     try:
         reversal = await svc.reverse(
-            session, entry_id, posted_by="web", tenant_id=tenant_id
+            session,
+            entry_id,
+            posted_by="web",
+            reversal_date=rev_date,
+            override_reason=override,
+            actor_role=resolve_actor_role(request),
+            tenant_id=tenant_id,
         )
     except PostingError as exc:
         raise HTTPException(400, str(exc)) from exc

@@ -24,6 +24,9 @@ from saebooks.web import templates
 from saebooks.services import active_company as active_svc
 from saebooks.api.v1.auth import resolve_tenant_id
 from saebooks.routers.deps import get_web_session
+from saebooks.services.authz import require_role, resolve_actor_role
+from saebooks.services.journal import PostingError
+from saebooks.models.user import UserRole
 
 router = APIRouter(prefix="/reports")
 
@@ -171,6 +174,62 @@ async def balance_sheet_report(
     )
 
 
+@router.get("/statement-pack", response_class=HTMLResponse)
+async def statement_pack(
+    request: Request,
+    as_of: str | None = Query(None),
+    from_date: str | None = Query(None, alias="from"),
+    to_date: str | None = Query(None, alias="to"),
+    session: AsyncSession = Depends(get_web_session),
+) -> HTMLResponse:
+    """Bundle P&L + Balance Sheet + Trial Balance into one dated pack with a
+    cover page and trustee declaration. Read-only render; use the page's
+    Print / Save-as-PDF button to produce the FY pack document (Phase-1 #6,
+    interim HTML+print form; the ReportLab pack is the heavier follow-up).
+    """
+    company = await _first_company()
+    fy_end = _parse_date(as_of) or _default_fy_end(company)
+    fy_month = company.fin_year_start_month or 7
+    default_from = (
+        date(fy_end.year, 1, 1)
+        if fy_month == 1
+        else date(fy_end.year - 1, fy_month, 1)
+    )
+    fd = _parse_date(from_date) or default_from
+    td = _parse_date(to_date) or fy_end
+
+    tb_sections = await svc.trial_balance(session, company.id, as_of=fy_end)
+    tb_debit = sum(sec.total_debit for sec in tb_sections)
+    tb_credit = sum(sec.total_credit for sec in tb_sections)
+    pl_sections, net_profit = await svc.profit_and_loss(
+        session, company.id, from_date=fd, to_date=td
+    )
+    bs_sections, net_assets = await svc.balance_sheet(
+        session, company.id, as_of=fy_end
+    )
+
+    return templates.TemplateResponse(
+        request,
+        "reports/statement_pack.html",
+        {
+            "edition": settings.edition,
+            "company": company,
+            "company_name": company.name,
+            "as_of": fy_end.isoformat(),
+            "from_date": fd.isoformat(),
+            "to_date": td.isoformat(),
+            "prepared": date.today().isoformat(),
+            "tb_sections": tb_sections,
+            "tb_debit": tb_debit,
+            "tb_credit": tb_credit,
+            "pl_sections": pl_sections,
+            "net_profit": net_profit,
+            "bs_sections": bs_sections,
+            "net_assets": net_assets,
+        },
+    )
+
+
 @router.get("/aged-ar", response_class=HTMLResponse)
 async def aged_ar_report(
     request: Request,
@@ -303,12 +362,25 @@ async def close_year_form(
     )
 
 
-@router.post("/close-year", response_model=None)
+@router.post(
+    "/close-year",
+    response_model=None,
+    dependencies=[Depends(require_role(UserRole.ADMIN))],
+)
 async def close_year_submit(
     request: Request,
     session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse:
-    """Post the year-end close journal, then lock the period."""
+    """Post the year-end close journal, then lock the period.
+
+    ADMIN-gated: closing a year locks the period and is a privileged,
+    effectively-irreversible action. ``actor_role`` is threaded into the
+    period-lock override gate so the close still succeeds when an earlier
+    lock already sits at/through the close date AND the admin supplies an
+    ``override_reason`` (F-04). Without an override the lock raises
+    ``PostingError`` — caught here and bounced back to the preview with the
+    reason so the admin can retry with one.
+    """
     company = await _first_company()
     form = await request.form()
     through_date = _parse_date(str(form.get("through", "")))
@@ -319,17 +391,33 @@ async def close_year_submit(
             400, "Both 'through' date and retained-earnings account are required"
         )
     posted_by = request.headers.get("remote-user") or None
+    override_reason = str(form.get("override_reason", "")).strip() or None
 
     tenant_id = resolve_tenant_id(request)
 
-    entry = await period_close_svc.close_year(
-        session,
-        company.id,
-        tenant_id=tenant_id,
-        through_date=through_date,
-        retained_earnings_account_id=retained_id,
-        posted_by=posted_by,
-    )
+    try:
+        entry = await period_close_svc.close_year(
+            session,
+            company.id,
+            tenant_id=tenant_id,
+            through_date=through_date,
+            retained_earnings_account_id=retained_id,
+            posted_by=posted_by,
+            override_reason=override_reason,
+            actor_role=resolve_actor_role(request),
+        )
+    except PostingError as exc:
+        await session.rollback()
+        # A lock already covers the close date. Send the admin back to the
+        # preview with the message; the form carries an override-reason
+        # input so the close can be retried with an acknowledgement.
+        from urllib.parse import quote
+
+        return RedirectResponse(
+            f"/reports/close-year?through={through_date.isoformat()}"
+            f"&error={quote(str(exc))}",
+            status_code=303,
+        )
 
     if entry is None:
         return RedirectResponse(

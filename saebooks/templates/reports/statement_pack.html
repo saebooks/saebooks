@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Financial statement pack — SAE Books{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Financial statement pack</h1>
+  <div class="meta">{{ company_name }}</div>
+</div>
+{% include "reports/_print.html" %}
+
+<style>
+@media print {
+  .pack-section { page-break-before: always; }
+  .pack-cover { page-break-after: always; }
+}
+.pack-cover { text-align: center; padding: 2rem 0; }
+.pack-cover .pack-title { font-size: 1.4rem; font-weight: 600; margin: 1rem 0 0.3rem; }
+.pack-section { margin-top: 1.5rem; }
+.pack-declaration { margin-top: 2rem; }
+.sig-line { margin-top: 2rem; }
+</style>
+
+<form class="report-filter" method="get">
+  <label>FY end (as at) <input name="as_of" type="date" value="{{ as_of }}"></label>
+  <label>P&amp;L from <input name="from" type="date" value="{{ from_date }}"></label>
+  <label>to <input name="to" type="date" value="{{ to_date }}"></label>
+  <button type="submit" class="btn-secondary">Run</button>
+</form>
+
+<section class="pack-cover">
+  <h2>{{ company.legal_name or company.name }}</h2>
+  {% if company.acn %}<div>ACN {{ company.acn }}</div>{% endif %}
+  {% if company.abn %}<div>ABN {{ company.abn }}</div>{% endif %}
+  <div class="pack-title">Special Purpose Financial Statements</div>
+  <div>For the year ended {{ to_date }}</div>
+  <div class="dim">Prepared {{ prepared }} &mdash; DRAFT, not certified</div>
+</section>
+
+<h2 class="pack-section">Statement of Profit or Loss</h2>
+<div class="dim">For the period {{ from_date }} to {{ to_date }}</div>
+<table class="report-table">
+  <thead><tr><th>Code</th><th>Account</th><th class="num">Amount</th></tr></thead>
+  {% for section in pl_sections %}
+  <tbody>
+    <tr class="section-header"><td colspan="3">{{ section.label }}</td></tr>
+    {% for r in section.rows %}
+    <tr><td class="code">{{ r.code }}</td><td>{{ r.name }}</td>
+        <td class="num">{{ "%.2f"|format(r.balance|abs) }}</td></tr>
+    {% endfor %}
+    <tr class="section-total"><td></td><td>Total {{ section.label }}</td>
+        <td class="num">{{ "%.2f"|format(section.total_balance|abs) }}</td></tr>
+  </tbody>
+  {% endfor %}
+  <tfoot><tr class="grand-total"><td></td><td><strong>Net profit / (loss)</strong></td>
+    <td class="num"><strong>{{ "%.2f"|format(net_profit) }}</strong></td></tr></tfoot>
+</table>
+
+<h2 class="pack-section">Statement of Financial Position</h2>
+<div class="dim">As at {{ as_of }}</div>
+<table class="report-table">
+  <thead><tr><th>Code</th><th>Account</th><th class="num">Amount</th></tr></thead>
+  {% for section in bs_sections %}
+  <tbody>
+    <tr class="section-header"><td colspan="3">{{ section.label }}</td></tr>
+    {% for r in section.rows %}
+    <tr><td class="code">{{ r.code }}</td><td>{{ r.name }}</td>
+        <td class="num">{{ "%.2f"|format(r.balance|abs) }}</td></tr>
+    {% endfor %}
+    <tr class="section-total"><td></td><td>Total {{ section.label }}</td>
+        <td class="num">{{ "%.2f"|format(section.total_balance|abs) }}</td></tr>
+  </tbody>
+  {% endfor %}
+  <tfoot><tr class="grand-total"><td></td><td><strong>Net assets</strong></td>
+    <td class="num"><strong>{{ "%.2f"|format(net_assets) }}</strong></td></tr></tfoot>
+</table>
+
+<h2 class="pack-section">Trial Balance</h2>
+<div class="dim">As at {{ as_of }}</div>
+<table class="report-table">
+  <thead><tr><th>Code</th><th>Account</th><th class="num">Debit</th><th class="num">Credit</th></tr></thead>
+  {% for section in tb_sections %}
+  <tbody>
+    <tr class="section-header"><td colspan="4">{{ section.label }}</td></tr>
+    {% for r in section.rows %}
+    <tr><td class="code">{{ r.code }}</td><td>{{ r.name }}</td>
+        <td class="num">{{ "%.2f"|format(r.debit) if r.debit else "" }}</td>
+        <td class="num">{{ "%.2f"|format(r.credit) if r.credit else "" }}</td></tr>
+    {% endfor %}
+    <tr class="section-total"><td></td><td>Total {{ section.label }}</td>
+        <td class="num">{{ "%.2f"|format(section.total_debit) }}</td>
+        <td class="num">{{ "%.2f"|format(section.total_credit) }}</td></tr>
+  </tbody>
+  {% endfor %}
+  <tfoot><tr class="grand-total"><td></td><td><strong>Grand total</strong></td>
+    <td class="num"><strong>{{ "%.2f"|format(tb_debit) }}</strong></td>
+    <td class="num"><strong>{{ "%.2f"|format(tb_credit) }}</strong></td></tr></tfoot>
+</table>
+
+<section class="pack-declaration">
+  <h2>Trustee&#39;s declaration</h2>
+  <p>In the opinion of the trustee of {{ company.legal_name or company.name }}:</p>
+  <ul>
+    <li>the financial statements present fairly the financial position as at
+        {{ as_of }} and the result for the year then ended; and</li>
+    <li>there are reasonable grounds to believe the entity will be able to pay
+        its debts as and when they become due and payable.</li>
+  </ul>
+  <p>Signed for and on behalf of the trustee:</p>
+  <div class="sig-line">_______________________________&nbsp;&nbsp;&nbsp;Date: ____________</div>
+</section>
+{% endblock %}

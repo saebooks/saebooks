@@ -84,6 +84,28 @@ def current_user(request: Request) -> User | None:
     return user
 
 
+def resolve_actor_role(request: Request) -> str | None:
+    """Role string for the F-04 period-lock override gate, HTML-route flavour.
+
+    Prefers ``request.state.role`` (stamped by ForwardAuthMiddleware),
+    falls back to the authenticated user's own ``role``, then the
+    ``X-Actor-Role`` header (service-to-service escape hatch), else
+    ``None`` so the service layer fails closed. The JSON API has its own
+    richer resolver (``api/v1/journal_entries._resolve_actor_role``) that
+    also honours the static dev bearer; HTML routes never see that token.
+    """
+    role = getattr(request.state, "role", None)
+    if role:
+        return str(role)
+    user = current_user(request)
+    if user is not None and getattr(user, "role", None):
+        return str(user.role)
+    hdr = request.headers.get("x-actor-role")
+    if hdr:
+        return hdr.strip()
+    return None
+
+
 def require_user() -> Callable[[Request], Awaitable[User]]:
     """Dep: 401 if no authenticated user on the request."""
     async def _dep(request: Request) -> User:

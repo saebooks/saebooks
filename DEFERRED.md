@@ -52,9 +52,24 @@ copies the `saebk_*` cleartext, and pastes it into the CLI via
 
 ## Per-scope authorization
 
-`ApiToken.scopes` is informational only — server-side scope enforcement
-is TODO. Every token currently has the user's full role-level access.
-Tracked as a follow-up.
+**ENFORCED** (A2, `feat/api-token-scope-enforcement`). `ApiToken.scopes`
+is now read for an authorization decision on every `saebk_*` API-token
+request, in `require_bearer`'s API-token branch (`api/v1/auth.py`) via
+`services/scopes.py`. Minimum-viable read/write matrix:
+
+* `GET`/`HEAD`/`OPTIONS` require the `read` scope
+* `POST`/`PUT`/`PATCH`/`DELETE` require the `write` scope (a `write`
+  scope also satisfies `read`)
+
+Backward-compatible: a token whose scopes are empty/`None` or carry a
+full-access marker (`*`, `full`, or both `read` and `write`) keeps full
+access exactly as before — so every previously-issued token (all issued
+with the default `scopes=[]`) is unaffected. Only an explicitly
+restrictive set (e.g. `["read"]`) is limited. Interactive JWT / session
+/ web auth is untouched — it keeps role-based authz.
+
+Follow-up (still deferred): a finer per-domain scope matrix
+(e.g. `invoices.write` vs `payments.write`) if a consumer needs it.
 
 ## DNS / Caddy / Cloudflare for mcp.saebooks.com.au
 
