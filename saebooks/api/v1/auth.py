@@ -295,6 +295,35 @@ async def require_bearer(
                 headers={"WWW-Authenticate": "Bearer"},
             ) from exc
 
+        # ---- Scope enforcement (A2) ---------------------------------
+        # API-token auth ONLY. Interactive JWT / static-dev-bearer paths
+        # return BEFORE reaching here, so their role-based authz is
+        # unchanged. A token whose scopes are empty/None or a full-access
+        # marker ("*" / "full" / both "read"+"write") keeps full access
+        # exactly as before this layer existed -- so every existing live
+        # token (issued with the default scopes=[]) is unaffected. Only an
+        # explicitly restrictive set (e.g. ["read"]) is limited: safe
+        # methods need "read", mutating methods need "write".
+        from saebooks.services.scopes import (  # noqa: PLC0415
+            method_requires_scope,
+            token_allows,
+        )
+        if not token_allows(getattr(token_row, "scopes", None), request.method):
+            required = method_requires_scope(request.method)
+            logger.info(
+                "api token scope deny: prefix=%s method=%s scopes=%s",
+                getattr(token_row, "token_prefix", "?"),
+                request.method,
+                getattr(token_row, "scopes", None),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "API token scope does not permit this operation "
+                    f"({request.method} requires the '{required}' scope)"
+                ),
+            )
+
         # Stamp request.state so downstream handlers see the same
         # shape as the JWT path: jwt_claims (for tenant resolution),
         # user (for role gates), role (string), username.
