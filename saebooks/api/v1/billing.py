@@ -49,7 +49,7 @@ from saebooks.api.v1.auth import (
     resolve_tenant_id,
 )
 from saebooks.config import settings
-from saebooks.db import AsyncSessionLocal
+from saebooks.db import AsyncSessionLocal, LoginSessionLocal
 from saebooks.models.tenant import Tenant
 from saebooks.models.user import User
 from saebooks.services.auth_tokens import (
@@ -232,7 +232,15 @@ async def _handle_checkout_completed(event: dict[str, Any]) -> None:
         )
         return
 
-    async with AsyncSessionLocal() as session:
+    # Stripe-signature-authed webhook: no tenant JWT, and it resolves/mints
+    # the tenant FROM the payload. The users table is FORCE-RLS, so under the
+    # NOBYPASSRLS saebooks_app role _find_user_by_email returns zero rows
+    # (wrongly minting a duplicate tenant) and the owner-User INSERT fails the
+    # WITH CHECK. Use the owner role (LoginSessionLocal) — same as today's
+    # BYPASSRLS behaviour. tenants is global; users is RLS — both are correct
+    # under the owner role here. (bypass_tenant_scope would NOT help — it only
+    # toggles the company-scope ORM filter, not the app.current_tenant GUC.)
+    async with LoginSessionLocal() as session:
         user = await _find_user_by_email(session, customer_email)
 
         if user is not None and user.email_verified_at is not None:
@@ -317,7 +325,8 @@ async def _handle_subscription_updated(event: dict[str, Any]) -> None:
     status_str = (obj.get("status") or "").lower()
     edition = _edition_from_event(event) or "business"
 
-    async with AsyncSessionLocal() as session:
+    # Stripe-signature-authed webhook (no tenant JWT) — owner role, as above.
+    async with LoginSessionLocal() as session:
         tenant = await _find_tenant_by_subscription(session, sub_id)
         if tenant is None:
             logger.warning(
@@ -342,7 +351,8 @@ async def _handle_subscription_deleted(event: dict[str, Any]) -> None:
     obj = (event.get("data") or {}).get("object") or {}
     sub_id = obj.get("id") or ""
 
-    async with AsyncSessionLocal() as session:
+    # Stripe-signature-authed webhook (no tenant JWT) — owner role, as above.
+    async with LoginSessionLocal() as session:
         tenant = await _find_tenant_by_subscription(session, sub_id)
         if tenant is None:
             logger.warning(

@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime, time
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -38,6 +38,7 @@ class ContactBase(BaseModel):
     bank_account_number: str | None = None
     bank_account_title: str | None = None
     currency_code: str | None = Field(default=None, max_length=3, description="ISO 4217 billing currency")
+    is_one_off: bool = False
 
 
 class ContactCreate(ContactBase):
@@ -68,6 +69,7 @@ class ContactUpdate(BaseModel):
     default_account_id: uuid.UUID | None = None
     default_tax_code: str | None = None
     currency_code: str | None = Field(default=None, max_length=3)
+    is_one_off: bool | None = None
 
 
 class ContactOut(ContactBase):
@@ -1229,6 +1231,14 @@ class BankAccountCreate(BaseModel):
     apca_user_id: str | None = Field(default=None, max_length=6)
     bank_abbreviation: str | None = Field(default=None, max_length=3)
     is_trust_account: bool = False
+    credit_limit: Decimal | None = Field(
+        default=None, ge=0,
+        description="Credit limit for this account; null = no limit",
+    )
+    credit_limit_kind: Literal["soft", "hard"] = Field(
+        default="soft",
+        description="soft (warn only, default) | hard — mirrors SeatCapKind",
+    )
 
 
 class BankAccountUpdate(BaseModel):
@@ -1246,6 +1256,8 @@ class BankAccountUpdate(BaseModel):
     apca_user_id: str | None = None
     bank_abbreviation: str | None = None
     is_trust_account: bool | None = None
+    credit_limit: Decimal | None = Field(default=None, ge=0)
+    credit_limit_kind: Literal["soft", "hard"] | None = None
 
 
 class BankAccountOut(BaseModel):
@@ -1277,6 +1289,17 @@ class BankAccountOut(BaseModel):
     # running balance the bsl view would show.
     balance: Decimal | None = None
     statement_balance: Decimal | None = None
+    # Credit-limit fields. ``credit_limit`` / ``credit_limit_kind`` are
+    # persisted on the row. ``available`` and ``over_limit`` are *computed*
+    # by the handler when a balance is known (list ?include_statement_balance
+    # / detail get): available = credit_limit - amount_owed, where amount_owed
+    # is the positive money-owed figure (for credit-normal LIABILITY accounts
+    # this is the negated statement balance). Both are None when no limit is
+    # set or no balance was computed.
+    credit_limit: Decimal | None = None
+    credit_limit_kind: str | None = None
+    available: Decimal | None = None
+    over_limit: bool | None = None
 
 
 class BankAccountListOut(BaseModel):

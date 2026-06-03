@@ -132,8 +132,17 @@ async def _upsert_dev_user(
     Returns the refreshed ORM row or ``None`` if the DB call failed.
     """
     bootstrap_admins = _bootstrap_admins()
+    # Dev-override path only (gated by SAEBOOKS_DEV_USER, never set in
+    # production). The synthetic user lives in the seed/default tenant,
+    # so stamp it on the session: under the NOBYPASSRLS app role FORCE
+    # RLS on ``users`` would otherwise drop the SELECT and reject the
+    # INSERT. In dev with the owner-role fallback this is a harmless
+    # no-op. Keeps the dev path coherent if a developer points
+    # SAEBOOKS_APP_DATABASE_URL at the app role locally.
+    _dev_tenant_id = "00000000-0000-0000-0000-000000000001"
     try:
         async with AsyncSessionLocal() as session:
+            session.info["tenant_id"] = _dev_tenant_id
             existing = (
                 await session.execute(
                     select(User).where(User.username == username)
@@ -218,8 +227,19 @@ async def _user_from_jwt_bearer(
     except (ValueError, TypeError):
         return None, claims
 
+    # Bind app.current_tenant from the JWT claim BEFORE the session.get,
+    # or FORCE-RLS on ``users`` (migration 0055) silently drops every row
+    # under the NOBYPASSRLS ``saebooks_app`` runtime role — the lookup
+    # returns None and every server-rendered HTML page treats the request
+    # as anonymous (the role gate 403s / login appears broken). Stamping
+    # ``session.info['tenant_id']`` lets the ``after_begin`` listener in
+    # ``api/v1/deps.py`` issue ``SET LOCAL app.current_tenant``. Mirrors
+    # ``api/v1/auth.py::_stamp_user_from_sub`` and ``login.py::_user_by_id``.
+    tenant_claim = claims.get("tenant_id")
     try:
         async with AsyncSessionLocal() as session:
+            if tenant_claim:
+                session.info["tenant_id"] = str(tenant_claim)
             user = await session.get(User, user_id)
     except Exception as exc:  # defensive — DB hiccup shouldn't 500
         logger.warning("JWT user lookup failed for sub=%s: %s", sub, exc)

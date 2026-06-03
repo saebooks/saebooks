@@ -10,13 +10,14 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.config import settings
-from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
+from saebooks.routers.deps import get_web_session
 from saebooks.services import dashboard as svc
 from saebooks.web import templates
 from saebooks.services import active_company as active_svc
@@ -30,7 +31,10 @@ async def _first_company() -> Company | None:
 
 @router.get("", response_class=HTMLResponse)
 @router.get("/", response_class=HTMLResponse)
-async def dashboard_index(request: Request) -> HTMLResponse:
+async def dashboard_index(
+    request: Request,
+    session: AsyncSession = Depends(get_web_session),
+) -> HTMLResponse:
     """Render the dashboard.
 
     On a fresh DB with no company row, the dashboard is still
@@ -43,8 +47,7 @@ async def dashboard_index(request: Request) -> HTMLResponse:
         # crashing. Migrations may have run but seed may be pending.
         raise HTTPException(500, "No active company")
 
-    async with AsyncSessionLocal() as session:
-        bundle = await svc.build_dashboard(session, company.id)
+    bundle = await svc.build_dashboard(session, company.id)
 
     return templates.TemplateResponse(
         request,

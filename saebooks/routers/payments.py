@@ -25,13 +25,13 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.config import settings
-from saebooks.db import AsyncSessionLocal
+from saebooks.routers.deps import get_web_session
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact
@@ -123,6 +123,7 @@ async def payments_list(
     request: Request,
     status: str = Query("all"),
     direction: str = Query("all"),
+    session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:
     company = await _first_company()
     filter_status: PaymentStatus | None = None
@@ -132,21 +133,20 @@ async def payments_list(
     if direction.upper() in PaymentDirection.__members__:
         filter_direction = PaymentDirection(direction.upper())
 
-    async with AsyncSessionLocal() as session:
-        pays = await svc.list_payments(
-            session,
-            company.id,
-            status=filter_status,
-            direction=filter_direction,
-            include_archived=(status == "archived"),
+    pays = await svc.list_payments(
+        session,
+        company.id,
+        status=filter_status,
+        direction=filter_direction,
+        include_archived=(status == "archived"),
+    )
+    contact_ids = {p.contact_id for p in pays}
+    contact_map: dict[uuid.UUID, str] = {}
+    if contact_ids:
+        r = await session.execute(
+            select(Contact.id, Contact.name).where(Contact.id.in_(contact_ids))
         )
-        contact_ids = {p.contact_id for p in pays}
-        contact_map: dict[uuid.UUID, str] = {}
-        if contact_ids:
-            r = await session.execute(
-                select(Contact.id, Contact.name).where(Contact.id.in_(contact_ids))
-            )
-            contact_map = {row[0]: row[1] for row in r.all()}
+        contact_map = {row[0]: row[1] for row in r.all()}
     return templates.TemplateResponse(
         request,
         "payments/list.html",
@@ -168,11 +168,13 @@ async def payments_list(
 
 
 @router.get("/new", response_class=HTMLResponse)
-async def payments_new(request: Request) -> HTMLResponse:
+async def payments_new(
+    request: Request,
+    session: AsyncSession = Depends(get_web_session),
+) -> HTMLResponse:
     company = await _first_company()
-    async with AsyncSessionLocal() as session:
-        dropdowns = await _form_dropdowns(session, company.id)
-        preview_number = await numbering.peek_next(session, company.id, "payment")
+    dropdowns = await _form_dropdowns(session, company.id)
+    preview_number = await numbering.peek_next(session, company.id, "payment")
     return templates.TemplateResponse(
         request,
         "payments/form.html",
@@ -189,7 +191,10 @@ async def payments_new(request: Request) -> HTMLResponse:
 
 
 @router.post("", response_model=None)
-async def payments_create(request: Request) -> RedirectResponse | HTMLResponse:
+async def payments_create(
+    request: Request,
+    session: AsyncSession = Depends(get_web_session),
+) -> RedirectResponse | HTMLResponse:
     company = await _first_company()
     form = dict(await request.form())
     try:
@@ -210,14 +215,13 @@ async def payments_create(request: Request) -> RedirectResponse | HTMLResponse:
             "reference": str(form.get("reference") or "").strip() or None,
             "notes": str(form.get("notes") or "").strip() or None,
         }
-        async with AsyncSessionLocal() as session:
-            pay = await svc.create_draft(session, company_id=company.id, **kwargs)
+        pay = await svc.create_draft(session, company_id=company.id, **kwargs)
     except (ValueError, svc.PaymentError) as exc:
-        async with AsyncSessionLocal() as session:
-            dropdowns = await _form_dropdowns(session, company.id)
-            preview_number = await numbering.peek_next(
-                session, company.id, "payment"
-            )
+        await session.rollback()
+        dropdowns = await _form_dropdowns(session, company.id)
+        preview_number = await numbering.peek_next(
+            session, company.id, "payment"
+        )
         return templates.TemplateResponse(
             request,
             "payments/form.html",
@@ -241,38 +245,41 @@ async def payments_create(request: Request) -> RedirectResponse | HTMLResponse:
 
 
 @router.get("/{payment_id}", response_class=HTMLResponse)
-async def payments_detail(request: Request, payment_id: UUID) -> HTMLResponse:
-    async with AsyncSessionLocal() as session:
-        pay = await svc.get(session, payment_id)
-        company = await session.get(Company, pay.company_id)
-        contact = await session.get(Contact, pay.contact_id)
-        bank = await session.get(Account, pay.bank_account_id)
+async def payments_detail(
+    request: Request,
+    payment_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> HTMLResponse:
+    pay = await svc.get(session, payment_id)
+    company = await session.get(Company, pay.company_id)
+    contact = await session.get(Contact, pay.contact_id)
+    bank = await session.get(Account, pay.bank_account_id)
 
-        # Candidate invoices to allocate against (posted, same contact,
-        # balance > 0, matching direction for incoming receipts).
-        candidate_invoices: list[Invoice] = []
-        if pay.direction == PaymentDirection.INCOMING:
-            r = await session.execute(
-                select(Invoice)
-                .where(
-                    Invoice.company_id == pay.company_id,
-                    Invoice.contact_id == pay.contact_id,
-                    Invoice.status == InvoiceStatus.POSTED,
-                    Invoice.archived_at.is_(None),
-                )
-                .order_by(Invoice.issue_date)
+    # Candidate invoices to allocate against (posted, same contact,
+    # balance > 0, matching direction for incoming receipts).
+    candidate_invoices: list[Invoice] = []
+    if pay.direction == PaymentDirection.INCOMING:
+        r = await session.execute(
+            select(Invoice)
+            .where(
+                Invoice.company_id == pay.company_id,
+                Invoice.contact_id == pay.contact_id,
+                Invoice.status == InvoiceStatus.POSTED,
+                Invoice.archived_at.is_(None),
             )
-            candidate_invoices = [
-                inv for inv in r.scalars().all()
-                if (inv.total - inv.amount_paid) > Decimal("0")
-            ]
+            .order_by(Invoice.issue_date)
+        )
+        candidate_invoices = [
+            inv for inv in r.scalars().all()
+            if (inv.total - inv.amount_paid) > Decimal("0")
+        ]
 
-        # Build an allocation map so the form can show existing amounts.
-        allocated: dict[uuid.UUID, Decimal] = {
-            a.invoice_id: a.amount
-            for a in pay.allocations
-            if a.invoice_id is not None
-        }
+    # Build an allocation map so the form can show existing amounts.
+    allocated: dict[uuid.UUID, Decimal] = {
+        a.invoice_id: a.amount
+        for a in pay.allocations
+        if a.invoice_id is not None
+    }
     total_allocated = sum(allocated.values(), Decimal("0"))
     remaining = pay.amount - total_allocated
     return templates.TemplateResponse(
@@ -298,32 +305,40 @@ async def payments_detail(request: Request, payment_id: UUID) -> HTMLResponse:
 
 
 @router.post("/{payment_id}/post")
-async def payments_post(payment_id: UUID) -> RedirectResponse:
+async def payments_post(
+    payment_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> RedirectResponse:
     try:
-        async with AsyncSessionLocal() as session:
-            await svc.post_payment(session, payment_id, posted_by="web")
+        await svc.post_payment(session, payment_id, posted_by="web")
     except (PostingError, svc.PaymentError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return RedirectResponse(f"/payments/{payment_id}", status_code=303)
 
 
 @router.post("/{payment_id}/void")
-async def payments_void(payment_id: UUID) -> RedirectResponse:
-    async with AsyncSessionLocal() as session:
-        await svc.void_payment(session, payment_id, posted_by="web")
+async def payments_void(
+    payment_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> RedirectResponse:
+    await svc.void_payment(session, payment_id, posted_by="web")
     return RedirectResponse(f"/payments/{payment_id}", status_code=303)
 
 
 @router.post("/{payment_id}/archive")
-async def payments_archive(payment_id: UUID) -> RedirectResponse:
-    async with AsyncSessionLocal() as session:
-        await svc.archive(session, payment_id)
+async def payments_archive(
+    payment_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> RedirectResponse:
+    await svc.archive(session, payment_id)
     return RedirectResponse("/payments", status_code=303)
 
 
 @router.post("/{payment_id}/allocate", response_model=None)
 async def payments_allocate(
-    request: Request, payment_id: UUID
+    request: Request,
+    payment_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse | HTMLResponse:
     """Parse ``allocate_<invoice_id>=<amount>`` pairs and replace allocations.
 
@@ -352,12 +367,11 @@ async def payments_allocate(
             except ValueError as exc:
                 raise ValueError(f"Invalid invoice id in {key}") from exc
             allocations.append((inv_id, amount))
-        async with AsyncSessionLocal() as session:
-            await svc.allocate(
-                session,
-                payment_id,
-                invoice_allocations=allocations,
-            )
+        await svc.allocate(
+            session,
+            payment_id,
+            invoice_allocations=allocations,
+        )
     except (ValueError, svc.PaymentError) as exc:
         # Re-render the detail page with the error. Keep it simple —
         # just append the error as a query param the template picks up.

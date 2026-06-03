@@ -28,6 +28,10 @@ class Company(Base):
     acn: Mapped[str | None] = mapped_column(String(20))
     address: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     base_currency: Mapped[str] = mapped_column(String(3), default="AUD", nullable=False)
+    coa_template_key: Mapped[str] = mapped_column(
+        String(64), default="au/default", nullable=False,
+        comment="Jurisdiction CoA/reference-data template key",
+    )
     # Multi-jurisdiction routing key. Free text (no FK) because the
     # jurisdiction registry lives in the reference DB; validated at the
     # service layer. Defaults to AU because that is the only jurisdiction

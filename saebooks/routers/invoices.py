@@ -22,14 +22,14 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Form, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import resolve_tenant_id
 from saebooks.config import settings
-from saebooks.db import AsyncSessionLocal
+from saebooks.routers.deps import get_web_session
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact
@@ -181,27 +181,27 @@ async def invoices_list(
     request: Request,
     status: str = Query("all"),
     q: str | None = Query(None),
+    session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:
     company = await _first_company()
     filter_status: InvoiceStatus | None = None
     if status.upper() in InvoiceStatus.__members__:
         filter_status = InvoiceStatus(status.upper())
 
-    async with AsyncSessionLocal() as session:
-        invoices = await svc.list_invoices(
-            session,
-            company.id,
-            status=filter_status,
-            include_archived=(status == "archived"),
+    invoices = await svc.list_invoices(
+        session,
+        company.id,
+        status=filter_status,
+        include_archived=(status == "archived"),
+    )
+    # Contact names
+    contact_map: dict[uuid.UUID, str] = {}
+    contact_ids = {inv.contact_id for inv in invoices}
+    if contact_ids:
+        r = await session.execute(
+            select(Contact.id, Contact.name).where(Contact.id.in_(contact_ids))
         )
-        # Contact names
-        contact_map: dict[uuid.UUID, str] = {}
-        contact_ids = {inv.contact_id for inv in invoices}
-        if contact_ids:
-            r = await session.execute(
-                select(Contact.id, Contact.name).where(Contact.id.in_(contact_ids))
-            )
-            contact_map = {row[0]: row[1] for row in r.all()}
+        contact_map = {row[0]: row[1] for row in r.all()}
 
     # naive in-python q filter
     if q:
@@ -233,11 +233,13 @@ async def invoices_list(
 
 
 @router.get("/new", response_class=HTMLResponse)
-async def invoices_new(request: Request) -> HTMLResponse:
+async def invoices_new(
+    request: Request,
+    session: AsyncSession = Depends(get_web_session),
+) -> HTMLResponse:
     company = await _first_company()
-    async with AsyncSessionLocal() as session:
-        dropdowns = await _form_dropdowns(session, company.id)
-        preview_number = await numbering.peek_next(session, company.id, "invoice")
+    dropdowns = await _form_dropdowns(session, company.id)
+    preview_number = await numbering.peek_next(session, company.id, "invoice")
     today = date.today()
     return templates.TemplateResponse(
         request,
@@ -256,7 +258,10 @@ async def invoices_new(request: Request) -> HTMLResponse:
 
 
 @router.post("", response_model=None)
-async def invoices_create(request: Request) -> RedirectResponse | HTMLResponse:
+async def invoices_create(
+    request: Request,
+    session: AsyncSession = Depends(get_web_session),
+) -> RedirectResponse | HTMLResponse:
     company = await _first_company()
     form = dict(await request.form())
     try:
@@ -272,12 +277,11 @@ async def invoices_create(request: Request) -> RedirectResponse | HTMLResponse:
         }
         if not kwargs["lines"]:
             raise svc.InvoiceError("At least one line with description is required")
-        async with AsyncSessionLocal() as session:
-            inv = await svc.create_draft(session, company_id=company.id, **kwargs)
+        inv = await svc.create_draft(session, company_id=company.id, **kwargs)
     except (ValueError, svc.InvoiceError) as exc:
-        async with AsyncSessionLocal() as session:
-            dropdowns = await _form_dropdowns(session, company.id)
-            preview_number = await numbering.peek_next(session, company.id, "invoice")
+        await session.rollback()
+        dropdowns = await _form_dropdowns(session, company.id)
+        preview_number = await numbering.peek_next(session, company.id, "invoice")
         return templates.TemplateResponse(
             request,
             "invoices/form.html",
@@ -302,11 +306,14 @@ async def invoices_create(request: Request) -> RedirectResponse | HTMLResponse:
 
 
 @router.get("/{invoice_id}.pdf")
-async def invoices_pdf(invoice_id: UUID) -> Response:
+async def invoices_pdf(
+    invoice_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> Response:
     # Registered BEFORE ``/{invoice_id}`` so FastAPI's order-sensitive
     # dispatcher doesn't swallow ``<uuid>.pdf`` into the detail handler
     # and 422 on UUID coercion.
-    ctx = await _render_invoice_context(invoice_id)
+    ctx = await _render_invoice_context(session, invoice_id)
     data = pdf_svc.render_invoice_pdf(ctx)
     filename = f"{ctx.get('number', 'invoice')}.pdf"
     return Response(
@@ -317,30 +324,33 @@ async def invoices_pdf(invoice_id: UUID) -> Response:
 
 
 @router.get("/{invoice_id}", response_class=HTMLResponse)
-async def invoices_detail(request: Request, invoice_id: UUID) -> HTMLResponse:
+async def invoices_detail(
+    request: Request,
+    invoice_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> HTMLResponse:
     tenant_id = resolve_tenant_id(request)
-    async with AsyncSessionLocal() as session:
-        try:
-            inv = await svc.get(session, invoice_id, tenant_id=tenant_id)
-        except svc.InvoiceError as exc:
-            raise HTTPException(404, "Invoice not found") from exc
-        company = await session.get(Company, inv.company_id)
-        contact = await session.get(Contact, inv.contact_id)
-        # Resolve account + tax-code names for the line display
-        account_ids = {ln.account_id for ln in inv.lines}
-        tax_code_ids = {ln.tax_code_id for ln in inv.lines if ln.tax_code_id}
-        account_map: dict[uuid.UUID, Account] = {}
-        tax_map: dict[uuid.UUID, TaxCode] = {}
-        if account_ids:
-            r = await session.execute(
-                select(Account).where(Account.id.in_(account_ids))
-            )
-            account_map = {a.id: a for a in r.scalars().all()}
-        if tax_code_ids:
-            r2 = await session.execute(
-                select(TaxCode).where(TaxCode.id.in_(tax_code_ids))
-            )
-            tax_map = {t.id: t for t in r2.scalars().all()}
+    try:
+        inv = await svc.get(session, invoice_id, tenant_id=tenant_id)
+    except svc.InvoiceError as exc:
+        raise HTTPException(404, "Invoice not found") from exc
+    company = await session.get(Company, inv.company_id)
+    contact = await session.get(Contact, inv.contact_id)
+    # Resolve account + tax-code names for the line display
+    account_ids = {ln.account_id for ln in inv.lines}
+    tax_code_ids = {ln.tax_code_id for ln in inv.lines if ln.tax_code_id}
+    account_map: dict[uuid.UUID, Account] = {}
+    tax_map: dict[uuid.UUID, TaxCode] = {}
+    if account_ids:
+        r = await session.execute(
+            select(Account).where(Account.id.in_(account_ids))
+        )
+        account_map = {a.id: a for a in r.scalars().all()}
+    if tax_code_ids:
+        r2 = await session.execute(
+            select(TaxCode).where(TaxCode.id.in_(tax_code_ids))
+        )
+        tax_map = {t.id: t for t in r2.scalars().all()}
     return templates.TemplateResponse(
         request,
         "invoices/detail.html",
@@ -361,15 +371,18 @@ async def invoices_detail(request: Request, invoice_id: UUID) -> HTMLResponse:
 
 
 @router.get("/{invoice_id}/edit", response_class=HTMLResponse)
-async def invoices_edit(request: Request, invoice_id: UUID) -> HTMLResponse:
+async def invoices_edit(
+    request: Request,
+    invoice_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> HTMLResponse:
     tenant_id = resolve_tenant_id(request)
-    async with AsyncSessionLocal() as session:
-        try:
-            inv = await svc.get(session, invoice_id, tenant_id=tenant_id)
-        except svc.InvoiceError as exc:
-            raise HTTPException(404, "Invoice not found") from exc
-        company = await session.get(Company, inv.company_id)
-        dropdowns = await _form_dropdowns(session, inv.company_id)
+    try:
+        inv = await svc.get(session, invoice_id, tenant_id=tenant_id)
+    except svc.InvoiceError as exc:
+        raise HTTPException(404, "Invoice not found") from exc
+    company = await session.get(Company, inv.company_id)
+    dropdowns = await _form_dropdowns(session, inv.company_id)
     if inv.status != InvoiceStatus.DRAFT:
         raise HTTPException(400, f"Cannot edit invoice in state {inv.status}")
     return templates.TemplateResponse(
@@ -390,33 +403,34 @@ async def invoices_edit(request: Request, invoice_id: UUID) -> HTMLResponse:
 
 @router.post("/{invoice_id}", response_model=None)
 async def invoices_update(
-    request: Request, invoice_id: UUID
+    request: Request,
+    invoice_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse | HTMLResponse:
     tenant_id = resolve_tenant_id(request)
     form = dict(await request.form())
     try:
         sd_raw_u = str(form.get("settlement_date") or "").strip()
-        async with AsyncSessionLocal() as session:
-            await svc.update_draft(
-                session,
-                invoice_id,
-                tenant_id=tenant_id,
-                contact_id=uuid.UUID(str(form["contact_id"])),
-                issue_date=_parse_date(str(form["issue_date"]), "issue_date"),
-                due_date=_parse_date(str(form["due_date"]), "due_date"),
-                settlement_date=_parse_date(sd_raw_u, "settlement_date") if sd_raw_u else None,
-                notes=str(form.get("notes") or "").strip() or None,
-                payment_terms=str(form.get("payment_terms") or "").strip() or None,
-                lines=_parse_lines_from_form(form),
-            )
+        await svc.update_draft(
+            session,
+            invoice_id,
+            tenant_id=tenant_id,
+            contact_id=uuid.UUID(str(form["contact_id"])),
+            issue_date=_parse_date(str(form["issue_date"]), "issue_date"),
+            due_date=_parse_date(str(form["due_date"]), "due_date"),
+            settlement_date=_parse_date(sd_raw_u, "settlement_date") if sd_raw_u else None,
+            notes=str(form.get("notes") or "").strip() or None,
+            payment_terms=str(form.get("payment_terms") or "").strip() or None,
+            lines=_parse_lines_from_form(form),
+        )
     except (ValueError, svc.InvoiceError) as exc:
-        async with AsyncSessionLocal() as session:
-            try:
-                inv = await svc.get(session, invoice_id, tenant_id=tenant_id)
-            except svc.InvoiceError:
-                raise HTTPException(404, "Invoice not found") from exc
-            company = await session.get(Company, inv.company_id)
-            dropdowns = await _form_dropdowns(session, inv.company_id)
+        await session.rollback()
+        try:
+            inv = await svc.get(session, invoice_id, tenant_id=tenant_id)
+        except svc.InvoiceError:
+            raise HTTPException(404, "Invoice not found") from exc
+        company = await session.get(Company, inv.company_id)
+        dropdowns = await _form_dropdowns(session, inv.company_id)
         return templates.TemplateResponse(
             request,
             "invoices/form.html",
@@ -441,38 +455,45 @@ async def invoices_update(
 
 
 @router.post("/{invoice_id}/post")
-async def invoices_post(invoice_id: UUID) -> RedirectResponse:
-    async with AsyncSessionLocal() as session:
-        await svc.post_invoice(session, invoice_id, posted_by="web")
+async def invoices_post(
+    invoice_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> RedirectResponse:
+    await svc.post_invoice(session, invoice_id, posted_by="web")
     return RedirectResponse(f"/invoices/{invoice_id}", status_code=303)
 
 
 @router.post("/{invoice_id}/void")
-async def invoices_void(invoice_id: UUID) -> RedirectResponse:
-    async with AsyncSessionLocal() as session:
-        await svc.void_invoice(session, invoice_id, posted_by="web")
+async def invoices_void(
+    invoice_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> RedirectResponse:
+    await svc.void_invoice(session, invoice_id, posted_by="web")
     return RedirectResponse(f"/invoices/{invoice_id}", status_code=303)
 
 
 @router.post("/{invoice_id}/sent")
-async def invoices_sent(invoice_id: UUID) -> RedirectResponse:
-    async with AsyncSessionLocal() as session:
-        await svc.mark_sent(session, invoice_id)
+async def invoices_sent(
+    invoice_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> RedirectResponse:
+    await svc.mark_sent(session, invoice_id)
     return RedirectResponse(f"/invoices/{invoice_id}", status_code=303)
 
 
 @router.post("/{invoice_id}/archive")
 async def invoices_archive(
-    request: Request, invoice_id: UUID
+    request: Request,
+    invoice_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse:
     tenant_id = resolve_tenant_id(request)
-    async with AsyncSessionLocal() as session:
-        try:
-            await svc.archive(session, invoice_id, tenant_id=tenant_id)
-        except svc.InvoiceError:
-            # Cross-tenant archive — silently no-op (303 to list per
-            # forum#2 acceptance criteria; row stays untouched).
-            pass
+    try:
+        await svc.archive(session, invoice_id, tenant_id=tenant_id)
+    except svc.InvoiceError:
+        # Cross-tenant archive — silently no-op (303 to list per
+        # forum#2 acceptance criteria; row stays untouched).
+        pass
     return RedirectResponse("/invoices", status_code=303)
 
 
@@ -481,19 +502,20 @@ async def invoices_archive(
 # ---------------------------------------------------------------------- #
 
 
-async def _render_invoice_context(invoice_id: uuid.UUID) -> dict[str, Any]:
-    async with AsyncSessionLocal() as session:
-        inv = await svc.get(session, invoice_id)
-        company = await session.get(Company, inv.company_id)
-        contact = await session.get(Contact, inv.contact_id)
-        # Tax-code labels for the PDF line grid.
-        tax_code_ids = {ln.tax_code_id for ln in inv.lines if ln.tax_code_id}
-        tax_map: dict[uuid.UUID, TaxCode] = {}
-        if tax_code_ids:
-            r2 = await session.execute(
-                select(TaxCode).where(TaxCode.id.in_(tax_code_ids))
-            )
-            tax_map = {t.id: t for t in r2.scalars().all()}
+async def _render_invoice_context(
+    session: AsyncSession, invoice_id: uuid.UUID
+) -> dict[str, Any]:
+    inv = await svc.get(session, invoice_id)
+    company = await session.get(Company, inv.company_id)
+    contact = await session.get(Contact, inv.contact_id)
+    # Tax-code labels for the PDF line grid.
+    tax_code_ids = {ln.tax_code_id for ln in inv.lines if ln.tax_code_id}
+    tax_map: dict[uuid.UUID, TaxCode] = {}
+    if tax_code_ids:
+        r2 = await session.execute(
+            select(TaxCode).where(TaxCode.id.in_(tax_code_ids))
+        )
+        tax_map = {t.id: t for t in r2.scalars().all()}
 
     lines_ctx = []
     for ln in inv.lines:
@@ -561,12 +583,12 @@ async def invoices_email(
     to: str = Form(""),
     subject: str = Form(""),
     body: str = Form(""),
+    session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse:
-    ctx = await _render_invoice_context(invoice_id)
+    ctx = await _render_invoice_context(session, invoice_id)
     pdf_bytes = pdf_svc.render_invoice_pdf(ctx)
-    async with AsyncSessionLocal() as session:
-        inv = await svc.get(session, invoice_id)
-        contact = await session.get(Contact, inv.contact_id)
+    inv = await svc.get(session, invoice_id)
+    contact = await session.get(Contact, inv.contact_id)
     recipient = to.strip() or (contact.email if contact and contact.email else "")
     if not recipient:
         raise HTTPException(400, "No recipient email (contact has none and none supplied)")
@@ -588,9 +610,8 @@ async def invoices_email(
             )
         ],
     )
-    async with AsyncSessionLocal() as session:
-        inv = await svc.get(session, invoice_id)
-        if inv.status == InvoiceStatus.POSTED:
-            with contextlib.suppress(svc.InvoiceError):
-                await svc.mark_sent(session, invoice_id)
+    inv = await svc.get(session, invoice_id)
+    if inv.status == InvoiceStatus.POSTED:
+        with contextlib.suppress(svc.InvoiceError):
+            await svc.mark_sent(session, invoice_id)
     return RedirectResponse(f"/invoices/{invoice_id}", status_code=303)

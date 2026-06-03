@@ -56,6 +56,32 @@ async def test_create_company_succeeds_on_enterprise(
         await _purge_test_companies("CAP_TEST_")
 
 
+async def test_create_company_succeeds_on_developer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression for ``ValueError: Unknown edition: 'developer'``.
+
+    The live sauer stack runs ``SAEBOOKS_EDITION=developer`` (internal
+    guardrails-off edition, CHARTER 12.4). Before the cap entry existed,
+    ``create_company`` -> ``resolve_licence`` -> ``caps_for("developer")``
+    raised on an unknown edition. Developer has unlimited company caps,
+    so a create must succeed regardless of how many companies already
+    exist in the DB.
+    """
+    monkeypatch.setattr(
+        companies_svc, "resolve_licence", lambda: _fake_licence("developer")
+    )
+    tag = uuid.uuid4().hex[:8]
+    name = f"CAP_TEST_DEV_{tag}"
+    try:
+        async with AsyncSessionLocal() as session:
+            company = await companies_svc.create_company(session, name=name)
+            assert company.id is not None
+            assert company.name == name
+    finally:
+        await _purge_test_companies("CAP_TEST_DEV_")
+
+
 async def test_create_company_blocks_on_community(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

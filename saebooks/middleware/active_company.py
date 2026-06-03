@@ -119,6 +119,14 @@ class ActiveCompanyMiddleware(BaseHTTPMiddleware):
 
         try:
             async with AsyncSessionLocal() as session:
+                # FORCE-RLS: stamp the resolved tenant so the process-wide
+                # after_begin listener issues SET LOCAL app.current_tenant
+                # before resolve_active_with_options reads the (RLS-isolated)
+                # companies table. Without this, under the NOBYPASSRLS
+                # saebooks_app role the lookup returns zero rows and every
+                # HTML page 500s "No active company". (tenant_id is already
+                # resolved above.)
+                session.info["tenant_id"] = str(tenant_id)
                 active, companies = (
                     await active_svc.resolve_active_with_options(
                         session, request, tenant_id

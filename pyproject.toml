@@ -26,6 +26,7 @@ dependencies = [
     "sentry-sdk[fastapi]>=2.18",
     "python-json-logger>=2.0",
     "cryptography>=43.0",
+    "lxml>=5.0",  # SBR/XBRL Activity-Statement document generation
     "bcrypt>=4.2",
     "connecpy>=2.3",
     "grpcio>=1.62",

@@ -76,6 +76,36 @@ def _dump(account: Any) -> dict[str, Any]:
     return json.loads(BankAccountOut.model_validate(account).model_dump_json())
 
 
+def _owed_from_statement_balance(
+    statement_balance: Decimal | None, account_type: str | None
+) -> Decimal | None:
+    """Return the positive "amount owed" implied by a statement balance.
+
+    For credit-normal LIABILITY accounts (credit cards, loans) money spent
+    drives the statement balance negative, so the amount owed is the negated
+    balance. For debit-normal accounts the balance itself is the figure.
+    Returns None when no statement balance is known.
+    """
+    if statement_balance is None:
+        return None
+    if account_type == "LIABILITY":
+        return -statement_balance
+    return statement_balance
+
+
+def _apply_credit_fields(out: BankAccountOut, owed: Decimal | None) -> None:
+    """Populate available + over_limit on an out model given amount owed.
+
+    No-op (leaves both None) when the account has no credit_limit set or the
+    owed figure could not be computed. available = credit_limit - owed;
+    over_limit is True when owed strictly exceeds the limit.
+    """
+    if out.credit_limit is None or owed is None:
+        return
+    out.available = out.credit_limit - owed
+    out.over_limit = owed > out.credit_limit
+
+
 # ---------------------------------------------------------------------------
 # List
 # ---------------------------------------------------------------------------
@@ -149,6 +179,14 @@ async def list_bank_accounts(
         if include_statement_balance:
             # None when the account has no bsls — the UI renders "—".
             m.statement_balance = stmt_by_id.get(a.id)
+            # available/over_limit need the owed figure; statement balance is
+            # the canonical "owed" source (matches the dashboard widget). An
+            # account with a limit but no bsls is treated as owing 0.
+            owed = _owed_from_statement_balance(
+                m.statement_balance if m.statement_balance is not None else Decimal("0"),
+                m.account_type,
+            )
+            _apply_credit_fields(m, owed)
         out.append(m)
 
     return BankAccountListOut(
@@ -177,7 +215,27 @@ async def get_bank_account(
     )
     if account is None:
         raise HTTPException(404, "Bank account not found")
-    return BankAccountOut.model_validate(account)
+    out = BankAccountOut.model_validate(account)
+    # Compute the statement balance for this one account so the detail page
+    # can show available/over_limit. Mirrors the list handler's aggregation
+    # but scoped to a single account_id.
+    if out.credit_limit is not None:
+        sb_stmt = (
+            select(
+                func.coalesce(func.sum(BankStatementLine.amount), Decimal("0"))
+            )
+            .where(
+                BankStatementLine.company_id == company_id,
+                BankStatementLine.account_id == account.id,
+                BankStatementLine.archived_at.is_(None),
+            )
+        )
+        stmt_bal = Decimal((await session.execute(sb_stmt)).scalar_one())
+        out.statement_balance = stmt_bal
+        _apply_credit_fields(
+            out, _owed_from_statement_balance(stmt_bal, out.account_type)
+        )
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -233,6 +291,8 @@ async def create_bank_account(
             apca_user_id=payload.apca_user_id,
             bank_abbreviation=payload.bank_abbreviation,
             is_trust_account=payload.is_trust_account,
+            credit_limit=payload.credit_limit,
+            credit_limit_kind=payload.credit_limit_kind,
         )
     except (ValueError, svc.BankAccountError) as exc:
         raise HTTPException(422, str(exc)) from exc

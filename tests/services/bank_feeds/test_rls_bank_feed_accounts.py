@@ -70,7 +70,7 @@ from saebooks.models.tenant import Tenant
 # saebooks_app engine — connects via the locked-down runtime role.            #
 # --------------------------------------------------------------------------- #
 
-_APP_ROLE_PASSWORD = "test-only-app-pw"
+_APP_ROLE_PASSWORD = "saebooks_app_test_pw"
 _APP_ENGINE_URL_TEMPLATE = (
     "postgresql+asyncpg://saebooks_app:{pw}@db:5432/{db}"
 )

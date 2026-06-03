@@ -24,17 +24,17 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.config import settings
-from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact
 from saebooks.models.depreciation_model import DepreciationModel
+from saebooks.routers.deps import get_web_session
 from saebooks.services import assets as svc
 from saebooks.services import assets_import as imp_svc
 from saebooks.web import templates
@@ -141,16 +141,16 @@ def _optional_date(raw: str, field: str) -> date | None:
 async def assets_list(
     request: Request,
     status: str = Query("active"),
+    session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:
     company = await _first_company()
     filter_status: str | None = status if status in {"active", "disposed", "archived"} else None
-    async with AsyncSessionLocal() as session:
-        assets = await svc.list_assets(
-            session,
-            company.id,
-            status=filter_status,
-            include_archived=(status == "archived"),
-        )
+    assets = await svc.list_assets(
+        session,
+        company.id,
+        status=filter_status,
+        include_archived=(status == "archived"),
+    )
     return templates.TemplateResponse(
         request,
         "assets/list.html",
@@ -170,10 +170,12 @@ async def assets_list(
 
 
 @router.get("/new", response_class=HTMLResponse)
-async def assets_new(request: Request) -> HTMLResponse:
+async def assets_new(
+    request: Request,
+    session: AsyncSession = Depends(get_web_session),
+) -> HTMLResponse:
     company = await _first_company()
-    async with AsyncSessionLocal() as session:
-        dropdowns = await _form_dropdowns(session, company.id)
+    dropdowns = await _form_dropdowns(session, company.id)
     return templates.TemplateResponse(
         request,
         "assets/form.html",
@@ -254,6 +256,7 @@ async def assets_create(
     warranty_end: str = Form(""),
     purchase_contact_id: str = Form(""),
     tax_model_id: str = Form(""),
+    session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse | HTMLResponse:
     company = await _first_company()
     try:
@@ -278,11 +281,10 @@ async def assets_create(
             warranty_end=warranty_end,
             purchase_contact_id=purchase_contact_id,
         )
-        async with AsyncSessionLocal() as session:
-            asset = await svc.create(session, company.id, **kwargs)
+        asset = await svc.create(session, company.id, **kwargs)
     except ValueError as exc:
-        async with AsyncSessionLocal() as session:
-            dropdowns = await _form_dropdowns(session, company.id)
+        await session.rollback()
+        dropdowns = await _form_dropdowns(session, company.id)
         return templates.TemplateResponse(
             request,
             "assets/form.html",
@@ -320,6 +322,7 @@ async def assets_import_form(request: Request) -> HTMLResponse:
 async def assets_import_preview(
     request: Request,
     file: UploadFile = Form(...),  # noqa: B008
+    session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:
     company = await _first_company()
     raw = (await file.read()).decode("utf-8-sig", errors="replace")
@@ -332,8 +335,7 @@ async def assets_import_preview(
             {"edition": settings.edition, "error": str(exc)},
             status_code=400,
         )
-    async with AsyncSessionLocal() as session:
-        plan = await imp_svc.classify_rows(session, company.id, rows)
+    plan = await imp_svc.classify_rows(session, company.id, rows)
     return templates.TemplateResponse(
         request,
         "assets/import_preview.html",
@@ -348,13 +350,13 @@ async def assets_import_preview(
 @router.post("/import/apply", response_model=None)
 async def assets_import_apply(
     raw: str = Form(...),
+    session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse:
     company = await _first_company()
     rows = imp_svc.parse_assets_csv(raw)
-    async with AsyncSessionLocal() as session:
-        plan = await imp_svc.classify_rows(session, company.id, rows)
-        written = await imp_svc.apply_import(session, company.id, plan)
-        await session.commit()
+    plan = await imp_svc.classify_rows(session, company.id, rows)
+    written = await imp_svc.apply_import(session, company.id, plan)
+    await session.commit()
     skipped = len(plan.skip)
     invalid = len(plan.invalid)
     return RedirectResponse(
@@ -369,24 +371,27 @@ async def assets_import_apply(
 
 
 @router.get("/{asset_id}", response_class=HTMLResponse)
-async def assets_detail(request: Request, asset_id: UUID) -> HTMLResponse:
-    async with AsyncSessionLocal() as session:
-        asset = await svc.get(session, asset_id)
-        if asset is None:
-            raise HTTPException(404, "Asset not found")
-        company = await session.get(Company, asset.company_id)
+async def assets_detail(
+    request: Request,
+    asset_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> HTMLResponse:
+    asset = await svc.get(session, asset_id)
+    if asset is None:
+        raise HTTPException(404, "Asset not found")
+    company = await session.get(Company, asset.company_id)
 
-        # Compute current NBV as of today for the detail page.
-        today = date.today()
-        cumulative = await svc.cumulative_depreciation_through(
-            session, asset, today
-        )
-        nbv = (asset.cost - cumulative).quantize(Decimal("0.01"))
+    # Compute current NBV as of today for the detail page.
+    today = date.today()
+    cumulative = await svc.cumulative_depreciation_through(
+        session, asset, today
+    )
+    nbv = (asset.cost - cumulative).quantize(Decimal("0.01"))
 
-        cost_acct = await session.get(Account, asset.cost_account_id)
-        accum_acct = await session.get(Account, asset.accum_dep_account_id)
-        dep_acct = await session.get(Account, asset.dep_expense_account_id)
-        model = await session.get(DepreciationModel, asset.depreciation_model_id)
+    cost_acct = await session.get(Account, asset.cost_account_id)
+    accum_acct = await session.get(Account, asset.accum_dep_account_id)
+    dep_acct = await session.get(Account, asset.dep_expense_account_id)
+    model = await session.get(DepreciationModel, asset.depreciation_model_id)
 
     return templates.TemplateResponse(
         request,
@@ -412,13 +417,16 @@ async def assets_detail(request: Request, asset_id: UUID) -> HTMLResponse:
 
 
 @router.get("/{asset_id}/edit", response_class=HTMLResponse)
-async def assets_edit(request: Request, asset_id: UUID) -> HTMLResponse:
-    async with AsyncSessionLocal() as session:
-        asset = await svc.get(session, asset_id)
-        if asset is None:
-            raise HTTPException(404, "Asset not found")
-        company = await session.get(Company, asset.company_id)
-        dropdowns = await _form_dropdowns(session, asset.company_id)
+async def assets_edit(
+    request: Request,
+    asset_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> HTMLResponse:
+    asset = await svc.get(session, asset_id)
+    if asset is None:
+        raise HTTPException(404, "Asset not found")
+    company = await session.get(Company, asset.company_id)
+    dropdowns = await _form_dropdowns(session, asset.company_id)
     return templates.TemplateResponse(
         request,
         "assets/form.html",
@@ -455,6 +463,7 @@ async def assets_update(
     warranty_end: str = Form(""),
     purchase_contact_id: str = Form(""),
     tax_model_id: str = Form(""),
+    session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse | HTMLResponse:
     try:
         kwargs = _parse_asset_form(
@@ -485,15 +494,14 @@ async def assets_update(
         # in_service_date was optional in create — require it for update.
         if kwargs.get("in_service_date") is None:
             kwargs["in_service_date"] = kwargs["purchase_date"]
-        async with AsyncSessionLocal() as session:
-            await svc.update(session, asset_id, **kwargs)
+        await svc.update(session, asset_id, **kwargs)
     except ValueError as exc:
-        async with AsyncSessionLocal() as session:
-            asset = await svc.get(session, asset_id)
-            if asset is None:
-                raise HTTPException(404, "Asset not found") from exc
-            company = await session.get(Company, asset.company_id)
-            dropdowns = await _form_dropdowns(session, asset.company_id)
+        await session.rollback()
+        asset = await svc.get(session, asset_id)
+        if asset is None:
+            raise HTTPException(404, "Asset not found") from exc
+        company = await session.get(Company, asset.company_id)
+        dropdowns = await _form_dropdowns(session, asset.company_id)
         return templates.TemplateResponse(
             request,
             "assets/form.html",
@@ -518,12 +526,12 @@ async def assets_update(
 async def assets_depreciate(
     asset_id: UUID,
     through_date: str = Form(...),
+    session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse:
     through = _parse_date(through_date, "through_date")
-    async with AsyncSessionLocal() as session:
-        await svc.post_depreciation(
-            session, asset_id, through, posted_by="web"
-        )
+    await svc.post_depreciation(
+        session, asset_id, through, posted_by="web"
+    )
     return RedirectResponse(f"/assets/{asset_id}", status_code=303)
 
 
@@ -533,17 +541,20 @@ async def assets_depreciate(
 
 
 @router.get("/{asset_id}/dispose", response_class=HTMLResponse)
-async def assets_dispose_form(request: Request, asset_id: UUID) -> HTMLResponse:
-    async with AsyncSessionLocal() as session:
-        asset = await svc.get(session, asset_id)
-        if asset is None:
-            raise HTTPException(404, "Asset not found")
-        if asset.status != "active":
-            raise HTTPException(
-                400, f"Cannot dispose — asset status is {asset.status!r}"
-            )
-        company = await session.get(Company, asset.company_id)
-        dropdowns = await _form_dropdowns(session, asset.company_id)
+async def assets_dispose_form(
+    request: Request,
+    asset_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> HTMLResponse:
+    asset = await svc.get(session, asset_id)
+    if asset is None:
+        raise HTTPException(404, "Asset not found")
+    if asset.status != "active":
+        raise HTTPException(
+            400, f"Cannot dispose — asset status is {asset.status!r}"
+        )
+    company = await session.get(Company, asset.company_id)
+    dropdowns = await _form_dropdowns(session, asset.company_id)
     return templates.TemplateResponse(
         request,
         "assets/dispose.html",
@@ -565,24 +576,24 @@ async def assets_dispose(
     disposal_date: str = Form(...),
     proceeds: str = Form(...),
     cash_account_id: str = Form(...),
+    session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse | HTMLResponse:
     try:
-        async with AsyncSessionLocal() as session:
-            await svc.dispose_asset(
-                session,
-                asset_id,
-                disposal_date=_parse_date(disposal_date, "disposal_date"),
-                proceeds=_parse_decimal(proceeds, "proceeds"),
-                cash_account_id=uuid.UUID(cash_account_id),
-                posted_by="web",
-            )
+        await svc.dispose_asset(
+            session,
+            asset_id,
+            disposal_date=_parse_date(disposal_date, "disposal_date"),
+            proceeds=_parse_decimal(proceeds, "proceeds"),
+            cash_account_id=uuid.UUID(cash_account_id),
+            posted_by="web",
+        )
     except ValueError as exc:
-        async with AsyncSessionLocal() as session:
-            asset = await svc.get(session, asset_id)
-            if asset is None:
-                raise HTTPException(404, "Asset not found") from exc
-            company = await session.get(Company, asset.company_id)
-            dropdowns = await _form_dropdowns(session, asset.company_id)
+        await session.rollback()
+        asset = await svc.get(session, asset_id)
+        if asset is None:
+            raise HTTPException(404, "Asset not found") from exc
+        company = await session.get(Company, asset.company_id)
+        dropdowns = await _form_dropdowns(session, asset.company_id)
         return templates.TemplateResponse(
             request,
             "assets/dispose.html",
@@ -606,19 +617,20 @@ async def assets_dispose(
 
 @router.get("/{asset_id}/dispose-partial", response_class=HTMLResponse)
 async def assets_dispose_partial_form(
-    request: Request, asset_id: UUID
+    request: Request,
+    asset_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:
-    async with AsyncSessionLocal() as session:
-        asset = await svc.get(session, asset_id)
-        if asset is None:
-            raise HTTPException(404, "Asset not found")
-        if asset.status != "active":
-            raise HTTPException(
-                400,
-                f"Cannot partially dispose — asset status is {asset.status!r}",
-            )
-        company = await session.get(Company, asset.company_id)
-        dropdowns = await _form_dropdowns(session, asset.company_id)
+    asset = await svc.get(session, asset_id)
+    if asset is None:
+        raise HTTPException(404, "Asset not found")
+    if asset.status != "active":
+        raise HTTPException(
+            400,
+            f"Cannot partially dispose — asset status is {asset.status!r}",
+        )
+    company = await session.get(Company, asset.company_id)
+    dropdowns = await _form_dropdowns(session, asset.company_id)
     return templates.TemplateResponse(
         request,
         "assets/dispose_partial.html",
@@ -641,25 +653,25 @@ async def assets_dispose_partial(
     disposal_date: str = Form(...),
     proceeds: str = Form(...),
     cash_account_id: str = Form(...),
+    session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse | HTMLResponse:
     try:
-        async with AsyncSessionLocal() as session:
-            parent, _child, _gl = await svc.dispose_partial(
-                session,
-                asset_id,
-                fraction=_parse_decimal(fraction, "fraction"),
-                disposal_date=_parse_date(disposal_date, "disposal_date"),
-                proceeds=_parse_decimal(proceeds, "proceeds"),
-                cash_account_id=uuid.UUID(cash_account_id),
-                posted_by="web",
-            )
+        parent, _child, _gl = await svc.dispose_partial(
+            session,
+            asset_id,
+            fraction=_parse_decimal(fraction, "fraction"),
+            disposal_date=_parse_date(disposal_date, "disposal_date"),
+            proceeds=_parse_decimal(proceeds, "proceeds"),
+            cash_account_id=uuid.UUID(cash_account_id),
+            posted_by="web",
+        )
     except ValueError as exc:
-        async with AsyncSessionLocal() as session:
-            asset = await svc.get(session, asset_id)
-            if asset is None:
-                raise HTTPException(404, "Asset not found") from exc
-            company = await session.get(Company, asset.company_id)
-            dropdowns = await _form_dropdowns(session, asset.company_id)
+        await session.rollback()
+        asset = await svc.get(session, asset_id)
+        if asset is None:
+            raise HTTPException(404, "Asset not found") from exc
+        company = await session.get(Company, asset.company_id)
+        dropdowns = await _form_dropdowns(session, asset.company_id)
         return templates.TemplateResponse(
             request,
             "assets/dispose_partial.html",
@@ -683,23 +695,26 @@ async def assets_dispose_partial(
 
 
 @router.get("/{asset_id}/convert", response_class=HTMLResponse)
-async def assets_convert_form(request: Request, asset_id: UUID) -> HTMLResponse:
-    async with AsyncSessionLocal() as session:
-        asset = await svc.get(session, asset_id)
-        if asset is None:
-            raise HTTPException(404, "Asset not found")
-        if asset.status != "active":
-            raise HTTPException(
-                400, f"Cannot convert — asset status is {asset.status!r}"
-            )
-        company = await session.get(Company, asset.company_id)
-        dropdowns = await _form_dropdowns(session, asset.company_id)
-
-        today = date.today()
-        cumulative = await svc.cumulative_depreciation_through(
-            session, asset, today
+async def assets_convert_form(
+    request: Request,
+    asset_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> HTMLResponse:
+    asset = await svc.get(session, asset_id)
+    if asset is None:
+        raise HTTPException(404, "Asset not found")
+    if asset.status != "active":
+        raise HTTPException(
+            400, f"Cannot convert — asset status is {asset.status!r}"
         )
-        nbv = (asset.cost - cumulative).quantize(Decimal("0.01"))
+    company = await session.get(Company, asset.company_id)
+    dropdowns = await _form_dropdowns(session, asset.company_id)
+
+    today = date.today()
+    cumulative = await svc.cumulative_depreciation_through(
+        session, asset, today
+    )
+    nbv = (asset.cost - cumulative).quantize(Decimal("0.01"))
 
     return templates.TemplateResponse(
         request,
@@ -722,29 +737,29 @@ async def assets_convert(
     asset_id: UUID,
     conversion_date: str = Form(...),
     inventory_account_id: str = Form(...),
+    session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse | HTMLResponse:
     try:
-        async with AsyncSessionLocal() as session:
-            await svc.convert_to_inventory(
-                session,
-                asset_id,
-                conversion_date=_parse_date(conversion_date, "conversion_date"),
-                inventory_account_id=uuid.UUID(inventory_account_id),
-                posted_by="web",
-            )
+        await svc.convert_to_inventory(
+            session,
+            asset_id,
+            conversion_date=_parse_date(conversion_date, "conversion_date"),
+            inventory_account_id=uuid.UUID(inventory_account_id),
+            posted_by="web",
+        )
     except ValueError as exc:
-        async with AsyncSessionLocal() as session:
-            asset = await svc.get(session, asset_id)
-            if asset is None:
-                raise HTTPException(404, "Asset not found") from exc
-            company = await session.get(Company, asset.company_id)
-            dropdowns = await _form_dropdowns(session, asset.company_id)
-            today = date.today()
-            from saebooks.services import assets as _svc
-            cumulative = await _svc.cumulative_depreciation_through(
-                session, asset, today
-            )
-            nbv = (asset.cost - cumulative).quantize(Decimal("0.01"))
+        await session.rollback()
+        asset = await svc.get(session, asset_id)
+        if asset is None:
+            raise HTTPException(404, "Asset not found") from exc
+        company = await session.get(Company, asset.company_id)
+        dropdowns = await _form_dropdowns(session, asset.company_id)
+        today = date.today()
+        from saebooks.services import assets as _svc
+        cumulative = await _svc.cumulative_depreciation_through(
+            session, asset, today
+        )
+        nbv = (asset.cost - cumulative).quantize(Decimal("0.01"))
         return templates.TemplateResponse(
             request,
             "assets/convert.html",
@@ -768,7 +783,9 @@ async def assets_convert(
 
 
 @router.post("/{asset_id}/archive")
-async def assets_archive(asset_id: UUID) -> RedirectResponse:
-    async with AsyncSessionLocal() as session:
-        await svc.archive(session, asset_id)
+async def assets_archive(
+    asset_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> RedirectResponse:
+    await svc.archive(session, asset_id)
     return RedirectResponse("/assets", status_code=303)

@@ -11,14 +11,15 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.config import settings
-from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
+from saebooks.routers.deps import get_web_session
 from saebooks.services import budgets as svc
 from saebooks.web import templates
 from saebooks.services import active_company as active_svc
@@ -47,20 +48,21 @@ async def _first_company() -> Company:
     return await active_svc.first_company_compat()
 
 
-async def _budgetable_accounts(company_id: uuid.UUID) -> list[Account]:
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Account)
-            .where(
-                Account.company_id == company_id,
-                Account.archived_at.is_(None),
-                Account.is_header.is_(False),
-            )
-            .order_by(Account.code)
+async def _budgetable_accounts(
+    session: AsyncSession, company_id: uuid.UUID
+) -> list[Account]:
+    result = await session.execute(
+        select(Account)
+        .where(
+            Account.company_id == company_id,
+            Account.archived_at.is_(None),
+            Account.is_header.is_(False),
         )
-        return [
-            a for a in result.scalars().all() if a.account_type in _BUDGETABLE_TYPES
-        ]
+        .order_by(Account.code)
+    )
+    return [
+        a for a in result.scalars().all() if a.account_type in _BUDGETABLE_TYPES
+    ]
 
 
 def _default_year() -> int:
@@ -76,11 +78,11 @@ def _default_year() -> int:
 async def budgets_index(
     request: Request,
     year: int = Query(default_factory=_default_year),
+    session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:
     company = await _first_company()
-    accounts = await _budgetable_accounts(company.id)
-    async with AsyncSessionLocal() as session:
-        rows = await svc.list_for_period(session, company.id, year=year)
+    accounts = await _budgetable_accounts(session, company.id)
+    rows = await svc.list_for_period(session, company.id, year=year)
     # Roll up: account_id -> total + per-month map
     by_account: dict[uuid.UUID, dict[str, Any]] = {}
     for row in rows:
@@ -130,15 +132,15 @@ async def budgets_edit(
     request: Request,
     account_id: uuid.UUID = Query(...),  # noqa: B008
     year: int = Query(default_factory=_default_year),
+    session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:
     company = await _first_company()
-    async with AsyncSessionLocal() as session:
-        account = await session.get(Account, account_id)
-        if account is None or account.company_id != company.id:
-            raise HTTPException(404, "Account not found")
-        rows = await svc.list_for_period(
-            session, company.id, year=year, account_id=account_id
-        )
+    account = await session.get(Account, account_id)
+    if account is None or account.company_id != company.id:
+        raise HTTPException(404, "Account not found")
+    rows = await svc.list_for_period(
+        session, company.id, year=year, account_id=account_id
+    )
     # Build month -> {amount, notes} pre-fill map.
     by_month = {r.month: r for r in rows}
     monthly = []
@@ -170,7 +172,10 @@ async def budgets_edit(
 
 
 @router.post("/save", response_model=None)
-async def budgets_save(request: Request) -> RedirectResponse | HTMLResponse:
+async def budgets_save(
+    request: Request,
+    session: AsyncSession = Depends(get_web_session),
+) -> RedirectResponse | HTMLResponse:
     company = await _first_company()
     form = dict(await request.form())
     try:
@@ -198,7 +203,6 @@ async def budgets_save(request: Request) -> RedirectResponse | HTMLResponse:
             }
         )
 
-    async with AsyncSessionLocal() as session:
-        await svc.bulk_upsert(session, company.id, year=year, rows=rows)
+    await svc.bulk_upsert(session, company.id, year=year, rows=rows)
 
     return RedirectResponse(f"/budgets?year={year}", status_code=303)

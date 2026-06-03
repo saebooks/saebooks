@@ -88,6 +88,9 @@ class Contact(CompanyScoped, Base):
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # TPAR: flag this contact as a sub-contractor for TPAR reporting (CIVL-5).
     is_tpar_supplier: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # One-off / walk-in flag — keeps transient parties out of the main list
+    # (filterable on the contacts page; toggled via bulk-tag-one-off).
+    is_one_off: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # Monotonic version counter for optimistic locking via the API's
     # ``If-Match: <version>`` header. Bumped on every write that goes
     # through ``saebooks.api.v1``; legacy Jinja writes also route

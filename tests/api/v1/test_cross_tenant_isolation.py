@@ -102,7 +102,7 @@ from saebooks.services.jwt_tokens import (
 # role. For this test we MUST go through ``saebooks_app`` so FORCE RLS
 # binds the session — see file docstring.
 
-_APP_ROLE_PASSWORD = "test-only-app-pw"
+_APP_ROLE_PASSWORD = "saebooks_app_test_pw"
 
 
 def _build_app_engine_url() -> str:

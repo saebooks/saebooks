@@ -2,17 +2,18 @@
 import uuid
 from uuid import UUID
 
-from fastapi import APIRouter, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.config import settings
-from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account
 from saebooks.models.bank_rule import MatchType
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact
 from saebooks.models.tax_code import TaxCode
+from saebooks.routers.deps import get_web_session
 from saebooks.services import bank_rules as svc
 from saebooks.web import templates
 from saebooks.services import active_company as active_svc
@@ -65,18 +66,20 @@ async def _form_dropdowns(session, company_id: uuid.UUID):
 
 
 @router.get("", response_class=HTMLResponse)
-async def rules_list(request: Request) -> HTMLResponse:
+async def rules_list(
+    request: Request,
+    session: AsyncSession = Depends(get_web_session),
+) -> HTMLResponse:
     company = await _first_company()
-    async with AsyncSessionLocal() as session:
-        rules = await svc.list_rules(session, company.id)
-        # Resolve account names for display
-        acct_ids = {r.account_id for r in rules}
-        accounts = {}
-        if acct_ids:
-            result = await session.execute(
-                select(Account).where(Account.id.in_(acct_ids))
-            )
-            accounts = {a.id: a for a in result.scalars().all()}
+    rules = await svc.list_rules(session, company.id)
+    # Resolve account names for display
+    acct_ids = {r.account_id for r in rules}
+    accounts = {}
+    if acct_ids:
+        result = await session.execute(
+            select(Account).where(Account.id.in_(acct_ids))
+        )
+        accounts = {a.id: a for a in result.scalars().all()}
 
     return templates.TemplateResponse(
         request,
@@ -97,10 +100,12 @@ async def rules_list(request: Request) -> HTMLResponse:
 
 
 @router.get("/new", response_class=HTMLResponse)
-async def rules_new(request: Request) -> HTMLResponse:
+async def rules_new(
+    request: Request,
+    session: AsyncSession = Depends(get_web_session),
+) -> HTMLResponse:
     company = await _first_company()
-    async with AsyncSessionLocal() as session:
-        accounts, tax_codes, contacts = await _form_dropdowns(session, company.id)
+    accounts, tax_codes, contacts = await _form_dropdowns(session, company.id)
     return templates.TemplateResponse(
         request,
         "bank_rules/form.html",
@@ -130,27 +135,27 @@ async def rules_create(
     auto_create: bool = Form(False),
     priority: int = Form(0),
     is_active: bool = Form(False),
+    session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse | HTMLResponse:
     company = await _first_company()
     try:
-        async with AsyncSessionLocal() as session:
-            await svc.create(
-                session,
-                company.id,
-                name=name,
-                match_pattern=match_pattern,
-                match_type=MatchType(match_type),
-                account_id=UUID(account_id),
-                tax_code=tax_code or None,
-                contact_id=UUID(contact_id) if contact_id else None,
-                description_template=description_template or None,
-                auto_create=auto_create,
-                priority=priority,
-                is_active=is_active,
-            )
+        await svc.create(
+            session,
+            company.id,
+            name=name,
+            match_pattern=match_pattern,
+            match_type=MatchType(match_type),
+            account_id=UUID(account_id),
+            tax_code=tax_code or None,
+            contact_id=UUID(contact_id) if contact_id else None,
+            description_template=description_template or None,
+            auto_create=auto_create,
+            priority=priority,
+            is_active=is_active,
+        )
     except ValueError as exc:
-        async with AsyncSessionLocal() as session:
-            accounts, tax_codes, contacts = await _form_dropdowns(session, company.id)
+        await session.rollback()
+        accounts, tax_codes, contacts = await _form_dropdowns(session, company.id)
         return templates.TemplateResponse(
             request,
             "bank_rules/form.html",
@@ -175,13 +180,16 @@ async def rules_create(
 
 
 @router.get("/{rule_id}/edit", response_class=HTMLResponse)
-async def rules_edit(request: Request, rule_id: UUID) -> HTMLResponse:
-    async with AsyncSessionLocal() as session:
-        rule = await svc.get(session, rule_id)
-        if rule is None:
-            raise HTTPException(404, "Rule not found")
-        company = await session.get(Company, rule.company_id)
-        accounts, tax_codes, contacts = await _form_dropdowns(session, rule.company_id)
+async def rules_edit(
+    request: Request,
+    rule_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> HTMLResponse:
+    rule = await svc.get(session, rule_id)
+    if rule is None:
+        raise HTTPException(404, "Rule not found")
+    company = await session.get(Company, rule.company_id)
+    accounts, tax_codes, contacts = await _form_dropdowns(session, rule.company_id)
     return templates.TemplateResponse(
         request,
         "bank_rules/form.html",
@@ -212,30 +220,30 @@ async def rules_update(
     auto_create: bool = Form(False),
     priority: int = Form(0),
     is_active: bool = Form(False),
+    session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse | HTMLResponse:
     try:
-        async with AsyncSessionLocal() as session:
-            await svc.update(
-                session, rule_id,
-                name=name,
-                match_pattern=match_pattern,
-                match_type=MatchType(match_type),
-                account_id=UUID(account_id),
-                tax_code=tax_code or None,
-                contact_id=UUID(contact_id) if contact_id else None,
-                description_template=description_template or None,
-                auto_create=auto_create,
-                priority=priority,
-                is_active=is_active,
-                performed_by="web",
-            )
+        await svc.update(
+            session, rule_id,
+            name=name,
+            match_pattern=match_pattern,
+            match_type=MatchType(match_type),
+            account_id=UUID(account_id),
+            tax_code=tax_code or None,
+            contact_id=UUID(contact_id) if contact_id else None,
+            description_template=description_template or None,
+            auto_create=auto_create,
+            priority=priority,
+            is_active=is_active,
+            performed_by="web",
+        )
     except ValueError as exc:
-        async with AsyncSessionLocal() as session:
-            rule = await svc.get(session, rule_id)
-            if rule is None:
-                raise HTTPException(404, "Rule not found") from exc
-            company = await session.get(Company, rule.company_id)
-            accounts, tax_codes, contacts = await _form_dropdowns(session, rule.company_id)
+        await session.rollback()
+        rule = await svc.get(session, rule_id)
+        if rule is None:
+            raise HTTPException(404, "Rule not found") from exc
+        company = await session.get(Company, rule.company_id)
+        accounts, tax_codes, contacts = await _form_dropdowns(session, rule.company_id)
         return templates.TemplateResponse(
             request,
             "bank_rules/form.html",
@@ -255,9 +263,11 @@ async def rules_update(
 
 
 @router.post("/{rule_id}/delete")
-async def rules_delete(rule_id: UUID) -> RedirectResponse:
-    async with AsyncSessionLocal() as session:
-        await svc.delete(session, rule_id, performed_by="web")
+async def rules_delete(
+    rule_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> RedirectResponse:
+    await svc.delete(session, rule_id, performed_by="web")
     return RedirectResponse("/bank-rules", status_code=303)
 
 
@@ -267,10 +277,12 @@ async def rules_delete(rule_id: UUID) -> RedirectResponse:
 
 
 @router.post("/run-auto", response_model=None)
-async def run_auto_rules(request: Request) -> RedirectResponse:
+async def run_auto_rules(
+    request: Request,
+    session: AsyncSession = Depends(get_web_session),
+) -> RedirectResponse:
     company = await _first_company()
-    async with AsyncSessionLocal() as session:
-        counts = await svc.auto_apply_rules(session, company.id)
+    counts = await svc.auto_apply_rules(session, company.id)
     return RedirectResponse(
         f"/bank-rules?ran={counts['created']}&skipped={counts['skipped']}",
         status_code=303,

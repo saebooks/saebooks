@@ -22,6 +22,7 @@ Covers:
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -419,3 +420,224 @@ async def test_bank_accounts_change_log_full_sequence(api_client: AsyncClient) -
     assert "updated" in ops
     assert "deleted" in ops
     assert versions == sorted(versions)  # monotonically increasing
+
+
+# ---------------------------------------------------------------------------
+# Credit limit — field round-trip, available/over_limit, soft-vs-hard
+# (added 2026-05-31, migration 0141_account_credit_limit)
+# ---------------------------------------------------------------------------
+
+
+def _card_payload(**overrides: object) -> dict:
+    """A CREDIT_CARD bank-account payload (no BSB required for cards)."""
+    base: dict = {
+        "code": f"2-{uuid.uuid4().hex[:8].upper()}",
+        "name": "Test Credit Card",
+        "account_kind": "CREDIT_CARD",
+    }
+    base.update(overrides)
+    return base
+
+
+async def test_credit_limit_create_round_trip(api_client: AsyncClient) -> None:
+    """POST with credit_limit + kind persists and is returned on the out body."""
+    r = await api_client.post(
+        "/api/v1/bank_accounts",
+        json=_card_payload(credit_limit="5000.00", credit_limit_kind="soft"),
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["credit_limit"] == "5000.00"
+    assert body["credit_limit_kind"] == "soft"
+
+    # GET round-trips the persisted values.
+    r2 = await api_client.get(f"/api/v1/bank_accounts/{body['id']}")
+    assert r2.status_code == 200
+    got = r2.json()
+    assert got["credit_limit"] == "5000.00"
+    assert got["credit_limit_kind"] == "soft"
+
+
+async def test_credit_limit_defaults_soft(api_client: AsyncClient) -> None:
+    """Omitting credit_limit_kind defaults to 'soft'."""
+    r = await api_client.post(
+        "/api/v1/bank_accounts",
+        json=_card_payload(credit_limit="1000.00"),
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["credit_limit_kind"] == "soft"
+
+
+async def test_credit_limit_null_when_unset(api_client: AsyncClient) -> None:
+    """No credit_limit -> available/over_limit are null on the out body."""
+    r = await api_client.post("/api/v1/bank_accounts", json=_card_payload())
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["credit_limit"] is None
+    assert body["available"] is None
+    assert body["over_limit"] is None
+
+
+async def test_credit_limit_rejects_bad_kind(api_client: AsyncClient) -> None:
+    """credit_limit_kind outside {soft,hard} is a 422 (Literal-validated)."""
+    r = await api_client.post(
+        "/api/v1/bank_accounts",
+        json=_card_payload(credit_limit="1000.00", credit_limit_kind="blocky"),
+    )
+    assert r.status_code == 422, r.text
+
+
+async def test_credit_limit_patch_set_and_clear(api_client: AsyncClient) -> None:
+    """PATCH can set the limit, change kind to hard, then clear it (null)."""
+    r = await api_client.post("/api/v1/bank_accounts", json=_card_payload())
+    assert r.status_code == 201
+    ba_id = r.json()["id"]
+    v = r.json()["version"]
+
+    # Set the limit + hard kind.
+    r2 = await api_client.patch(
+        f"/api/v1/bank_accounts/{ba_id}",
+        json={"credit_limit": "2500.00", "credit_limit_kind": "hard"},
+        headers={"If-Match": str(v)},
+    )
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["credit_limit"] == "2500.00"
+    assert r2.json()["credit_limit_kind"] == "hard"
+
+    # Clear the limit by sending null.
+    v2 = r2.json()["version"]
+    r3 = await api_client.patch(
+        f"/api/v1/bank_accounts/{ba_id}",
+        json={"credit_limit": None},
+        headers={"If-Match": str(v2)},
+    )
+    assert r3.status_code == 200, r3.text
+    assert r3.json()["credit_limit"] is None
+    # Kind is left unchanged when omitted.
+    assert r3.json()["credit_limit_kind"] == "hard"
+
+
+async def test_credit_limit_patch_omitted_leaves_unchanged(api_client: AsyncClient) -> None:
+    """PATCH that does not mention credit_limit must not wipe it (sentinel)."""
+    r = await api_client.post(
+        "/api/v1/bank_accounts",
+        json=_card_payload(credit_limit="3000.00"),
+    )
+    assert r.status_code == 201
+    ba_id = r.json()["id"]
+    v = r.json()["version"]
+
+    # Update only the name; credit_limit must survive.
+    r2 = await api_client.patch(
+        f"/api/v1/bank_accounts/{ba_id}",
+        json={"name": "Renamed Card"},
+        headers={"If-Match": str(v)},
+    )
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["credit_limit"] == "3000.00"
+
+
+async def test_available_and_over_limit_computed(api_client: AsyncClient) -> None:
+    """available = limit - owed; over_limit reflects owed > limit.
+
+    Seeds bank-statement lines on a CREDIT_CARD so the computed owed figure
+    is non-zero, then checks the list (?include_statement_balance) and the
+    detail GET both surface available/over_limit with the correct sign.
+    """
+    from datetime import date as _date
+
+    from saebooks.models.bank_statement import BankStatementLine
+
+    r = await api_client.post(
+        "/api/v1/bank_accounts",
+        json=_card_payload(credit_limit="5000.00", credit_limit_kind="soft"),
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    ba_id = body["id"]
+    company_id = uuid.UUID(body["company_id"])
+    tenant_id = uuid.UUID(body["tenant_id"])
+
+    # Seed a net -3887.53 statement balance (money spent on the card).
+    async with AsyncSessionLocal() as session:
+        session.add(
+            BankStatementLine(
+                id=uuid.uuid4(),
+                company_id=company_id,
+                tenant_id=tenant_id,
+                account_id=uuid.UUID(ba_id),
+                txn_date=_date(2026, 1, 15),
+                description="Card spend",
+                amount=Decimal("-3887.53"),
+            )
+        )
+        await session.commit()
+
+    # Detail GET computes owed for the single account.
+    r_get = await api_client.get(f"/api/v1/bank_accounts/{ba_id}")
+    assert r_get.status_code == 200, r_get.text
+    got = r_get.json()
+    # owed = 3887.53 -> available = 5000 - 3887.53 = 1112.47, not over.
+    assert Decimal(got["available"]) == Decimal("1112.47")
+    assert got["over_limit"] is False
+
+    # List handler computes the same via ?include_statement_balance.
+    r_list = await api_client.get(
+        "/api/v1/bank_accounts",
+        params={"include_statement_balance": "true", "page_size": 500},
+    )
+    assert r_list.status_code == 200
+    item = next(i for i in r_list.json()["items"] if i["id"] == ba_id)
+    assert Decimal(item["available"]) == Decimal("1112.47")
+    assert item["over_limit"] is False
+
+
+async def test_over_limit_true_when_owed_exceeds(api_client: AsyncClient) -> None:
+    """When owed > limit, over_limit is True and available goes negative."""
+    from datetime import date as _date
+
+    from saebooks.models.bank_statement import BankStatementLine
+
+    r = await api_client.post(
+        "/api/v1/bank_accounts",
+        json=_card_payload(credit_limit="1000.00", credit_limit_kind="soft"),
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    ba_id = body["id"]
+
+    async with AsyncSessionLocal() as session:
+        session.add(
+            BankStatementLine(
+                id=uuid.uuid4(),
+                company_id=uuid.UUID(body["company_id"]),
+                tenant_id=uuid.UUID(body["tenant_id"]),
+                account_id=uuid.UUID(ba_id),
+                txn_date=_date(2026, 1, 20),
+                description="Over-limit spend",
+                amount=Decimal("-1500.00"),
+            )
+        )
+        await session.commit()
+
+    r_get = await api_client.get(f"/api/v1/bank_accounts/{ba_id}")
+    assert r_get.status_code == 200, r_get.text
+    got = r_get.json()
+    assert Decimal(got["available"]) == Decimal("-500.00")
+    assert got["over_limit"] is True
+
+
+async def test_soft_vs_hard_persisted_distinctly(api_client: AsyncClient) -> None:
+    """A hard-limit card and a soft-limit card keep their distinct kinds."""
+    r_soft = await api_client.post(
+        "/api/v1/bank_accounts",
+        json=_card_payload(credit_limit="100.00", credit_limit_kind="soft"),
+    )
+    r_hard = await api_client.post(
+        "/api/v1/bank_accounts",
+        json=_card_payload(credit_limit="100.00", credit_limit_kind="hard"),
+    )
+    assert r_soft.status_code == 201
+    assert r_hard.status_code == 201
+    assert r_soft.json()["credit_limit_kind"] == "soft"
+    assert r_hard.json()["credit_limit_kind"] == "hard"

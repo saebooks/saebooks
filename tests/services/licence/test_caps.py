@@ -13,12 +13,18 @@ from saebooks.services.licence.caps import TIER_CAPS, EditionCaps, caps_for
 
 
 def test_every_edition_has_an_entry() -> None:
+    # CHARTER 12.2/12.3 publish five editions; the internal-only
+    # "developer" edition (12.4) is unlimited like enterprise but is
+    # never surfaced to customers. It must have a cap entry so
+    # caps_for("developer") / create_company work under
+    # SAEBOOKS_EDITION=developer.
     assert set(TIER_CAPS.keys()) == {
         "community",
         "offline",
         "business",
         "pro",
         "enterprise",
+        "developer",
     }
 
 
@@ -59,6 +65,22 @@ def test_enterprise_caps_are_unlimited() -> None:
     assert e.admin_seats_unlimited is True
     assert e.employee_seats_unlimited is True
     assert e.companies_unlimited is True
+
+
+def test_developer_caps_are_unlimited() -> None:
+    """Developer is the internal guardrails-off edition (CHARTER 12.4) and
+    must mirror enterprise: unlimited admin/employee seats and unlimited
+    companies, so caps_for("developer") never raises and create_company
+    has no cap to trip on a SAEBOOKS_EDITION=developer instance."""
+    d = caps_for("developer")
+    assert d.admin_seats is None
+    assert d.employee_seats is None
+    assert d.companies is None
+    assert d.admin_seats_unlimited is True
+    assert d.employee_seats_unlimited is True
+    assert d.companies_unlimited is True
+    # Developer is unlimited exactly like enterprise.
+    assert d == caps_for("enterprise")
 
 
 def test_caps_for_unknown_edition_raises() -> None:

@@ -3,19 +3,19 @@ from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
-from fastapi import APIRouter, Form, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import resolve_tenant_id
 from saebooks.config import settings
-from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
 from saebooks.models.account_range import AccountRange
 from saebooks.models.company import Company
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
 from saebooks.models.tax_code import TaxCode
+from saebooks.routers.deps import get_web_session
 from saebooks.services import accounts as svc
 from saebooks.web import templates
 from saebooks.services import active_company as active_svc
@@ -169,31 +169,32 @@ async def _account_balances(
     return balances
 
 
-async def _tax_codes(company_id: uuid.UUID) -> list[TaxCode]:
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(TaxCode)
-            .where(TaxCode.company_id == company_id, TaxCode.archived_at.is_(None))
-            .order_by(TaxCode.code)
-        )
-        return list(result.scalars().all())
+async def _tax_codes(session: AsyncSession, company_id: uuid.UUID) -> list[TaxCode]:
+    result = await session.execute(
+        select(TaxCode)
+        .where(TaxCode.company_id == company_id, TaxCode.archived_at.is_(None))
+        .order_by(TaxCode.code)
+    )
+    return list(result.scalars().all())
 
 
 @router.get("/accounts", response_class=HTMLResponse)
-async def accounts_list(request: Request) -> HTMLResponse:
+async def accounts_list(
+    request: Request,
+    session: AsyncSession = Depends(get_web_session),
+) -> HTMLResponse:
     company = await _first_company()
-    async with AsyncSessionLocal() as session:
-        accounts = await svc.list_active(session, company.id)
+    accounts = await svc.list_active(session, company.id)
+    ranges = await svc.get_ranges(session, company.id)
+
+    # Auto-seed default ranges if none exist yet
+    if not ranges:
+        await svc.seed_default_ranges(session, company.id)
         ranges = await svc.get_ranges(session, company.id)
 
-        # Auto-seed default ranges if none exist yet
-        if not ranges:
-            await svc.seed_default_ranges(session, company.id)
-            ranges = await svc.get_ranges(session, company.id)
+    balances = await _account_balances(session, company.id)
 
-        balances = await _account_balances(session, company.id)
-
-    tax_codes = await _tax_codes(company.id)
+    tax_codes = await _tax_codes(session, company.id)
     groups = _build_hierarchy(accounts, ranges, balances)
 
     return templates.TemplateResponse(
@@ -220,25 +221,25 @@ async def accounts_create(
     reconcile: bool = Form(False),
     is_header: bool = Form(False),
     tax_code_default: str = Form(""),
+    session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse | HTMLResponse:
     company = await _first_company()
     try:
-        async with AsyncSessionLocal() as session:
-            await svc.create(
-                session,
-                company.id,
-                code=code,
-                name=name,
-                account_type=AccountType(account_type),
-                reconcile=reconcile,
-                is_header=is_header,
-                tax_code_default=tax_code_default or None,
-            )
+        await svc.create(
+            session,
+            company.id,
+            code=code,
+            name=name,
+            account_type=AccountType(account_type),
+            reconcile=reconcile,
+            is_header=is_header,
+            tax_code_default=tax_code_default or None,
+        )
     except ValueError as exc:
-        async with AsyncSessionLocal() as session:
-            accounts = await svc.list_active(session, company.id)
-            ranges = await svc.get_ranges(session, company.id)
-            bal = await _account_balances(session, company.id)
+        await session.rollback()
+        accounts = await svc.list_active(session, company.id)
+        ranges = await svc.get_ranges(session, company.id)
+        bal = await _account_balances(session, company.id)
         groups = _build_hierarchy(accounts, ranges, bal)
         return templates.TemplateResponse(
             request,
@@ -275,56 +276,56 @@ async def accounts_detail(
     account_id: UUID,
     from_date: str | None = Query(None, alias="from"),
     to_date: str | None = Query(None, alias="to"),
+    session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:
     parsed_from = _parse_date(from_date)
     parsed_to = _parse_date(to_date)
 
     tenant_id = resolve_tenant_id(request)
-    async with AsyncSessionLocal() as session:
-        account = await svc.get(session, account_id, tenant_id=tenant_id)
-        if account is None:
-            raise HTTPException(404, "Account not found")
-        company = await session.get(Company, account.company_id)
+    account = await svc.get(session, account_id, tenant_id=tenant_id)
+    if account is None:
+        raise HTTPException(404, "Account not found")
+    company = await session.get(Company, account.company_id)
 
-        credit_normal = account.account_type in _CREDIT_NORMAL
+    credit_normal = account.account_type in _CREDIT_NORMAL
 
-        # Opening balance: sum of all posted lines before from_date
-        opening_balance = Decimal("0")
-        if parsed_from:
-            ob_stmt = (
-                select(
-                    func.coalesce(func.sum(JournalLine.debit), Decimal("0")).label("tot_dr"),
-                    func.coalesce(func.sum(JournalLine.credit), Decimal("0")).label("tot_cr"),
-                )
-                .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
-                .where(
-                    JournalLine.account_id == account_id,
-                    JournalEntry.status == EntryStatus.POSTED,
-                    JournalEntry.entry_date < parsed_from,
-                )
+    # Opening balance: sum of all posted lines before from_date
+    opening_balance = Decimal("0")
+    if parsed_from:
+        ob_stmt = (
+            select(
+                func.coalesce(func.sum(JournalLine.debit), Decimal("0")).label("tot_dr"),
+                func.coalesce(func.sum(JournalLine.credit), Decimal("0")).label("tot_cr"),
             )
-            ob_row = (await session.execute(ob_stmt)).one()
-            if credit_normal:
-                opening_balance = ob_row.tot_cr - ob_row.tot_dr
-            else:
-                opening_balance = ob_row.tot_dr - ob_row.tot_cr
-
-        # Main query: all posted lines for this account within date range
-        stmt = (
-            select(JournalLine, JournalEntry)
             .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
             .where(
                 JournalLine.account_id == account_id,
                 JournalEntry.status == EntryStatus.POSTED,
+                JournalEntry.entry_date < parsed_from,
             )
-            .order_by(JournalEntry.entry_date.asc(), JournalLine.line_no.asc())
         )
-        if parsed_from:
-            stmt = stmt.where(JournalEntry.entry_date >= parsed_from)
-        if parsed_to:
-            stmt = stmt.where(JournalEntry.entry_date <= parsed_to)
+        ob_row = (await session.execute(ob_stmt)).one()
+        if credit_normal:
+            opening_balance = ob_row.tot_cr - ob_row.tot_dr
+        else:
+            opening_balance = ob_row.tot_dr - ob_row.tot_cr
 
-        rows = (await session.execute(stmt)).all()
+    # Main query: all posted lines for this account within date range
+    stmt = (
+        select(JournalLine, JournalEntry)
+        .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+        .where(
+            JournalLine.account_id == account_id,
+            JournalEntry.status == EntryStatus.POSTED,
+        )
+        .order_by(JournalEntry.entry_date.asc(), JournalLine.line_no.asc())
+    )
+    if parsed_from:
+        stmt = stmt.where(JournalEntry.entry_date >= parsed_from)
+    if parsed_to:
+        stmt = stmt.where(JournalEntry.entry_date <= parsed_to)
+
+    rows = (await session.execute(stmt)).all()
 
     # Build display rows with running balance
     running = opening_balance
@@ -371,14 +372,17 @@ async def accounts_detail(
 
 
 @router.get("/accounts/{account_id}/edit", response_class=HTMLResponse)
-async def accounts_edit(request: Request, account_id: UUID) -> HTMLResponse:
+async def accounts_edit(
+    request: Request,
+    account_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> HTMLResponse:
     tenant_id = resolve_tenant_id(request)
-    async with AsyncSessionLocal() as session:
-        account = await svc.get(session, account_id, tenant_id=tenant_id)
-        if account is None:
-            raise HTTPException(404, "Account not found")
-        company = await session.get(Company, account.company_id)
-        ranges = await svc.get_ranges(session, account.company_id)
+    account = await svc.get(session, account_id, tenant_id=tenant_id)
+    if account is None:
+        raise HTTPException(404, "Account not found")
+    company = await session.get(Company, account.company_id)
+    ranges = await svc.get_ranges(session, account.company_id)
     protected = account.code in _PROTECTED_CODES or account.system_managed
     return templates.TemplateResponse(
         request,
@@ -404,29 +408,29 @@ async def accounts_update(
     reconcile: bool = Form(False),
     is_header: bool = Form(False),
     tax_code_default: str = Form(""),
+    session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse | HTMLResponse:
     tenant_id = resolve_tenant_id(request)
     try:
-        async with AsyncSessionLocal() as session:
-            await svc.update(
-                session,
-                account_id,
-                tenant_id=tenant_id,
-                code=code,
-                name=name,
-                account_type=AccountType(account_type),
-                reconcile=reconcile,
-                is_header=is_header,
-                tax_code_default=tax_code_default,
-                performed_by="web",
-            )
+        await svc.update(
+            session,
+            account_id,
+            tenant_id=tenant_id,
+            code=code,
+            name=name,
+            account_type=AccountType(account_type),
+            reconcile=reconcile,
+            is_header=is_header,
+            tax_code_default=tax_code_default,
+            performed_by="web",
+        )
     except ValueError as exc:
-        async with AsyncSessionLocal() as session:
-            account = await svc.get(session, account_id, tenant_id=tenant_id)
-            if account is None:
-                raise HTTPException(404, "Account not found") from exc
-            company = await session.get(Company, account.company_id)
-            ranges = await svc.get_ranges(session, account.company_id)
+        await session.rollback()
+        account = await svc.get(session, account_id, tenant_id=tenant_id)
+        if account is None:
+            raise HTTPException(404, "Account not found") from exc
+        company = await session.get(Company, account.company_id)
+        ranges = await svc.get_ranges(session, account.company_id)
         return templates.TemplateResponse(
             request,
             "accounts/edit.html",
@@ -444,23 +448,29 @@ async def accounts_update(
 
 
 @router.post("/accounts/{account_id}/archive")
-async def accounts_archive(request: Request, account_id: UUID) -> RedirectResponse:
+async def accounts_archive(
+    request: Request,
+    account_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> RedirectResponse:
     tenant_id = resolve_tenant_id(request)
-    async with AsyncSessionLocal() as session:
-        await svc.archive(session, account_id, tenant_id=tenant_id)
+    await svc.archive(session, account_id, tenant_id=tenant_id)
     return RedirectResponse("/accounts", status_code=303)
 
 
 @router.get("/accounts/{account_id}/delete", response_class=HTMLResponse)
-async def accounts_delete_check(request: Request, account_id: UUID) -> HTMLResponse:
+async def accounts_delete_check(
+    request: Request,
+    account_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> HTMLResponse:
     company = await _first_company()
-    async with AsyncSessionLocal() as session:
-        deps = await svc.check_dependencies(session, account_id)
-        all_accounts = await svc.list_active(session, company.id)
-        candidates = [
-            a for a in all_accounts
-            if a.id != account_id and a.account_type == deps.account.account_type
-        ]
+    deps = await svc.check_dependencies(session, account_id)
+    all_accounts = await svc.list_active(session, company.id)
+    candidates = [
+        a for a in all_accounts
+        if a.id != account_id and a.account_type == deps.account.account_type
+    ]
 
     return templates.TemplateResponse(
         request,
@@ -478,6 +488,7 @@ async def accounts_delete_check(request: Request, account_id: UUID) -> HTMLRespo
 async def accounts_migrate(
     request: Request,
     account_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse | HTMLResponse:
     form = await request.form()
     target_raw = str(form.get("target_id", ""))
@@ -485,10 +496,9 @@ async def accounts_migrate(
         return RedirectResponse(f"/accounts/{account_id}/delete?error=no_target", status_code=303)
 
     target_id = UUID(target_raw)
-    async with AsyncSessionLocal() as session:
-        counts = await svc.migrate_account(
-            session, account_id, target_id, performed_by="web"
-        )
+    counts = await svc.migrate_account(
+        session, account_id, target_id, performed_by="web"
+    )
 
     total = sum(counts.values())
     return RedirectResponse(
@@ -501,10 +511,10 @@ async def accounts_migrate(
 async def accounts_delete(
     request: Request,
     account_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse | HTMLResponse:
     try:
-        async with AsyncSessionLocal() as session:
-            await svc.delete_account(session, account_id, performed_by="web")
+        await svc.delete_account(session, account_id, performed_by="web")
     except Exception as exc:
         return RedirectResponse(
             f"/accounts/{account_id}/delete?error={exc}",
@@ -520,21 +530,22 @@ async def accounts_delete(
 
 @router.patch("/accounts/{account_id}/tax-code", response_class=HTMLResponse)
 async def accounts_set_tax_code(
-    request: Request, account_id: UUID
+    request: Request,
+    account_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:
     """HTMX inline: set the default tax code for an account."""
     tenant_id = resolve_tenant_id(request)
     form = await request.form()
     new_code = str(form.get("tax_code_default", "")).strip()
-    async with AsyncSessionLocal() as session:
-        await svc.update(
-            session, account_id,
-            tenant_id=tenant_id,
-            tax_code_default=new_code or None,
-            skip_validation=True,
-            performed_by="web",
-        )
-        account = await svc.get(session, account_id, tenant_id=tenant_id)
+    await svc.update(
+        session, account_id,
+        tenant_id=tenant_id,
+        tax_code_default=new_code or None,
+        skip_validation=True,
+        performed_by="web",
+    )
+    account = await svc.get(session, account_id, tenant_id=tenant_id)
     if account is None:
         raise HTTPException(404)
     # Return just the cell content for HTMX swap
@@ -548,14 +559,15 @@ async def accounts_set_tax_code(
 
 @router.get("/accounts/{account_id}/tax-code/edit", response_class=HTMLResponse)
 async def accounts_edit_tax_code_inline(
-    request: Request, account_id: UUID
+    request: Request,
+    account_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:
     """HTMX inline: render the tax code dropdown for an account."""
     tenant_id = resolve_tenant_id(request)
     company = await _first_company()
-    tax_codes = await _tax_codes(company.id)
-    async with AsyncSessionLocal() as session:
-        account = await svc.get(session, account_id, tenant_id=tenant_id)
+    tax_codes = await _tax_codes(session, company.id)
+    account = await svc.get(session, account_id, tenant_id=tenant_id)
     if account is None:
         raise HTTPException(404)
     current = account.tax_code_default or ""
@@ -578,7 +590,10 @@ async def accounts_edit_tax_code_inline(
 
 
 @router.post("/accounts/bulk", response_model=None)
-async def accounts_bulk_update(request: Request) -> RedirectResponse:
+async def accounts_bulk_update(
+    request: Request,
+    session: AsyncSession = Depends(get_web_session),
+) -> RedirectResponse:
     """Apply a bulk action to selected accounts."""
     tenant_id = resolve_tenant_id(request)
     form = dict(await request.form())
@@ -595,24 +610,23 @@ async def accounts_bulk_update(request: Request) -> RedirectResponse:
     action = str(form.get("bulk_action", ""))
     bulk_val = str(form.get("bulk_value", "")).strip()
 
-    async with AsyncSessionLocal() as session:
-        if action == "tax_code":
-            for aid in selected:
-                await svc.update(
-                    session, aid,
-                    tenant_id=tenant_id,
-                    tax_code_default=bulk_val or None,
-                    skip_validation=True,
-                    performed_by="web-bulk",
-                )
-        elif action == "reconcile":
-            for aid in selected:
-                await svc.update(
-                    session, aid,
-                    tenant_id=tenant_id,
-                    reconcile=bulk_val == "true",
-                    skip_validation=True,
-                    performed_by="web-bulk",
-                )
+    if action == "tax_code":
+        for aid in selected:
+            await svc.update(
+                session, aid,
+                tenant_id=tenant_id,
+                tax_code_default=bulk_val or None,
+                skip_validation=True,
+                performed_by="web-bulk",
+            )
+    elif action == "reconcile":
+        for aid in selected:
+            await svc.update(
+                session, aid,
+                tenant_id=tenant_id,
+                reconcile=bulk_val == "true",
+                skip_validation=True,
+                performed_by="web-bulk",
+            )
 
     return RedirectResponse("/accounts", status_code=303)

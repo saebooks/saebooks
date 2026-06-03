@@ -1,5 +1,6 @@
 from saebooks.models.account import Account, AccountType
 from saebooks.models.account_range import AccountRange
+from saebooks.models.business_identifier import BusinessIdentifier
 from saebooks.models.ato_sbr import AtoSbrConfig
 from saebooks.models.bank_feed import (
     BankFeedAccount,
@@ -50,6 +51,7 @@ from saebooks.models.user import User, UserRole
 __all__ = [
     "Account",
     "AccountRange",
+    "BusinessIdentifier",
     "AllocationRule",
     "AccountType",
     "AtoSbrConfig",

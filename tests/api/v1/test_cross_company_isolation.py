@@ -317,7 +317,7 @@ async def item_in_seed(seed_company_id: uuid.UUID) -> uuid.UUID:
     # Item needs inventory + cogs + income accounts (all FK-required).
     inv = await _new_account(seed_company_id, kind=AccountType.ASSET)
     cogs = await _new_account(seed_company_id, kind=AccountType.EXPENSE)
-    income = await _new_account(seed_company_id, kind=AccountType.REVENUE)
+    income = await _new_account(seed_company_id, kind=AccountType.INCOME)
     async with AsyncSessionLocal() as session:
         session.add(
             Item(

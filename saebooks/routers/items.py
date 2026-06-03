@@ -11,15 +11,16 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 from uuid import UUID
 
-from fastapi import APIRouter, Form, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.config import settings
-from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.models.item import CostMethod
+from saebooks.routers.deps import get_web_session
 from saebooks.services import items as svc
 from saebooks.web import templates
 from saebooks.services import active_company as active_svc
@@ -32,16 +33,16 @@ async def _first_company() -> Company:
 
 
 async def _account_choices(
+    session: AsyncSession,
     company_id: UUID,
 ) -> tuple[list[Account], list[Account], list[Account]]:
     """Return (inventory asset, COGS, income) account choices for the picker."""
-    async with AsyncSessionLocal() as session:
-        stmt = select(Account).where(
-            Account.company_id == company_id,
-            Account.archived_at.is_(None),
-        ).order_by(Account.code)
-        result = await session.execute(stmt)
-        all_accounts = list(result.scalars().all())
+    stmt = select(Account).where(
+        Account.company_id == company_id,
+        Account.archived_at.is_(None),
+    ).order_by(Account.code)
+    result = await session.execute(stmt)
+    all_accounts = list(result.scalars().all())
     inv = [a for a in all_accounts if a.account_type == AccountType.ASSET]
     cogs = [a for a in all_accounts if a.account_type == AccountType.COST_OF_SALES]
     income = [
@@ -72,16 +73,16 @@ async def items_list(
     request: Request,
     q: str | None = Query(None),
     archived: str | None = Query(None),
+    session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:
     company = await _first_company()
     include_archived = archived in ("1", "true", "on", "yes")
-    async with AsyncSessionLocal() as session:
-        items = await svc.list_items(
-            session,
-            company.id,
-            search=q or None,
-            include_archived=include_archived,
-        )
+    items = await svc.list_items(
+        session,
+        company.id,
+        search=q or None,
+        include_archived=include_archived,
+    )
     return templates.TemplateResponse(
         request,
         "items/list.html",
@@ -102,9 +103,12 @@ async def items_list(
 
 
 @router.get("/new", response_class=HTMLResponse)
-async def items_new(request: Request) -> HTMLResponse:
+async def items_new(
+    request: Request,
+    session: AsyncSession = Depends(get_web_session),
+) -> HTMLResponse:
     company = await _first_company()
-    inv, cogs, income = await _account_choices(company.id)
+    inv, cogs, income = await _account_choices(session, company.id)
     return templates.TemplateResponse(
         request,
         "items/form.html",
@@ -132,28 +136,29 @@ async def items_create(
     on_hand_qty: str = Form("0"),
     wac_cost: str = Form("0"),
     default_sale_price: str = Form("0"),
+    session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse | HTMLResponse:
     company = await _first_company()
     try:
-        async with AsyncSessionLocal() as session:
-            item = await svc.create(
-                session,
-                company.id,
-                sku=sku,
-                name=name,
-                description=description.strip() or None,
-                inventory_account_id=UUID(inventory_account_id),
-                cogs_account_id=UUID(cogs_account_id),
-                income_account_id=UUID(income_account_id),
-                cost_method=CostMethod.WAC,
-                on_hand_qty=_parse_decimal(on_hand_qty, field="on_hand_qty"),
-                wac_cost=_parse_decimal(wac_cost, field="wac_cost"),
-                default_sale_price=_parse_decimal(
-                    default_sale_price, field="default_sale_price"
-                ),
-            )
+        item = await svc.create(
+            session,
+            company.id,
+            sku=sku,
+            name=name,
+            description=description.strip() or None,
+            inventory_account_id=UUID(inventory_account_id),
+            cogs_account_id=UUID(cogs_account_id),
+            income_account_id=UUID(income_account_id),
+            cost_method=CostMethod.WAC,
+            on_hand_qty=_parse_decimal(on_hand_qty, field="on_hand_qty"),
+            wac_cost=_parse_decimal(wac_cost, field="wac_cost"),
+            default_sale_price=_parse_decimal(
+                default_sale_price, field="default_sale_price"
+            ),
+        )
     except ValueError as exc:
-        inv, cogs, income = await _account_choices(company.id)
+        await session.rollback()
+        inv, cogs, income = await _account_choices(session, company.id)
         return templates.TemplateResponse(
             request,
             "items/form.html",
@@ -177,15 +182,18 @@ async def items_create(
 
 
 @router.get("/{item_id}", response_class=HTMLResponse)
-async def items_detail(request: Request, item_id: UUID) -> HTMLResponse:
-    async with AsyncSessionLocal() as session:
-        item = await svc.get(session, item_id)
-        if item is None:
-            raise HTTPException(404, "Item not found")
-        company = await session.get(Company, item.company_id)
-        inventory_account = await session.get(Account, item.inventory_account_id)
-        cogs_account = await session.get(Account, item.cogs_account_id)
-        income_account = await session.get(Account, item.income_account_id)
+async def items_detail(
+    request: Request,
+    item_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> HTMLResponse:
+    item = await svc.get(session, item_id)
+    if item is None:
+        raise HTTPException(404, "Item not found")
+    company = await session.get(Company, item.company_id)
+    inventory_account = await session.get(Account, item.inventory_account_id)
+    cogs_account = await session.get(Account, item.cogs_account_id)
+    income_account = await session.get(Account, item.income_account_id)
     return templates.TemplateResponse(
         request,
         "items/detail.html",
@@ -201,13 +209,16 @@ async def items_detail(request: Request, item_id: UUID) -> HTMLResponse:
 
 
 @router.get("/{item_id}/edit", response_class=HTMLResponse)
-async def items_edit(request: Request, item_id: UUID) -> HTMLResponse:
-    async with AsyncSessionLocal() as session:
-        item = await svc.get(session, item_id)
-        if item is None:
-            raise HTTPException(404, "Item not found")
-        company = await session.get(Company, item.company_id)
-    inv, cogs, income = await _account_choices(item.company_id)
+async def items_edit(
+    request: Request,
+    item_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> HTMLResponse:
+    item = await svc.get(session, item_id)
+    if item is None:
+        raise HTTPException(404, "Item not found")
+    company = await session.get(Company, item.company_id)
+    inv, cogs, income = await _account_choices(session, item.company_id)
     return templates.TemplateResponse(
         request,
         "items/form.html",
@@ -234,30 +245,30 @@ async def items_update(
     cogs_account_id: str = Form(...),
     income_account_id: str = Form(...),
     default_sale_price: str = Form("0"),
+    session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse | HTMLResponse:
     try:
-        async with AsyncSessionLocal() as session:
-            await svc.update(
-                session,
-                item_id,
-                performed_by="web",
-                sku=sku,
-                name=name,
-                description=description.strip() or None,
-                inventory_account_id=UUID(inventory_account_id),
-                cogs_account_id=UUID(cogs_account_id),
-                income_account_id=UUID(income_account_id),
-                default_sale_price=_parse_decimal(
-                    default_sale_price, field="default_sale_price"
-                ),
-            )
+        await svc.update(
+            session,
+            item_id,
+            performed_by="web",
+            sku=sku,
+            name=name,
+            description=description.strip() or None,
+            inventory_account_id=UUID(inventory_account_id),
+            cogs_account_id=UUID(cogs_account_id),
+            income_account_id=UUID(income_account_id),
+            default_sale_price=_parse_decimal(
+                default_sale_price, field="default_sale_price"
+            ),
+        )
     except ValueError as exc:
-        async with AsyncSessionLocal() as session:
-            item = await svc.get(session, item_id)
-            if item is None:
-                raise HTTPException(404, "Item not found") from exc
-            company = await session.get(Company, item.company_id)
-        inv, cogs, income = await _account_choices(item.company_id)
+        await session.rollback()
+        item = await svc.get(session, item_id)
+        if item is None:
+            raise HTTPException(404, "Item not found") from exc
+        company = await session.get(Company, item.company_id)
+        inv, cogs, income = await _account_choices(session, item.company_id)
         return templates.TemplateResponse(
             request,
             "items/form.html",
@@ -281,10 +292,12 @@ async def items_update(
 
 
 @router.post("/{item_id}/archive")
-async def items_archive(item_id: UUID) -> RedirectResponse:
+async def items_archive(
+    item_id: UUID,
+    session: AsyncSession = Depends(get_web_session),
+) -> RedirectResponse:
     try:
-        async with AsyncSessionLocal() as session:
-            await svc.archive(session, item_id, performed_by="web")
+        await svc.archive(session, item_id, performed_by="web")
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return RedirectResponse("/items", status_code=303)

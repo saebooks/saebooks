@@ -15,7 +15,7 @@ from typing import Any
 
 from sqlalchemy import select
 
-from saebooks.db import AsyncSessionLocal
+from saebooks.db import AsyncSessionLocal, LoginSessionLocal
 from saebooks.models.user import User
 
 logger = logging.getLogger("saebooks.fido2")
@@ -50,8 +50,12 @@ async def begin_registration(user_id: uuid.UUID) -> dict[str, Any]:
     except ImportError:
         raise FIDO2Error("webauthn library not installed")
 
-    # Get user info
-    async with AsyncSessionLocal() as session:
+    # Get user info. Auth-flow lookup by primary key where the tenant is
+    # not yet known — use the BYPASSRLS owner role (LoginSessionLocal), or
+    # FORCE RLS on ``users`` (0055) drops the row under the saebooks_app
+    # runtime role. FIDO2 is the only permitted 2FA in this org so this
+    # MUST resolve the real user. See db.py + api/v1/login.py::_user_by_email.
+    async with LoginSessionLocal() as session:
         user = await session.get(User, user_id)
         if not user:
             raise FIDO2Error("User not found")
@@ -130,7 +134,18 @@ async def complete_registration(
         public_key = verified_registration.credential_public_key_hex
         sign_count = verified_registration.credential_sign_count
 
+        # Resolve the user first via the BYPASSRLS owner role to learn the
+        # tenant (tenant is not threaded into this legacy entrypoint), then
+        # bind that tenant on a runtime session for the UPDATE so FORCE RLS
+        # on ``users`` permits the write.
+        async with LoginSessionLocal() as lookup_session:
+            owner_user = await lookup_session.get(User, user_id)
+        if not owner_user:
+            raise FIDO2Error("User not found")
+        tenant_id = owner_user.tenant_id
+
         async with AsyncSessionLocal() as session:
+            session.info["tenant_id"] = str(tenant_id)
             user = await session.get(User, user_id)
             if not user:
                 raise FIDO2Error("User not found")
@@ -170,8 +185,11 @@ async def begin_authentication(email: str) -> dict[str, Any]:
     except ImportError:
         raise FIDO2Error("webauthn library not installed")
 
-    # Look up user by email
-    async with AsyncSessionLocal() as session:
+    # Pre-auth lookup BY EMAIL — tenant unknown at this point, so use the
+    # BYPASSRLS owner role (LoginSessionLocal). Under the saebooks_app
+    # runtime role FORCE RLS on ``users`` would return zero rows and every
+    # FIDO2 sign-in would falsely report "no credentials registered".
+    async with LoginSessionLocal() as session:
         user_result = await session.execute(
             select(User).where(User.email == email)
         )
@@ -185,11 +203,13 @@ async def begin_authentication(email: str) -> dict[str, Any]:
             rp_id="saebooks.com.au",
         )
 
-        # Store challenge
+        # Store challenge. (Was a NameError here: referenced an undefined
+        # ``user_id`` instead of ``user.id`` — fixed so the function can
+        # actually reach the DB and store the challenge.)
         import base64 as _b64
         challenge_b64 = _b64.urlsafe_b64encode(authentication_options.challenge).rstrip(b"=").decode("ascii")
         _challenge_store[challenge_b64] = {
-            "user_id": str(user_id),
+            "user_id": str(user.id),
             "type": "authentication",
             "created_at": datetime.now(UTC),
         }
@@ -238,8 +258,11 @@ async def complete_authentication(
         # This is a simplified version - full implementation requires
         # storing credential details in the database.
 
-        # Get user
-        async with AsyncSessionLocal() as session:
+        # Get user — auth-flow lookup by primary key, tenant unknown, so
+        # use the BYPASSRLS owner role (LoginSessionLocal). FORCE RLS on
+        # ``users`` would otherwise drop the row under saebooks_app and the
+        # authenticated user would be reported as "not found".
+        async with LoginSessionLocal() as session:
             user = await session.get(User, uuid.UUID(user_id_str))
             if not user:
                 raise FIDO2Error("User not found")
