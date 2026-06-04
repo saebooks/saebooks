@@ -83,6 +83,7 @@ from saebooks.api.v1.quotes import router as quotes_router
 from saebooks.api.v1.reconciliation import router as reconciliation_router
 from saebooks.api.v1.recurring_invoices import router as recurring_invoices_router
 from saebooks.api.v1.reports import router as reports_router
+from saebooks.api.v1.period_close import router as period_close_router
 from saebooks.api.v1.search import router as search_router
 from saebooks.api.v1.signup import router as signup_router
 from saebooks.api.v1.snapshot import router as snapshot_router
@@ -159,6 +160,7 @@ router.include_router(depreciation_models_router)
 router.include_router(reconciliation_router)
 router.include_router(recurring_invoices_router)
 router.include_router(reports_router)
+router.include_router(period_close_router)
 # /api/v1/proration — pure-math prorate previews + deferred-revenue
 # recognise. See saebooks/services/proration.py.
 router.include_router(proration_router)
