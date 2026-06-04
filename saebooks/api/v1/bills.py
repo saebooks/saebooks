@@ -587,7 +587,7 @@ async def get_bill_pdf(
 
     from saebooks.models.company import Company
     from saebooks.models.contact import Contact
-    from saebooks.services.pdf import render_bill_pdf
+    from saebooks.services.latex_pdf import render_latex
 
     tenant_id = resolve_tenant_id(request)
     bill = await svc.api_get(session, bill_id, tenant_id=tenant_id, company_id=company_id)
@@ -602,7 +602,8 @@ async def get_bill_pdf(
     ).scalars().first()
 
     ctx = _build_bill_ctx(bill, supplier, company)
-    pdf_bytes = render_bill_pdf(ctx)
+    ctx.setdefault("kind", "Bill")
+    pdf_bytes = await render_latex("document", ctx)
     filename = f"bill-{ctx['number']}.pdf"
     return Response(
         content=pdf_bytes,
@@ -629,7 +630,7 @@ async def post_bill_send_email(
         CustomerEmailError,
         send_customer_email,
     )
-    from saebooks.services.pdf import render_bill_pdf
+    from saebooks.services.latex_pdf import render_latex
 
     tenant_id = resolve_tenant_id(request)
     payload = await request.json()
@@ -666,7 +667,8 @@ async def post_bill_send_email(
     ).scalars().first()
 
     ctx = _build_bill_ctx(bill, supplier, company)
-    pdf_bytes = render_bill_pdf(ctx)
+    ctx.setdefault("kind", "Bill")
+    pdf_bytes = await render_latex("document", ctx)
     pdf_filename = f"bill-{ctx['number']}.pdf"
 
     try:

@@ -658,7 +658,7 @@ async def get_invoice_pdf(
 
     from saebooks.models.company import Company
     from saebooks.models.contact import Contact
-    from saebooks.services.pdf import render_invoice_pdf
+    from saebooks.services.latex_pdf import render_latex
 
     tenant_id = resolve_tenant_id(request)
     inv = await svc.api_get(session, invoice_id, tenant_id=tenant_id, company_id=company_id)
@@ -673,7 +673,8 @@ async def get_invoice_pdf(
     ).scalars().first()
 
     ctx = _build_invoice_ctx(inv, customer, company)
-    pdf_bytes = render_invoice_pdf(ctx)
+    ctx.setdefault("kind", "Tax Invoice")
+    pdf_bytes = await render_latex("document", ctx)
     filename = f"invoice-{ctx['number']}.pdf"
     return Response(
         content=pdf_bytes,
@@ -712,7 +713,7 @@ async def post_invoice_send_email(
         CustomerEmailError,
         send_customer_email,
     )
-    from saebooks.services.pdf import render_invoice_pdf
+    from saebooks.services.latex_pdf import render_latex
 
     tenant_id = resolve_tenant_id(request)
     payload = await request.json()
@@ -749,7 +750,8 @@ async def post_invoice_send_email(
     ).scalars().first()
 
     ctx = _build_invoice_ctx(inv, customer, company)
-    pdf_bytes = render_invoice_pdf(ctx)
+    ctx.setdefault("kind", "Tax Invoice")
+    pdf_bytes = await render_latex("document", ctx)
     pdf_filename = f"invoice-{ctx['number']}.pdf"
 
     try:
