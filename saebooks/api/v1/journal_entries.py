@@ -41,6 +41,7 @@ from saebooks.api.v1.schemas import (
     JournalEntryListOut,
     JournalEntryOut,
     JournalEntryPostBody,
+    JournalEntryReverseBody,
     JournalEntryUpdate,
 )
 from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
@@ -554,6 +555,7 @@ async def post_journal_entry(
 async def reverse_journal_entry(
     entry_id: UUID,
     request: Request,
+    payload: JournalEntryReverseBody = Body(default_factory=JournalEntryReverseBody),
     if_match: str | None = Header(default=None, alias="If-Match"),
     idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     bearer: str = Depends(require_bearer),
@@ -605,6 +607,8 @@ async def reverse_journal_entry(
             actor=f"api:{bearer[:8]}…",
             expected_version=expected,
             actor_role=_resolve_actor_role(request),
+            reversal_date=payload.reversal_date,
+            override_reason=payload.override_reason or None,
         )
     except svc.VersionConflict as exc:
         body = JournalEntryConflictBody(

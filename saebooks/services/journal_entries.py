@@ -618,6 +618,8 @@ async def api_reverse(
     expected_version: int,
     *,
     actor_role: str | None = None,
+    reversal_date: date | None = None,
+    override_reason: str | None = None,
 ) -> JournalEntry:
     """Create a reversal of a POSTED journal entry.
 
@@ -653,7 +655,12 @@ async def api_reverse(
     # period-lock override gate.
     try:
         reversal = await journal_svc.reverse(
-            session, entry_id, posted_by=actor, actor_role=actor_role
+            session,
+            entry_id,
+            posted_by=actor,
+            actor_role=actor_role,
+            reversal_date=reversal_date,
+            override_reason=override_reason,
         )
     except journal_svc.PostingError as exc:
         raise JournalEntryError(str(exc)) from exc
