@@ -451,6 +451,8 @@ async def test_snapshot_empty_company_all_markers_count_zero(
     real_session_local = _snap_mod.AsyncSessionLocal
 
     class _MockSession:
+        info: dict = {}
+
         async def __aenter__(self):
             return self
 
