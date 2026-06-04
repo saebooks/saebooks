@@ -1,0 +1,176 @@
+{#
+  contact_statement.tex.j2 — SAE Books AR customer statement
+
+  Context keys (all data values MUST be latex_escape'd before interpolation):
+    contact_name   str   customer display name
+    period_start   str   ISO date — statement period start
+    period_end     str   ISO date — statement period end
+    company:
+      legal_name   str   e.g. "Sauer Pty Ltd ATF Saueesti Trust"
+      abn          str   or ""
+      acn          str   or ""
+      address      dict  optional; keys: address_line1, city, state, postcode, country
+    contact:
+      name         str
+      email        str   or ""
+    opening_balance             str   decimal string
+    total_invoiced_in_period    str   decimal string
+    total_paid_in_period        str   decimal string
+    closing_balance             str   decimal string
+    lines          list  dicts with:
+                         line_date, kind, reference, description,
+                         amount_dr, amount_cr, balance
+                         (amount_dr / amount_cr are decimal strings; blank when "0.00")
+
+  All string interpolations use |latex_escape.
+  Bare % in .tex.j2 source is a LaTeX comment — never write a bare % here.
+#}
+{%- macro fmt_money(v) -%}
+  {%- if v is not none -%}\${{ "%.2f"|format(v|float) }}{%- else -%}\$0.00{%- endif -%}
+{%- endmacro -%}
+{%- macro fmt_money_col(v) -%}
+  {%- if v and v not in ("0.00", "0") -%}\${{ "%.2f"|format(v|float) }}{%- endif -%}
+{%- endmacro -%}
+{% include '_preamble.tex.j2' %}
+
+%% Override header/footer for the statement pages
+\fancyhead[L]{\small\color{midgrey}Customer Statement}
+\fancyhead[R]{\small\color{midgrey}{{ period_start | latex_escape }} \textendash{} {{ period_end | latex_escape }}}
+
+\begin{document}
+
+%% =====================================================================
+%% DOCUMENT HEADER
+%% =====================================================================
+\vspace*{2mm}
+\begin{minipage}[t]{0.52\textwidth}
+  {\LARGE\bfseries\color{saegreen} STATEMENT }\\[2mm]
+  {\large\color{midgrey} {{ contact_name | latex_escape }}}\\[3mm]
+  \begin{tabular}{@{}ll@{}}
+    \textbf{Period:} & {{ period_start | latex_escape }} \textendash{} {{ period_end | latex_escape }} \\
+  \end{tabular}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.44\textwidth}
+  \raggedleft
+  {\large\bfseries {{ company.legal_name | latex_escape }}}\par
+  {% if company.abn -%}
+  {\small ABN {{ company.abn | latex_escape }}}\par
+  {%- endif %}
+  {% set addr = company.address or {} %}
+  {% if addr.get('address_line1') -%}
+  {\small {{ addr.get('address_line1') | latex_escape }}\par}
+  {%- endif %}
+  {%- set city_line = [addr.get('city',''), addr.get('state',''), addr.get('postcode','')] | select | join(' ') -%}
+  {% if city_line -%}
+  {\small {{ city_line | latex_escape }}\par}
+  {%- endif %}
+  {%- if addr.get('country') and addr.get('country') != 'Australia' -%}
+  {\small {{ addr.get('country') | latex_escape }}\par}
+  {%- endif %}
+\end{minipage}
+
+\vspace{6mm}
+\color{saegreen}\rule{\linewidth}{0.6pt}\color{black}
+\vspace{4mm}
+
+%% =====================================================================
+%% FROM / TO BLOCKS
+%% =====================================================================
+\begin{minipage}[t]{0.48\textwidth}
+  \textbf{\color{saegreen}From}\\[1mm]
+  {{ company.legal_name | latex_escape }}\\
+  {% if company.abn -%}
+  {\small ABN {{ company.abn | latex_escape }}}\\
+  {%- endif %}
+  {% set addr = company.address or {} %}
+  {% if addr.get('address_line1') -%}
+  {\small {{ addr.get('address_line1') | latex_escape }}}\\
+  {%- endif %}
+  {%- set city_line = [addr.get('city',''), addr.get('state',''), addr.get('postcode','')] | select | join(' ') -%}
+  {% if city_line -%}
+  {\small {{ city_line | latex_escape }}}\\
+  {%- endif %}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.48\textwidth}
+  \textbf{\color{saegreen}To}\\[1mm]
+  {{ contact.name | latex_escape }}\\
+  {% if contact.email -%}
+  {\small {{ contact.email | latex_escape }}}\\
+  {%- endif %}
+\end{minipage}
+
+\vspace{6mm}
+
+%% =====================================================================
+%% ACCOUNT SUMMARY
+%% =====================================================================
+\begin{flushright}
+\begin{tabular}{@{}lr@{}}
+  Opening balance              & {{ fmt_money(opening_balance) }} \\
+  Invoiced this period         & {{ fmt_money(total_invoiced_in_period) }} \\
+  Paid this period             & \textminus{}{{ fmt_money(total_paid_in_period) }} \\
+  \midrule
+  \textbf{Closing balance}     & \textbf{ {{ fmt_money(closing_balance) }} } \\
+\end{tabular}
+\end{flushright}
+
+\vspace{4mm}
+
+%% =====================================================================
+%% TRANSACTION LINES TABLE
+%% =====================================================================
+\begin{longtable}{p{2.0cm} p{1.6cm} p{2.2cm} p{5.0cm} r r r}
+  \toprule
+  \rowcolor{lightgrey}
+  \textbf{Date} &
+  \textbf{Type} &
+  \textbf{Reference} &
+  \textbf{Description} &
+  \textbf{Debit} &
+  \textbf{Credit} &
+  \textbf{Balance} \\
+  \midrule
+  \endfirsthead
+  \multicolumn{7}{l}{\textit{(continued)}} \\
+  \toprule
+  \rowcolor{lightgrey}
+  \textbf{Date} &
+  \textbf{Type} &
+  \textbf{Reference} &
+  \textbf{Description} &
+  \textbf{Debit} &
+  \textbf{Credit} &
+  \textbf{Balance} \\
+  \midrule
+  \endhead
+  \bottomrule
+  \endfoot
+  {% if lines %}
+    {% for ln in lines %}
+  {{ ln.line_date | latex_escape }} &
+  {{ ln.kind | latex_escape }} &
+  {{ ln.reference | latex_escape }} &
+  {{ ln.description | latex_escape }} &
+  {{ fmt_money_col(ln.amount_dr) }} &
+  {{ fmt_money_col(ln.amount_cr) }} &
+  {{ fmt_money(ln.balance) }} \\
+    {% endfor %}
+  {% else %}
+  \multicolumn{7}{c}{\textit{\color{midgrey}No transactions for this period}} \\
+  {% endif %}
+  \bottomrule
+\end{longtable}
+
+\vspace{8mm}
+\color{midgrey}\rule{\linewidth}{0.4pt}\color{black}
+{\small\color{midgrey}
+  {{ company.legal_name | latex_escape }}
+  {% if company.abn -%}
+  \textbullet{} ABN {{ company.abn | latex_escape }}
+  {%- endif %}
+  \hfill Generated by SAE Books
+}
+
+\end{document}

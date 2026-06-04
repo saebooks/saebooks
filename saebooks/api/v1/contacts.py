@@ -527,7 +527,7 @@ async def get_contact_statement_pdf(
         await session.execute(sa_select(Company).where(Company.id == company_id))
     ).scalars().first()
 
-    pdf_bytes = render_statement_pdf(statement, company=company)
+    pdf_bytes = await render_statement_pdf(statement, company=company)
     filename = f"statement-{statement.contact_name.replace(' ', '-')[:40]}-{period_from.isoformat()}-{period_to.isoformat()}.pdf"
     return Response(
         content=pdf_bytes,
