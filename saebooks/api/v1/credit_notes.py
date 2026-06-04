@@ -495,3 +495,107 @@ async def void_credit_note_transition(
         await store_response(session, key, 204, b'{"voided": true}')
         await session.commit()
     return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
+# PDF — LaTeX engine
+# ---------------------------------------------------------------------------
+
+
+def _build_credit_note_ctx(cn: Any, customer: Any, company: Any) -> dict[str, Any]:
+    """Build the document.tex.j2 render context from a CreditNote + Contact + Company."""
+    customer_addr: dict[str, Any] = {}
+    if customer:
+        customer_addr = {k: v for k, v in {
+            "address_line1": customer.address_line1,
+            "city":          customer.city,
+            "state":         customer.state,
+            "postcode":      customer.postcode,
+            "country":       customer.country,
+        }.items() if v}
+    company_addr = (company.address or {}) if company else {}
+    return {
+        "kind":         "Credit Note",
+        "number":       cn.number or str(cn.id)[:8],
+        "issue_date":   cn.issue_date.isoformat() if cn.issue_date else "",
+        "due_date":     "",          # credit notes have no due_date field
+        "currency":     "AUD",
+        "subtotal":     str(cn.subtotal),
+        "tax_total":    str(cn.tax_total),
+        "total":        str(cn.total),
+        "amount_paid":  str(cn.amount_allocated),   # allocated = credited/paid amount
+        "notes":        cn.notes or "",
+        "payment_terms": "",          # not applicable for credit notes
+        "company": {
+            "name":    (company.legal_name or company.name) if company else "",
+            "abn":     (company.abn or "") if company else "",
+            "address": company_addr,
+            **({k: v for k, v in company_addr.items()} if company_addr else {}),
+        },
+        "contact": {
+            "name":    customer.name if customer else "",
+            "email":   (customer.email or "") if customer else "",
+            "phone":   (customer.phone or "") if customer else "",
+            **({k: v for k, v in customer_addr.items()} if customer_addr else {}),
+        },
+        "lines": [
+            {
+                "line_no":     ln.line_no,
+                "description": ln.description,
+                "quantity":    str(ln.quantity),
+                "unit_price":  str(ln.unit_price),
+                "line_total":  str(ln.line_total),
+                "line_tax":    str(ln.line_tax),
+            }
+            for ln in cn.lines
+        ],
+    }
+
+
+@router.get("/{credit_note_id}/pdf")
+async def get_credit_note_pdf(
+    credit_note_id: UUID,
+    request: Request,
+    bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> Response:
+    """Render a credit note as PDF via the LaTeX engine. Always regenerated; never stored."""
+    from sqlalchemy import select as sa_select
+
+    from saebooks.models.company import Company
+    from saebooks.models.contact import Contact
+    from saebooks.services.latex_pdf import LatexCompileError, LatexServiceError, render_latex
+
+    tenant_id = resolve_tenant_id(request)
+    cn = await svc.api_get(session, credit_note_id, tenant_id=tenant_id, company_id=company_id)
+    if cn is None:
+        raise HTTPException(404, "Credit note not found")
+
+    customer = (
+        await session.execute(sa_select(Contact).where(Contact.id == cn.contact_id))
+    ).scalars().first()
+    company = (
+        await session.execute(sa_select(Company).where(Company.id == cn.company_id))
+    ).scalars().first()
+
+    ctx = _build_credit_note_ctx(cn, customer, company)
+    try:
+        pdf_bytes = await render_latex("document", ctx)
+    except LatexCompileError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"LaTeX compile error: {exc.log_tail}",
+        ) from exc
+    except LatexServiceError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"LaTeX service error: {exc}",
+        ) from exc
+
+    filename = f"credit-note-{ctx['number']}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
