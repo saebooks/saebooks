@@ -51,6 +51,7 @@ Conventions
 from __future__ import annotations
 
 import hashlib
+import json
 import hmac
 import logging
 import uuid
@@ -66,6 +67,10 @@ from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_session
 from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
+from saebooks.services.integrations.paperless_ingest import (
+    extract_document_id,
+    ingest_document,
+)
 from saebooks.services.crypto import decrypt_field, FieldEncryptionNotConfiguredError
 from saebooks.services.features import (
     FLAG_COMPANIES_HOUSE,
@@ -374,7 +379,39 @@ async def paperless_webhook(
         "integrations: paperless webhook accepted for tenant=%s",
         tenant_uuid,
     )
-    return JSONResponse({"received": True, "tenant_id": str(tenant_uuid)})
+
+    # --- Ingest → DRAFT bill (review-before-post; never touches the GL). ---
+    # Fail-safe: any error is logged and swallowed (return 200) so Paperless
+    # does not retry-storm; the source document is unharmed in Paperless and
+    # can be re-triggered. The session is tenant-bound via session.info so the
+    # after_begin listener re-applies app.current_tenant across create_draft's
+    # internal commit (RLS stays enforced — no cross-tenant write).
+    try:
+        payload = json.loads(raw_body or b"{}")
+    except (json.JSONDecodeError, ValueError):
+        payload = {}
+    doc_id = extract_document_id(payload) if isinstance(payload, dict) else None
+    ingest: dict = {"status": "skipped_no_document_id"}
+    if doc_id is not None:
+        try:
+            async with AsyncSessionLocal() as ing_session:
+                ing_session.info["tenant_id"] = tenant_uuid
+                ingest = await ingest_document(
+                    ing_session,
+                    tenant_id=tenant_uuid,
+                    document_id=doc_id,
+                    settings=settings,
+                )
+        except Exception as exc:  # noqa: BLE001 — webhook must not 5xx
+            logger.exception(
+                "integrations: paperless ingest failed tenant=%s doc=%s",
+                tenant_uuid, doc_id,
+            )
+            ingest = {"status": "error", "detail": str(exc)}
+
+    return JSONResponse(
+        {"received": True, "tenant_id": str(tenant_uuid), "ingest": ingest}
+    )
 
 
 # ---------------------------------------------------------------------------
