@@ -462,3 +462,48 @@ async def test_ingest_resolves_reconciled_when_clean():
     assert stmt.status == StatementStatus.RECONCILED.value
     assert stmt.our_ap_as_at is not None
     assert stmt.balance_delta is not None
+
+
+@pytest.mark.asyncio
+async def test_ingest_paid_invoice_nets_to_closing_no_false_review():
+    """Net-balance gate (regression for the gross-invoice-sum bug, #28): a
+    statement listing an invoice AND its later payment nets to the carried
+    closing balance. The gate must NOT trip — no false NEEDS_REVIEW, no opus
+    escalation. The OLD code summed only invoices (1000) vs closing (700) and
+    wrongly flagged it; the fix nets all signed lines (1000 - 300 = 700)."""
+    company_id = await _seed_company_id()
+    settings = _fake_settings()
+    doc_id = 9077
+    response = json.dumps({
+        "supplier_name": "Netting Test Supplies Pty Ltd",
+        "supplier_abn": None, "customer_ref": None,
+        "statement_date": "2026-05-31", "terms": None,
+        "closing_balance": 700.00, "opening_balance": 0.00,
+        "lines": [
+            {"date": "2026-05-05", "type": "IN", "reference": "INV-7",
+             "description": None, "amount": 1000.00},
+            {"date": "2026-05-20", "type": "PY", "reference": "INV-7",
+             "description": None, "amount": -300.00},
+        ],
+    })
+    calls = []
+
+    async def _mock_llm(*args, **kwargs):
+        calls.append(kwargs.get("model", ""))
+        return response
+
+    with (
+        patch("saebooks.services.statements.ingest.PaperlessClient", _FakePaperlessClient),
+        patch.object(extract_mod, "_call_llm", new=_mock_llm),
+    ):
+        async with AsyncSessionLocal() as session:
+            session.info["tenant_id"] = _TENANT
+            stmt = await ingest_statement(
+                session, tenant_id=_TENANT, company_id=company_id,
+                paperless_document_id=doc_id, settings=settings,
+            )
+            await session.commit()
+
+    assert stmt.status != StatementStatus.NEEDS_REVIEW.value, stmt.extraction_meta
+    assert len(calls) == 1, f"gate falsely tripped → escalated; calls={calls}"
+    assert stmt.extraction_meta.get("escalated") in (False, None)

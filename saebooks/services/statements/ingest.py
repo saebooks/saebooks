@@ -110,18 +110,22 @@ async def ingest_statement(
         )
         await session.flush()
         await _upsert_lines(session, stmt, extracted)
+        await session.commit()
         return stmt
 
     # ------------------------------------------------------------------
     # 5. Balance gate — check if open invoice lines reconcile to closing_balance
     # ------------------------------------------------------------------
-    open_invoice_sum = sum(
-        line.amount
-        for line in extracted.lines
-        if line.line_type == "invoice"
-    )
+    # Internal-consistency check: the statement's own arithmetic must tie out.
+    # Every line amount is SIGNED by the extractor (invoices +, payments/credits -),
+    # so the sum of ALL lines is the net movement, which must equal
+    # (closing - opening). Summing only invoices double-counts paid items — a
+    # statement that lists an invoice AND its later payment nets to the carried
+    # balance, not the gross invoice total.
+    opening = extracted.opening_balance or Decimal("0")
     closing = extracted.closing_balance or Decimal("0")
-    balance_discrepancy = abs(open_invoice_sum - closing)
+    statement_net = sum((line.amount for line in extracted.lines), Decimal("0"))
+    balance_discrepancy = abs(statement_net - (closing - opening))
 
     escalated_extraction: ExtractedStatement | None = None
     if balance_discrepancy > _CENT:
@@ -137,13 +141,12 @@ async def ingest_statement(
                 model_override=settings.statement_llm_model_escalation,
             )
             # Check if escalated parse resolves the discrepancy
-            esc_open_sum = sum(
-                line.amount
-                for line in escalated_extraction.lines
-                if line.line_type == "invoice"
-            )
+            esc_opening = escalated_extraction.opening_balance or Decimal("0")
             esc_closing = escalated_extraction.closing_balance or Decimal("0")
-            esc_discrepancy = abs(esc_open_sum - esc_closing)
+            esc_net = sum(
+                (line.amount for line in escalated_extraction.lines), Decimal("0")
+            )
+            esc_discrepancy = abs(esc_net - (esc_closing - esc_opening))
 
             if esc_discrepancy <= _CENT:
                 # Escalation fixed it — use the escalated extraction
@@ -222,6 +225,10 @@ async def ingest_statement(
         "recon_counts": summary.counts,
     }
 
+    # Commit the post-reconcile status/aggregates. The _upsert helpers commit the
+    # header+lines at PENDING_EXTRACT; without this commit the final status,
+    # our_ap_as_at and balance_delta would be left uncommitted.
+    await session.commit()
     return stmt
 
 
