@@ -26,7 +26,7 @@ import logging
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.config import Settings
@@ -38,13 +38,20 @@ from saebooks.models.supplier_statement import (
     SupplierStatement,
     SupplierStatementLine,
 )
+from saebooks.models.supplier_statement_template import SupplierStatementTemplate
 from saebooks.services.integrations.paperless import PaperlessClient
-from saebooks.services.statements.extract import ExtractedStatement, extract_statement
+from saebooks.services.statements.extract import (
+    ExtractedStatement,
+    extract_statement,
+    extract_statement_vision,
+)
 from saebooks.services.statements.reconcile import reconcile_lines
 
 logger = logging.getLogger("saebooks.statements.ingest")
 
 _CENT = Decimal("0.01")
+# OCR text shorter than this is treated as absent; vision fallback is used.
+_MIN_OCR_CHARS = 40
 
 
 async def ingest_statement(
@@ -77,17 +84,64 @@ async def ingest_statement(
     ocr_text: str = doc_meta.get("content") or ""
 
     # ------------------------------------------------------------------
-    # 3. Extract with primary model
+    # 3. Resolve template hint (for re-ingest when identity is known)
     # ------------------------------------------------------------------
-    extracted = await extract_statement(ocr_text, settings=settings)
+    # On first ingest the identity fields (contact_id / supplier_abn) are
+    # not yet known — templates only apply on re-ingest or when the
+    # existing statement already carries identity. That is expected:
+    # templates kick in after a poor first pass and the operator re-runs.
+    template: SupplierStatementTemplate | None = None
+    if existing_stmt is not None:
+        template = await _lookup_template(
+            session,
+            company_id=company_id,
+            contact_id=existing_stmt.contact_id,
+            supplier_abn=existing_stmt.supplier_abn,
+            supplier_name=existing_stmt.supplier_name,
+        )
+
+    prompt_hint: str | None = template.prompt_hint if template is not None else None
     extraction_meta: dict = {
-        "model_used": extracted.model_used,
+        "model_used": "",  # filled in after extraction
         "escalated": False,
         "escalation_resolved": None,
     }
+    if template is not None:
+        extraction_meta["template_id"] = str(template.id)
 
     # ------------------------------------------------------------------
-    # 4. AP/AR + readability gate (before persisting lines)
+    # 4. Extract — text path or vision fallback
+    # ------------------------------------------------------------------
+    vision_used = False
+    if len(ocr_text.strip()) < _MIN_OCR_CHARS:
+        # Scanned / image-only document with no usable OCR — download binary
+        # and route through the vision model.
+        logger.info(
+            "OCR text too short (%d chars); using vision fallback for doc %d",
+            len(ocr_text.strip()),
+            paperless_document_id,
+        )
+        async with PaperlessClient(settings=settings) as pc:
+            image_bytes, mime_type = await pc.download_content(paperless_document_id)
+        mime_type = mime_type or "application/octet-stream"
+        extracted = await extract_statement_vision(
+            image_bytes,
+            mime_type,
+            settings=settings,
+            prompt_hint=prompt_hint,
+        )
+        vision_used = True
+    else:
+        extracted = await extract_statement(
+            ocr_text, settings=settings, prompt_hint=prompt_hint
+        )
+
+    extraction_meta["model_used"] = extracted.model_used
+    if vision_used:
+        extraction_meta["vision"] = True
+
+    # ------------------------------------------------------------------
+    # 5. AP/AR + readability gate (before persisting lines)
     # ------------------------------------------------------------------
     if extracted.supplier_name is None or (
         extracted.closing_balance is not None and extracted.closing_balance < 0
@@ -113,7 +167,7 @@ async def ingest_statement(
         return stmt
 
     # ------------------------------------------------------------------
-    # 5. Balance gate — check if open invoice lines reconcile to closing_balance
+    # 6. Balance gate — check if open invoice lines reconcile to closing_balance
     # ------------------------------------------------------------------
     # Internal-consistency check: the statement's own arithmetic must tie out.
     # Every line amount is SIGNED by the extractor (invoices +, payments/credits -),
@@ -138,6 +192,7 @@ async def ingest_statement(
                 ocr_text,
                 settings=settings,
                 model_override=settings.statement_llm_model_escalation,
+                prompt_hint=prompt_hint,
             )
             # Check if escalated parse resolves the discrepancy
             esc_opening = escalated_extraction.opening_balance or Decimal("0")
@@ -168,7 +223,7 @@ async def ingest_statement(
             extraction_meta["balance_discrepancy"] = str(balance_discrepancy)
 
     # ------------------------------------------------------------------
-    # 6. Persist header + lines
+    # 7. Persist header + lines
     # ------------------------------------------------------------------
     stmt = await _upsert_header(
         session,
@@ -186,7 +241,7 @@ async def ingest_statement(
     fresh_lines = await _upsert_lines(session, stmt, extracted)
 
     # ------------------------------------------------------------------
-    # 7. Resolve supplier contact
+    # 8. Resolve supplier contact
     # ------------------------------------------------------------------
     if extracted.supplier_name:
         contact = await _resolve_contact(session, company_id, extracted.supplier_name)
@@ -194,7 +249,7 @@ async def ingest_statement(
             stmt.contact_id = contact.id
 
     # ------------------------------------------------------------------
-    # 8. Load supplier's bills and reconcile
+    # 9. Load supplier's bills and reconcile
     # ------------------------------------------------------------------
     bills = await _load_supplier_bills(session, company_id, stmt.contact_id)
     # Pass lines explicitly to avoid triggering lazy-load on stmt.lines
@@ -205,7 +260,7 @@ async def ingest_statement(
         session.add(synthetic)
 
     # ------------------------------------------------------------------
-    # 9. Apply final status gates
+    # 10. Apply final status gates
     # ------------------------------------------------------------------
     if balance_discrepancy > _CENT:
         # Balance gate still tripped after escalation attempt
@@ -247,6 +302,69 @@ async def _find_existing(
         )
     )
     return result.scalars().first()
+
+
+async def _lookup_template(
+    session: AsyncSession,
+    *,
+    company_id: uuid.UUID,
+    contact_id: uuid.UUID | None,
+    supplier_abn: str | None,
+    supplier_name: str | None,
+) -> SupplierStatementTemplate | None:
+    """Find the highest-priority active template for this supplier.
+
+    Match priority: contact_id (exact) > supplier_abn (normalised, case-insensitive)
+    > supplier_name (ilike). Returns the first match or None.
+    """
+    base_where = [
+        SupplierStatementTemplate.company_id == company_id,
+        SupplierStatementTemplate.active.is_(True),
+    ]
+
+    # 1. contact_id match (most specific)
+    if contact_id is not None:
+        result = await session.execute(
+            select(SupplierStatementTemplate).where(
+                *base_where,
+                SupplierStatementTemplate.contact_id == contact_id,
+            ).limit(1)
+        )
+        tmpl = result.scalars().first()
+        if tmpl is not None:
+            return tmpl
+
+    # 2. supplier_abn match (normalised: remove spaces, case-insensitive)
+    if supplier_abn:
+        normalised_abn = supplier_abn.replace(" ", "").upper()
+        result = await session.execute(
+            select(SupplierStatementTemplate).where(
+                *base_where,
+                SupplierStatementTemplate.contact_id.is_(None),
+                func.replace(SupplierStatementTemplate.supplier_abn, " ", "").ilike(
+                    normalised_abn
+                ),
+            ).limit(1)
+        )
+        tmpl = result.scalars().first()
+        if tmpl is not None:
+            return tmpl
+
+    # 3. supplier_name ilike match (least specific)
+    if supplier_name:
+        result = await session.execute(
+            select(SupplierStatementTemplate).where(
+                *base_where,
+                SupplierStatementTemplate.contact_id.is_(None),
+                SupplierStatementTemplate.supplier_abn.is_(None),
+                SupplierStatementTemplate.supplier_name.ilike(supplier_name),
+            ).limit(1)
+        )
+        tmpl = result.scalars().first()
+        if tmpl is not None:
+            return tmpl
+
+    return None
 
 
 async def _upsert_header(

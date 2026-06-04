@@ -9,9 +9,11 @@ Configuration keys added to saebooks/config.py:
   statement_llm_model  (STATEMENT_LLM_MODEL)
   statement_llm_model_escalation (STATEMENT_LLM_MODEL_ESCALATION)
   statement_llm_api_key (STATEMENT_LLM_API_KEY)
+  statement_llm_vision_model (STATEMENT_LLM_VISION_MODEL)
 """
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import re
@@ -178,6 +180,72 @@ async def _call_llm(
     raise RuntimeError(f"LLM call failed after 3 attempts: {last_err}")
 
 
+async def _call_llm_vision(
+    prompt_system: str,
+    image_bytes: bytes,
+    mime_type: str,
+    *,
+    model: str,
+    base_url: str,
+    api_key: str,
+) -> str:
+    """POST a vision message to an OpenAI-compatible /chat/completions endpoint.
+
+    Encodes ``image_bytes`` as base64 and sends a multimodal user message.
+    Note: PDF documents (mime application/pdf) are not natively supported as
+    image_url by most vision models — the call is still attempted and any
+    failure will propagate to the caller to be handled by the existing
+    fail-safe path.
+
+    Returns the assistant message content string.
+    Raises RuntimeError on exhausted retries.
+    """
+    b64 = base64.b64encode(image_bytes).decode("ascii")
+    payload = {
+        "model": model,
+        "temperature": 0,
+        "messages": [
+            {"role": "system", "content": prompt_system},
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Extract this supplier statement of account as STRICT JSON per the schema.",
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{mime_type};base64,{b64}"},
+                    },
+                ],
+            },
+        ],
+    }
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    url = base_url.rstrip("/") + "/chat/completions"
+
+    last_err: Exception | None = None
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        for attempt in range(3):
+            try:
+                resp = await client.post(url, json=payload, headers=headers)
+                resp.raise_for_status()
+                body = resp.json()
+                return body["choices"][0]["message"]["content"]
+            except Exception as exc:
+                last_err = exc
+                logger.warning(
+                    "litellm vision attempt %d failed: %s; retrying", attempt + 1, exc
+                )
+                if attempt < 2:
+                    time.sleep(1.5 * (attempt + 1))
+
+    raise RuntimeError(f"LLM vision call failed after 3 attempts: {last_err}")
+
+
 # ---------------------------------------------------------------------------
 # Parsing helpers (ported from prototype)
 # ---------------------------------------------------------------------------
@@ -285,6 +353,18 @@ def _build_extracted_statement(data: dict, model_used: str, escalated: bool) -> 
     )
 
 
+def _build_system_prompt(prompt_hint: str | None) -> str:
+    """Return the system prompt, optionally appending a supplier-specific hint."""
+    if not prompt_hint:
+        return _SYSTEM_PROMPT
+    return (
+        _SYSTEM_PROMPT
+        + "\n\nSupplier-specific extraction guidance"
+        " (follow this for THIS supplier's layout):\n"
+        + prompt_hint
+    )
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -294,18 +374,26 @@ async def extract_statement(
     *,
     settings: Settings,
     model_override: str | None = None,
+    prompt_hint: str | None = None,
 ) -> ExtractedStatement:
     """Parse supplier statement OCR text into an ExtractedStatement.
 
     ``model_override`` lets the ingest layer request the escalation model
     on the second attempt without duplicating call logic.
+
+    ``prompt_hint`` is an optional supplier-specific extraction guidance
+    string (sourced from a SupplierStatementTemplate row). When set, it is
+    appended to the base system prompt so layout-specific instructions
+    supplement rather than replace the generic rules.
     """
     model = model_override or settings.statement_llm_model
     base_url = settings.statement_llm_base
     api_key = settings.statement_llm_api_key
 
+    system_prompt = _build_system_prompt(prompt_hint)
+
     raw_response = await _call_llm(
-        _SYSTEM_PROMPT,
+        system_prompt,
         ocr_text,
         model=model,
         base_url=base_url,
@@ -315,3 +403,40 @@ async def extract_statement(
     data = _parse_response(raw_response)
     escalated = model_override == settings.statement_llm_model_escalation
     return _build_extracted_statement(data, model_used=model, escalated=escalated)
+
+
+async def extract_statement_vision(
+    image_bytes: bytes,
+    mime_type: str,
+    *,
+    settings: Settings,
+    prompt_hint: str | None = None,
+) -> ExtractedStatement:
+    """Extract a supplier statement from image/binary content via a vision LLM.
+
+    Used as a fallback when Paperless OCR is absent or too short to be
+    reliable (fewer than 40 non-whitespace characters). Encodes the binary
+    as a base64 data URI and sends it to the configured vision model.
+
+    Note on PDF inputs: most vision models do not accept application/pdf as
+    an image_url data URI. When mime_type is 'application/pdf', the call is
+    still attempted — the litellm gateway may handle the conversion, or the
+    error will propagate to the ingest layer's existing fail-safe path.
+    """
+    model = settings.statement_llm_vision_model
+    base_url = settings.statement_llm_base
+    api_key = settings.statement_llm_api_key
+
+    system_prompt = _build_system_prompt(prompt_hint)
+
+    raw_response = await _call_llm_vision(
+        system_prompt,
+        image_bytes,
+        mime_type,
+        model=model,
+        base_url=base_url,
+        api_key=api_key,
+    )
+
+    data = _parse_response(raw_response)
+    return _build_extracted_statement(data, model_used=model, escalated=False)

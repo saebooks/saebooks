@@ -429,6 +429,15 @@ class Settings(BaseSettings):
         default='claude-opus-4-7',
         alias='STATEMENT_LLM_MODEL_ESCALATION',
     )
+    # Vision model for image-only / scanned statements (P4 #28).
+    # When OCR text is absent or too short, the ingest layer downloads
+    # the document binary and routes it through this model.  Defaults to
+    # claude-haiku-4-5 (fast + multimodal); override to a more capable
+    # vision model if accuracy on complex layouts requires it.
+    statement_llm_vision_model: str = Field(
+        default='claude-haiku-4-5',
+        alias='STATEMENT_LLM_VISION_MODEL',
+    )
     @property
     def oauth_allowed_emails_set(self) -> set[str]:
         return {e.strip().lower() for e in self.oauth_allowed_emails.split(",") if e.strip()}
