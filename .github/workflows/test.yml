@@ -116,29 +116,15 @@ jobs:
           uv pip install -e ".[dev]"
       - name: Bootstrap migration-owner roles
         # Migrations reference the saebooks / saebooks_app roles by name
-        # (the docker test stack does this via docker/test-initdb). Recreate
-        # them here against the service Postgres before upgrading. Plain
-        # conditional statements — no PL/pgSQL dollar-quoting, so nothing
-        # the shell could try to expand.
+        # (the docker test stack seeds them via docker/test-initdb). Replay
+        # that exact SQL against the service Postgres with psql
+        # (postgresql-client is preinstalled on ubuntu-latest). Using the
+        # committed init script avoids duplicating the role definitions.
+        env:
+          PGPASSWORD: saebooks_test_pw
         run: |
-          uv run python - <<PYEOF
-          import asyncio, asyncpg
-          async def main():
-              c = await asyncpg.connect(
-                  user="saebooks_test", password="saebooks_test_pw",
-                  database="saebooks_test", host="localhost", port=5432)
-              if not await c.fetchval("SELECT 1 FROM pg_roles WHERE rolname=saebooks"):
-                  await c.execute("CREATE ROLE saebooks LOGIN SUPERUSER")
-              if not await c.fetchval("SELECT 1 FROM pg_roles WHERE rolname=saebooks_app"):
-                  await c.execute(
-                      "CREATE ROLE saebooks_app LOGIN NOSUPERUSER NOBYPASSRLS "
-                      "INHERIT PASSWORD saebooks_app_test_pw")
-              if not await c.fetchval(
-                      "SELECT pg_has_role(saebooks_test,saebooks,member)"):
-                  await c.execute("GRANT saebooks TO saebooks_test")
-              await c.close()
-          asyncio.run(main())
-          PYEOF
+          psql -h localhost -p 5432 -U saebooks_test -d saebooks_test \
+            -v ON_ERROR_STOP=1 -f docker/test-initdb/01-test-roles.sql
       - name: alembic upgrade head (fresh DB, full 0001..head chain)
         run: uv run alembic upgrade head
 
