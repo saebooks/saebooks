@@ -18,7 +18,6 @@ from saebooks.services.latex_pdf import (
     latex_escape,
 )
 
-
 # ---------------------------------------------------------------------------
 # latex_escape unit tests
 # ---------------------------------------------------------------------------
@@ -120,8 +119,9 @@ def _setup_test_env(extra_templates: dict[str, str] | None = None) -> None:
     ``extra_templates`` maps template names (without .tex.j2) to source strings.
     The dict is merged with a minimal _preamble.tex.j2 so include directives work.
     """
-    import saebooks.services.latex_pdf as _svc
     import jinja2
+
+    import saebooks.services.latex_pdf as _svc
 
     _svc._env = None
     env = _svc._get_env()
@@ -148,6 +148,7 @@ def _setup_test_env(extra_templates: dict[str, str] | None = None) -> None:
 async def test_render_latex_success(respx_mock: respx.MockRouter) -> None:
     """Happy path: compile → pdf_url → GET pdf bytes; escaped values present."""
     import os
+
     import saebooks.services.latex_pdf as _svc
 
     os.environ["LATEX_API_URL"] = _LATEX_API_BASE
@@ -184,6 +185,7 @@ async def test_render_latex_success(respx_mock: respx.MockRouter) -> None:
 async def test_render_latex_compile_error(respx_mock: respx.MockRouter) -> None:
     """422 from /compile raises LatexCompileError with the log tail."""
     import os
+
     import saebooks.services.latex_pdf as _svc
 
     os.environ["LATEX_API_URL"] = _LATEX_API_BASE
@@ -208,7 +210,9 @@ async def test_render_latex_compile_error(respx_mock: respx.MockRouter) -> None:
 async def test_render_latex_connection_error(respx_mock: respx.MockRouter) -> None:
     """Connection failure raises LatexServiceError (not a raw httpx error)."""
     import os
+
     import httpx
+
     import saebooks.services.latex_pdf as _svc
 
     os.environ["LATEX_API_URL"] = _LATEX_API_BASE

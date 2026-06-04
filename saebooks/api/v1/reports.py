@@ -60,6 +60,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import Response as FastAPIResponse
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1939,7 +1940,7 @@ async def statement_pack_pdf(
     comparative: bool = Query(default=True),
     session: AsyncSession = Depends(get_session),
     company_id: UUID = Depends(get_active_company_id),
-) -> "FastAPIResponse":
+) -> FastAPIResponse:
     """Render a financial statement pack (P&L + Balance Sheet + Trial Balance)
     as a PDF via the LaTeX engine.
 
@@ -1949,8 +1950,6 @@ async def statement_pack_pdf(
     The ctx is assembled entirely from service-layer functions — no HTTP
     self-calls.  Returns ``application/pdf`` with ``Content-Disposition: inline``.
     """
-    from fastapi.responses import Response as FastAPIResponse
-
     from saebooks.services.latex_pdf import LatexCompileError, LatexServiceError, render_latex
 
     today = date.today()
@@ -2023,8 +2022,8 @@ async def statement_pack_pdf(
                     {"account_id": str(acc_id), "account_name": acc_name, "code": acc_code, "amount": net}
                 )
 
-    total_income = sum(l["amount"] for lines in income_by_type.values() for l in lines)
-    total_expenses = sum(l["amount"] for lines in expenses_by_type.values() for l in lines)
+    total_income = sum(ln["amount"] for lines in income_by_type.values() for ln in lines)
+    total_expenses = sum(ln["amount"] for lines in expenses_by_type.values() for ln in lines)
 
     pl_report: dict[str, Any] = {
         "from_date": from_.isoformat(),
@@ -2098,9 +2097,9 @@ async def statement_pack_pdf(
     cye_balance = float(cye_income_credit - cye_expense_debit)
     equity_rows.append({"account_id": "00000000-0000-0000-0000-000000000000", "account_name": "Current Year Earnings", "code": "CYE", "balance": cye_balance})
 
-    total_assets = sum(l["balance"] for l in assets)
-    total_liabilities = sum(l["balance"] for l in liabilities)
-    total_equity = sum(l["balance"] for l in equity_rows)
+    total_assets = sum(ln["balance"] for ln in assets)
+    total_liabilities = sum(ln["balance"] for ln in liabilities)
+    total_equity = sum(ln["balance"] for ln in equity_rows)
     bs_difference = abs(total_assets - total_liabilities - total_equity)
 
     bs_report: dict[str, Any] = {
@@ -2220,8 +2219,8 @@ async def statement_pack_pdf(
                         {"account_id": str(acc_id), "account_name": acc_name, "code": acc_code, "amount": net}
                     )
 
-        p_total_income = sum(l["amount"] for lines in prior_income_by_type.values() for l in lines)
-        p_total_expenses = sum(l["amount"] for lines in prior_expenses_by_type.values() for l in lines)
+        p_total_income = sum(ln["amount"] for lines in prior_income_by_type.values() for ln in lines)
+        p_total_expenses = sum(ln["amount"] for lines in prior_expenses_by_type.values() for ln in lines)
 
         prior_pl: dict[str, Any] = {
             "income": {
@@ -2241,7 +2240,7 @@ async def statement_pack_pdf(
         # Merge current + prior P&L into comp_pl using the same logic as
         # saebooks_web._build_comparative_pl — align by account_id.
         def _merge_lines(current_lines: list[dict], prior_lines: list[dict]) -> list[dict]:
-            prior_by_id = {l["account_id"]: l for l in prior_lines if l.get("account_id")}
+            prior_by_id = {ln["account_id"]: ln for ln in prior_lines if ln.get("account_id")}
             merged = []
             for line in current_lines:
                 aid = line.get("account_id")
@@ -2341,9 +2340,9 @@ async def statement_pack_pdf(
         p_cye = float(p_cye_income_credit - p_cye_expense_debit)
         p_equity_rows.append({"account_id": "00000000-0000-0000-0000-000000000000", "account_name": "Current Year Earnings", "code": "CYE", "balance": p_cye})
 
-        p_total_assets = sum(l["balance"] for l in p_assets)
-        p_total_liabilities = sum(l["balance"] for l in p_liabilities)
-        p_total_equity = sum(l["balance"] for l in p_equity_rows)
+        p_total_assets = sum(ln["balance"] for ln in p_assets)
+        p_total_liabilities = sum(ln["balance"] for ln in p_liabilities)
+        p_total_equity = sum(ln["balance"] for ln in p_equity_rows)
 
         prior_bs: dict[str, Any] = {
             "assets": {"ASSET": p_assets, "total_assets": p_total_assets},

@@ -21,7 +21,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select as sa_select, text
+from sqlalchemy import select as sa_select
+from sqlalchemy import text
 
 from saebooks.api.v1.auth import DEFAULT_TENANT_ID, current_token
 from saebooks.db import AsyncSessionLocal

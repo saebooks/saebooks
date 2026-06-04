@@ -45,7 +45,6 @@ async def api_client() -> AsyncClient:
 @pytest.fixture
 async def quote_id() -> str:
     """Create a quote with two section groups and special chars; return its UUID."""
-    import json
 
     token = current_token()
     async with AsyncSessionLocal() as session:
@@ -155,6 +154,7 @@ async def test_quote_pdf_returns_pdf(
 ) -> None:
     """GET /{id}/pdf → 200 application/pdf; respx mocks latex-api."""
     import os
+
     import saebooks.services.latex_pdf as _svc
 
     os.environ["LATEX_API_URL"] = _LATEX_API_BASE

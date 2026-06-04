@@ -10,8 +10,6 @@ from datetime import date
 from decimal import Decimal
 from unittest.mock import MagicMock
 
-import pytest
-
 from saebooks.models.bill import BillStatus
 from saebooks.models.supplier_statement import (
     StatementLineType,
@@ -19,7 +17,7 @@ from saebooks.models.supplier_statement import (
     SupplierStatement,
     SupplierStatementLine,
 )
-from saebooks.services.statements.reconcile import ReconSummary, reconcile_lines
+from saebooks.services.statements.reconcile import reconcile_lines
 
 _TENANT = uuid.UUID("00000000-0000-0000-0000-000000000001")
 _COMPANY = uuid.UUID("00000000-0000-0000-0000-000000000002")
@@ -148,7 +146,7 @@ def test_payment_info():
     stmt = _make_stmt(closing_balance="0.00")
     line = _add_line(stmt, amount="-500.00", line_type=StatementLineType.PAYMENT.value)
 
-    summary = reconcile_lines(stmt, [], statement_lines=stmt.lines)
+    reconcile_lines(stmt, [], statement_lines=stmt.lines)
 
     assert line.match_status == StatementMatchStatus.PAYMENT_INFO.value
 

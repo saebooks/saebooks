@@ -16,19 +16,18 @@ the shared seed company.
 from __future__ import annotations
 
 import uuid
-from datetime import date as _date, datetime
+from datetime import date as _date
+from datetime import datetime
 
 import pytest
-from sqlalchemy import select
 
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 from saebooks.models.pay_run import PayRun
 from saebooks.models.stp_submission import StpStatus, StpSubmission
+from saebooks.services import stp as stp_svc
 from saebooks.services.lodgement.base import LodgementResult, LodgementStatus
 from saebooks.services.lodgement.exceptions import LodgementRejected
-from saebooks.services import stp as stp_svc
-
 
 _DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 

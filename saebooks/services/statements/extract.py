@@ -265,7 +265,7 @@ def _build_extracted_statement(data: dict, model_used: str, escalated: bool) -> 
 
     # Derive closing_balance from lines if not stated
     if closing_balance is None and lines:
-        derived = sum(l.amount for l in lines)
+        derived = sum(ln.amount for ln in lines)
         if derived < 0:
             derived = abs(derived)
         closing_balance = derived

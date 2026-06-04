@@ -33,7 +33,6 @@ from saebooks.config import Settings
 from saebooks.models.bill import Bill, BillStatus
 from saebooks.models.contact import Contact, ContactType
 from saebooks.models.supplier_statement import (
-    StatementLineType,
     StatementMatchStatus,
     StatementStatus,
     SupplierStatement,

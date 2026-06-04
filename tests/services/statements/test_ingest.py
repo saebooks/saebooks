@@ -10,7 +10,7 @@ import json
 import uuid
 from datetime import date
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy import select
@@ -21,7 +21,6 @@ from saebooks.models.bill import Bill, BillStatus
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
 from saebooks.models.supplier_statement import (
-    StatementMatchStatus,
     StatementStatus,
     SupplierStatement,
     SupplierStatementLine,
@@ -415,8 +414,8 @@ async def test_ingest_resolves_reconciled_when_clean():
         session.add(contact)
         await session.flush()
 
+
         from saebooks.models.account import Account
-        from sqlalchemy import text
 
         # Get an account to attach the bill to
         acct = (await session.execute(
