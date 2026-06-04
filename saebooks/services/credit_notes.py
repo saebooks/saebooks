@@ -448,6 +448,7 @@ async def archive(
 # two surfaces can evolve independently.
 # ==========================================================================
 
+from saebooks.services import audit_log as audit_log_svc  # noqa: E402
 from saebooks.services import change_log as change_log_svc  # noqa: E402
 
 
@@ -766,6 +767,7 @@ async def api_post_credit_note(
     expected_version: int,
     *,
     tenant_id: uuid.UUID | None = None,
+    actor_user_id: uuid.UUID | None = None,
 ) -> CreditNote:
     """Transition DRAFT → POSTED with JE generation, optimistic locking + change_log.
 
@@ -807,6 +809,16 @@ async def api_post_credit_note(
     cn_loaded = await _get_api(session, credit_note_id)
     assert cn_loaded is not None
 
+    if actor_user_id is not None:
+        await audit_log_svc.append(
+            session,
+            tenant_id=cn_loaded.tenant_id,
+            actor_user_id=actor_user_id,
+            action=audit_log_svc.AuditAction.CREDIT_NOTE_POST,
+            table_name="credit_notes",
+            row_id=str(cn_loaded.id),
+            row_snapshot=_serialise_cn(cn_loaded),
+        )
     await change_log_svc.append(
         session,
         entity="credit_note",

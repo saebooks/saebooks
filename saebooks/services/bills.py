@@ -599,6 +599,7 @@ async def archive(
 # two surfaces can evolve independently.
 # ==========================================================================
 
+from saebooks.services import audit_log as audit_log_svc  # noqa: E402
 from saebooks.services import change_log as change_log_svc  # noqa: E402
 from sqlalchemy import func  # noqa: E402
 
@@ -1056,6 +1057,7 @@ async def api_post_bill(
     expected_version: int,
     *,
     tenant_id: uuid.UUID | None = None,
+    actor_user_id: uuid.UUID | None = None,
 ) -> Bill:
     """Transition DRAFT → POSTED with JE generation, optimistic locking + change_log.
 
@@ -1103,6 +1105,16 @@ async def api_post_bill(
     bill_loaded = await _get_with_lines(session, bill_id)
     assert bill_loaded is not None
 
+    if actor_user_id is not None:
+        await audit_log_svc.append(
+            session,
+            tenant_id=bill_loaded.tenant_id,
+            actor_user_id=actor_user_id,
+            action=audit_log_svc.AuditAction.BILL_POST,
+            table_name="bills",
+            row_id=str(bill_loaded.id),
+            row_snapshot=_serialise_bill(bill_loaded),
+        )
     await change_log_svc.append(
         session,
         entity="bill",
@@ -1123,6 +1135,7 @@ async def api_void_bill(
     expected_version: int,
     *,
     tenant_id: uuid.UUID | None = None,
+    actor_user_id: uuid.UUID | None = None,
 ) -> Bill:
     """Transition any non-VOIDED → VOIDED with JE reversal (if POSTED),
     optimistic locking + change_log.
@@ -1160,6 +1173,17 @@ async def api_void_bill(
     bill_loaded = await _get_with_lines(session, bill_id)
     assert bill_loaded is not None
 
+    if actor_user_id is not None:
+        await audit_log_svc.append(
+            session,
+            tenant_id=bill_loaded.tenant_id,
+            actor_user_id=actor_user_id,
+            action=audit_log_svc.AuditAction.BILL_VOID,
+            table_name="bills",
+            row_id=str(bill_loaded.id),
+            row_snapshot=_serialise_bill(bill_loaded),
+            reason=f"API void by {actor}",
+        )
     await change_log_svc.append(
         session,
         entity="bill",

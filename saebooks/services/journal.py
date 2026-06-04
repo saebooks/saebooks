@@ -12,6 +12,7 @@ import uuid
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -20,6 +21,7 @@ from saebooks.models.account import Account, AccountType
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine, PeriodLock
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import audit as audit_svc
+from saebooks.services import audit_log as audit_log_svc
 from saebooks.services import gst as gst_svc
 from saebooks.services import settings as settings_svc
 from saebooks.services.tax_engine import get_engine
@@ -570,6 +572,7 @@ async def post(
     override_reason: str | None = None,
     actor_role: str | None = None,
     tenant_id: uuid.UUID | None = None,
+    actor_user_id: uuid.UUID | None = None,
 ) -> JournalEntry:
     """Transition DRAFT → POSTED.
 
@@ -619,6 +622,27 @@ async def post(
     entry.posted_by = posted_by
     if override_reason:
         entry.override_reason = override_reason
+
+    # C2 audit: a post into a LOCKED period via an authorised override is a
+    # compliance-relevant event. _check_period_lock raised above for an
+    # unauthorised/reason-less override, so reaching here with an
+    # override_reason means the override was accepted. The audit row is
+    # staged on this same session and commits with the post below; if any
+    # later step were to raise, it rolls back with the post (no orphan).
+    if override_reason and actor_user_id is not None:
+        snapshot = jsonable_encoder(
+            {c.key: getattr(entry, c.key) for c in entry.__table__.columns}
+        )
+        await audit_log_svc.append(
+            session,
+            tenant_id=entry.tenant_id,
+            actor_user_id=actor_user_id,
+            action=audit_log_svc.AuditAction.JOURNAL_OVERRIDE_POST,
+            table_name="journal_entries",
+            row_id=str(entry.id),
+            row_snapshot=snapshot,
+            reason=override_reason,
+        )
 
     await session.commit()
     return entry

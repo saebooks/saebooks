@@ -33,7 +33,7 @@ from fastapi.responses import JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
-from saebooks.api.v1.deps import get_active_company_id, get_session
+from saebooks.api.v1.deps import get_active_company_id, get_active_user_id, get_session
 from saebooks.api.v1.schemas import (
     BillConflictBody,
     BillCreate,
@@ -334,6 +334,7 @@ async def void_bill(
                 actor=f"api:{bearer[:8]}…",
                 expected_version=expected,
                 tenant_id=tenant_id,
+                actor_user_id=await get_active_user_id(request),
             )
     except svc.VersionConflict as exc:
         body = BillConflictBody(
@@ -410,6 +411,7 @@ async def post_bill(
             actor=f"api:{bearer[:8]}…",
             expected_version=expected,
             tenant_id=tenant_id,
+            actor_user_id=await get_active_user_id(request),
         )
     except svc.VersionConflict as exc:
         body = BillConflictBody(
@@ -493,6 +495,7 @@ async def void_bill_transition(
             actor=f"api:{bearer[:8]}…",
             expected_version=expected,
             tenant_id=tenant_id,
+            actor_user_id=await get_active_user_id(request),
         )
     except svc.VersionConflict as exc:
         body = BillConflictBody(

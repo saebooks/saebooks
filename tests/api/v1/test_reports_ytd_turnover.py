@@ -175,7 +175,7 @@ async def test_ytd_turnover_above_threshold(
     register-within-21-days obligation is real.
     """
     async with AsyncSessionLocal() as session:
-        company = (await session.execute(select(Company).limit(1))).scalar_one()
+        company = (await session.execute(select(Company).order_by(Company.created_at).limit(1))).scalar_one()
         company.gst_registered = False
         await session.commit()
 
@@ -210,7 +210,7 @@ async def test_ytd_turnover_above_threshold_already_registered(
     must not trigger the dashboard banner. Regression test.
     """
     async with AsyncSessionLocal() as session:
-        company = (await session.execute(select(Company).limit(1))).scalar_one()
+        company = (await session.execute(select(Company).order_by(Company.created_at).limit(1))).scalar_one()
         company.gst_registered = True
         company.gst_effective_date = date(2020, 7, 1)
         await session.commit()
