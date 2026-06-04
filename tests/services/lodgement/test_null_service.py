@@ -51,3 +51,8 @@ def test_message_names_required_edition() -> None:
     assert "ato_sbr" in str(err)
     assert err.required_edition == "pro"
     assert err.flag == "ato_sbr"
+
+
+async def test_poll_status_refuses(svc: NullLodgementService) -> None:
+    with pytest.raises(LodgementUnsupportedEdition):
+        await svc.poll_status(receipt_ref="payevent-1", product="stp")

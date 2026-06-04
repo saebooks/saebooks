@@ -101,6 +101,22 @@ Status codes:
 - 502 — ATO SBR endpoint unreachable / 5xx. Client should retry with
   backoff.
 
+#### Status / poll route — TODO (gated on PVT)
+
+A QUEUED (202) lodgement returns a *deferred* receipt: the ATO has not yet
+issued a final receipt. Resolving it later needs a status-retrieval route
+(e.g. `GET /api/v1/stp/status/{payevent_id}`), backed by the ATO ebMS3
+response-retrieval (SBR get-status / Pull) flow.
+
+**This route is NOT yet contracted.** Its request/response shape and the
+underlying ATO transport are deliberately left unspecified here because
+they are gated on the ATO PVT (Product Verification Testing) reference
+pack, which SAE Engineering does not yet hold. `RemoteLodgementService.
+poll_status` raises `NotImplementedError` until this is locked; the
+engine-side reconcile orchestration (`services/stp.reconcile_stp_submission`
+/ `reconcile_pending_stp`) is already built and tested against a test
+double, so only this transport seam is outstanding.
+
 ### `POST /api/v1/bas/lodge`
 
 Same shape as `/stp/lodge` but for BAS envelopes. The idempotency field is

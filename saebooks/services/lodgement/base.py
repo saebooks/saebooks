@@ -119,6 +119,37 @@ class LodgementService(ABC):
         """POST a SuperStream contribution message."""
 
     @abstractmethod
+    async def poll_status(
+        self,
+        *,
+        receipt_ref: str,
+        product: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> LodgementResult:
+        """Retrieve the current ATO status for a previously-lodged envelope.
+
+        Used to reconcile a QUEUED (deferred) lodgement: ``lodge_*`` may
+        return ``QUEUED`` when the ATO has not yet issued a final receipt,
+        leaving the callers record in an in-flight state. ``poll_status``
+        resolves it later.
+
+        ``receipt_ref`` is the correlation handle the caller holds — the
+        ``payevent_id`` (idempotency key, == the submission id) it lodged
+        under, or the ``ato_receipt_id`` if one was issued. ``product``
+        distinguishes the envelope family (``"stp"`` / ``"bas"`` / ``"tpar"``)
+        so a single status route can fan out server-side.
+
+        Returns a ``LodgementResult`` whose ``status`` reflects the current
+        ATO outcome: ``ACCEPTED`` (final receipt now present), ``QUEUED``
+        (still deferred — caller leaves the record in-flight and re-polls
+        later), or ``STUB``. An ATO *rejection* surfaces as a
+        ``LodgementRejected`` exception, mirroring the lodge path.
+
+        NOTE: the concrete remote implementation is gated on the ATO PVT
+        pack + the lodge-server status route, which are not yet contracted.
+        """
+
+    @abstractmethod
     async def lookup_abr(self, abn: str) -> dict[str, Any]:
         """Resolve an ABN against the ABR via SAE Engineering's quota."""
 

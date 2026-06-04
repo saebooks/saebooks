@@ -40,7 +40,7 @@ from saebooks.services import active_company as active_svc
 from saebooks.services import invoices as svc
 from saebooks.services import mailer as mailer_svc
 from saebooks.services import numbering
-from saebooks.services import pdf as pdf_svc
+from saebooks.services.latex_pdf import render_latex
 from saebooks.web import templates
 
 router = APIRouter(prefix="/invoices")
@@ -314,7 +314,7 @@ async def invoices_pdf(
     # dispatcher doesn't swallow ``<uuid>.pdf`` into the detail handler
     # and 422 on UUID coercion.
     ctx = await _render_invoice_context(session, invoice_id)
-    data = pdf_svc.render_invoice_pdf(ctx)
+    data = await render_latex("document", ctx)
     filename = f"{ctx.get('number', 'invoice')}.pdf"
     return Response(
         content=data,
@@ -503,75 +503,13 @@ async def invoices_archive(
 async def _render_invoice_context(
     session: AsyncSession, invoice_id: uuid.UUID
 ) -> dict[str, Any]:
+    """Canonical document ctx (same shape as the api/v1 PDF path) for the LaTeX engine."""
+    from saebooks.api.v1.invoices import _build_invoice_ctx
     inv = await svc.get(session, invoice_id)
     company = await session.get(Company, inv.company_id)
     contact = await session.get(Contact, inv.contact_id)
-    # Tax-code labels for the PDF line grid.
-    tax_code_ids = {ln.tax_code_id for ln in inv.lines if ln.tax_code_id}
-    tax_map: dict[uuid.UUID, TaxCode] = {}
-    if tax_code_ids:
-        r2 = await session.execute(
-            select(TaxCode).where(TaxCode.id.in_(tax_code_ids))
-        )
-        tax_map = {t.id: t for t in r2.scalars().all()}
-
-    lines_ctx = []
-    for ln in inv.lines:
-        tax = tax_map.get(ln.tax_code_id) if ln.tax_code_id else None
-        lines_ctx.append(
-            {
-                "description": ln.description,
-                "quantity": f"{ln.quantity:g}",
-                "unit_price": f"{ln.unit_price:,.2f}",
-                "tax_label": tax.code if tax else "—",
-                "line_total": f"{ln.line_total:,.2f}",
-            }
-        )
-
-    def _addr_lines(obj: Any) -> list[str]:
-        if obj is None:
-            return []
-        bits: list[str] = []
-        if getattr(obj, "address_line1", None):
-            bits.append(str(obj.address_line1))
-        if getattr(obj, "address_line2", None):
-            bits.append(str(obj.address_line2))
-        loc = " ".join(
-            s for s in (
-                getattr(obj, "city", None),
-                getattr(obj, "state", None),
-                getattr(obj, "postcode", None),
-            )
-            if s
-        ).strip()
-        if loc:
-            bits.append(loc)
-        return bits
-
-    ctx: dict[str, Any] = {
-        "kind": "Tax Invoice",
-        "number": inv.number or "(draft)",
-        "issue_date": inv.issue_date.isoformat(),
-        "due_date": inv.due_date.isoformat(),
-        "company": {
-            "name": company.name if company else "",
-            "abn": getattr(company, "abn", None),
-            "address_lines": _addr_lines(company),
-        },
-        "contact": {
-            "name": contact.name if contact else "",
-            "abn": getattr(contact, "abn", None),
-            "address_lines": _addr_lines(contact),
-        },
-        "lines": lines_ctx,
-        "subtotal": f"{inv.subtotal:,.2f}",
-        "tax_total": f"{inv.tax_total:,.2f}",
-        "total": f"{inv.total:,.2f}",
-        "amount_paid": f"{inv.amount_paid:,.2f}",
-        "balance_due": f"{(inv.total - inv.amount_paid):,.2f}",
-        "notes": inv.notes,
-        "payment_terms": inv.payment_terms,
-    }
+    ctx = _build_invoice_ctx(inv, contact, company)
+    ctx["kind"] = "Tax Invoice"
     return ctx
 
 
@@ -584,7 +522,7 @@ async def invoices_email(
     session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse:
     ctx = await _render_invoice_context(session, invoice_id)
-    pdf_bytes = pdf_svc.render_invoice_pdf(ctx)
+    pdf_bytes = await render_latex("document", ctx)
     inv = await svc.get(session, invoice_id)
     contact = await session.get(Contact, inv.contact_id)
     recipient = to.strip() or (contact.email if contact and contact.email else "")
