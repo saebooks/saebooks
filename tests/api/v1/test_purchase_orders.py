@@ -28,10 +28,10 @@ from saebooks.api.v1.auth import DEFAULT_TENANT_ID, current_token
 from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.account import Account, AccountType
-from saebooks.models.company import Company
-from saebooks.models.contact import ContactType
 from saebooks.models.change_log import ChangeLog
-from saebooks.models.contact import Contact
+from saebooks.models.company import Company
+from saebooks.models.contact import Contact, ContactType
+
 pytestmark = pytest.mark.postgres_only
 
 

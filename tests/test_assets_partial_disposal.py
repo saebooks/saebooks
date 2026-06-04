@@ -44,6 +44,7 @@ from saebooks.models.company import Company
 from saebooks.models.fixed_asset import FixedAsset
 from saebooks.models.journal import EntryStatus, JournalEntry
 from saebooks.services import assets as svc
+
 pytestmark = pytest.mark.postgres_only
 
 

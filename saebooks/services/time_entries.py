@@ -26,9 +26,8 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from decimal import ROUND_HALF_UP, Decimal
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from saebooks.models.account import Account, AccountType
 from saebooks.models.contact import Contact

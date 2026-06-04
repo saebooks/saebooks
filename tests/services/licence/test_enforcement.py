@@ -10,7 +10,6 @@ from saebooks.services.licence.enforcement import (
     has_capacity_for_role_change,
 )
 
-
 # --------------------------------------------------------------------- #
 # check_admin_seat                                                      #
 # --------------------------------------------------------------------- #

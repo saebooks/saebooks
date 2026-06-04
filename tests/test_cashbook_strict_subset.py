@@ -141,9 +141,9 @@ def _parse_schema(sql_text: str) -> list[_Column]:
 def _postgres_type_name(col: object) -> str:
     """Return a short upper-case name for a SQLAlchemy column type."""
     from sqlalchemy import (
+        CHAR,
         BigInteger,
         Boolean,
-        CHAR,
         Date,
         DateTime,
         Enum,
@@ -250,10 +250,7 @@ def _types_compatible(sqlite_type: str, pg_type_name: str) -> bool:
 
     # Boolean, Date, DateTime — already handled by exact match above.
     # LargeBinary → BLOB
-    if p == "LARGEBINARY" and s == "BLOB":
-        return True
-
-    return False
+    return bool(p == "LARGEBINARY" and s == "BLOB")
 
 
 # ---------------------------------------------------------------------------

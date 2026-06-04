@@ -28,7 +28,6 @@ from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.account import Account, AccountType
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

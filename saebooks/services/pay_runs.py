@@ -23,10 +23,10 @@ from saebooks.models.pay_run import PayRun, PayRunLine, PayRunStatus
 from saebooks.services import change_log as cl_svc
 from saebooks.services import journal as journal_svc
 from saebooks.services.aba import (
+    TXN_CREDIT_GENERAL,
     AbaDetail,
     AbaError,
     AbaHeader,
-    TXN_CREDIT_GENERAL,
     build_aba,
     dollars_to_cents,
 )
@@ -411,8 +411,9 @@ async def export_aba(
             "description": f"Net payroll: {pay_run.period_start} to {pay_run.period_end}",
             "debit": total_net,
             "credit": Decimal("0"),
-        }
-    ] + journal_lines
+        },
+        *journal_lines,
+    ]
 
     bank_abbr = remitter_account.bank_abbreviation or "CBA"
     ddmmyy = pay_run.payment_date.strftime("%d%m%y")

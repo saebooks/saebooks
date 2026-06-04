@@ -16,7 +16,7 @@ so they assume at least one non-archived company in the default tenant.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import select
@@ -25,6 +25,7 @@ from saebooks.api.v1.auth import DEFAULT_TENANT_ID
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 from saebooks.services import active_company as active_svc
+
 pytestmark = pytest.mark.postgres_only
 
 
@@ -49,7 +50,7 @@ def _stub_company(name: str) -> Company:
         id=uuid.uuid4(),
         tenant_id=DEFAULT_TENANT_ID,
         name=name,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
 

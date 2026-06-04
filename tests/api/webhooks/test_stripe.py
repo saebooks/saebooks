@@ -26,7 +26,7 @@ from httpx import ASGITransport, AsyncClient
 os.environ.setdefault("SAEBOOKS_ENV", "test")
 os.environ.setdefault("SAEBOOKS_TEST_TRUSTED_USER_HEADER", "1")
 
-from saebooks.main import app  # noqa: E402
+from saebooks.main import app
 
 _TEST_WEBHOOK_SECRET = "whsec_test_stripe_cat_c_local_only"
 _WEBHOOK_URL = "/webhooks/stripe"

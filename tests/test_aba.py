@@ -276,7 +276,7 @@ def test_non_printable_char_rejected() -> None:
         detail = aba.AbaDetail(
             payee_bsb="062-001",
             payee_account_number="12345678",
-            payee_account_title="ACME – WIDGETS",  # en-dash  # noqa: RUF001
+            payee_account_title="ACME – WIDGETS",  # en-dash
             amount_cents=1,
             lodgement_reference="R",
             remitter_bsb="062-000",

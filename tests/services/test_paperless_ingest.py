@@ -18,8 +18,8 @@ from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.bill import Bill, BillStatus
 from saebooks.models.company import Company
-from saebooks.services.integrations.paperless import PaperlessAttachment
 from saebooks.services.integrations import paperless_ingest
+from saebooks.services.integrations.paperless import PaperlessAttachment
 
 pytestmark = pytest.mark.postgres_only
 
@@ -32,7 +32,7 @@ class _FakeClient:
     def __init__(self, *_, **__) -> None:
         pass
 
-    async def __aenter__(self) -> "_FakeClient":
+    async def __aenter__(self) -> _FakeClient:
         return self
 
     async def __aexit__(self, *_: object) -> None:

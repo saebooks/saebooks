@@ -38,6 +38,7 @@ from saebooks.services import audit as audit_svc
 from saebooks.services import change_log as change_log_svc
 from saebooks.services import settings as settings_svc
 
+
 class VersionConflict(Exception):
     """Raised when ``expected_version`` does not match the stored value.
 

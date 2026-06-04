@@ -30,6 +30,7 @@ from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.account import Account
 from saebooks.models.company import Company
+
 pytestmark = pytest.mark.postgres_only
 
 
@@ -106,7 +107,7 @@ async def client() -> AsyncClient:
 
 
 async def test_cashbook_full_user_journey(client: AsyncClient) -> None:
-    _, company_id, bank_id = await _seed_state()
+    _, _company_id, bank_id = await _seed_state()
 
     # 1. /setup is idempotent — re-pinning the same bank works.
     r = await client.post(
@@ -164,8 +165,8 @@ async def test_cashbook_full_user_journey(client: AsyncClient) -> None:
     assert r_pre.status_code == 200
     pre = r_pre.json()
     # Use deltas in case the dev DB carries other same-day entries.
-    pre_income = _D(pre["income_total"])
-    pre_expense = _D(pre["expense_total"])
+    _D(pre["income_total"])
+    _D(pre["expense_total"])
 
     # 5. Replace the income entry with a different category.
     replace_body = {

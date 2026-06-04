@@ -11,17 +11,16 @@ Two routes:
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.config import settings
 from saebooks.models.company import Company
 from saebooks.routers.deps import get_web_session
+from saebooks.services import active_company as active_svc
 from saebooks.services import search as svc
 from saebooks.web import templates
-from saebooks.services import active_company as active_svc
 
 router = APIRouter()
 

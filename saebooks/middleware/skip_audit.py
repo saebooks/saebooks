@@ -24,7 +24,7 @@ from starlette.responses import Response
 
 from saebooks.config import settings as _settings
 from saebooks.models.user import UserRole, has_at_least
-from saebooks.services.dev_context import set_skip_audit, reset_skip_audit
+from saebooks.services.dev_context import reset_skip_audit, set_skip_audit
 from saebooks.services.features import FLAG_SKIP_AUDIT_TRAIL, is_enabled
 
 _log = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ class SkipAuditMiddleware(BaseHTTPMiddleware):
         if user is not None and role is None:
             role = getattr(user, "role", None)
         is_admin = bool(role and has_at_least(role, UserRole.ADMIN.value))
-        if not is_admin:
+        if not is_admin:  # noqa: SIM102  inner branch carries the dev-token fallback rationale
             # Dev-token path doesn't set request.state.user — fall back to
             # X-Admin: true (same pattern as hard_delete_admin_gate).
             if request.headers.get("x-admin", "").strip().lower() != "true":

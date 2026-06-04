@@ -113,6 +113,7 @@ def _build_app_engine_url() -> str:
     network, so deriving from settings keeps this fixture portable.
     """
     from urllib.parse import urlsplit, urlunsplit
+
     from saebooks.config import settings
 
     parts = urlsplit(settings.database_url)

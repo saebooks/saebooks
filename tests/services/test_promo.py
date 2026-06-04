@@ -12,9 +12,9 @@ Covers:
 """
 from __future__ import annotations
 
+import httpx
 import pytest
 import respx
-import httpx
 
 from saebooks.config import Settings
 from saebooks.services import launch_promo as _mod

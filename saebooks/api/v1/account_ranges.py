@@ -25,7 +25,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from saebooks.api.v1.auth import require_bearer
 from saebooks.api.v1.deps import get_active_company_id, get_session
 from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
-from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.api.v1.schemas import (
     AccountRangeCreate,
     AccountRangeListOut,
@@ -37,6 +36,7 @@ from saebooks.api.v1.schemas import (
 from saebooks.models.account_range import AccountRange
 from saebooks.services import accounts as account_svc
 from saebooks.services import settings as settings_svc
+from saebooks.services.hard_delete import hard_delete_with_audit
 
 router = APIRouter(
     prefix="/account_ranges",

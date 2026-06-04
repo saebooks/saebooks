@@ -17,11 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_active_company_id, get_session
 from saebooks.api.v1.schemas import (
+    OneOffVendorConflictBody,
     OneOffVendorCreate,
     OneOffVendorListOut,
     OneOffVendorOut,
     OneOffVendorUpdate,
-    OneOffVendorConflictBody,
 )
 from saebooks.services import one_off_vendors as svc
 

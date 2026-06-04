@@ -7,9 +7,7 @@ plain async methods that only touch in-memory state).
 from __future__ import annotations
 
 import asyncio
-import datetime
 import unittest.mock as mock
-
 
 # ---------------------------------------------------------------------------
 # Proto message presence
@@ -18,7 +16,7 @@ import unittest.mock as mock
 
 def test_presence_messages_in_proto() -> None:
     """PresenceRequest, PresenceEvent, AcquireLockRequest, LockResponse importable."""
-    from saebooks.grpc_gen import saebooks_pb2  # noqa: PLC0415
+    from saebooks.grpc_gen import saebooks_pb2
 
     assert hasattr(saebooks_pb2, "PresenceRequest")
     assert hasattr(saebooks_pb2, "PresenceEvent")
@@ -43,7 +41,7 @@ def test_presence_messages_in_proto() -> None:
 
 def test_servicer_has_watch_presence() -> None:
     """SAEBooksServicer.WatchPresence is callable."""
-    from saebooks.grpc_server import SAEBooksServicer  # noqa: PLC0415
+    from saebooks.grpc_server import SAEBooksServicer
 
     svc = SAEBooksServicer()
     assert callable(getattr(svc, "WatchPresence", None))
@@ -51,7 +49,7 @@ def test_servicer_has_watch_presence() -> None:
 
 def test_servicer_has_acquire_lock() -> None:
     """SAEBooksServicer.AcquireLock is callable."""
-    from saebooks.grpc_server import SAEBooksServicer  # noqa: PLC0415
+    from saebooks.grpc_server import SAEBooksServicer
 
     svc = SAEBooksServicer()
     assert callable(getattr(svc, "AcquireLock", None))
@@ -59,7 +57,7 @@ def test_servicer_has_acquire_lock() -> None:
 
 def test_servicer_has_release_lock() -> None:
     """SAEBooksServicer.ReleaseLock is callable."""
-    from saebooks.grpc_server import SAEBooksServicer  # noqa: PLC0415
+    from saebooks.grpc_server import SAEBooksServicer
 
     svc = SAEBooksServicer()
     assert callable(getattr(svc, "ReleaseLock", None))
@@ -79,8 +77,9 @@ def _make_context() -> mock.MagicMock:
 
 def test_acquire_lock_basic() -> None:
     """AcquireLock returns acquired=True for a fresh lock."""
-    import saebooks.grpc_server as srv  # noqa: PLC0415
-    from saebooks.grpc_gen import saebooks_pb2  # noqa: PLC0415
+    from saebooks.grpc_gen import saebooks_pb2
+
+    import saebooks.grpc_server as srv
 
     # Isolate this test with a clean lock store.
     srv._lock_store.clear()
@@ -102,8 +101,9 @@ def test_acquire_lock_basic() -> None:
 
 def test_acquire_lock_conflict() -> None:
     """Second user cannot acquire a lock held by the first."""
-    import saebooks.grpc_server as srv  # noqa: PLC0415
-    from saebooks.grpc_gen import saebooks_pb2  # noqa: PLC0415
+    from saebooks.grpc_gen import saebooks_pb2
+
+    import saebooks.grpc_server as srv
 
     srv._lock_store.clear()
 
@@ -132,8 +132,9 @@ def test_acquire_lock_conflict() -> None:
 
 def test_release_lock() -> None:
     """Acquire, release, then re-acquire succeeds."""
-    import saebooks.grpc_server as srv  # noqa: PLC0415
-    from saebooks.grpc_gen import saebooks_pb2  # noqa: PLC0415
+    from saebooks.grpc_gen import saebooks_pb2
+
+    import saebooks.grpc_server as srv
 
     srv._lock_store.clear()
 

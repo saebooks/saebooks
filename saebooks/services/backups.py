@@ -24,7 +24,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-
 BACKUP_DIR = Path(os.environ.get("SAEBOOKS_BACKUP_DIR_IN_CONTAINER", "/app/backups"))
 BACKUP_LOG = BACKUP_DIR / "backups.jsonl"
 RESTORE_LOG = BACKUP_DIR / "restore-tests.jsonl"

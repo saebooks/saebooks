@@ -22,15 +22,12 @@ A cash-basis variant can be added by joining payment_allocations.
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from saebooks.models.contact import Contact
-
-from dataclasses import dataclass
 
 
 @dataclass(frozen=True)

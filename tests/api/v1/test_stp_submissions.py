@@ -34,7 +34,6 @@ from saebooks.models.company import Company
 from saebooks.models.pay_run import PayRun
 from saebooks.models.stp_submission import StpSubmission
 
-
 _DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 

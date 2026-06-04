@@ -213,7 +213,7 @@ async def download(
 
 async def stream_download(
     tenant_id: uuid.UUID, file_id: uuid.UUID
-) -> "AsyncIterator[tuple[bytes, str, str]]":
+) -> AsyncIterator[tuple[bytes, str, str]]:
     """Streaming variant — yields ``(chunk, mime, filename)`` tuples.
 
     The first iteration carries mime + filename + first chunk; subsequent
@@ -222,7 +222,7 @@ async def stream_download(
     """
     url = f"{_base_url()}/api/v1/files/{file_id}/download"
     try:
-        async with httpx.AsyncClient(timeout=settings.vault_upload_timeout) as client:
+        async with httpx.AsyncClient(timeout=settings.vault_upload_timeout) as client:  # noqa: SIM117  inner stream() uses `client` bound here
             async with client.stream(
                 "GET", url, headers=_headers(tenant_id)
             ) as resp:

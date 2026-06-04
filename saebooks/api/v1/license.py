@@ -32,7 +32,7 @@ from pydantic import BaseModel, Field
 
 from saebooks.api.v1.auth import require_bearer
 from saebooks.services.licence import LicenseService
-from saebooks.services.licence.jwt import _verify_and_decode, _load_portal_public_key
+from saebooks.services.licence.jwt import _load_portal_public_key, _verify_and_decode
 
 log = logging.getLogger(__name__)
 

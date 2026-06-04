@@ -15,10 +15,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
-
-from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
@@ -27,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_active_company_id, get_session
+from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.api.v1.schemas import (
     BankAccountConflictBody,
     BankAccountCreate,
@@ -34,7 +34,6 @@ from saebooks.api.v1.schemas import (
     BankAccountOut,
     BankAccountUpdate,
 )
-from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.models.bank_statement import BankStatementLine
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
 from saebooks.services import bank_accounts as svc

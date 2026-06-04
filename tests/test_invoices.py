@@ -28,9 +28,10 @@ from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
 from saebooks.models.invoice import InvoiceStatus
-from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
+from saebooks.models.journal import EntryStatus, JournalEntry
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import invoices as svc
+
 pytestmark = pytest.mark.postgres_only
 
 
@@ -798,7 +799,6 @@ async def test_trade_in_post_creates_companion_bill() -> None:
     Net cash settlement: $71,500 AR − $16,500 AP = $55,000  (but each leg is separate)
     """
     from saebooks.models.bill import Bill, BillStatus
-    from saebooks.models.journal import JournalLine
 
     cid, contact, income_acct, gst, _fre = await _ctx()
     inv_acct = await _ensure_inventory_account(cid)

@@ -21,15 +21,14 @@ Enforcement lives in ``require_bearer``'s API-token branch only.
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncIterator
 
 import pytest
-import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
 from saebooks.api.v1.auth import current_token
-from saebooks.db import AsyncSessionLocal, engine as _owner_engine
+from saebooks.db import AsyncSessionLocal
+from saebooks.db import engine as _owner_engine
 from saebooks.main import app
 from saebooks.services import api_tokens as token_svc
 from saebooks.services.companies import ensure_seed_company

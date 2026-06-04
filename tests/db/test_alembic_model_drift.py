@@ -36,8 +36,8 @@ import pytest
 from alembic.autogenerate import compare_metadata
 from alembic.runtime.migration import MigrationContext
 
-from saebooks.db import Base, engine
 import saebooks.models  # noqa: F401  (register every ORM table on Base.metadata)
+from saebooks.db import Base, engine
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgres_only]
 

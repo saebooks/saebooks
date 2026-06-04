@@ -662,7 +662,7 @@ async def maybe_build_after_finalize(
             company_id=company_id,
             pay_run_id=pay_run_id,
         )
-    except Exception:  # noqa: BLE001 — fire-and-forget on purpose
+    except Exception:
         _log.exception(
             "super lodgement build failed for pay_run %s; "
             "payroll finalise was NOT rolled back",
@@ -673,13 +673,13 @@ async def maybe_build_after_finalize(
 
 __all__ = [
     "SuperLodgementError",
-    "is_payday_super_enabled",
     "build_super_lodgement_run",
     "finalise_super_lodgement_run",
+    "get_super_lodgement_run",
+    "is_payday_super_enabled",
+    "lines_to_saff_csv",
+    "list_super_lodgement_lines",
+    "list_super_lodgement_runs",
     "mark_super_lodgement_submitted",
     "maybe_build_after_finalize",
-    "get_super_lodgement_run",
-    "list_super_lodgement_runs",
-    "list_super_lodgement_lines",
-    "lines_to_saff_csv",
 ]

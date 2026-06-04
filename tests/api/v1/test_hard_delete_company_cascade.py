@@ -13,11 +13,12 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
 
-from saebooks.api.v1.auth import current_token, resolve_tenant_id, DEFAULT_TENANT_ID
+from saebooks.api.v1.auth import DEFAULT_TENANT_ID, current_token
 from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.audit_log import AuditLog
 from saebooks.models.company import Company
+
 pytestmark = pytest.mark.postgres_only
 
 
@@ -78,7 +79,7 @@ async def test_company_with_refs_returns_409(api_client: AsyncClient) -> None:
             row = (
                 await s.execute(
                     text(
-                        f"SELECT company_id FROM {table} "  # noqa: S608 — table whitelisted
+                        f"SELECT company_id FROM {table} "
                         "WHERE company_id IS NOT NULL LIMIT 1"
                     )
                 )

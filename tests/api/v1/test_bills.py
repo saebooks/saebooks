@@ -16,7 +16,6 @@ Covers:
 from __future__ import annotations
 
 import uuid
-from datetime import date
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -28,6 +27,7 @@ from saebooks.main import app
 from saebooks.models.account import Account, AccountType
 from saebooks.models.change_log import ChangeLog
 from saebooks.models.contact import Contact
+
 pytestmark = pytest.mark.postgres_only
 
 
@@ -496,11 +496,12 @@ async def test_bill_create_rejects_cross_company_contact(
     api_client: AsyncClient, bill_deps: dict[str, str]
 ) -> None:
     """POST /bills with a contact from a different company must return 422."""
+    import uuid as _uuid
+
     from saebooks.api.v1.auth import DEFAULT_TENANT_ID
     from saebooks.db import AsyncSessionLocal
-    from saebooks.models.contact import Contact, ContactType
     from saebooks.models.company import Company
-    import uuid as _uuid
+    from saebooks.models.contact import Contact, ContactType
 
     # Create a second company + contact in the same tenant but a different company
     async with AsyncSessionLocal() as session:

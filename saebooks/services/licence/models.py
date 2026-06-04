@@ -24,7 +24,7 @@ from enum import Enum
 from saebooks.services.licence.caps import EditionCaps
 
 
-class LicenceSource(str, Enum):
+class LicenceSource(str, Enum):  # noqa: UP042  str-mixin kept: backs SQLAlchemy Enum column / str() semantics
     """How the current edition was resolved at boot."""
 
     COMMUNITY_FALLBACK = "community_fallback"

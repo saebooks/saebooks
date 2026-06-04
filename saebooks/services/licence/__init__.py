@@ -41,6 +41,8 @@ __all__ = [
     "CheckOutcome",
     "EditionCaps",
     "LicenceSource",
+    "LicenseService",
+    "LicenseSnapshot",
     "ResolvedLicence",
     "SeatCapKind",
     "caps_for",
@@ -50,8 +52,6 @@ __all__ = [
     "has_capacity_for_role_change",
     "resolve_licence",
     "resolve_licence_for_user",
-    "LicenseService",
-    "LicenseSnapshot",
 ]
 
 from saebooks.services.licence.service import (

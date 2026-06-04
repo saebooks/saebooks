@@ -15,7 +15,6 @@ to verify:
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -25,7 +24,6 @@ from saebooks.services.integrations.stripe_billing import (
     StripeBillingError,
     create_checkout_session,
 )
-
 
 # ---------------------------------------------------------------------------
 # EDITIONS shape
@@ -98,7 +96,7 @@ class _FakeStripeClient:
         self._session_id = "cs_test_yearly_session_id"
         self._session_url = "https://checkout.stripe.com/c/pay/cs_test_xyz"
 
-    async def __aenter__(self) -> "_FakeStripeClient":
+    async def __aenter__(self) -> _FakeStripeClient:
         return self
 
     async def __aexit__(self, *exc: object) -> None:

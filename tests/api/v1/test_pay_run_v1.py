@@ -40,6 +40,7 @@ from saebooks.models.employee import Employee, EmploymentBasis, PayBasis, PayFre
 from saebooks.models.journal import JournalEntry, JournalLine
 from saebooks.models.tenant import Tenant
 from saebooks.services.jwt_tokens import create_access_token
+
 pytestmark = pytest.mark.postgres_only
 
 

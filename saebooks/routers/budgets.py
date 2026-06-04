@@ -20,9 +20,9 @@ from saebooks.config import settings
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.routers.deps import get_web_session
+from saebooks.services import active_company as active_svc
 from saebooks.services import budgets as svc
 from saebooks.web import templates
-from saebooks.services import active_company as active_svc
 
 router = APIRouter(prefix="/budgets")
 
@@ -130,7 +130,7 @@ async def budgets_index(
 @router.get("/edit", response_class=HTMLResponse)
 async def budgets_edit(
     request: Request,
-    account_id: uuid.UUID = Query(...),  # noqa: B008
+    account_id: uuid.UUID = Query(...),
     year: int = Query(default_factory=_default_year),
     session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:

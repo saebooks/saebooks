@@ -45,7 +45,7 @@ from __future__ import annotations
 import time
 import uuid
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
@@ -59,8 +59,8 @@ from saebooks.config import settings
 from saebooks.models.ato_sbr import AtoSbrConfig
 from saebooks.models.company import Company
 from saebooks.services import crypto as crypto_svc
-from saebooks.services.ato_sbr.keystore import KeystoreError, load_keystore
 from saebooks.services.ato_sbr import onboarding as sbr
+from saebooks.services.ato_sbr.keystore import KeystoreError, load_keystore
 from saebooks.services.features import FLAG_ATO_SBR, require_feature
 from saebooks.services.lodgement.exceptions import (
     LodgementAuthError,
@@ -68,7 +68,6 @@ from saebooks.services.lodgement.exceptions import (
     LodgementUpstreamUnavailable,
 )
 from saebooks.services.lodgement.remote import RemoteLodgementService
-from saebooks.services.lodgement.base import LodgementStatus
 
 router = APIRouter(
     prefix="/ato_sbr",
@@ -550,7 +549,7 @@ async def advance_wizard(
     if error:
         raise HTTPException(422, error)
 
-    steps = _FLOW_STEPS.get(flow, _MACHINE_CREDENTIAL_STEPS)
+    _FLOW_STEPS.get(flow, _MACHINE_CREDENTIAL_STEPS)
     next_step = current_step + 1
 
     # Merge answers and advance.
@@ -681,7 +680,7 @@ async def ping_lodge_server(
             "detail": str(exc),
             "latency_ms": latency_ms,
         })
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         latency_ms = int((time.monotonic() - start) * 1000)
         return JSONResponse({
             "ok": False,

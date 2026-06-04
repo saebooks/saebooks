@@ -793,8 +793,8 @@ __all__ = [
     "allocate",
     "api_create",
     "api_get",
-    "api_update",
     "api_post_payment",
+    "api_update",
     "api_void",
     "archive",
     "create_draft",
@@ -814,9 +814,10 @@ __all__ = [
 # two surfaces can evolve independently.
 # ==========================================================================
 
+from sqlalchemy import func  # noqa: E402
+
 from saebooks.services import audit_log as audit_log_svc  # noqa: E402
 from saebooks.services import change_log as change_log_svc  # noqa: E402
-from sqlalchemy import func  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Exceptions
@@ -870,9 +871,7 @@ def _serialise_payment(pay: Payment) -> dict:
         val = getattr(pay, key, None)
         if isinstance(val, uuid.UUID):
             val = str(val)
-        elif isinstance(val, datetime):
-            val = val.isoformat()
-        elif isinstance(val, date):
+        elif isinstance(val, (datetime, date)):
             val = val.isoformat()
         elif isinstance(val, _D):
             val = str(val)
@@ -1306,7 +1305,9 @@ async def api_post_payment(
         PostingError (from journal layer): cross-company account reference
             or other journal integrity violation
     """
-    from saebooks.services.journal import PostingError as _PostingError  # noqa: F401 (re-exported via raise)
+    from saebooks.services.journal import (
+        PostingError as _PostingError,  # noqa: F401 (re-exported via raise)
+    )
 
     pay = await _get_with_allocations(session, payment_id)
     if pay is None:

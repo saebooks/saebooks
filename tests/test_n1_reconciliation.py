@@ -34,12 +34,12 @@ from saebooks.models.account import Account, AccountType
 from saebooks.models.bank_statement import BankStatementLine, StatementLineStatus
 from saebooks.models.bsl_match import (
     TARGET_JOURNAL_ENTRY,
-    TARGET_PAYMENT,
     BslMatch,
 )
 from saebooks.models.company import Company
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
 from saebooks.services import reconciliation as recon_svc
+
 pytestmark = pytest.mark.postgres_only
 
 
@@ -326,7 +326,7 @@ async def test_cross_company_target_rejected() -> None:
     # the primary company's BSL against the sibling's entry.
     primary = await _primary_company()
     bank = await _create_bank_account(primary.id)
-    expense = await _expense_account(primary.id)
+    await _expense_account(primary.id)
     bsl = await _create_bsl(primary.id, bank.id, Decimal("100.00"))
 
     async with AsyncSessionLocal() as session:

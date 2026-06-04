@@ -202,18 +202,17 @@ async def test_tax_periods_visible_to_own_tenant(
         app_engine, expire_on_commit=False, class_=AsyncSession
     )
     a = seeded["tenant_a"]
-    async with AppSession() as session:
-        async with session.begin():
+    async with AppSession() as session, session.begin():
+        await session.execute(
+            text("SELECT set_config('app.current_tenant', :tid, true)"),
+            {"tid": str(a["tenant_id"])},
+        )
+        visible = (
             await session.execute(
-                text("SELECT set_config('app.current_tenant', :tid, true)"),
-                {"tid": str(a["tenant_id"])},
+                text("SELECT id FROM tax_periods WHERE id = :pid"),
+                {"pid": a["period_id"]},
             )
-            visible = (
-                await session.execute(
-                    text("SELECT id FROM tax_periods WHERE id = :pid"),
-                    {"pid": a["period_id"]},
-                )
-            ).all()
+        ).all()
     assert len(visible) == 1, (
         f"tenant A could not see its own tax_period {a['period_id']} — "
         f"RLS predicate too tight"
@@ -228,18 +227,17 @@ async def test_tax_periods_invisible_across_tenant(
     )
     a_tenant = seeded["tenant_a"]["tenant_id"]
     b_period = seeded["tenant_b"]["period_id"]
-    async with AppSession() as session:
-        async with session.begin():
+    async with AppSession() as session, session.begin():
+        await session.execute(
+            text("SELECT set_config('app.current_tenant', :tid, true)"),
+            {"tid": str(a_tenant)},
+        )
+        visible = (
             await session.execute(
-                text("SELECT set_config('app.current_tenant', :tid, true)"),
-                {"tid": str(a_tenant)},
+                text("SELECT id FROM tax_periods WHERE id = :pid"),
+                {"pid": b_period},
             )
-            visible = (
-                await session.execute(
-                    text("SELECT id FROM tax_periods WHERE id = :pid"),
-                    {"pid": b_period},
-                )
-            ).all()
+        ).all()
     assert len(visible) == 0, (
         f"tenant A leaked tenant B's tax_period {b_period} — the "
         f"tenant_isolation policy on tax_periods is broken or not FORCEd"
@@ -252,11 +250,10 @@ async def test_tax_periods_no_tenant_set_returns_zero(
     AppSession = async_sessionmaker(
         app_engine, expire_on_commit=False, class_=AsyncSession
     )
-    async with AppSession() as session:
-        async with session.begin():
-            rows = (
-                await session.execute(text("SELECT count(*) FROM tax_periods"))
-            ).scalar_one()
+    async with AppSession() as session, session.begin():
+        rows = (
+            await session.execute(text("SELECT count(*) FROM tax_periods"))
+        ).scalar_one()
     assert rows == 0, (
         f"expected 0 visible tax_periods with no tenant set, got {rows} — "
         f"RLS is not denying by default"

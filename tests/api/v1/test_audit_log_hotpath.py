@@ -30,8 +30,8 @@ from __future__ import annotations
 
 import os
 import uuid
+from collections.abc import AsyncIterator
 from datetime import date
-from typing import AsyncIterator
 
 import pytest
 import pytest_asyncio
@@ -47,7 +47,7 @@ from saebooks.main import app
 from saebooks.models.account import Account, AccountType
 from saebooks.models.audit_log import AuditLog
 from saebooks.models.company import Company
-from saebooks.models.contact import Contact, ContactType
+from saebooks.models.contact import Contact
 from saebooks.models.user import User
 from saebooks.services import journal as journal_svc
 from saebooks.services.jwt_tokens import _reset_secret_cache, create_access_token

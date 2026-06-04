@@ -34,7 +34,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_active_company_id, get_session
 from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
-from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.api.v1.schemas import (
     AccountConflictBody,
     AccountCreate,
@@ -44,6 +43,7 @@ from saebooks.api.v1.schemas import (
 )
 from saebooks.models.account import Account, AccountType
 from saebooks.services import accounts as svc
+from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 
 router = APIRouter(
@@ -86,7 +86,7 @@ def _dump(account: Account) -> dict[str, Any]:
 
 @router.get("", response_model=AccountListOut)
 async def list_accounts(
-    account_type: AccountType | None = Query(default=None),  # noqa: B008
+    account_type: AccountType | None = Query(default=None),
     include_balance: bool = Query(default=False, description="Include current balance per account (POSTED journal lines)."),
     include_archived: bool = Query(default=False, description="Include accounts whose archived_at is set (historical lookups)."),
     limit: int = Query(default=200, ge=1, le=1000),

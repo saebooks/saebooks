@@ -23,18 +23,13 @@ only care about the role grants, not auth.
 """
 from __future__ import annotations
 
-import os
 import uuid
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy.pool import NullPool
 
-from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
 from saebooks.services import sql_tool as sql_svc
-
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgres_only]
 
@@ -66,7 +61,6 @@ async def _expect_denied(sql: str, *, engine, contains: list[str] | None = None)
     """Run ``sql`` on ``engine`` and assert it raises a permission /
     privilege error. ``contains`` is an optional list of substrings that
     must all appear in the error message (case-insensitive)."""
-    import sqlalchemy.exc
 
     with pytest.raises(Exception) as exc_info:
         async with engine.connect() as conn:

@@ -14,9 +14,9 @@ from saebooks.models.company import Company
 from saebooks.models.contact import Contact
 from saebooks.models.tax_code import TaxCode
 from saebooks.routers.deps import get_web_session
+from saebooks.services import active_company as active_svc
 from saebooks.services import bank_rules as svc
 from saebooks.web import templates
-from saebooks.services import active_company as active_svc
 
 router = APIRouter(prefix="/bank-rules")
 

@@ -74,7 +74,7 @@ async def generate_magic_link(email: str) -> str:
         logger.error(f"Failed to send magic link email to {email}: {e}")
         # Remove token if email send fails
         _token_store.pop(token, None)
-        raise MagicLinkError(f"Failed to send email: {e}")
+        raise MagicLinkError(f"Failed to send email: {e}") from e
 
     logger.info(f"Magic link sent to {email}")
     return token

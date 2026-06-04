@@ -35,6 +35,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_active_company_id, get_active_user_id, get_session
+from saebooks.api.v1.edit_force_gate import edit_force_admin_gate
+from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.api.v1.schemas import (
     JournalEntryConflictBody,
     JournalEntryCreate,
@@ -44,8 +46,6 @@ from saebooks.api.v1.schemas import (
     JournalEntryReverseBody,
     JournalEntryUpdate,
 )
-from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
-from saebooks.api.v1.edit_force_gate import edit_force_admin_gate
 from saebooks.models.journal import EntryStatus
 from saebooks.services import journal_entries as svc
 from saebooks.services.hard_delete import hard_delete_with_audit

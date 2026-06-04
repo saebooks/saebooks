@@ -15,7 +15,6 @@ import pytest
 
 from saebooks.services.licence import LicenseService
 
-
 TEST_BASE_URL = "https://lodge.test"
 TEST_TOKEN = "test.licence.token"
 

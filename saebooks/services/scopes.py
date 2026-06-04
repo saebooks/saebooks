@@ -84,9 +84,7 @@ def is_full_access(scopes: Iterable[str] | None) -> bool:
         return True
     if norm & FULL_ACCESS_MARKERS:
         return True
-    if SCOPE_READ in norm and SCOPE_WRITE in norm:
-        return True
-    return False
+    return bool(SCOPE_READ in norm and SCOPE_WRITE in norm)
 
 
 def token_allows(scopes: Iterable[str] | None, method: str) -> bool:
@@ -110,10 +108,10 @@ def token_allows(scopes: Iterable[str] | None, method: str) -> bool:
 
 
 __all__ = [
+    "FULL_ACCESS_MARKERS",
     "SCOPE_READ",
     "SCOPE_WRITE",
-    "FULL_ACCESS_MARKERS",
-    "method_requires_scope",
     "is_full_access",
+    "method_requires_scope",
     "token_allows",
 ]

@@ -32,7 +32,7 @@ from enum import Enum
 from typing import Any
 
 
-class LodgementStatus(str, Enum):
+class LodgementStatus(str, Enum):  # noqa: UP042  str-mixin kept: backs SQLAlchemy Enum column / str() semantics
     """Coarse outcome of a single lodgement attempt.
 
     Mirrors the lodge-server contract's status field plus a STUB

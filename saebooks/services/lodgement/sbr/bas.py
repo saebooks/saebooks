@@ -72,7 +72,7 @@ class BasFigures:
         return self.label_1a - self.label_1b
 
     @classmethod
-    def from_bas_report(cls, report: Any) -> "BasFigures":
+    def from_bas_report(cls, report: Any) -> BasFigures:
         """Build from a ``tax_engine.au.BASReport`` (each field is a ``BASLine``)."""
         return cls(
             g1=_dec(report.g1.amount),
@@ -85,7 +85,7 @@ class BasFigures:
         )
 
     @classmethod
-    def from_figures_json(cls, figures: dict[str, Any]) -> "BasFigures":
+    def from_figures_json(cls, figures: dict[str, Any]) -> BasFigures:
         """Build from a ``tax_returns.figures`` JSONB dict, tolerant of key style.
 
         Accepts label keys in any of: ``G1``/``g1``, ``1A``/``label_1a``/``1a``.

@@ -17,6 +17,7 @@ from sqlalchemy import text
 
 from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
+
 pytestmark = pytest.mark.postgres_only
 
 

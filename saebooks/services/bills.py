@@ -599,9 +599,10 @@ async def archive(
 # two surfaces can evolve independently.
 # ==========================================================================
 
+from sqlalchemy import func  # noqa: E402
+
 from saebooks.services import audit_log as audit_log_svc  # noqa: E402
 from saebooks.services import change_log as change_log_svc  # noqa: E402
-from sqlalchemy import func  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Exceptions
@@ -653,9 +654,7 @@ def _serialise_bill(bill: Bill) -> dict:
         val = getattr(bill, key, None)
         if isinstance(val, uuid.UUID):
             val = str(val)
-        elif isinstance(val, datetime):
-            val = val.isoformat()
-        elif isinstance(val, date):
+        elif isinstance(val, (datetime, date)):
             val = val.isoformat()
         elif isinstance(val, _D):
             val = str(val)

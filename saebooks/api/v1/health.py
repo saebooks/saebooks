@@ -27,7 +27,8 @@ displayed on every HTML page.  ``version`` is the static
 """
 from __future__ import annotations
 
-from importlib.metadata import PackageNotFoundError, version as pkg_version
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as pkg_version
 
 from fastapi import APIRouter
 

@@ -81,7 +81,7 @@ async def create_super_lodgement(
     try:
         pay_run_id = UUID(str(pay_run_raw))
     except (ValueError, TypeError):
-        raise HTTPException(422, "pay_run_id must be a valid UUID")
+        raise HTTPException(422, "pay_run_id must be a valid UUID") from None
 
     notes = payload.get("notes")
     try:

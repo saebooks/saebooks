@@ -19,7 +19,6 @@ all the same security boilerplate. Single endpoint keeps it tight.
 """
 from __future__ import annotations
 
-import json
 import uuid
 from typing import Any
 

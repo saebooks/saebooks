@@ -12,7 +12,6 @@ Coverage:
 """
 from __future__ import annotations
 
-import json
 import uuid
 
 import pytest
@@ -22,8 +21,7 @@ from sqlalchemy import text
 from saebooks.api.v1.auth import current_token
 from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
-from saebooks.models.account import Account, AccountType
-from saebooks.models.company import Company
+from saebooks.models.account import Account
 from saebooks.models.tenant import Tenant
 
 pytestmark = pytest.mark.postgres_only

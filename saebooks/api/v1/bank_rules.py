@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer
 from saebooks.api.v1.deps import get_active_company_id, get_session
+from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.api.v1.schemas import (
     BankRuleApplyOut,
     BankRuleCreate,
@@ -37,7 +38,6 @@ from saebooks.api.v1.schemas import (
     BankRuleOut,
     BankRuleUpdate,
 )
-from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.models.bank_rule import BankRule, MatchType
 from saebooks.services import bank_rules as svc
 from saebooks.services.hard_delete import hard_delete_with_audit

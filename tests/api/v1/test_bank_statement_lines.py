@@ -26,7 +26,6 @@ Covers:
 from __future__ import annotations
 
 import uuid
-from datetime import date
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -35,8 +34,8 @@ from sqlalchemy import select
 from saebooks.api.v1.auth import current_token
 from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
-from saebooks.models.account import Account, AccountType
 from saebooks.models.change_log import ChangeLog
+
 pytestmark = pytest.mark.postgres_only
 
 

@@ -22,6 +22,7 @@ from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.change_log import ChangeLog
 from saebooks.models.company import Company
+
 pytestmark = pytest.mark.postgres_only
 
 
@@ -433,6 +434,7 @@ async def test_set_bookkeeping_mode_downgrade_refused_with_ar(
     must list offending invoices."""
     from datetime import date as _date
     from decimal import Decimal as _Dec
+
     from sqlalchemy import select
 
     from saebooks.models.account import Account, AccountType

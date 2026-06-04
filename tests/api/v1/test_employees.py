@@ -39,7 +39,6 @@ from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
 from saebooks.models.employee import Employee
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

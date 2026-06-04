@@ -31,8 +31,9 @@ from saebooks.models.contact import Contact, ContactType
 from saebooks.models.invoice import InvoiceLine, InvoiceStatus
 from saebooks.models.journal import JournalEntry, JournalLine
 from saebooks.models.tax_code import TaxCode
-from saebooks.services import invoices as inv_svc
 from saebooks.services import deferred_revenue as dr_svc
+from saebooks.services import invoices as inv_svc
+
 pytestmark = pytest.mark.postgres_only
 
 
@@ -366,7 +367,7 @@ async def test_recognize_deferred_revenue_idempotent() -> None:
 @pytest.mark.asyncio
 async def test_recognize_last_month_absorbs_rounding() -> None:
     """12 months of $100 should total exactly $1,200 (no drift)."""
-    cid, contact, income_acct, unearned_acct, fre = await _ctx()
+    cid, contact, income_acct, _unearned_acct, fre = await _ctx()
 
     # $100/month x 12 = $1,200 exactly — last month should also be $100
     async with AsyncSessionLocal() as session:

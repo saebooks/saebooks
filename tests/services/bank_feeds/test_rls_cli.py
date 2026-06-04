@@ -32,8 +32,6 @@ from __future__ import annotations
 import os
 import uuid
 from collections.abc import AsyncIterator
-from datetime import date, datetime, timezone
-from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -58,7 +56,6 @@ from saebooks.models.bank_feed import (
 )
 from saebooks.models.company import Company
 from saebooks.models.tenant import Tenant
-
 
 # --------------------------------------------------------------------------- #
 # saebooks_app engine — connects via the locked-down runtime role.            #
@@ -319,18 +316,17 @@ async def test_cross_tenant_invisibility(
     a_company = seeded["tenant_a"]["company_id"]
     b_company = seeded["tenant_b"]["company_id"]
 
-    async with AppSession() as session:
-        async with session.begin():
+    async with AppSession() as session, session.begin():
+        await session.execute(
+            text("SELECT set_config('app.current_tenant', :tid, true)"),
+            {"tid": str(tenant_a_id)},
+        )
+        visible = (
             await session.execute(
-                text("SELECT set_config('app.current_tenant', :tid, true)"),
-                {"tid": str(tenant_a_id)},
+                text("SELECT id FROM companies WHERE id IN (:a, :b)"),
+                {"a": a_company, "b": b_company},
             )
-            visible = (
-                await session.execute(
-                    text("SELECT id FROM companies WHERE id IN (:a, :b)"),
-                    {"a": a_company, "b": b_company},
-                )
-            ).all()
+        ).all()
     visible_ids = {row.id for row in visible}
     assert a_company in visible_ids, "tenant A's own company should be visible"
     assert b_company not in visible_ids, (

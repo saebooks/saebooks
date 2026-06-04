@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import date
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -21,6 +20,7 @@ from saebooks.api.v1.auth import current_token
 from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.account import Account, AccountType
+
 pytestmark = pytest.mark.postgres_only
 
 

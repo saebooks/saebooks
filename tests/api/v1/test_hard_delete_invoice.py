@@ -8,11 +8,9 @@
 """
 from __future__ import annotations
 
-from datetime import date
-
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select, text
+from sqlalchemy import select
 
 from saebooks.api.v1.auth import DEFAULT_TENANT_ID, current_token
 from saebooks.db import AsyncSessionLocal
@@ -21,6 +19,7 @@ from saebooks.models.account import Account, AccountType
 from saebooks.models.audit_log import AuditLog
 from saebooks.models.contact import Contact
 from saebooks.models.invoice import Invoice
+
 pytestmark = pytest.mark.postgres_only
 
 

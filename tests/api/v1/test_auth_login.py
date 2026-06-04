@@ -14,15 +14,12 @@ Tests
 """
 from __future__ import annotations
 
-import base64
 import json
 import time
 import uuid
-from unittest.mock import patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import update
 
 from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
@@ -33,7 +30,6 @@ from saebooks.services.jwt_tokens import (
     create_access_token,
     hash_password,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -78,7 +74,7 @@ async def _make_user(
     pw_hash = hash_password(password) if password else None
 
     # Clean up any leftover row from a prior run with this email.
-    from sqlalchemy import delete as sa_delete  # noqa: PLC0415
+    from sqlalchemy import delete as sa_delete
 
     async with AsyncSessionLocal() as session:
         await session.execute(sa_delete(User).where(User.email == email))
@@ -121,7 +117,7 @@ def _decode_payload(token: str) -> dict:
 
 
 async def test_login_success_200(client: AsyncClient) -> None:
-    user = await _make_user(email="login_ok@test.com", password="hunter2")
+    await _make_user(email="login_ok@test.com", password="hunter2")
     r = await client.post(
         "/api/v1/auth/login",
         json={"email": "login_ok@test.com", "password": "hunter2"},
@@ -295,7 +291,7 @@ async def test_refresh_with_expired_token_401(client: AsyncClient) -> None:
 
 
 async def test_refresh_via_body_field(client: AsyncClient) -> None:
-    user = await _make_user(email="refresh_body@test.com", password="pw")
+    await _make_user(email="refresh_body@test.com", password="pw")
     login_r = await client.post(
         "/api/v1/auth/login",
         json={"email": "refresh_body@test.com", "password": "pw"},

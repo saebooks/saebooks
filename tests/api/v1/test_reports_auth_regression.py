@@ -37,10 +37,9 @@ from sqlalchemy import text
 os.environ.setdefault("SAEBOOKS_ENV", "test")
 os.environ.setdefault("SAEBOOKS_SECRET_KEY", "test-secret-key-for-reports-regression")
 
-from saebooks.api.v1.auth import current_token  # noqa: E402
-from saebooks.db import engine as _owner_engine  # noqa: E402
-from saebooks.main import app  # noqa: E402
-
+from saebooks.api.v1.auth import current_token
+from saebooks.db import engine as _owner_engine
+from saebooks.main import app
 
 # ---------------------------------------------------------------------------
 # Skip guard

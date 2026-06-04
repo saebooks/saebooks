@@ -8,9 +8,13 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from saebooks.api.v1.auth import resolve_tenant_id
 from saebooks.config import settings
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
+from saebooks.models.user import UserRole
+from saebooks.routers.deps import get_web_session
+from saebooks.services import active_company as active_svc
 from saebooks.services import assets_reports as assets_reports_svc
 from saebooks.services import bas as bas_svc
 from saebooks.services import gst as gst_svc
@@ -18,15 +22,11 @@ from saebooks.services import period_close as period_close_svc
 from saebooks.services import reports as svc
 from saebooks.services import tpar as tpar_svc
 from saebooks.services import trust_reports as trust_svc
+from saebooks.services.authz import require_role, resolve_actor_role
 from saebooks.services.fx import rates as fx_rates_svc
 from saebooks.services.fx import reval as fx_reval_svc
-from saebooks.web import templates
-from saebooks.services import active_company as active_svc
-from saebooks.api.v1.auth import resolve_tenant_id
-from saebooks.routers.deps import get_web_session
-from saebooks.services.authz import require_role, resolve_actor_role
 from saebooks.services.journal import PostingError
-from saebooks.models.user import UserRole
+from saebooks.web import templates
 
 router = APIRouter(prefix="/reports")
 
@@ -131,9 +131,10 @@ async def bas_report(
 
     # When the company has a gst_effective_date, clamp the report start to
     # that date so pre-registration transactions are excluded.
-    if company.gst_effective_date is not None:
-        if fd is None or fd < company.gst_effective_date:
-            fd = company.gst_effective_date
+    if company.gst_effective_date is not None and (
+        fd is None or fd < company.gst_effective_date
+    ):
+        fd = company.gst_effective_date
 
     report = await bas_svc.bas_report(session, company.id, from_date=fd, to_date=td)
     return templates.TemplateResponse(

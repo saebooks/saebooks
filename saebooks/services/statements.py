@@ -25,12 +25,12 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.models.contact import Contact
 from saebooks.models.invoice import Invoice, InvoiceStatus
-from saebooks.models.payment import Payment, PaymentAllocation, PaymentDirection
+from saebooks.models.payment import Payment, PaymentDirection
 
 
 @dataclass
@@ -194,12 +194,18 @@ def render_statement_pdf(statement: Statement, *, company: Any) -> bytes:
     paid, closing), then a chronological lines table.
     """
     from io import BytesIO
+
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
     from reportlab.platypus import (
-        SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer,
+        Paragraph,
+        SimpleDocTemplate,
+        Spacer,
+        Table,
+        TableStyle,
     )
-    from saebooks.services.pdf import _styles, _address_block
+
+    from saebooks.services.pdf import _address_block, _styles
 
     styles = _styles()
     buf = BytesIO()

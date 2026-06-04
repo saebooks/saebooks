@@ -20,7 +20,6 @@ from __future__ import annotations
 import uuid
 from collections.abc import Awaitable, Callable
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.models.company import Company

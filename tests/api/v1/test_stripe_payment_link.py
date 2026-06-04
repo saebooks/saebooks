@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import uuid
 from datetime import date
-from decimal import Decimal
 
 import httpx
 import pytest
@@ -33,8 +32,9 @@ from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.account import Account, AccountType
 from saebooks.models.contact import Contact
-from saebooks.models.invoice import Invoice, InvoiceStatus
+from saebooks.models.invoice import Invoice
 from saebooks.services.integrations.stripe_links import _CHECKOUT_URL
+
 pytestmark = pytest.mark.postgres_only
 
 # ---------------------------------------------------------------------------
@@ -348,8 +348,6 @@ async def test_zero_balance_invoice_returns_422(
     in the DB to simulate a fully-paid invoice without going through the
     payment posting flow.
     """
-    from decimal import Decimal as D
-    from sqlalchemy import update as sa_update
 
     inv = await _create_invoice(api_client, invoice_deps)
     posted = await _post_invoice(api_client, inv)

@@ -17,6 +17,7 @@ sub-divisional tags on transactions; not a legal entity. See
 from __future__ import annotations
 
 import json
+from datetime import UTC
 from typing import Any
 from uuid import UUID
 
@@ -220,8 +221,8 @@ async def archive_branch(
         raise HTTPException(
             409, "Cannot archive the default branch. Mark another branch default first."
         )
-    from datetime import datetime, timezone
-    branch.archived_at = datetime.now(tz=timezone.utc)
+    from datetime import datetime
+    branch.archived_at = datetime.now(tz=UTC)
     branch.version += 1
     await session.commit()
     return Response(status_code=204)

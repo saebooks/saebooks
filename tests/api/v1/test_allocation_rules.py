@@ -19,6 +19,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
+import saebooks.services.features as features_mod
 from saebooks.api.v1.auth import current_token
 from saebooks.config import Settings
 from saebooks.db import AsyncSessionLocal
@@ -30,7 +31,7 @@ from saebooks.services.allocations import (
     _validate_targets,
     compute_allocation_lines,
 )
-import saebooks.services.features as features_mod
+
 pytestmark = pytest.mark.postgres_only
 
 

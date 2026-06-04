@@ -18,18 +18,17 @@ from decimal import Decimal
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import inspect, select, text
+from sqlalchemy import select, text
 
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.models.distribution import (
-    BeneficiaryEntitlement,
     DistributionStatus,
     TrustDistribution,
 )
 from saebooks.services import distributions as svc
-from saebooks.services import journal as journal_svc
+
 pytestmark = pytest.mark.postgres_only
 
 # ---------------------------------------------------------------------------
@@ -109,7 +108,7 @@ async def test_tables_exist() -> None:
 
 @pytest.mark.asyncio
 async def test_create_rejects_empty_entitlements() -> None:
-    company_id, equity_id, _ = await _ctx()
+    company_id, _equity_id, _ = await _ctx()
     async with AsyncSessionLocal() as session:
         with pytest.raises(svc.DistributionError, match="at least one"):
             await svc.create(
@@ -125,7 +124,7 @@ async def test_create_rejects_empty_entitlements() -> None:
 
 @pytest.mark.asyncio
 async def test_create_rejects_bad_percentage_sum() -> None:
-    company_id, equity_id, _ = await _ctx()
+    company_id, _equity_id, _ = await _ctx()
     async with AsyncSessionLocal() as session:
         with pytest.raises(svc.DistributionError, match="100"):
             await svc.create(
@@ -150,7 +149,7 @@ async def test_create_rejects_bad_percentage_sum() -> None:
 
 @pytest.mark.asyncio
 async def test_create_and_minute() -> None:
-    company_id, equity_id, liab_id = await _ctx()
+    company_id, _equity_id, liab_id = await _ctx()
 
     async with AsyncSessionLocal() as session:
         dist = await svc.create(

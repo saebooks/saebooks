@@ -8,18 +8,16 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from datetime import datetime, UTC
-from types import SimpleNamespace
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import grpc
 import pytest
 from grpc import aio
-
 from saebooks.grpc_gen import saebooks_pb2, saebooks_pb2_grpc
-from saebooks.grpc_server import SAEBooksServicer, serve
 
+from saebooks.grpc_server import SAEBooksServicer
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -171,9 +169,8 @@ async def test_list_contacts_no_company(
     grpc_channel: saebooks_pb2_grpc.SAEBooksStub,
 ) -> None:
     """ListContacts returns INTERNAL when no company exists."""
-    with _patch_session(company_id=None):
-        with pytest.raises(grpc.aio.AioRpcError) as exc_info:
-            await grpc_channel.ListContacts(saebooks_pb2.ListContactsRequest())
+    with _patch_session(company_id=None), pytest.raises(grpc.aio.AioRpcError) as exc_info:
+        await grpc_channel.ListContacts(saebooks_pb2.ListContactsRequest())
     assert exc_info.value.code() == grpc.StatusCode.INTERNAL
 
 
@@ -203,11 +200,10 @@ async def test_get_contact_not_found(
     with patch(
         "saebooks.grpc_server.contact_svc.get",
         new=AsyncMock(return_value=None),
-    ):
-        with pytest.raises(grpc.aio.AioRpcError) as exc_info:
-            await grpc_channel.GetContact(
-                saebooks_pb2.GetContactRequest(id=str(uuid.uuid4()))
-            )
+    ), pytest.raises(grpc.aio.AioRpcError) as exc_info:
+        await grpc_channel.GetContact(
+            saebooks_pb2.GetContactRequest(id=str(uuid.uuid4()))
+        )
     assert exc_info.value.code() == grpc.StatusCode.NOT_FOUND
 
 
@@ -281,13 +277,12 @@ async def test_update_contact_version_conflict(
     with patch(
         "saebooks.grpc_server.contact_svc.update",
         new=AsyncMock(side_effect=VersionConflict(stale_contact)),
-    ):
-        with pytest.raises(grpc.aio.AioRpcError) as exc_info:
-            await grpc_channel.UpdateContact(
-                saebooks_pb2.UpdateContactRequest(
-                    id=str(uuid.uuid4()), name="X", if_match_version=1
-                )
+    ), pytest.raises(grpc.aio.AioRpcError) as exc_info:
+        await grpc_channel.UpdateContact(
+            saebooks_pb2.UpdateContactRequest(
+                id=str(uuid.uuid4()), name="X", if_match_version=1
             )
+        )
     assert exc_info.value.code() == grpc.StatusCode.ABORTED
 
 
@@ -317,11 +312,10 @@ async def test_archive_contact_not_found(
     with patch(
         "saebooks.grpc_server.contact_svc.archive",
         new=AsyncMock(return_value=None),
-    ):
-        with pytest.raises(grpc.aio.AioRpcError) as exc_info:
-            await grpc_channel.ArchiveContact(
-                saebooks_pb2.ArchiveContactRequest(id=str(uuid.uuid4()), if_match_version=1)
-            )
+    ), pytest.raises(grpc.aio.AioRpcError) as exc_info:
+        await grpc_channel.ArchiveContact(
+            saebooks_pb2.ArchiveContactRequest(id=str(uuid.uuid4()), if_match_version=1)
+        )
     assert exc_info.value.code() == grpc.StatusCode.NOT_FOUND
 
 

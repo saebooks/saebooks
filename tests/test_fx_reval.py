@@ -46,6 +46,7 @@ from saebooks.services.fx.reval import (
     _reval_for_currency,
     _reverse_lines,
 )
+
 pytestmark = pytest.mark.postgres_only
 
 # ------------------------------------------------------------------ #
