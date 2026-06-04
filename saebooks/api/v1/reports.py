@@ -1902,3 +1902,508 @@ async def ytd_turnover(
             and _approaching_floor <= ytd < _GST_THRESHOLD
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/reports/statement_pack.pdf — LaTeX statement pack
+# ---------------------------------------------------------------------------
+
+
+def _current_fy_bounds_for_pack(today: date | None = None) -> tuple[date, date]:
+    """Return (fy_start, fy_end) for the AU financial year containing today.
+
+    Australian FY: 1 July → 30 June.  Duplicated here so this endpoint
+    does not depend on the private helper defined earlier in this module.
+    """
+    d = today or date.today()
+    if d.month >= 7:
+        return date(d.year, 7, 1), date(d.year + 1, 6, 30)
+    return date(d.year - 1, 7, 1), date(d.year, 6, 30)
+
+
+def _subtract_one_year_pack(d: date) -> date:
+    """Return the date exactly one year before ``d``, guarding 29 Feb."""
+    try:
+        return d.replace(year=d.year - 1)
+    except ValueError:
+        # d is 29 Feb in a leap year → prior year has no 29 Feb → use 28 Feb
+        return d.replace(year=d.year - 1, day=28)
+
+
+@router.get("/statement_pack.pdf", response_class=None)
+async def statement_pack_pdf(
+    request: Request,
+    as_of_date: date | None = Query(default=None),
+    from_date: date | None = Query(default=None),
+    to_date: date | None = Query(default=None),
+    comparative: bool = Query(default=True),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> "FastAPIResponse":
+    """Render a financial statement pack (P&L + Balance Sheet + Trial Balance)
+    as a PDF via the LaTeX engine.
+
+    Defaults to the current Australian financial year (1 Jul → today).
+    With ``comparative=true`` (default) a prior-year column is included.
+
+    The ctx is assembled entirely from service-layer functions — no HTTP
+    self-calls.  Returns ``application/pdf`` with ``Content-Disposition: inline``.
+    """
+    from fastapi.responses import Response as FastAPIResponse
+
+    from saebooks.services.latex_pdf import LatexCompileError, LatexServiceError, render_latex
+
+    today = date.today()
+    fy_start, _ = _current_fy_bounds_for_pack(today)
+
+    as_of = as_of_date or today
+    from_ = from_date or fy_start
+    to_ = to_date or as_of
+
+    tenant_id = resolve_tenant_id(request)
+
+    # --- Company ---------------------------------------------------------
+    company_obj = await session.get(Company, company_id)
+    if company_obj is None:
+        raise HTTPException(404, "Active company not found")
+
+    company_ctx = {
+        "name": company_obj.name,
+        "legal_name": company_obj.legal_name or company_obj.name,
+        "acn": company_obj.acn or "",
+        "abn": company_obj.abn or "",
+    }
+
+    # --- Current period reports ------------------------------------------
+    # Inline the same DB queries used by the /profit_loss, /balance_sheet,
+    # and /trial_balance endpoints — no HTTP self-call.
+
+    # P&L
+    pnl_stmt = (
+        select(
+            Account.id,
+            Account.name,
+            Account.code,
+            Account.account_type,
+            func.sum(JournalLine.debit).label("total_debit"),
+            func.sum(JournalLine.credit).label("total_credit"),
+        )
+        .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+        .join(Account, JournalLine.account_id == Account.id)
+        .where(
+            and_(
+                JournalEntry.company_id == company_id,
+                JournalEntry.tenant_id == tenant_id,
+                JournalEntry.status == EntryStatus.POSTED,
+                JournalEntry.archived_at.is_(None),
+                JournalEntry.entry_date >= from_,
+                JournalEntry.entry_date <= to_,
+            )
+        )
+        .group_by(Account.id, Account.name, Account.code, Account.account_type)
+        .order_by(Account.code)
+    )
+    pnl_rows = (await session.execute(pnl_stmt)).all()
+
+    income_by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    expenses_by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for acc_id, acc_name, acc_code, acc_type, td, tc in pnl_rows:
+        td = Decimal(td or "0")
+        tc = Decimal(tc or "0")
+        if acc_type in _INCOME_TYPES:
+            net = float(tc - td)
+            if net != 0.0:
+                income_by_type[acc_type.value].append(
+                    {"account_id": str(acc_id), "account_name": acc_name, "code": acc_code, "amount": net}
+                )
+        elif acc_type in _EXPENSE_TYPES:
+            net = float(td - tc)
+            if net != 0.0:
+                expenses_by_type[acc_type.value].append(
+                    {"account_id": str(acc_id), "account_name": acc_name, "code": acc_code, "amount": net}
+                )
+
+    total_income = sum(l["amount"] for lines in income_by_type.values() for l in lines)
+    total_expenses = sum(l["amount"] for lines in expenses_by_type.values() for l in lines)
+
+    pl_report: dict[str, Any] = {
+        "from_date": from_.isoformat(),
+        "to_date": to_.isoformat(),
+        "income": {
+            "INCOME": income_by_type.get("INCOME", []),
+            "OTHER_INCOME": income_by_type.get("OTHER_INCOME", []),
+            "total_income": total_income,
+        },
+        "expenses": {
+            "EXPENSE": expenses_by_type.get("EXPENSE", []),
+            "COST_OF_SALES": expenses_by_type.get("COST_OF_SALES", []),
+            "OTHER_EXPENSE": expenses_by_type.get("OTHER_EXPENSE", []),
+            "total_expenses": total_expenses,
+        },
+        "net_profit": total_income - total_expenses,
+    }
+
+    # Balance Sheet
+    bs_stmt = (
+        select(
+            Account.id,
+            Account.name,
+            Account.code,
+            Account.account_type,
+            func.sum(JournalLine.debit).label("total_debit"),
+            func.sum(JournalLine.credit).label("total_credit"),
+        )
+        .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+        .join(Account, JournalLine.account_id == Account.id)
+        .where(
+            and_(
+                JournalEntry.company_id == company_id,
+                JournalEntry.tenant_id == tenant_id,
+                JournalEntry.status == EntryStatus.POSTED,
+                JournalEntry.archived_at.is_(None),
+                JournalEntry.entry_date <= as_of,
+            )
+        )
+        .group_by(Account.id, Account.name, Account.code, Account.account_type)
+        .order_by(Account.code)
+    )
+    bs_rows = (await session.execute(bs_stmt)).all()
+
+    assets: list[dict[str, Any]] = []
+    liabilities: list[dict[str, Any]] = []
+    equity_rows: list[dict[str, Any]] = []
+    cye_income_credit = Decimal("0")
+    cye_expense_debit = Decimal("0")
+
+    for acc_id, acc_name, acc_code, acc_type, td, tc in bs_rows:
+        td = Decimal(td or "0")
+        tc = Decimal(tc or "0")
+        if acc_type in _ASSET_TYPES:
+            bal = float(td - tc)
+            if bal != 0.0:
+                assets.append({"account_id": str(acc_id), "account_name": acc_name, "code": acc_code, "balance": bal})
+        elif acc_type in _LIABILITY_TYPES:
+            bal = float(tc - td)
+            if bal != 0.0:
+                liabilities.append({"account_id": str(acc_id), "account_name": acc_name, "code": acc_code, "balance": bal})
+        elif acc_type in _EQUITY_TYPES:
+            bal = float(tc - td)
+            if bal != 0.0:
+                equity_rows.append({"account_id": str(acc_id), "account_name": acc_name, "code": acc_code, "balance": bal})
+        elif acc_type in _INCOME_TYPES:
+            cye_income_credit += tc - td
+        elif acc_type in _EXPENSE_TYPES:
+            cye_expense_debit += td - tc
+
+    cye_balance = float(cye_income_credit - cye_expense_debit)
+    equity_rows.append({"account_id": "00000000-0000-0000-0000-000000000000", "account_name": "Current Year Earnings", "code": "CYE", "balance": cye_balance})
+
+    total_assets = sum(l["balance"] for l in assets)
+    total_liabilities = sum(l["balance"] for l in liabilities)
+    total_equity = sum(l["balance"] for l in equity_rows)
+    bs_difference = abs(total_assets - total_liabilities - total_equity)
+
+    bs_report: dict[str, Any] = {
+        "as_of_date": as_of.isoformat(),
+        "assets": {"ASSET": assets, "total_assets": total_assets},
+        "liabilities": {"LIABILITY": liabilities, "total_liabilities": total_liabilities},
+        "equity": {"EQUITY": equity_rows, "total_equity": total_equity},
+        "balanced": bs_difference < 0.01,
+        "difference": round(bs_difference, 2),
+    }
+
+    # Trial Balance
+    tb_stmt = (
+        select(
+            Account.id,
+            Account.code,
+            Account.name,
+            Account.account_type,
+            func.sum(JournalLine.debit).label("total_debit"),
+            func.sum(JournalLine.credit).label("total_credit"),
+        )
+        .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+        .join(Account, JournalLine.account_id == Account.id)
+        .where(
+            and_(
+                JournalEntry.company_id == company_id,
+                JournalEntry.tenant_id == tenant_id,
+                JournalEntry.status == EntryStatus.POSTED,
+                JournalEntry.archived_at.is_(None),
+                JournalEntry.entry_date <= as_of,
+            )
+        )
+        .group_by(Account.id, Account.code, Account.name, Account.account_type)
+        .order_by(Account.code)
+    )
+    tb_rows = (await session.execute(tb_stmt)).all()
+
+    tb_lines = []
+    tb_total_debits = Decimal("0")
+    tb_total_credits = Decimal("0")
+    for acc_id, acc_code, acc_name, acc_type, td, tc in tb_rows:
+        td = Decimal(td or "0")
+        tc = Decimal(tc or "0")
+        balance = td - tc
+        if balance == Decimal("0"):
+            continue
+        tb_lines.append({
+            "account_id": str(acc_id),
+            "code": acc_code,
+            "name": acc_name,
+            "account_type": acc_type.value,
+            "debit_total": float(td),
+            "credit_total": float(tc),
+            "balance": float(balance),
+        })
+        tb_total_debits += td
+        tb_total_credits += tc
+
+    tb_report: dict[str, Any] = {
+        "as_of_date": as_of.isoformat(),
+        "accounts": tb_lines,
+        "total_debits": float(tb_total_debits),
+        "total_credits": float(tb_total_credits),
+        "balanced": abs(tb_total_debits - tb_total_credits) < Decimal("0.01"),
+    }
+
+    # --- Prior-year comparatives ------------------------------------------
+    comp_pl: dict[str, Any] = {}
+    comp_bs: dict[str, Any] = {}
+    prior_from = _subtract_one_year_pack(from_)
+    prior_to = _subtract_one_year_pack(to_)
+    prior_as_of = _subtract_one_year_pack(as_of)
+
+    if comparative:
+        # Prior P&L
+        prior_pnl_stmt = (
+            select(
+                Account.id,
+                Account.name,
+                Account.code,
+                Account.account_type,
+                func.sum(JournalLine.debit).label("total_debit"),
+                func.sum(JournalLine.credit).label("total_credit"),
+            )
+            .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+            .join(Account, JournalLine.account_id == Account.id)
+            .where(
+                and_(
+                    JournalEntry.company_id == company_id,
+                    JournalEntry.tenant_id == tenant_id,
+                    JournalEntry.status == EntryStatus.POSTED,
+                    JournalEntry.archived_at.is_(None),
+                    JournalEntry.entry_date >= prior_from,
+                    JournalEntry.entry_date <= prior_to,
+                )
+            )
+            .group_by(Account.id, Account.name, Account.code, Account.account_type)
+            .order_by(Account.code)
+        )
+        prior_pnl_rows = (await session.execute(prior_pnl_stmt)).all()
+
+        prior_income_by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        prior_expenses_by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for acc_id, acc_name, acc_code, acc_type, td, tc in prior_pnl_rows:
+            td = Decimal(td or "0")
+            tc = Decimal(tc or "0")
+            if acc_type in _INCOME_TYPES:
+                net = float(tc - td)
+                if net != 0.0:
+                    prior_income_by_type[acc_type.value].append(
+                        {"account_id": str(acc_id), "account_name": acc_name, "code": acc_code, "amount": net}
+                    )
+            elif acc_type in _EXPENSE_TYPES:
+                net = float(td - tc)
+                if net != 0.0:
+                    prior_expenses_by_type[acc_type.value].append(
+                        {"account_id": str(acc_id), "account_name": acc_name, "code": acc_code, "amount": net}
+                    )
+
+        p_total_income = sum(l["amount"] for lines in prior_income_by_type.values() for l in lines)
+        p_total_expenses = sum(l["amount"] for lines in prior_expenses_by_type.values() for l in lines)
+
+        prior_pl: dict[str, Any] = {
+            "income": {
+                "INCOME": prior_income_by_type.get("INCOME", []),
+                "OTHER_INCOME": prior_income_by_type.get("OTHER_INCOME", []),
+                "total_income": p_total_income,
+            },
+            "expenses": {
+                "EXPENSE": prior_expenses_by_type.get("EXPENSE", []),
+                "COST_OF_SALES": prior_expenses_by_type.get("COST_OF_SALES", []),
+                "OTHER_EXPENSE": prior_expenses_by_type.get("OTHER_EXPENSE", []),
+                "total_expenses": p_total_expenses,
+            },
+            "net_profit": p_total_income - p_total_expenses,
+        }
+
+        # Merge current + prior P&L into comp_pl using the same logic as
+        # saebooks_web._build_comparative_pl — align by account_id.
+        def _merge_lines(current_lines: list[dict], prior_lines: list[dict]) -> list[dict]:
+            prior_by_id = {l["account_id"]: l for l in prior_lines if l.get("account_id")}
+            merged = []
+            for line in current_lines:
+                aid = line.get("account_id")
+                prior = prior_by_id.pop(aid, {})
+                merged.append({
+                    "account_id": aid,
+                    "account_name": line.get("account_name", ""),
+                    "code": line.get("code", ""),
+                    "current_amount": float(line.get("amount", line.get("balance", 0)) or 0),
+                    "prior_amount": float(prior.get("amount", prior.get("balance", 0)) or 0),
+                })
+            for aid, line in prior_by_id.items():
+                merged.append({
+                    "account_id": aid,
+                    "account_name": line.get("account_name", ""),
+                    "code": line.get("code", ""),
+                    "current_amount": 0.0,
+                    "prior_amount": float(line.get("amount", line.get("balance", 0)) or 0),
+                })
+            return merged
+
+        c_income = pl_report["income"]
+        p_income = prior_pl["income"]
+        c_expenses = pl_report["expenses"]
+        p_expenses = prior_pl["expenses"]
+
+        comp_pl = {
+            "income": {
+                "INCOME": _merge_lines(c_income.get("INCOME", []), p_income.get("INCOME", [])),
+                "OTHER_INCOME": _merge_lines(c_income.get("OTHER_INCOME", []), p_income.get("OTHER_INCOME", [])),
+                "total_income_current": float(c_income.get("total_income", 0) or 0),
+                "total_income_prior": float(p_income.get("total_income", 0) or 0),
+            },
+            "expenses": {
+                "EXPENSE": _merge_lines(c_expenses.get("EXPENSE", []), p_expenses.get("EXPENSE", [])),
+                "COST_OF_SALES": _merge_lines(c_expenses.get("COST_OF_SALES", []), p_expenses.get("COST_OF_SALES", [])),
+                "OTHER_EXPENSE": _merge_lines(c_expenses.get("OTHER_EXPENSE", []), p_expenses.get("OTHER_EXPENSE", [])),
+                "total_expenses_current": float(c_expenses.get("total_expenses", 0) or 0),
+                "total_expenses_prior": float(p_expenses.get("total_expenses", 0) or 0),
+            },
+            "net_profit_current": float(pl_report["net_profit"]),
+            "net_profit_prior": float(prior_pl["net_profit"]),
+        }
+
+        # Prior Balance Sheet
+        prior_bs_stmt = (
+            select(
+                Account.id,
+                Account.name,
+                Account.code,
+                Account.account_type,
+                func.sum(JournalLine.debit).label("total_debit"),
+                func.sum(JournalLine.credit).label("total_credit"),
+            )
+            .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+            .join(Account, JournalLine.account_id == Account.id)
+            .where(
+                and_(
+                    JournalEntry.company_id == company_id,
+                    JournalEntry.tenant_id == tenant_id,
+                    JournalEntry.status == EntryStatus.POSTED,
+                    JournalEntry.archived_at.is_(None),
+                    JournalEntry.entry_date <= prior_as_of,
+                )
+            )
+            .group_by(Account.id, Account.name, Account.code, Account.account_type)
+            .order_by(Account.code)
+        )
+        prior_bs_rows = (await session.execute(prior_bs_stmt)).all()
+
+        p_assets: list[dict[str, Any]] = []
+        p_liabilities: list[dict[str, Any]] = []
+        p_equity_rows: list[dict[str, Any]] = []
+        p_cye_income_credit = Decimal("0")
+        p_cye_expense_debit = Decimal("0")
+
+        for acc_id, acc_name, acc_code, acc_type, td, tc in prior_bs_rows:
+            td = Decimal(td or "0")
+            tc = Decimal(tc or "0")
+            if acc_type in _ASSET_TYPES:
+                bal = float(td - tc)
+                if bal != 0.0:
+                    p_assets.append({"account_id": str(acc_id), "account_name": acc_name, "code": acc_code, "balance": bal})
+            elif acc_type in _LIABILITY_TYPES:
+                bal = float(tc - td)
+                if bal != 0.0:
+                    p_liabilities.append({"account_id": str(acc_id), "account_name": acc_name, "code": acc_code, "balance": bal})
+            elif acc_type in _EQUITY_TYPES:
+                bal = float(tc - td)
+                if bal != 0.0:
+                    p_equity_rows.append({"account_id": str(acc_id), "account_name": acc_name, "code": acc_code, "balance": bal})
+            elif acc_type in _INCOME_TYPES:
+                p_cye_income_credit += tc - td
+            elif acc_type in _EXPENSE_TYPES:
+                p_cye_expense_debit += td - tc
+
+        p_cye = float(p_cye_income_credit - p_cye_expense_debit)
+        p_equity_rows.append({"account_id": "00000000-0000-0000-0000-000000000000", "account_name": "Current Year Earnings", "code": "CYE", "balance": p_cye})
+
+        p_total_assets = sum(l["balance"] for l in p_assets)
+        p_total_liabilities = sum(l["balance"] for l in p_liabilities)
+        p_total_equity = sum(l["balance"] for l in p_equity_rows)
+
+        prior_bs: dict[str, Any] = {
+            "assets": {"ASSET": p_assets, "total_assets": p_total_assets},
+            "liabilities": {"LIABILITY": p_liabilities, "total_liabilities": p_total_liabilities},
+            "equity": {"EQUITY": p_equity_rows, "total_equity": p_total_equity},
+        }
+
+        comp_bs = {
+            "assets": {
+                "ASSET": _merge_lines(bs_report["assets"]["ASSET"], prior_bs["assets"]["ASSET"]),
+                "total_assets_current": total_assets,
+                "total_assets_prior": p_total_assets,
+            },
+            "liabilities": {
+                "LIABILITY": _merge_lines(bs_report["liabilities"]["LIABILITY"], prior_bs["liabilities"]["LIABILITY"]),
+                "total_liabilities_current": total_liabilities,
+                "total_liabilities_prior": p_total_liabilities,
+            },
+            "equity": {
+                "EQUITY": _merge_lines(equity_rows, p_equity_rows),
+                "total_equity_current": total_equity,
+                "total_equity_prior": p_total_equity,
+            },
+            "balanced": bs_difference < 0.01,
+            "difference": round(bs_difference, 2),
+        }
+
+    # --- Assemble ctx and render ------------------------------------------
+    ctx = {
+        "company": company_ctx,
+        "from_date": from_.isoformat(),
+        "to_date": to_.isoformat(),
+        "as_of_date": as_of.isoformat(),
+        "prepared": today.isoformat(),
+        "pl_report": pl_report,
+        "bs_report": bs_report,
+        "tb_report": tb_report,
+        "comparative": comparative,
+        "comp_pl": comp_pl,
+        "comp_bs": comp_bs,
+        "prior_from": prior_from.isoformat(),
+        "prior_to": prior_to.isoformat(),
+        "prior_as_of": prior_as_of.isoformat(),
+    }
+
+    try:
+        pdf_bytes = await render_latex("statement_pack", ctx)
+    except LatexCompileError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"LaTeX compile error: {exc.log_tail}",
+        ) from exc
+    except LatexServiceError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"LaTeX service error: {exc}",
+        ) from exc
+
+    return FastAPIResponse(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'inline; filename="statement-pack.pdf"'},
+    )

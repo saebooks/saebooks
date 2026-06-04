@@ -388,6 +388,17 @@ class Settings(BaseSettings):
         default="", alias="REFERENCE_MIGRATION_DATABASE_URL"
     )
 
+    # ---------------------------------------------------------------- #
+    # LaTeX PDF engine (latex-api microservice)                        #
+    # ---------------------------------------------------------------- #
+    # LATEX_API_URL is the base URL of the latex-api FastAPI service
+    # that compiles LaTeX source to PDF via XeLaTeX.  Defaults to the  #
+    # in-compose service hostname so a sibling docker-compose with a   #
+    # shared latex_clients network Just Works.                     #
+    latex_api_url: str = Field(
+        default="http://latex-api:8000", alias="LATEX_API_URL"
+    )
+
     @property
     def oauth_allowed_emails_set(self) -> set[str]:
         return {e.strip().lower() for e in self.oauth_allowed_emails.split(",") if e.strip()}

@@ -1,0 +1,79 @@
+%% SAE Books LaTeX preamble — included by all statement templates.
+%%
+%% Fonts: Liberation Sans (sans-serif body text) is available in the
+%% latex-api TexLive image.  Open Sans is also available as a fallback.
+%% We avoid TeX Gyre Heros and any other fonts not confirmed present.
+%%
+%% Jinja2 note: all data values interpolated in child templates MUST be
+%% run through the |latex_escape filter.  The preamble itself contains
+%% no user data so no escaping is needed here.
+\documentclass[11pt,a4paper]{article}
+
+%% Page geometry — A4 with generous but professional margins.
+\usepackage[
+  a4paper,
+  top=25mm,
+  bottom=25mm,
+  left=25mm,
+  right=20mm,
+  headheight=15pt,
+]{geometry}
+
+%% Font setup — Liberation Sans via fontspec (XeLaTeX/LuaLaTeX).
+%% fontspec requires the font to be installed; Liberation Sans is
+%% bundled with fonts-liberation on Debian/Ubuntu (present in the
+%% latex-api image).
+\usepackage{fontspec}
+\setmainfont{Liberation Sans}
+\setsansfont{Liberation Sans}
+\setmonofont{Liberation Mono}
+
+%% Tables
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{tabularx}
+\usepackage{array}
+\newcolumntype{R}{>{\raggedleft\arraybackslash}X}  % right-aligned tabularx col
+
+%% Colour
+\usepackage[table]{xcolor}
+% SAE brand green — used for section headings and rule accents.
+\definecolor{saegreen}{HTML}{3E7A4E}
+\definecolor{lightgrey}{HTML}{F4F5F6}
+\definecolor{midgrey}{HTML}{9CA3AF}
+
+%% Headers / footers
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0.4pt}
+\fancyhead[L]{\small\color{midgrey}Special Purpose Financial Statements}
+\fancyhead[R]{\small\color{midgrey}\leftmark}
+\fancyfoot[L]{\small\color{midgrey}{{ company.legal_name | latex_escape }}%
+{%- if company.acn %} \textbullet{} ACN {{ company.acn | latex_escape }}{% endif -%}
+{%- if company.abn %} \textbullet{} ABN {{ company.abn | latex_escape }}{% endif -%}}
+\fancyfoot[R]{\small\color{midgrey}Page~\thepage}
+
+%% Misc
+\usepackage{microtype}
+\usepackage{parskip}
+\usepackage{hyperref}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=saegreen,
+  urlcolor=saegreen,
+  pdfborder={0 0 0},
+}
+
+%% Section heading colour
+\usepackage{titlesec}
+\titleformat{\section}{\large\bfseries\color{saegreen}}{}{0em}{}[\color{saegreen}\titlerule]
+\titleformat{\subsection}{\normalsize\bfseries\color{saegreen}}{}{0em}{}
+
+%% Date formatting (no external package needed — manual formatting in templates)
+
+%% Prevent paragraph indent — parskip handles spacing instead.
+\setlength{\parindent}{0pt}
+
+%% Number formatting helper macros
