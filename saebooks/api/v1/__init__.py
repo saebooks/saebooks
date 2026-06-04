@@ -24,6 +24,7 @@ from fastapi import APIRouter
 from saebooks.api.v1.account_ranges import router as account_ranges_router
 from saebooks.api.v1.accounts import router as accounts_router
 from saebooks.api.v1.admin import router as admin_router
+from saebooks.api.v1.audit_log import router as audit_log_router
 from saebooks.api.v1.admin_inspect import router as admin_inspect_router
 from saebooks.api.v1.admin_tenants import router as admin_tenants_router
 from saebooks.api.v1.api_tokens import router as api_tokens_router
@@ -177,6 +178,7 @@ router.include_router(allocations_router)
 router.include_router(attachments_router)
 # Cat-C (W5): admin audit-log + SQL tool (FLAG_SQL_TOOL Pro+).
 router.include_router(admin_router)
+router.include_router(audit_log_router)
 # FLAG_RAW_JSON_INSPECTOR — developer-tier-only raw-row + change_log debug endpoint.
 router.include_router(admin_inspect_router)
 # FLAG_TENANT_SWITCHER — list tenants on the instance for the switcher.

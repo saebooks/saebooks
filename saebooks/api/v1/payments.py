@@ -28,7 +28,7 @@ from fastapi.responses import JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
-from saebooks.api.v1.deps import get_active_company_id, get_session
+from saebooks.api.v1.deps import get_active_company_id, get_active_user_id, get_session
 from saebooks.api.v1.schemas import (
     PaymentConflictBody,
     PaymentCreate,
@@ -341,6 +341,7 @@ async def void_payment(
             payment_id,
             actor=f"api:{bearer[:8]}…",
             expected_version=expected,
+            actor_user_id=await get_active_user_id(request),
         )
     except svc.VersionConflict as exc:
         body = PaymentConflictBody(
@@ -429,6 +430,7 @@ async def post_payment_endpoint(
             actor=f"api:{bearer[:8]}…",
             expected_version=expected,
             tenant_id=tenant_id,
+            actor_user_id=await get_active_user_id(request),
         )
     except svc.VersionConflict as exc:
         body = PaymentConflictBody(
