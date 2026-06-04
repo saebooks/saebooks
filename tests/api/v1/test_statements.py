@@ -499,3 +499,374 @@ async def test_rls_statement_invisible_to_other_tenant() -> None:
             text("DELETE FROM tenants WHERE id = :id").bindparams(id=tenant_a_id)
         )
         await session.commit()
+
+
+# ===========================================================================
+# Phase 3 additions — action endpoints (POST draft-missing-bill / dismiss /
+# confirm). Appended to the Phase 1/2 suite; shares its imports and helpers.
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 helpers
+# ---------------------------------------------------------------------------
+
+
+async def _p3_default_company_id() -> uuid.UUID:
+    async with AsyncSessionLocal() as session:
+        company = (
+            await session.execute(
+                sa_select(Company).where(
+                    Company.tenant_id == DEFAULT_TENANT_ID,
+                    Company.archived_at.is_(None),
+                ).limit(1)
+            )
+        ).scalars().first()
+        if company is None:
+            pytest.skip("No active company in default tenant")
+        return company.id
+
+
+async def _seed_p3_statement(
+    *,
+    stmt_id: uuid.UUID,
+    company_id: uuid.UUID,
+    status: str = StatementStatus.NEEDS_REVIEW.value,
+    contact_id: uuid.UUID | None = None,
+) -> None:
+    """Insert a SupplierStatement for Phase 3 tests."""
+    async with AsyncSessionLocal() as session:
+        session.info["tenant_id"] = str(DEFAULT_TENANT_ID)
+        stmt = SupplierStatement(
+            id=stmt_id,
+            tenant_id=DEFAULT_TENANT_ID,
+            company_id=company_id,
+            source_document_id=9900,
+            supplier_name="Phase3 Test Supplier",
+            statement_date=date(2026, 5, 31),
+            closing_balance=Decimal("1100.00"),
+            currency="AUD",
+            status=status,
+            contact_id=contact_id,
+        )
+        session.add(stmt)
+        await session.commit()
+
+
+async def _seed_p3_line(
+    *,
+    line_id: uuid.UUID,
+    stmt_id: uuid.UUID,
+    match_status: str = StatementMatchStatus.MISSING_IN_BOOKS.value,
+    reference: str = "INV-P3-001",
+) -> None:
+    """Insert a SupplierStatementLine for Phase 3 tests."""
+    async with AsyncSessionLocal() as session:
+        session.info["tenant_id"] = str(DEFAULT_TENANT_ID)
+        line = SupplierStatementLine(
+            id=line_id,
+            tenant_id=DEFAULT_TENANT_ID,
+            statement_id=stmt_id,
+            line_date=date(2026, 5, 1),
+            line_type="invoice",
+            reference=reference,
+            description="Phase 3 test line",
+            amount=Decimal("1100.00"),
+            match_status=match_status,
+        )
+        session.add(line)
+        await session.commit()
+
+
+async def _delete_p3_statement(stmt_id: uuid.UUID) -> None:
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            text("DELETE FROM supplier_statement_lines WHERE statement_id = :id").bindparams(id=stmt_id)
+        )
+        await session.execute(
+            text("DELETE FROM supplier_statements WHERE id = :id").bindparams(id=stmt_id)
+        )
+        await session.commit()
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+async def p3_api_client() -> AsyncClient:
+    token = current_token()
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {token}"},
+    ) as ac:
+        yield ac
+
+
+@pytest.fixture
+async def p3_readonly_client() -> AsyncClient:
+    """API client with a read-scoped API token for write-rejection tests."""
+    from saebooks.models.user import User, UserRole
+    from saebooks.services import api_tokens as token_svc
+    from saebooks.services.companies import ensure_seed_company
+
+    async with AsyncSessionLocal() as session:
+        user = (
+            await session.execute(
+                sa_select(User).where(User.username == "pytest-p3-ro-user")
+            )
+        ).scalars().first()
+        if user is None:
+            user = User(
+                tenant_id=DEFAULT_TENANT_ID,
+                username="pytest-p3-ro-user",
+                role=UserRole.ADMIN.value,
+            )
+            session.add(user)
+            await session.flush()
+
+        company = await ensure_seed_company(session)
+        _, cleartext = await token_svc.issue(
+            session,
+            user_id=user.id,
+            company_id=company.id,
+            name=f"p3-ro-{uuid.uuid4().hex[:8]}",
+            scopes=["read"],
+        )
+        await session.commit()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {cleartext}"},
+    ) as ac:
+        yield ac
+
+
+# ---------------------------------------------------------------------------
+# POST /{id}/draft-missing-bill — 201, bill_id, line updated
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.postgres_only
+async def test_draft_missing_bill_returns_201_and_bill_id(p3_api_client: AsyncClient) -> None:
+    """POST /draft-missing-bill on a missing_in_books line → 201 with bill_id."""
+    from saebooks.models.bill import Bill, BillStatus
+
+    company_id = await _p3_default_company_id()
+    stmt_id = uuid.uuid4()
+    line_id = uuid.uuid4()
+
+    await _seed_p3_statement(stmt_id=stmt_id, company_id=company_id)
+    await _seed_p3_line(line_id=line_id, stmt_id=stmt_id)
+
+    try:
+        r = await p3_api_client.post(
+            f"/api/v1/statements/{stmt_id}/draft-missing-bill",
+            json={"line_id": str(line_id)},
+            headers={"X-Company-Id": str(company_id)},
+        )
+    finally:
+        await _delete_p3_statement(stmt_id)
+
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert "bill_id" in body, f"Missing bill_id in response: {body}"
+    assert "statement" in body, f"Missing statement in response: {body}"
+
+    bill_uuid = uuid.UUID(body["bill_id"])
+
+    # Verify statement detail shape.
+    stmt_detail = body["statement"]
+    assert stmt_detail["id"] == str(stmt_id)
+    assert "lines" in stmt_detail
+
+    # Verify a DRAFT Bill with correct supplier_reference exists in DB.
+    async with AsyncSessionLocal() as session:
+        bill = await session.get(Bill, bill_uuid)
+        assert bill is not None, "Bill not found in DB after draft-missing-bill"
+        assert bill.status == BillStatus.DRAFT.value, f"Expected DRAFT, got {bill.status}"
+        assert bill.supplier_reference == "INV-P3-001"
+
+
+@pytest.mark.postgres_only
+async def test_draft_missing_bill_line_is_now_matched(p3_api_client: AsyncClient) -> None:
+    """After draft-missing-bill, the line is matched and matched_bill_id is set."""
+    company_id = await _p3_default_company_id()
+    stmt_id = uuid.uuid4()
+    line_id = uuid.uuid4()
+
+    await _seed_p3_statement(stmt_id=stmt_id, company_id=company_id)
+    await _seed_p3_line(line_id=line_id, stmt_id=stmt_id)
+
+    try:
+        r = await p3_api_client.post(
+            f"/api/v1/statements/{stmt_id}/draft-missing-bill",
+            json={"line_id": str(line_id)},
+            headers={"X-Company-Id": str(company_id)},
+        )
+    finally:
+        await _delete_p3_statement(stmt_id)
+
+    assert r.status_code == 201, r.text
+    body = r.json()
+    bill_id_str = body["bill_id"]
+
+    # The statement detail in the response must show the line as matched.
+    lines = body["statement"]["lines"]
+    assert lines, "No lines in returned statement detail"
+    matched = [ln for ln in lines if ln["id"] == str(line_id)]
+    assert matched, f"Line {line_id} not in returned statement lines"
+    ln = matched[0]
+    assert ln["match_status"] == StatementMatchStatus.MATCHED.value
+    assert ln["matched_bill_id"] == bill_id_str
+    assert "draft bill created" in (ln["note"] or "")
+
+
+@pytest.mark.postgres_only
+async def test_draft_missing_bill_non_missing_line_returns_422(p3_api_client: AsyncClient) -> None:
+    """POST /draft-missing-bill on an already-matched line → 422."""
+    company_id = await _p3_default_company_id()
+    stmt_id = uuid.uuid4()
+    line_id = uuid.uuid4()
+
+    await _seed_p3_statement(stmt_id=stmt_id, company_id=company_id)
+    await _seed_p3_line(
+        line_id=line_id,
+        stmt_id=stmt_id,
+        match_status=StatementMatchStatus.MATCHED.value,
+    )
+
+    try:
+        r = await p3_api_client.post(
+            f"/api/v1/statements/{stmt_id}/draft-missing-bill",
+            json={"line_id": str(line_id)},
+            headers={"X-Company-Id": str(company_id)},
+        )
+    finally:
+        await _delete_p3_statement(stmt_id)
+
+    assert r.status_code == 422, r.text
+
+
+@pytest.mark.postgres_only
+async def test_draft_missing_bill_unknown_statement_returns_404(p3_api_client: AsyncClient) -> None:
+    """POST /draft-missing-bill with an unknown statement UUID → 404."""
+    company_id = await _p3_default_company_id()
+    r = await p3_api_client.post(
+        f"/api/v1/statements/{uuid.uuid4()}/draft-missing-bill",
+        json={"line_id": str(uuid.uuid4())},
+        headers={"X-Company-Id": str(company_id)},
+    )
+    assert r.status_code == 404, r.text
+
+
+# ---------------------------------------------------------------------------
+# POST /{id}/dismiss
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.postgres_only
+async def test_dismiss_sets_status_dismissed(p3_api_client: AsyncClient) -> None:
+    """POST /dismiss returns detail with status=dismissed."""
+    company_id = await _p3_default_company_id()
+    stmt_id = uuid.uuid4()
+    await _seed_p3_statement(stmt_id=stmt_id, company_id=company_id)
+
+    try:
+        r = await p3_api_client.post(
+            f"/api/v1/statements/{stmt_id}/dismiss",
+            headers={"X-Company-Id": str(company_id)},
+        )
+    finally:
+        await _delete_p3_statement(stmt_id)
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["id"] == str(stmt_id)
+    assert body["status"] == StatementStatus.DISMISSED.value
+
+
+@pytest.mark.postgres_only
+async def test_dismiss_unknown_statement_returns_404(p3_api_client: AsyncClient) -> None:
+    """POST /dismiss with unknown UUID → 404."""
+    company_id = await _p3_default_company_id()
+    r = await p3_api_client.post(
+        f"/api/v1/statements/{uuid.uuid4()}/dismiss",
+        headers={"X-Company-Id": str(company_id)},
+    )
+    assert r.status_code == 404, r.text
+
+
+# ---------------------------------------------------------------------------
+# POST /{id}/confirm
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.postgres_only
+async def test_confirm_sets_status_reconciled(p3_api_client: AsyncClient) -> None:
+    """POST /confirm returns detail with status=reconciled."""
+    company_id = await _p3_default_company_id()
+    stmt_id = uuid.uuid4()
+    await _seed_p3_statement(stmt_id=stmt_id, company_id=company_id)
+
+    try:
+        r = await p3_api_client.post(
+            f"/api/v1/statements/{stmt_id}/confirm",
+            headers={"X-Company-Id": str(company_id)},
+        )
+    finally:
+        await _delete_p3_statement(stmt_id)
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["id"] == str(stmt_id)
+    assert body["status"] == StatementStatus.RECONCILED.value
+
+
+@pytest.mark.postgres_only
+async def test_confirm_unknown_statement_returns_404(p3_api_client: AsyncClient) -> None:
+    """POST /confirm with unknown UUID → 404."""
+    company_id = await _p3_default_company_id()
+    r = await p3_api_client.post(
+        f"/api/v1/statements/{uuid.uuid4()}/confirm",
+        headers={"X-Company-Id": str(company_id)},
+    )
+    assert r.status_code == 404, r.text
+
+
+# ---------------------------------------------------------------------------
+# Read-only token rejected (403) on each action endpoint
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.postgres_only
+async def test_read_only_token_rejected_on_draft_missing_bill(
+    p3_readonly_client: AsyncClient,
+) -> None:
+    """Read-scoped token must receive 403 on POST /draft-missing-bill."""
+    r = await p3_readonly_client.post(
+        f"/api/v1/statements/{uuid.uuid4()}/draft-missing-bill",
+        json={"line_id": str(uuid.uuid4())},
+    )
+    assert r.status_code == 403, f"Expected 403, got {r.status_code}: {r.text}"
+
+
+@pytest.mark.postgres_only
+async def test_read_only_token_rejected_on_dismiss(
+    p3_readonly_client: AsyncClient,
+) -> None:
+    """Read-scoped token must receive 403 on POST /dismiss."""
+    r = await p3_readonly_client.post(f"/api/v1/statements/{uuid.uuid4()}/dismiss")
+    assert r.status_code == 403, f"Expected 403, got {r.status_code}: {r.text}"
+
+
+@pytest.mark.postgres_only
+async def test_read_only_token_rejected_on_confirm(
+    p3_readonly_client: AsyncClient,
+) -> None:
+    """Read-scoped token must receive 403 on POST /confirm."""
+    r = await p3_readonly_client.post(f"/api/v1/statements/{uuid.uuid4()}/confirm")
+    assert r.status_code == 403, f"Expected 403, got {r.status_code}: {r.text}"
