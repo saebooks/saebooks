@@ -42,6 +42,7 @@ from saebooks.models.project import Project, ProjectStatus
 from saebooks.models.quote import Quote, QuoteLine, QuoteStatus
 from saebooks.models.settings import Setting
 from saebooks.models.sql_query import SqlQuery
+from saebooks.models.supplier_statement_template import SupplierStatementTemplate
 from saebooks.models.supplier_statement import (
     StatementLineType,
     StatementMatchStatus,
