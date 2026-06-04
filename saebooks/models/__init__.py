@@ -42,6 +42,13 @@ from saebooks.models.project import Project, ProjectStatus
 from saebooks.models.quote import Quote, QuoteLine, QuoteStatus
 from saebooks.models.settings import Setting
 from saebooks.models.sql_query import SqlQuery
+from saebooks.models.supplier_statement import (
+    StatementLineType,
+    StatementMatchStatus,
+    StatementStatus,
+    SupplierStatement,
+    SupplierStatementLine,
+)
 from saebooks.models.tax_code import TaxCode
 from saebooks.models.tax_period import TaxPeriod, TaxPeriodStatus, TaxPeriodType
 from saebooks.models.tax_return import TaxReturn, TaxReturnStatus

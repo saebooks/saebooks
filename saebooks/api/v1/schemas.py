@@ -3719,3 +3719,65 @@ class OneOffCustomerListOut(BaseModel):
 class OneOffCustomerConflictBody(BaseModel):
     detail: str
     current: OneOffCustomerOut
+
+
+# ---------------------------------------------------------------------------
+# Supplier statement reconciliation (Gitea #28)
+# ---------------------------------------------------------------------------
+
+
+class StatementIngestRequest(BaseModel):
+    """POST /api/v1/statements/ingest body."""
+
+    paperless_document_id: int
+
+
+class StatementLineOut(BaseModel):
+    """One line from a supplier statement, with reconciliation verdict."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    line_date: date | None = None
+    line_type: str
+    reference: str | None = None
+    description: str | None = None
+    amount: Decimal
+    match_status: str
+    matched_bill_id: uuid.UUID | None = None
+    note: str | None = None
+
+
+class StatementDetailOut(BaseModel):
+    """Full detail for a single supplier statement, including lines.
+
+    Matches the exact JSON shape the saebooks-web frontend is built
+    against. Decimals serialised as JSON numbers (Pydantic default with
+    ``from_attributes=True``).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    supplier_name: str | None = None
+    supplier_abn: str | None = None
+    customer_ref: str | None = None
+    statement_date: date | None = None
+    terms: str | None = None
+    opening_balance: Decimal | None = None
+    closing_balance: Decimal | None = None
+    currency: str
+    status: str
+    our_ap_as_at: Decimal | None = None
+    balance_delta: Decimal | None = None
+    contact_id: uuid.UUID | None = None
+    source_document_id: int | None = None
+    extraction_meta: dict | None = None
+    lines: list[StatementLineOut] = Field(default_factory=list)
+
+
+class StatementListOut(BaseModel):
+    """GET /api/v1/statements response envelope."""
+
+    items: list[dict]  # StatementListItem dicts -- built inline in the router
+    total: int

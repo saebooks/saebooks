@@ -399,6 +399,36 @@ class Settings(BaseSettings):
         default="http://latex-api:8000", alias="LATEX_API_URL"
     )
 
+
+    # ---------------------------------------------------------------- #
+    # Supplier statement reconciliation (Phase 1, #28)               #
+    # ---------------------------------------------------------------- #
+    # LLM gateway for supplier-statement OCR extraction. Uses the same
+    # litellm proxy as AI extraction but on separate config keys so the
+    # statement pipeline can target a different model / key / base URL
+    # without conflicting with receipt extraction settings.
+    #
+    # statement_llm_api_key: bearer token for the litellm gateway.
+    #   When empty, extract_statement raises on use (fail-closed).
+    # statement_llm_base: base URL of the OpenAI-compatible endpoint.
+    #   Defaults to the same litellm gateway used for receipts.
+    # statement_llm_model: primary extraction model.
+    # statement_llm_model_escalation: model used for a second extraction
+    #   attempt when the balance-reconciliation gate trips. Typically a
+    #   more capable (and slower/costlier) model.
+    statement_llm_api_key: str = Field(default='', alias='STATEMENT_LLM_API_KEY')
+    statement_llm_base: str = Field(
+        default='http://litellm:4000/v1',
+        alias='STATEMENT_LLM_BASE',
+    )
+    statement_llm_model: str = Field(
+        default='claude-sonnet-4-6',
+        alias='STATEMENT_LLM_MODEL',
+    )
+    statement_llm_model_escalation: str = Field(
+        default='claude-opus-4-7',
+        alias='STATEMENT_LLM_MODEL_ESCALATION',
+    )
     @property
     def oauth_allowed_emails_set(self) -> set[str]:
         return {e.strip().lower() for e in self.oauth_allowed_emails.split(",") if e.strip()}
