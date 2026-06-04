@@ -1931,7 +1931,7 @@ def _subtract_one_year_pack(d: date) -> date:
         return d.replace(year=d.year - 1, day=28)
 
 
-@router.get("/statement_pack.pdf", response_class=None)
+@router.get("/statement_pack.pdf", response_model=None)
 async def statement_pack_pdf(
     request: Request,
     as_of_date: date | None = Query(default=None),
