@@ -1,0 +1,358 @@
+{#
+  quote.tex.j2 — SAE Engineering quote / estimate
+
+  Context keys (all data values MUST be latex_escape'd before interpolation):
+    number          str   quote number, e.g. "1019"
+    title           str   project name
+    scope           str   scope of works (may be multi-line)
+    issue_date      str   ISO date "YYYY-MM-DD"
+    expiry_date     str   ISO date "YYYY-MM-DD" or ""
+    validity_days   int   e.g. 14
+    deposit_pct     str   e.g. "50"
+    subtotal        str   decimal string (ex GST)
+    total           str   decimal string (inc GST)
+    customer        dict  keys: name, contact, email, phone, mobile
+    lines           list  dicts with:
+                          line_no, description, quantity, line_total,
+                          section_label, material, length_note, drawing_ref
+
+  Design matches the existing ReportLab render_quote_pdf layout:
+    letterhead → blue rule → ESTIMATE / SAE-2026-{number}
+    → info boxes (Estimate To / Estimate Details)
+    → Project Details box
+    → sections grouped by section_label (heading + booktabs table)
+    → Total bar
+    → Key Terms / Insurance & Licences / Bank Details / Acceptance
+
+  Fonts: Liberation Sans (confirmed present in latex-api TexLive image).
+  Colours: saeblue #1B3A5C, saegrey #4A4A4A, ltgrey #F2F2F2, accent #E8792B.
+  NO TeX Gyre Heros — it is not installed in latex-api.
+
+  Bare % in .tex source = LaTeX comment — every literal percent MUST
+  come from |latex_escape which renders it as \%.
+#}
+{%- macro fmt_money(v) -%}
+  {%- if v is not none -%}\${{ "%.2f"|format(v|float) }}{%- else -%}\$0.00{%- endif -%}
+{%- endmacro -%}
+{%- macro fmt_qty(v) -%}
+  {%- if v is not none and v != "" -%}
+    {%- set d = v|float -%}
+    {%- if d == d|int|float -%}{{ d|int }}{%- else -%}{{ "%.2f"|format(d) }}{%- endif -%}
+  {%- endif -%}
+{%- endmacro -%}
+{%- macro fmt_date(iso) -%}
+  {%- if iso and iso|length >= 10 -%}
+    {%- set parts = iso[:10].split('-') -%}
+    {%- set months = ["January","February","March","April","May","June","July","August","September","October","November","December"] -%}
+    {{ parts[2]|int }} {{ months[parts[1]|int - 1] }} {{ parts[0] }}
+  {%- else -%}---{%- endif -%}
+{%- endmacro -%}
+{%- set ns = namespace(has_material=false, has_length=false, has_drawing=false) -%}
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[
+  a4paper,
+  top=25mm,
+  bottom=32mm,
+  left=20mm,
+  right=20mm,
+  headheight=15pt,
+]{geometry}
+
+\usepackage{fontspec}
+\setmainfont{Liberation Sans}
+\setsansfont{Liberation Sans}
+\setmonofont{Liberation Mono}
+
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{multirow}
+\newcolumntype{R}{>{\raggedleft\arraybackslash}p{22mm}}
+\newcolumntype{L}{>{\raggedright\arraybackslash}X}
+
+\usepackage[table]{xcolor}
+\definecolor{saeblue}{HTML}{1B3A5C}
+\definecolor{saegrey}{HTML}{4A4A4A}
+\definecolor{ltgrey}{HTML}{F2F2F2}
+\definecolor{saeaccent}{HTML}{E8792B}
+\definecolor{saeborder}{HTML}{CCCCCC}
+\definecolor{saefooter}{HTML}{194291}
+\definecolor{midgrey}{HTML}{9CA3AF}
+
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+\fancyfoot[L]{\textcolor{saefooter}{\small Sauer Pty Ltd ACN 683\,275\,756 \enspace ATF \enspace Saueesti Trust ABN 87\,744\,586\,592}}
+\fancyfoot[R]{\textcolor{saefooter}{\small Page~\thepage}}
+
+\usepackage{microtype}
+\usepackage{parskip}
+\setlength{\parindent}{0pt}
+
+\usepackage{titlesec}
+\titleformat{\section}{\large\bfseries\color{saeblue}}{}{0em}{}[\color{saeborder}\titlerule]
+\titlespacing*{\section}{0pt}{8pt}{4pt}
+
+\usepackage{hyperref}
+\hypersetup{colorlinks=true,linkcolor=saeblue,urlcolor=saeblue,pdfborder={0 0 0}}
+
+\begin{document}
+
+%% =====================================================================
+%% LETTERHEAD
+%% =====================================================================
+\thispagestyle{fancy}
+\begin{tabularx}{\textwidth}{@{}Xr@{}}
+  {\LARGE\bfseries\color{saeblue} SAE Engineering}
+  &
+  \begin{tabular}[t]{@{}r@{}}
+    \textcolor{saegrey}{\small PO Box 592, Bungalow QLD 4870} \\
+    \textcolor{saegrey}{\small \textbf{P:}~07\,4243\,3488 \quad \textbf{M:}~0457\,704\,373} \\
+    \textcolor{saegrey}{\small \textbf{E:}~admin@saee.com.au \quad \textbf{W:}~saee.com.au} \\
+    \textcolor{saegrey}{\small ABN: 87\,744\,586\,592 \quad QBCC: 15231284} \\
+  \end{tabular}
+\\
+\end{tabularx}
+
+\vspace{2mm}
+{\color{saeblue}\rule{\textwidth}{1.5pt}}
+\vspace{3mm}
+
+%% =====================================================================
+%% TITLE ROW — ESTIMATE + number
+%% =====================================================================
+\begin{tabularx}{\textwidth}{@{}Xl@{}}
+  {\huge\bfseries\color{saeblue} ESTIMATE}
+  &
+  {\Large\bfseries\color{saeaccent} SAE-2026-{{ number | latex_escape }}}
+  \\
+\end{tabularx}
+
+\vspace{5mm}
+
+%% =====================================================================
+%% INFO BOXES — Estimate To + Estimate Details (side-by-side)
+%% =====================================================================
+\begin{tabularx}{\textwidth}{@{}XX@{}}
+  \cellcolor{ltgrey}%
+  \begin{minipage}[t]{\linewidth}
+    \vspace{2mm}
+    {\small\bfseries\color{saeblue} ESTIMATE TO:}\\[2mm]
+    {\small\bfseries\color{saegrey} {{ customer.name | latex_escape }}}\\
+    {% if customer.contact -%}
+    {\small\color{saegrey} {{ customer.contact | latex_escape }}}\\
+    {%- endif %}
+    {% if customer.phone or customer.mobile -%}
+    {\small\color{saegrey}
+      {% if customer.phone %}\textbf{P:}~{{ customer.phone | latex_escape }}{% endif %}
+      {% if customer.phone and customer.mobile %}\quad{% endif %}
+      {% if customer.mobile %}\textbf{M:}~{{ customer.mobile | latex_escape }}{% endif %}
+    }\\
+    {%- endif %}
+    {% if customer.email -%}
+    {\small\color{saegrey} \textbf{E:}~{{ customer.email | latex_escape }}}\\
+    {%- endif %}
+    \vspace{2mm}
+  \end{minipage}
+  &
+  \cellcolor{ltgrey}%
+  \begin{minipage}[t]{\linewidth}
+    \vspace{2mm}
+    {\small\bfseries\color{saeblue} ESTIMATE DETAILS:}\\[2mm]
+    {\small\color{saegrey} \textbf{Estimate No:} \quad SAE-2026-{{ number | latex_escape }}}\\
+    {\small\color{saegrey} \textbf{Date:} \quad {{ fmt_date(issue_date) | latex_escape }}}\\
+    {\small\color{saegrey} \textbf{Valid Until:} \quad
+      {% if expiry_date -%}{{ fmt_date(expiry_date) | latex_escape }}{%- else -%}---{%- endif %}
+    }\\
+    \vspace{2mm}
+  \end{minipage}
+\\[4mm]
+\end{tabularx}
+
+%% =====================================================================
+%% PROJECT DETAILS BOX
+%% =====================================================================
+\begin{tabularx}{\textwidth}{@{}X@{}}
+  \cellcolor{ltgrey}%
+  \begin{minipage}[t]{\linewidth}
+    \vspace{2mm}
+    {\small\bfseries\color{saeblue} PROJECT DETAILS:}\\[2mm]
+    {\small\color{saegrey} \textbf{Project:} {{ title | latex_escape }}}\\
+    {% if scope -%}
+    {\small\color{saegrey} \textbf{Scope:} {{ scope | latex_escape }}}\\
+    {%- endif %}
+    \vspace{2mm}
+  \end{minipage}
+\\[4mm]
+\end{tabularx}
+
+%% =====================================================================
+%% LINE ITEM SECTIONS — grouped by section_label
+%% =====================================================================
+{%- set grouped = namespace(sections={}, order=[]) -%}
+{% for ln in lines -%}
+  {%- set sec = ln.section_label if ln.section_label else "General" -%}
+  {%- if sec not in grouped.sections -%}
+    {%- set _ = grouped.order.append(sec) -%}
+    {%- set _ = grouped.sections.update({sec: []}) -%}
+  {%- endif -%}
+  {%- set _ = grouped.sections[sec].append(ln) -%}
+{%- endfor %}
+
+{% for sec_label in grouped.order %}
+{%- set sec_lines = grouped.sections[sec_label] %}
+
+\vspace{2mm}
+{\large\bfseries\color{saeblue} {{ sec_label | latex_escape }}}\\[-1mm]
+{\color{saeborder}\rule{\textwidth}{0.4pt}}
+\vspace{2mm}
+
+{%- set desc_lines = [] -%}
+{%- set price_lines = [] -%}
+{% for ln in sec_lines -%}
+  {%- if ln.line_total|float == 0.0 -%}
+    {%- set _ = desc_lines.append(ln) -%}
+  {%- else -%}
+    {%- set _ = price_lines.append(ln) -%}
+  {%- endif -%}
+{%- endfor %}
+
+{% if desc_lines %}
+\begin{longtable}{@{}p{6mm}p{52mm}p{32mm}p{12mm}p{25mm}p{30mm}@{}}
+  \toprule
+  \rowcolor{saeblue}
+  \textcolor{white}{\textbf{\small Item}} &
+  \textcolor{white}{\textbf{\small Description}} &
+  \textcolor{white}{\textbf{\small Material}} &
+  \textcolor{white}{\textbf{\small Qty}} &
+  \textcolor{white}{\textbf{\small Length}} &
+  \textcolor{white}{\textbf{\small Drawing Ref}} \\
+  \midrule
+  \endfirsthead
+  \multicolumn{6}{l}{\textit{\small (continued)}} \\
+  \toprule
+  \rowcolor{saeblue}
+  \textcolor{white}{\textbf{\small Item}} &
+  \textcolor{white}{\textbf{\small Description}} &
+  \textcolor{white}{\textbf{\small Material}} &
+  \textcolor{white}{\textbf{\small Qty}} &
+  \textcolor{white}{\textbf{\small Length}} &
+  \textcolor{white}{\textbf{\small Drawing Ref}} \\
+  \midrule
+  \endhead
+  \bottomrule
+  \endfoot
+  {% for ln in desc_lines -%}
+  {%- set row_bg = "ltgrey" if loop.index is odd else "white" -%}
+  \rowcolor{{ "{" }}{{ row_bg }}{{ "}" }}
+  {\small\color{saegrey} {{ ln.line_no | latex_escape }}} &
+  {\small\color{saegrey} {{ ln.description | latex_escape }}} &
+  {\small\color{saegrey} {{ (ln.material or "") | latex_escape }}} &
+  {\small\color{saegrey}\centering {{ fmt_qty(ln.quantity) | latex_escape }}} &
+  {\small\color{saegrey} {{ (ln.length_note or "") | latex_escape }}} &
+  {\small\color{saegrey} {{ (ln.drawing_ref or "") | latex_escape }}} \\
+  {% endfor %}
+\end{longtable}
+{% endif %}
+
+{% for ln in price_lines %}
+\begin{tabularx}{\textwidth}{@{}Xr@{}}
+  \hline
+  \rowcolor{ltgrey}
+  {\small\bfseries\color{saeblue} {{ ln.description | latex_escape }}} &
+  {\small\bfseries\color{saeblue} {{ fmt_money(ln.line_total) }}} \\
+  \hline
+\end{tabularx}
+\vspace{1mm}
+{% endfor %}
+
+{% endfor %}
+
+\vspace{4mm}
+
+%% =====================================================================
+%% TOTAL BAR
+%% =====================================================================
+\begin{tabularx}{\textwidth}{@{}Xr@{}}
+  \rowcolor{saeblue}
+  {\large\bfseries\color{white} TOTAL ESTIMATE (ex GST)} &
+  {\large\bfseries\color{white} {{ fmt_money(subtotal) }}} \\
+\end{tabularx}
+
+\vspace{6mm}
+
+%% =====================================================================
+%% KEY TERMS
+%% =====================================================================
+\section*{\color{saeblue}Key Terms}
+
+\begin{itemize}
+  \setlength\itemsep{2pt}
+  \item \textbf{Validity:} {{ validity_days | latex_escape }} days from date of estimate. Material pricing subject to change beyond this period.
+  \item \textbf{Payment Terms:} {{ deposit_pct | latex_escape }}\% deposit on acceptance; balance per progress payment schedule.
+  \item \textbf{Programme:} Approximate 8--10 week lead time from receipt of approved IFC drawings and deposit.
+  \item \textbf{Late Fee:} 2.5\% per month on overdue amounts.
+  \item \textbf{PPSA:} SAE Engineering retains a security interest in all goods supplied until payment is received in full.
+  \item \textbf{Full Terms:} \href{https://saee.com.au/terms-of-trade}{saee.com.au/terms-of-trade}
+\end{itemize}
+
+\vspace{4mm}
+
+%% =====================================================================
+%% INSURANCE & LICENCES
+%% =====================================================================
+\section*{\color{saeblue}Insurance \& Licences}
+
+\begin{tabular}{@{}p{38mm}l@{}}
+  \textbf{Public Liability:}    & \$20,000,000 (valid to 23/12/2026) \\
+  \textbf{WorkCover:}           & Policy WSM241037628 (valid to 30/06/2026) \\
+  \textbf{QBCC Licence:}        & 15231284 \\
+\end{tabular}
+
+\vspace{4mm}
+
+%% =====================================================================
+%% BANK DETAILS
+%% =====================================================================
+\begin{tabularx}{\textwidth}{@{}X@{}}
+  \cellcolor{ltgrey}
+  \begin{minipage}[t]{\linewidth}
+    \vspace{2mm}
+    {\small\bfseries\color{saeblue} Bank Details for EFT Payment:}\\[2mm]
+    {\small\color{saegrey} \textbf{Bank:} \quad Westpac}\\
+    {\small\color{saegrey} \textbf{Account Name:} \quad Sauer Pty Ltd}\\
+    {\small\color{saegrey} \textbf{BSB:} \quad 034-193}\\
+    {\small\color{saegrey} \textbf{Account No:} \quad 485846}\\
+    {\small\color{saegrey} \textbf{Reference:} \quad SAE-2026-{{ number | latex_escape }}}\\
+    \vspace{2mm}
+  \end{minipage}
+\\
+\end{tabularx}
+
+\vspace{4mm}
+
+%% =====================================================================
+%% ACCEPTANCE
+%% =====================================================================
+\section*{\color{saeblue}Acceptance}
+
+To proceed with this estimate, please issue a purchase order referencing
+\textbf{SAE-2026-{{ number | latex_escape }}} to
+\href{mailto:admin@saee.com.au}{admin@saee.com.au}.
+Upon receipt of your purchase order, we will issue a formal tax invoice for the deposit
+amount and schedule the works accordingly.
+
+\vspace{6mm}
+
+\textbf{Prepared by:}\\[2mm]
+{\color{saegrey}
+Richard Sauer\\
+Director --- SAE Engineering\\
+\href{mailto:admin@saee.com.au}{admin@saee.com.au} \textbar{} 0457 704 373
+}
+
+\end{document}
