@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import pytest
 
-from saebooks.config import settings as app_settings
 from saebooks.services.licence import (
     LicenceSource,
     ResolvedLicence,
@@ -41,7 +40,7 @@ def _reset_resolver_cache() -> None:
 def test_community_fallback_when_nothing_present(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(app_settings, "edition", "community")
+    monkeypatch.setattr(resolver_mod._settings, "edition", "community")
     monkeypatch.setattr(usb_driver, "load_usb_licence", lambda: None)
     monkeypatch.setattr(jwt_driver, "load_portal_jwt", lambda: None)
 
@@ -56,7 +55,7 @@ def test_env_override_short_circuits_drivers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """SAEBOOKS_EDITION=enterprise skips both drivers, logs a warning."""
-    monkeypatch.setattr(app_settings, "edition", "enterprise")
+    monkeypatch.setattr(resolver_mod._settings, "edition", "enterprise")
     # Drivers shouldn't even be called.
     def _boom() -> None:
         raise AssertionError("drivers must not be called when env overrides")
@@ -71,7 +70,7 @@ def test_env_override_short_circuits_drivers(
 def test_usb_takes_precedence_over_jwt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(app_settings, "edition", "community")
+    monkeypatch.setattr(resolver_mod._settings, "edition", "community")
     fake_usb = usb_driver.build_fake_licence_for_tests(edition="offline")
     fake_jwt = jwt_driver.build_fake_licence_for_tests(edition="business")
     monkeypatch.setattr(usb_driver, "load_usb_licence", lambda: fake_usb)
@@ -87,7 +86,7 @@ def test_usb_takes_precedence_over_jwt(
 def test_jwt_used_when_usb_absent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(app_settings, "edition", "community")
+    monkeypatch.setattr(resolver_mod._settings, "edition", "community")
     fake_jwt = jwt_driver.build_fake_licence_for_tests(edition="pro")
     monkeypatch.setattr(usb_driver, "load_usb_licence", lambda: None)
     monkeypatch.setattr(jwt_driver, "load_portal_jwt", lambda: fake_jwt)
@@ -103,7 +102,7 @@ def test_jwt_used_when_usb_absent(
 def test_resolution_is_cached(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(app_settings, "edition", "community")
+    monkeypatch.setattr(resolver_mod._settings, "edition", "community")
     call_count = {"usb": 0, "jwt": 0}
 
     def _count_usb() -> ResolvedLicence | None:
@@ -126,7 +125,7 @@ def test_resolution_is_cached(
 def test_force_reruns_resolution(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(app_settings, "edition", "community")
+    monkeypatch.setattr(resolver_mod._settings, "edition", "community")
     monkeypatch.setattr(usb_driver, "load_usb_licence", lambda: None)
     monkeypatch.setattr(jwt_driver, "load_portal_jwt", lambda: None)
 
