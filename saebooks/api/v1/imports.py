@@ -62,6 +62,7 @@ from saebooks.services import change_log as change_log_svc
 
 # Import service helpers (parsers + persister)
 from saebooks.services.imports import bank_csv as bank_csv_svc
+from saebooks.services.imports import bill_csv as bill_csv_svc
 from saebooks.services.imports import bank_ofx as bank_ofx_svc
 from saebooks.services.imports import coa as coa_svc
 from saebooks.services.imports import persist as persist_svc
@@ -78,7 +79,7 @@ router = APIRouter(
     dependencies=[Depends(require_bearer)],
 )
 
-_COMMUNITY_KINDS = frozenset({"bank_csv", "bank_ofx", "coa"})
+_COMMUNITY_KINDS = frozenset({"bank_csv", "bank_ofx", "coa", "bill_csv"})
 _QBO_KINDS = frozenset({"qbo"})
 _ALL_KINDS = _COMMUNITY_KINDS | _QBO_KINDS
 
@@ -343,6 +344,8 @@ async def commit_wizard(
         result = await _commit_bank(session, state, company_id)
     elif kind == "coa":
         result = await _commit_coa(session, state, company_id)
+    elif kind == "bill_csv":
+        result = await _commit_bill_csv(session, state, company_id, tenant_id)
     elif kind == "qbo":
         result = await _commit_qbo(session, state, company_id)
     else:
@@ -375,6 +378,25 @@ async def commit_wizard(
 # ---------------------------------------------------------------------------
 # Commit helpers (one per import kind)
 # ---------------------------------------------------------------------------
+
+
+async def _commit_bill_csv(
+    session: AsyncSession,
+    state: dict[str, Any],
+    company_id: UUID,
+    tenant_id: UUID,
+) -> dict[str, Any]:
+    """Create DRAFT bills from an uploaded CSV. Never posts; bad rows are
+    rejected with per-row errors (see services.imports.bill_csv)."""
+    raw = state.get("raw", "") or state.get("raw_csv", "")
+    if not raw:
+        raise HTTPException(422, "Wizard state missing CSV text ('raw')")
+    try:
+        return await bill_csv_svc.commit_bill_csv(
+            session, company_id=company_id, tenant_id=tenant_id, raw=raw
+        )
+    except bill_csv_svc.BillCsvError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 async def _commit_bank(

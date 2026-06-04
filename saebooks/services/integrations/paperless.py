@@ -142,6 +142,22 @@ class PaperlessClient:
             mime_type=str(mime) if mime else None,
         )
 
+    async def download_content(self, document_id: int) -> tuple[bytes, str | None]:
+        """Download the document's binary content + mime (for extraction)."""
+        url = f"{self._api_base}/api/documents/{document_id}/download/"
+        resp = await self._client.get(
+            url, headers={"Authorization": f"Token {self._token}"}
+        )
+        if resp.status_code == 404:
+            raise PaperlessDocumentNotFoundError(
+                f"Paperless document {document_id} content not found"
+            )
+        if resp.status_code != 200:
+            raise PaperlessError(
+                f"Paperless download HTTP {resp.status_code}: {resp.text[:200]}"
+            )
+        return resp.content, resp.headers.get("content-type")
+
     def browser_url(self, document_id: int) -> str:
         """Build the user-facing detail URL for ``document_id``."""
         return build_browser_url(self._browser_base, document_id)

@@ -38,12 +38,15 @@ before.  Only requests with ``Accept: application/json`` (or
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from starlette.exceptions import HTTPException
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Error code registry
@@ -103,6 +106,9 @@ PRECONDITION_REQUIRED = _reg("precondition_required", 428, "Precondition Require
 # Auth
 AUTHENTICATION_REQUIRED = _reg("authentication_required", 401, "Authentication Required")
 INVALID_CREDENTIALS = _reg("invalid_credentials", 401, "Invalid Credentials")
+
+# Server-side failure (catch-all for unhandled exceptions)
+INTERNAL_ERROR = _reg("internal_error", 500, "Internal Server Error")
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +267,56 @@ async def validation_exception_handler(
     )
 
 
+async def unhandled_exception_handler(
+    request: Request,
+    exc: Exception,
+) -> JSONResponse | PlainTextResponse:
+    """Catch-all for unhandled exceptions — normalise 5xx to problem+json.
+
+    Without this, an unhandled exception falls through to Starlette's
+    default ``ServerErrorMiddleware`` and returns the bare
+    ``{"detail": "Internal Server Error"}`` (or a plain-text 500),
+    breaking the "all non-2xx JSON responses are problem+json" contract
+    for the 5xx surface (D1).
+
+    Gated on ``_wants_json()`` like the HTTPException / validation
+    handlers: JSON / API callers get ``application/problem+json``;
+    HTML / browser callers get a generic plain-text 500 (no traceback).
+
+    The traceback is logged server-side at ERROR level; it is NEVER
+    placed in the response body — leaking internal exception text /
+    stack frames to clients is an information-disclosure risk.
+    """
+    # Always log the full traceback server-side for diagnosis.
+    logger.error(
+        "Unhandled exception on %s %s",
+        request.method,
+        request.url.path,
+        exc_info=exc,
+    )
+
+    if not _wants_json(request):
+        # Browser / HTML caller — a generic plain-text 500 with no
+        # internal detail. Deterministic content-type, no leak.
+        return PlainTextResponse("Internal Server Error", status_code=500)
+
+    return _problem(
+        status=500,
+        code="internal_error",
+        detail="An internal error occurred. The incident has been logged.",
+    )
+
+
 def register_handlers(app: Any) -> None:
-    """Install both handlers on a FastAPI ``app`` instance."""
+    """Install the problem+json exception handlers on a FastAPI ``app``.
+
+    Order does not matter for type-keyed handlers, but the catch-all
+    ``Exception`` handler is the broadest and only fires when no more
+    specific handler (HTTPException / RequestValidationError) matched.
+    """
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    # Catch-all: normalise any other unhandled exception to a 500
+    # problem+json (D1). Starlette routes a registered ``Exception``
+    # handler through ServerErrorMiddleware.
+    app.add_exception_handler(Exception, unhandled_exception_handler)

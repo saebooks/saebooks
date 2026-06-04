@@ -669,6 +669,19 @@ async def balance_sheet(
 # Reporting types that contribute to taxable BAS buckets.
 _TAXABLE_REPORTING_TYPE = "taxable"
 _GST_FREE_REPORTING_TYPE = "gst_free"
+# C3: G2/G10 reporting types — kept in lock-step with the strings
+# au.bas_report matches ("export" -> G2, "capital" -> G10).
+_EXPORT_REPORTING_TYPE = "export"
+_CAPITAL_REPORTING_TYPE = "capital"
+
+# C3: reuse au.bas_report's exact account-type sets for G2/G10 so the
+# two BAS implementations sum over identical lines. Imported under
+# aliases to keep this module's local _INCOME_TYPES/_EXPENSE_TYPES
+# (used by the other report routes) untouched.
+from saebooks.services.tax_engine.au import (  # noqa: E402
+    _BAS_INCOME_TYPES as _AU_BAS_INCOME_TYPES,
+    _BAS_PURCHASE_TYPES as _AU_BAS_PURCHASE_TYPES,
+)
 
 # GST rate used for 1A calculation (sales).
 _GST_RATE = Decimal("0.10")
@@ -683,14 +696,29 @@ async def _bas_aggregate(
     tenant_id: UUID,
     from_date: date,
     to_date: date,
-) -> tuple[Decimal, Decimal, Decimal]:
-    """Aggregate G1, G3, G11 totals for POSTED lines in [from_date, to_date]."""
+) -> tuple[Decimal, Decimal, Decimal, Decimal, Decimal]:
+    """Aggregate G1, G2, G3, G10, G11 totals for POSTED lines in range.
+
+    G2 (export sales) and G10 (capital acquisitions) are computed from
+    ``TaxCode.reporting_type`` using the SAME account-type sets and
+    formulas as ``services.tax_engine.au.bas_report`` so the two BAS
+    implementations agree by construction (C3 reconciliation):
+
+      * G2  = export-tagged INCOME lines, net = credit - debit.
+      * G10 = capital-tagged PURCHASE lines (incl. ASSET), net +
+              stamped gst_amount = debit - credit + gst_amount.
+
+    G10 sums ``gst_amount`` alongside the net so the result matches
+    au.bas_report, which adds the line's stamped GST to the capital
+    bucket (G10 is reported GST-inclusive).
+    """
     stmt = (
         select(
             Account.account_type,
             TaxCode.reporting_type,
             func.sum(JournalLine.debit).label("total_debit"),
             func.sum(JournalLine.credit).label("total_credit"),
+            func.sum(func.coalesce(JournalLine.gst_amount, 0)).label("total_gst"),
         )
         .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
         .join(Account, JournalLine.account_id == Account.id)
@@ -710,26 +738,39 @@ async def _bas_aggregate(
     rows = (await session.execute(stmt)).all()
 
     g1 = Decimal("0")
+    g2 = Decimal("0")
     g3 = Decimal("0")
+    g10 = Decimal("0")
     g11 = Decimal("0")
 
-    for acc_type, reporting_type, total_debit, total_credit in rows:
+    for acc_type, reporting_type, total_debit, total_credit, total_gst in rows:
         total_debit = Decimal(total_debit or "0")
         total_credit = Decimal(total_credit or "0")
+        total_gst = Decimal(total_gst or "0")
         rt = reporting_type or ""
 
-        if acc_type in _INCOME_TYPES:
+        # Income side. ``_AU_BAS_INCOME_TYPES`` mirrors au.bas_report's
+        # income set so G2 lands on exactly the same lines au counts.
+        if acc_type in _AU_BAS_INCOME_TYPES:
             net = total_credit - total_debit
             if rt == _TAXABLE_REPORTING_TYPE:
                 g1 += net
+            elif rt == _EXPORT_REPORTING_TYPE:
+                g2 += net
             elif rt == _GST_FREE_REPORTING_TYPE:
                 g3 += net
-        elif acc_type in _EXPENSE_TYPES:
+        # Purchase side. ``_AU_BAS_PURCHASE_TYPES`` includes ASSET so
+        # capital acquisitions booked to an asset account land in G10,
+        # matching au.bas_report.
+        if acc_type in _AU_BAS_PURCHASE_TYPES:
             net = total_debit - total_credit
             if rt == _TAXABLE_REPORTING_TYPE:
                 g11 += net
+            elif rt == _CAPITAL_REPORTING_TYPE:
+                # G10 is reported GST-inclusive — net + stamped GST.
+                g10 += net + total_gst
 
-    return g1, g3, g11
+    return g1, g2, g3, g10, g11
 
 
 async def _bas_gst_amounts(
@@ -850,9 +891,16 @@ async def bas_summary(
              "gst_free": net = credit - debit.
     * G11 — lines on EXPENSE/COST_OF_SALES/OTHER_EXPENSE accounts with
              reporting_type "taxable": net = debit - credit.
-    * 1A  = G1 × 10%  (GST collected, calculated from GST-exclusive base).
-    * 1B  = G11 × 1/11 (GST credits, tax-inclusive component of purchase).
-    * G2/G10 are always 0 in v1 (no export or capital acquisition tracking).
+    * G2  — lines on INCOME/OTHER_INCOME accounts with reporting_type
+             "export": net = credit - debit.
+    * G10 — lines on purchase accounts (EXPENSE/COST_OF_SALES/
+             OTHER_EXPENSE/ASSET) with reporting_type "capital":
+             net + gst_amount = debit - credit + GST (GST-inclusive).
+    * 1A/1B come from the GST control accounts (see _bas_gst_amounts).
+
+    G2/G10 are computed by ``_bas_aggregate`` using the SAME account-type
+    sets and formulas as ``services.tax_engine.au.bas_report`` so the two
+    BAS implementations reconcile by construction (C3).
 
     When registration_effective_date falls within the period, G1 is split:
     pre-registration sales are disclosed but excluded from 1A; only
@@ -873,14 +921,16 @@ async def bas_summary(
     if _split:
         assert registration_effective_date is not None  # narrowing
         pre_end = registration_effective_date - timedelta(days=1)
-        g1_pre, g3_pre, _g11_pre = await _bas_aggregate(
+        g1_pre, g2_pre, g3_pre, _g10_pre, _g11_pre = await _bas_aggregate(
             session, company_id, tenant_id, from_date, pre_end
         )
-        g1_post, g3_post, g11_post = await _bas_aggregate(
+        g1_post, g2_post, g3_post, g10_post, g11_post = await _bas_aggregate(
             session, company_id, tenant_id, registration_effective_date, to_date
         )
         g1 = g1_pre + g1_post
+        g2 = g2_pre + g2_post  # export sales disclosed in full, like G1
         g3 = g3_pre + g3_post
+        g10 = g10_post  # capital ITCs only claimable from registration date
         g11 = g11_post  # ITCs only claimable from registration date
         # 1A/1B come from the actual gst_amount on the ledger lines —
         # only the post-registration slice is in scope for 1A; 1B is
@@ -890,7 +940,7 @@ async def bas_summary(
             session, company_id, tenant_id, registration_effective_date, to_date
         )
     else:
-        g1, g3, g11 = await _bas_aggregate(
+        g1, g2, g3, g10, g11 = await _bas_aggregate(
             session, company_id, tenant_id, from_date, to_date
         )
         g1_post = g1
@@ -917,9 +967,9 @@ async def bas_summary(
         from_date=from_date,
         to_date=to_date,
         g1_total_sales=float(g1),
-        g2_export_sales=0.0,
+        g2_export_sales=float(g2),
         g3_other_gst_free_sales=float(g3),
-        g10_capital_acquisitions=0.0,
+        g10_capital_acquisitions=float(g10),
         g11_other_acquisitions=float(g11),
         label_1a_gst_on_sales=float(label_1a),
         label_1b_gst_on_purchases=float(label_1b),

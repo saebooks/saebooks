@@ -282,6 +282,100 @@ async def test_paperless_webhook_valid_hmac_accepted(
 
 
 @pytest.mark.asyncio
+async def test_paperless_webhook_static_secret_accepted(
+    client: AsyncClient,
+) -> None:
+    """Paperless-ngx cannot HMAC its body, so the native path sends the raw
+    shared secret as ``X-Paperless-Signature: <secret>`` (no ``sha256=``
+    prefix). The handler must accept it via constant-time compare."""
+    tenant_id = uuid.uuid4()
+    secret = "test-paperless-webhook-secret"
+    payload = b'{"type":"document_added","doc_url":"https://p/documents/42/"}'
+
+    from cryptography.fernet import Fernet
+
+    fernet = Fernet(Fernet.generate_key())
+    mock_row = MagicMock()
+    mock_row.secret_ciphertext = fernet.encrypt(secret.encode("utf-8"))
+    mock_row.tenant_id = tenant_id
+
+    async def _fake_execute(stmt: Any) -> Any:
+        result = MagicMock()
+        result.scalars.return_value.first.return_value = mock_row
+        return result
+
+    with (
+        patch("saebooks.api.v1.integrations.AsyncSessionLocal") as mock_session_cm,
+        patch(
+            "saebooks.api.v1.integrations.decrypt_field",
+            return_value=secret,
+        ),
+    ):
+        mock_session = AsyncMock()
+        mock_session.execute = _fake_execute
+        mock_session_cm.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_cm.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        resp = await client.post(
+            "/api/v1/integrations/paperless/webhook",
+            content=payload,
+            headers={
+                # No "sha256=" prefix -> static-secret path.
+                "X-Tenant-Id": str(tenant_id),
+                "X-Paperless-Signature": secret,
+            },
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["received"] is True
+
+
+@pytest.mark.asyncio
+async def test_paperless_webhook_wrong_static_secret_rejected(
+    client: AsyncClient,
+) -> None:
+    """A wrong static secret (no sha256= prefix) is rejected 400."""
+    tenant_id = uuid.uuid4()
+    secret = "correct-secret"
+    payload = b'{"type":"document_added"}'
+
+    from cryptography.fernet import Fernet
+
+    fernet = Fernet(Fernet.generate_key())
+    mock_row = MagicMock()
+    mock_row.secret_ciphertext = fernet.encrypt(secret.encode("utf-8"))
+    mock_row.tenant_id = tenant_id
+
+    async def _fake_execute(stmt: Any) -> Any:
+        result = MagicMock()
+        result.scalars.return_value.first.return_value = mock_row
+        return result
+
+    with (
+        patch("saebooks.api.v1.integrations.AsyncSessionLocal") as mock_session_cm,
+        patch(
+            "saebooks.api.v1.integrations.decrypt_field",
+            return_value=secret,
+        ),
+    ):
+        mock_session = AsyncMock()
+        mock_session.execute = _fake_execute
+        mock_session_cm.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_cm.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        resp = await client.post(
+            "/api/v1/integrations/paperless/webhook",
+            content=payload,
+            headers={
+                "X-Tenant-Id": str(tenant_id),
+                "X-Paperless-Signature": "definitely-wrong",
+            },
+        )
+
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_paperless_webhook_invalid_hmac_rejected(
     client: AsyncClient,
 ) -> None:

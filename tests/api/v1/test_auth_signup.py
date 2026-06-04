@@ -299,16 +299,28 @@ async def test_pwv_mismatch_invalidates_token(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_signup_rate_limit(client: AsyncClient) -> None:
-    await _reset_rate_limits()
-    statuses = []
-    for i in range(6):
-        email = f"rl-{i}-{uuid.uuid4().hex[:6]}@example.test"
-        await _purge_email(email)
-        resp = await client.post(
-            "/api/v1/auth/signup",
-            json={"email": email, "password": "letmein-2026"},
-        )
-        statuses.append(resp.status_code)
+    # The limiter uses fixed minute windows (date_trunc('minute', now())). If
+    # the 6 requests straddle a minute boundary the counter resets mid-loop and
+    # the 6th request is no longer the 6th in its window -> spurious non-429.
+    # Under suite load the loop is slow enough to occasionally cross a boundary.
+    # Retry the whole sequence in a fresh window when that happens (no fixed
+    # sleeps): only assert on a run that stayed inside one minute window.
+    statuses: list[int] = []
+    for _attempt in range(4):
+        await _reset_rate_limits()
+        minute_before = datetime.now(UTC).minute
+        statuses = []
+        for i in range(6):
+            email = f"rl-{i}-{uuid.uuid4().hex[:6]}@example.test"
+            await _purge_email(email)
+            resp = await client.post(
+                "/api/v1/auth/signup",
+                json={"email": email, "password": "letmein-2026"},
+            )
+            statuses.append(resp.status_code)
+        if datetime.now(UTC).minute == minute_before:
+            break  # whole loop ran inside one fixed-minute window
+
     # First 5 should pass (201), 6th should be 429.
     assert statuses[0] == 201
     assert statuses[4] == 201
