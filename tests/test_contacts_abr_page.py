@@ -20,13 +20,25 @@ pytestmark = pytest.mark.postgres_only
 
 @pytest.fixture
 def enterprise(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(app_settings, "edition", "enterprise")
+    # Patch the LIVE config singleton, not this module stale ``app_settings``
+    # alias: test_runtime_database_url_strict (runs earlier) does
+    # importlib.reload(saebooks.config), rebinding the singleton. The feature
+    # gate reads the live object (conftest re-syncs features/resolver to it),
+    # and the contacts router passes its own bound ``settings`` to lookup_abn —
+    # repoint that to live too so the ABR client sees the mocked config below.
+    import saebooks.config as _cfg
+    import saebooks.routers.contacts as _contacts_mod
+
+    monkeypatch.setattr(_cfg.settings, "edition", "enterprise")
+    monkeypatch.setattr(_contacts_mod, "settings", _cfg.settings)
 
 
 @pytest.fixture
 def configured_abr(monkeypatch: pytest.MonkeyPatch, enterprise: None) -> None:
-    monkeypatch.setattr(app_settings, "abr_api_guid", "test-guid")
-    monkeypatch.setattr(app_settings, "abr_api_base", "https://abr.example/json")
+    import saebooks.config as _cfg
+
+    monkeypatch.setattr(_cfg.settings, "abr_api_guid", "test-guid")
+    monkeypatch.setattr(_cfg.settings, "abr_api_base", "https://abr.example/json")
 
 
 async def _first_company_id() -> object:
