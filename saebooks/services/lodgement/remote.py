@@ -196,6 +196,34 @@ class RemoteLodgementService(LodgementService):
             self._raise_for_status(resp)
         return resp.json()
 
+    async def poll_status(
+        self,
+        *,
+        receipt_ref: str,
+        product: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> LodgementResult:
+        """GATED STUB — the lodge-server status route is not yet contracted.
+
+        The real ATO status-retrieval is an ebMS3 response-retrieval (the
+        SBR Pull/get-status flow) fronted by a lodge-server route. Both
+        the route shape AND the underlying ATO transport are gated on the
+        ATO PVT (Product Verification Testing) reference pack, which SAE
+        Engineering does not yet hold. Rather than fabricate a route or a
+        Pull call here — which would silently diverge from whatever the
+        contract eventually locks — we fail loudly. The engine-side
+        reconcile orchestration (``services/stp.reconcile_*``) is built and
+        tested against a test double; only this transport seam is pending.
+
+        See docs/contracts/lodge-server.md (status/poll route: TODO, gated).
+        """
+        raise NotImplementedError(
+            "lodge-server status/poll route not yet contracted — gated on "
+            "the ATO PVT pack. The ebMS3 response-retrieval transport and "
+            "its lodge-server route shape are deliberately not fabricated; "
+            "see docs/contracts/lodge-server.md."
+        )
+
     # ------------------------------------------------------------------ #
     # Internals                                                          #
     # ------------------------------------------------------------------ #
