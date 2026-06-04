@@ -23,6 +23,7 @@ from saebooks.models.document_counter import DocumentCounter
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import bills as bill_svc
 from saebooks.services import reports as svc
+
 pytestmark = pytest.mark.postgres_only
 
 

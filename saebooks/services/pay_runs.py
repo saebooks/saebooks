@@ -23,10 +23,10 @@ from saebooks.models.pay_run import PayRun, PayRunLine, PayRunStatus
 from saebooks.services import change_log as cl_svc
 from saebooks.services import journal as journal_svc
 from saebooks.services.aba import (
+    TXN_CREDIT_GENERAL,
     AbaDetail,
     AbaError,
     AbaHeader,
-    TXN_CREDIT_GENERAL,
     build_aba,
     dollars_to_cents,
 )
@@ -405,14 +405,7 @@ async def export_aba(
             "Re-run the AU CoA seed or create the account manually before exporting ABA."
         )
 
-    all_journal_lines: list[dict[str, Any]] = [
-        {
-            "account_id": wages_account.id,
-            "description": f"Net payroll: {pay_run.period_start} to {pay_run.period_end}",
-            "debit": total_net,
-            "credit": Decimal("0"),
-        }
-    ] + journal_lines
+    all_journal_lines: list[dict[str, Any]] = [{"account_id": wages_account.id, "description": f"Net payroll: {pay_run.period_start} to {pay_run.period_end}", "debit": total_net, "credit": Decimal("0")}, *journal_lines]
 
     bank_abbr = remitter_account.bank_abbreviation or "CBA"
     ddmmyy = pay_run.payment_date.strftime("%d%m%y")

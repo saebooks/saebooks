@@ -11,7 +11,8 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
 
 from saebooks.config import settings
-from saebooks.services.mailer import EmailAttachment, EmailResult, send_email as mailer_send_email
+from saebooks.services.mailer import EmailAttachment, EmailResult
+from saebooks.services.mailer import send_email as mailer_send_email
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,7 @@ async def send_email(
     try:
         tmpl = jinja_env.get_template(template_path)
         html = tmpl.render(**context)
-    except FileNotFoundError as e:
+    except FileNotFoundError:
         logger.error(f"Email template not found: {template_path}")
         raise
     except Exception as e:

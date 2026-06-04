@@ -30,7 +30,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_session
 from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
-from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.api.v1.schemas import (
     CompanyConflictBody,
     CompanyCreate,
@@ -42,6 +41,7 @@ from saebooks.models.company import Company
 from saebooks.models.invoice import Invoice, InvoiceStatus
 from saebooks.services import companies as svc
 from saebooks.services.features import FLAG_MULTI_COMPANY, require_feature
+from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 
 router = APIRouter(
@@ -315,9 +315,9 @@ async def _company_ref_counts(
     """Return non-zero ref counts per table for a candidate company hard-delete."""
     counts: dict[str, int] = {}
     for table in _COMPANY_REF_TABLES:
-        assert table in _COMPANY_REF_TABLES, f"table {table!r} not in allowed list"  # noqa: S101
+        assert table in _COMPANY_REF_TABLES, f"table {table!r} not in allowed list"
         result = await session.execute(
-            text("SELECT count(*) FROM " + table + " WHERE company_id = :cid"),  # noqa: S608
+            text("SELECT count(*) FROM " + table + " WHERE company_id = :cid"),
             {"cid": str(company_id)},
         )
         n = int(result.scalar() or 0)
@@ -432,8 +432,8 @@ async def gst_backdate_preview(
 # ---------------------------------------------------------------------------
 
 
-from pydantic import BaseModel as _BaseModel
-from pydantic import Field as _Field
+from pydantic import BaseModel as _BaseModel  # noqa: E402
+from pydantic import Field as _Field  # noqa: E402
 
 
 class BookkeepingModeChange(_BaseModel):

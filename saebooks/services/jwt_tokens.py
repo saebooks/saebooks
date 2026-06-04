@@ -56,7 +56,7 @@ def _secret_key() -> str:
     if _SECRET is not None:
         return _SECRET
     # Import here to avoid a circular import at module level.
-    from saebooks.config import settings as _settings  # noqa: PLC0415
+    from saebooks.config import settings as _settings
 
     key = _settings.secret_key.strip()
     if key:
@@ -176,7 +176,7 @@ def decode_access_token(token: str) -> dict[str, Any]:
         raise JWTError("Malformed token")
 
     header_b64, payload_b64, sig_b64 = parts
-    signing_input = f"{header_b64}.{payload_b64}".encode("utf-8")
+    signing_input = f"{header_b64}.{payload_b64}".encode()
     expected_sig = hmac.new(
         _secret_key().encode("utf-8"),
         signing_input,

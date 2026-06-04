@@ -18,7 +18,7 @@ secret, which is deliberate.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -65,7 +65,7 @@ async def list_page(request: Request) -> HTMLResponse:
             "include_revoked": include_revoked,
             "new_token": new_token,
             "new_name": new_name,
-            "now": datetime.now(timezone.utc),
+            "now": datetime.now(UTC),
         },
     )
 

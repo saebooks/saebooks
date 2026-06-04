@@ -307,7 +307,8 @@ async def test_migration_backfill_stamps_legacy_null_lines() -> None:
     """Simulate the pre-fix world (a cashbook category line with NULL
     tax_code_id) and run migration 0149's step-3 backfill SQL. The line
     must end up stamped and the supply visible to BAS (delta restored)."""
-    from sqlalchemy import select as _select, text as _text
+    from sqlalchemy import select as _select
+    from sqlalchemy import text as _text
 
     from saebooks.models.journal import JournalLine
 

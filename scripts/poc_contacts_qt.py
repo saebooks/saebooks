@@ -20,7 +20,7 @@ from typing import Any
 import httpx
 
 try:
-    from PySide6.QtCore import Qt
+    from PySide6.QtCore import Qt  # noqa: F401
     from PySide6.QtWidgets import (
         QApplication,
         QDialog,

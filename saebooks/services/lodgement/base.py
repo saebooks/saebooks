@@ -28,11 +28,11 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class LodgementStatus(str, Enum):
+class LodgementStatus(StrEnum):
     """Coarse outcome of a single lodgement attempt.
 
     Mirrors the lodge-server contract's status field plus a STUB

@@ -44,7 +44,6 @@ from saebooks.main import app
 from saebooks.models.company import Company
 from saebooks.models.super_fund import SuperFund
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

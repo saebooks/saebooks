@@ -20,8 +20,8 @@ from __future__ import annotations
 import csv
 import io
 import uuid
-from dataclasses import dataclass, field
-from datetime import date, timedelta
+from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -119,9 +119,9 @@ def parse_bill_csv(raw: str) -> list[ParsedBillRow]:
 
     rows: list[ParsedBillRow] = []
     for i, raw_row in enumerate(reader, start=2):  # row 1 = header
-        def g(canon: str) -> str:
+        def g(canon: str, _row: dict = raw_row) -> str:
             col = header_map.get(canon)
-            return (raw_row.get(col, "") if col else "").strip()
+            return (_row.get(col, "") if col else "").strip()
 
         row = ParsedBillRow(row_num=i)
         row.supplier = g("supplier")

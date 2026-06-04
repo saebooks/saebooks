@@ -26,21 +26,15 @@ or simply insert via raw SQL with the trigger disabled at session level.
 from __future__ import annotations
 
 import uuid
-from datetime import date
 from decimal import Decimal
 
 import pytest
 from sqlalchemy import text
 
 from saebooks.db import AsyncSessionLocal
-from saebooks.models.account import Account, AccountType
+from saebooks.models.account import AccountType
 from saebooks.models.company import Company
-from saebooks.models.contact import Contact, ContactType
-from saebooks.models.department import CostCentre, Department
-from saebooks.models.item import CostMethod, Item, ItemType
-from saebooks.models.journal_template import JournalTemplate
-from saebooks.models.project import Project, ProjectStatus
-from saebooks.models.tax_code import TaxCode
+from saebooks.models.contact import ContactType
 from saebooks.models.tenant import Tenant
 from saebooks.services import accounts as accounts_svc
 from saebooks.services import contacts as contacts_svc
@@ -143,8 +137,8 @@ def _inject(table: str, row: dict) -> text:
     (e.g. from the critic seeding that caused the original leak).
     """
     cols = ", ".join(row.keys())
-    vals = ", ".join(f":{k}" for k in row.keys())
-    return text(f"INSERT INTO {table} ({cols}) VALUES ({vals})")  # noqa: S608
+    vals = ", ".join(f":{k}" for k in row)
+    return text(f"INSERT INTO {table} ({cols}) VALUES ({vals})")
 
 
 async def _disable_trigger(session, table: str) -> None:
@@ -500,7 +494,7 @@ async def test_projects_list_active_excludes_corrupt_row(two_tenants: dict) -> N
 
     # list_projects (API tier) — had tenant_id param but didn't use it
     async with AsyncSessionLocal() as session:
-        rows_api, total = await projects_svc.list_projects(
+        rows_api, _total = await projects_svc.list_projects(
             session, alpha["company_id"], alpha["tenant_id"]
         )
     api_ids = {r.id for r in rows_api}

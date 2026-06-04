@@ -15,6 +15,8 @@ module default).
 """
 from __future__ import annotations
 
+import itertools
+
 import pytest
 from fastapi import Depends, FastAPI
 from httpx import ASGITransport, AsyncClient
@@ -250,7 +252,7 @@ def test_tier_flags_unknown_tier_raises() -> None:
 
 def test_tier_superset_invariant() -> None:
     """Each tier must be a strict superset of the one below it."""
-    for lower, higher in zip(TIER_ORDER, TIER_ORDER[1:]):
+    for lower, higher in itertools.pairwise(TIER_ORDER):
         lower_flags = tier_flags(lower)
         higher_flags = tier_flags(higher)
         assert lower_flags <= higher_flags, (
@@ -418,7 +420,7 @@ async def test_require_feature_consults_per_user_promo_jwt(
 
     # Stub the per-user resolver to behave as if the request user has
     # a verified Pro JWT (or no JWT at all if user_edition is None).
-    def _fake_for_user(u):  # noqa: ANN001
+    def _fake_for_user(u):
         if u is None or user_edition is None:
             # singleton fallback
             return ResolvedLicence(
@@ -439,7 +441,7 @@ async def test_require_feature_consults_per_user_promo_jwt(
     app = FastAPI()
 
     @app.middleware("http")
-    async def _stamp_user(request, call_next):  # noqa: ANN001
+    async def _stamp_user(request, call_next):
         # Tests inject "X-Test-User: 1" to simulate a logged-in
         # request whose user row carries a Pro promo JWT. Absence
         # leaves request.state.user unset, exercising the fallback.

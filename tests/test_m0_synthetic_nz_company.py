@@ -33,7 +33,6 @@ from saebooks.services.lodgement import get_adapter
 from saebooks.services.tax_engine import get_engine
 from saebooks.services.templates import apply_template
 
-
 _TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 

@@ -52,7 +52,6 @@ from sqlalchemy import JSON
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.ext.compiler import compiles
 
-
 # --------------------------------------------------------------------------- #
 # SQLite compile hooks for Postgres-native column types                       #
 # --------------------------------------------------------------------------- #
@@ -97,4 +96,4 @@ def _uuid_sqlite(element, compiler, **kw):  # type: ignore[no-untyped-def]
     return "CHAR(32)"
 
 
-__all__ = ["JSONB", "UUID", "ARRAY"]
+__all__ = ["ARRAY", "JSONB", "UUID"]

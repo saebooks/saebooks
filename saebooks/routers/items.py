@@ -21,9 +21,9 @@ from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.models.item import CostMethod
 from saebooks.routers.deps import get_web_session
+from saebooks.services import active_company as active_svc
 from saebooks.services import items as svc
 from saebooks.web import templates
-from saebooks.services import active_company as active_svc
 
 router = APIRouter(prefix="/items")
 

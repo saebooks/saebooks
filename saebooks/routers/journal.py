@@ -16,11 +16,11 @@ from saebooks.models.journal import EntryStatus, JournalEntry
 from saebooks.models.project import Project, ProjectStatus
 from saebooks.models.tax_code import TaxCode
 from saebooks.routers.deps import get_web_session
+from saebooks.services import active_company as active_svc
 from saebooks.services import journal as svc
 from saebooks.services.authz import resolve_actor_role
 from saebooks.services.journal import PostingError
 from saebooks.web import templates
-from saebooks.services import active_company as active_svc
 
 router = APIRouter(prefix="/journal")
 
@@ -332,7 +332,7 @@ async def journal_delete(
     session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse:
     tenant_id = resolve_tenant_id(request)
-    try:
+    try:  # noqa: SIM105
         await svc.delete(
             session, entry_id, performed_by="web", tenant_id=tenant_id
         )

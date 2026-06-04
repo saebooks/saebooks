@@ -33,11 +33,11 @@ from saebooks.models.company import Company
 from saebooks.models.contact import Contact
 from saebooks.models.project import Project, ProjectStatus
 from saebooks.models.tax_code import TaxCode
+from saebooks.routers.deps import get_web_session
+from saebooks.services import active_company as active_svc
 from saebooks.services import bills as svc
 from saebooks.services import numbering
 from saebooks.web import templates
-from saebooks.services import active_company as active_svc
-from saebooks.routers.deps import get_web_session
 
 router = APIRouter(prefix="/bills")
 
@@ -481,7 +481,7 @@ async def bills_archive(
     session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse:
     tenant_id = resolve_tenant_id(request)
-    try:
+    try:  # noqa: SIM105
         await svc.archive(session, bill_id, tenant_id=tenant_id)
     except svc.BillError:
         # Cross-tenant or already-archived: silently no-op so users

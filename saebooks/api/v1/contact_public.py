@@ -30,6 +30,11 @@ from saebooks.db import AsyncSessionLocal
 
 logger = logging.getLogger("saebooks.contact")
 
+# Strong references to fire-and-forget notify tasks so the event loop
+# does not garbage-collect them mid-flight (RUF006).
+_background_tasks: set[asyncio.Task] = set()
+
+
 router = APIRouter(prefix="/contact", tags=["contact"])
 
 # ---------------------------------------------------------------------------
@@ -216,7 +221,9 @@ async def contact_submit(body: ContactRequest, request: Request) -> JSONResponse
                 )
                 await upd_session.commit()
 
-    asyncio.create_task(_notify_and_update())
+    _task = asyncio.create_task(_notify_and_update())
+    _background_tasks.add(_task)
+    _task.add_done_callback(_background_tasks.discard)
 
     return JSONResponse(
         status_code=status.HTTP_200_OK,

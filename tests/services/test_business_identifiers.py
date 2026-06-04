@@ -114,7 +114,7 @@ async def test_backfill_seeded_au_abn_from_companies_abn() -> None:
     company having no ABN — only assert the row exists when the column
     is populated.
     """
-    tenant_id, company_id = await _seed_company()
+    _tenant_id, company_id = await _seed_company()
     async with AsyncSessionLocal() as session:
         co = await session.get(Company, company_id)
         if not co or not co.abn:

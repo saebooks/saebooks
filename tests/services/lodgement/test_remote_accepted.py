@@ -1,7 +1,7 @@
 """200 ACCEPTED response → status, receipt, timestamp parsed."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 import respx
@@ -37,7 +37,7 @@ async def test_accepted_parses_receipt_and_timestamp() -> None:
     assert result.status is LodgementStatus.ACCEPTED
     assert result.ato_receipt_id == "ATO-RECEIPT-XYZ"
     assert result.ato_timestamp == datetime(
-        2026, 5, 2, 12, 0, 0, tzinfo=timezone.utc
+        2026, 5, 2, 12, 0, 0, tzinfo=UTC
     )
     assert result.warnings == ["payee count exceeded 1000"]
 

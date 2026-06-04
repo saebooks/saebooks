@@ -51,13 +51,12 @@ Conventions
 from __future__ import annotations
 
 import hashlib
-import json
 import hmac
+import json
 import logging
 import uuid
-from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import select, text
@@ -67,11 +66,7 @@ from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_session
 from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
-from saebooks.services.integrations.paperless_ingest import (
-    extract_document_id,
-    ingest_document,
-)
-from saebooks.services.crypto import decrypt_field, FieldEncryptionNotConfiguredError
+from saebooks.services.crypto import FieldEncryptionNotConfiguredError, decrypt_field
 from saebooks.services.features import (
     FLAG_COMPANIES_HOUSE,
     FLAG_LEI_LOOKUP,
@@ -99,6 +94,10 @@ from saebooks.services.integrations.lei import (
     LeiError,
     LeiNotFoundError,
     lookup_lei,
+)
+from saebooks.services.integrations.paperless_ingest import (
+    extract_document_id,
+    ingest_document,
 )
 
 logger = logging.getLogger("saebooks.api.v1.integrations")
@@ -213,7 +212,7 @@ async def stripe_customer_status(
         200 ``{"connected": bool, "account_id": str|null, "charges_enabled":
         bool, "payouts_enabled": bool, "details_submitted": bool}``
     """
-    from saebooks.models.tenant import Tenant  # noqa: PLC0415
+    from saebooks.models.tenant import Tenant
 
     tenant_id = resolve_tenant_id(request)
     result = await session.execute(
@@ -298,7 +297,7 @@ async def paperless_webhook(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="X-Tenant-Id must be a valid UUID",
-        )
+        ) from None
 
     if not x_paperless_signature:
         raise HTTPException(
@@ -323,7 +322,7 @@ async def paperless_webhook(
     # error at or near "$1""); use literal interpolation, safe
     # because tenant_uuid is a typed UUID. Matches the pattern in
     # saebooks/api/v1/deps.py:_set_current_tenant_on_begin.
-    from saebooks.models.integrations import PaperlessWebhookSecret  # noqa: PLC0415
+    from saebooks.models.integrations import PaperlessWebhookSecret
 
     async with AsyncSessionLocal() as session:
         # SET LOCAL needs an open transaction; the first statement on
@@ -402,7 +401,7 @@ async def paperless_webhook(
                     document_id=doc_id,
                     settings=settings,
                 )
-        except Exception as exc:  # noqa: BLE001 — webhook must not 5xx
+        except Exception as exc:
             logger.exception(
                 "integrations: paperless ingest failed tenant=%s doc=%s",
                 tenant_uuid, doc_id,
@@ -454,7 +453,7 @@ async def lei_lookup(
         ) from exc
 
     # Convert dataclass to dict for JSON serialisation.
-    import dataclasses  # noqa: PLC0415
+    import dataclasses
     return JSONResponse(dataclasses.asdict(result) if dataclasses.is_dataclass(result) else dict(result))  # type: ignore[arg-type]
 
 
@@ -502,7 +501,7 @@ async def companies_house_search(
             detail=str(exc),
         ) from exc
 
-    import dataclasses  # noqa: PLC0415
+    import dataclasses
     return JSONResponse(dataclasses.asdict(result) if dataclasses.is_dataclass(result) else dict(result))  # type: ignore[arg-type]
 
 
@@ -528,7 +527,7 @@ async def ato_prefill(
 
     Body: ``{period_start: "YYYY-MM-DD", period_end: "YYYY-MM-DD"}``
     """
-    from datetime import date as _date  # noqa: PLC0415
+    from datetime import date as _date
 
     try:
         ps = _date.fromisoformat(body.period_start)
@@ -550,7 +549,7 @@ async def ato_prefill(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
         )
 
-    import dataclasses  # noqa: PLC0415
+    import dataclasses
     return JSONResponse(dataclasses.asdict(result))
 
 

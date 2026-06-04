@@ -75,8 +75,9 @@ HEADER = """\
 
 async def _build_db(path: str) -> None:
     """Bootstrap an empty SQLite DB at *path* using the ORM metadata."""
-    from saebooks.db import bootstrap_schema
     from sqlalchemy.ext.asyncio import create_async_engine
+
+    from saebooks.db import bootstrap_schema
 
     url = f"sqlite+aiosqlite:///{path}"
     eng = create_async_engine(url)

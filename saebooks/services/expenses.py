@@ -576,9 +576,7 @@ def _serialise_expense(expense: Expense) -> dict:
         val = getattr(expense, key, None)
         if isinstance(val, uuid.UUID):
             val = str(val)
-        elif isinstance(val, datetime):
-            val = val.isoformat()
-        elif isinstance(val, date):
+        elif isinstance(val, (datetime, date)):
             val = val.isoformat()
         elif isinstance(val, Decimal):
             val = str(val)

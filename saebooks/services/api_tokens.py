@@ -215,11 +215,11 @@ def to_public_dict(token: ApiToken, *, cleartext: str | None = None) -> dict[str
 
 
 __all__ = [
-    "TokenVerifyError",
     "TOKEN_PREFIX_HEADER",
+    "TokenVerifyError",
     "issue",
-    "verify",
     "list_for_user",
     "revoke",
     "to_public_dict",
+    "verify",
 ]

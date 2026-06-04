@@ -8,9 +8,8 @@ from __future__ import annotations
 
 import uuid
 from decimal import Decimal
-from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 

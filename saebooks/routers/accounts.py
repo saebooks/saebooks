@@ -17,8 +17,8 @@ from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
 from saebooks.models.tax_code import TaxCode
 from saebooks.routers.deps import get_web_session
 from saebooks.services import accounts as svc
-from saebooks.web import templates
 from saebooks.services import active_company as active_svc
+from saebooks.web import templates
 
 _CREDIT_NORMAL = {AccountType.LIABILITY, AccountType.EQUITY, AccountType.INCOME, AccountType.OTHER_INCOME}
 

@@ -47,7 +47,6 @@ from saebooks.services.idempotency import (
     store_response,
 )
 
-
 router = APIRouter(
     prefix="/admin",
     tags=["admin"],

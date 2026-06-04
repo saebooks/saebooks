@@ -8,11 +8,17 @@ import enum
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
-
 from typing import Any
 
 from sqlalchemy import (
-    Date, DateTime, ForeignKey, Integer, Numeric, String, Text, func,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -69,7 +75,7 @@ class PayRun(CompanyScoped, Base):
     )
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    lines: Mapped[list["PayRunLine"]] = relationship(
+    lines: Mapped[list[PayRunLine]] = relationship(
         back_populates="pay_run",
         cascade="all, delete-orphan",
         order_by="PayRunLine.created_at",
@@ -157,4 +163,4 @@ class PayRunLine(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
-    pay_run: Mapped["PayRun"] = relationship(back_populates="lines")
+    pay_run: Mapped[PayRun] = relationship(back_populates="lines")

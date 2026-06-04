@@ -58,7 +58,7 @@ class TaxEngine(Protocol):
         """
         ...
 
-    def boxes(self, period: Any) -> dict[str, "Decimal"]:
+    def boxes(self, period: Any) -> dict[str, Decimal]:
         """Return the form-box mapping for a closed period.
 
         Keys are jurisdiction-specific labels: BAS labels for AU
@@ -81,7 +81,7 @@ def _au_factory() -> TaxEngine:
 
 
 def _stub(jurisdiction: str, milestone: str):
-    def _factory() -> TaxEngine:  # noqa: ANN202 — local helper
+    def _factory() -> TaxEngine:
         raise NotImplementedError(
             f"{jurisdiction} tax engine — implemented in {milestone}"
         )

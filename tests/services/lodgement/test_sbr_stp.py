@@ -8,9 +8,9 @@ from saebooks.services.lodgement.sbr import (
     envelope_parts,
 )
 from saebooks.services.lodgement.sbr.stp import (
-    PAYEVNT_TAXONOMY_NS,
     _PAYEVNT_CONCEPTS,
     _PAYEVNTEMP_CONCEPTS,
+    PAYEVNT_TAXONOMY_NS,
 )
 
 XBRLI = "http://www.xbrl.org/2003/instance"

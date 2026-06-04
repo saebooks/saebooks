@@ -46,6 +46,7 @@ built and exercised before SBR Machine Credential onboarding lands.
 """
 from __future__ import annotations
 
+from saebooks.services.lodgement.adapters.au import UnknownRoute
 from saebooks.services.lodgement.base import (
     LodgementResult,
     LodgementService,
@@ -62,9 +63,8 @@ from saebooks.services.lodgement.exceptions import (
 )
 from saebooks.services.lodgement.factory import get_lodgement_service
 from saebooks.services.lodgement.null import NullLodgementService
-from saebooks.services.lodgement.remote import RemoteLodgementService
-from saebooks.services.lodgement.adapters.au import UnknownRoute
 from saebooks.services.lodgement.registry import UnknownJurisdiction, get_adapter
+from saebooks.services.lodgement.remote import RemoteLodgementService
 
 __all__ = [
     "LodgementAuthError",
@@ -81,6 +81,6 @@ __all__ = [
     "RemoteLodgementService",
     "UnknownJurisdiction",
     "UnknownRoute",
-    "get_lodgement_service",
     "get_adapter",
+    "get_lodgement_service",
 ]

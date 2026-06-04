@@ -29,6 +29,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_active_company_id, get_active_user_id, get_session
+from saebooks.api.v1.edit_force_gate import edit_force_admin_gate
+from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.api.v1.schemas import (
     PaymentConflictBody,
     PaymentCreate,
@@ -36,13 +38,11 @@ from saebooks.api.v1.schemas import (
     PaymentOut,
     PaymentUpdate,
 )
-from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
-from saebooks.api.v1.edit_force_gate import edit_force_admin_gate
 from saebooks.models.payment import PaymentDirection, PaymentMethod
 from saebooks.services import payments as svc
 from saebooks.services.hard_delete import hard_delete_with_audit
-from saebooks.services.journal import PostingError
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
+from saebooks.services.journal import PostingError
 
 router = APIRouter(
     prefix="/payments",

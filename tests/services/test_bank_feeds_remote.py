@@ -33,7 +33,6 @@ from saebooks.services.bank_feeds import (
 )
 from saebooks.services.licence import LicenseService
 
-
 TEST_BASE_URL = "https://feeds.test"
 TEST_TOKEN = "test.licence.token"
 

@@ -33,6 +33,7 @@ from saebooks.models.payment import Payment, PaymentDirection
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import invoices as inv_svc
 from saebooks.services import payments as pay_svc
+
 pytestmark = pytest.mark.postgres_only
 
 

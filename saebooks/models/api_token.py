@@ -82,7 +82,7 @@ class ApiToken(CompanyScoped, Base):
         String(6), nullable=False, unique=True, index=True
     )
     token_hash: Mapped[str] = mapped_column(String(60), nullable=False)
-    scopes: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    scopes: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -97,8 +97,8 @@ class ApiToken(CompanyScoped, Base):
         DateTime(timezone=True), nullable=True
     )
 
-    user: Mapped["User"] = relationship("User", lazy="joined")
-    company: Mapped["Company"] = relationship("Company", lazy="joined")
+    user: Mapped[User] = relationship("User", lazy="joined")
+    company: Mapped[Company] = relationship("Company", lazy="joined")
 
     __table_args__ = (
         Index("ix_api_tokens_company_user", "company_id", "user_id"),
@@ -113,9 +113,8 @@ class ApiToken(CompanyScoped, Base):
     @property
     def is_active(self) -> bool:
         """True iff the token is not revoked and not expired."""
-        from datetime import UTC, datetime as _dt
+        from datetime import UTC
+        from datetime import datetime as _dt
         if self.revoked_at is not None:
             return False
-        if self.expires_at is not None and self.expires_at < _dt.now(UTC):
-            return False
-        return True
+        return not (self.expires_at is not None and self.expires_at < _dt.now(UTC))

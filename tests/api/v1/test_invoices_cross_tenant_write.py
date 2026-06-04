@@ -27,6 +27,7 @@ from saebooks.models.contact import Contact, ContactType
 from saebooks.models.tax_code import TaxCode
 from saebooks.models.tenant import Tenant
 from saebooks.services import invoices as svc
+
 pytestmark = pytest.mark.postgres_only
 
 

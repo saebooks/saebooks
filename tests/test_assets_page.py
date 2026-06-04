@@ -17,8 +17,9 @@ from __future__ import annotations
 
 import uuid
 
-from httpx import AsyncClient
 import pytest
+from httpx import AsyncClient
+
 pytestmark = pytest.mark.postgres_only
 
 

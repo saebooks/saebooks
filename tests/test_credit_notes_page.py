@@ -28,6 +28,7 @@ from saebooks.models.credit_note import CreditNote
 from saebooks.models.document_counter import DocumentCounter
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import credit_notes as svc
+
 pytestmark = pytest.mark.postgres_only
 
 

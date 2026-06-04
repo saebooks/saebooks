@@ -15,19 +15,19 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import date
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
-from saebooks.api.v1.auth import current_token, DEFAULT_TENANT_ID
+from saebooks.api.v1.auth import DEFAULT_TENANT_ID, current_token
 from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import settings as settings_svc
+
 pytestmark = pytest.mark.postgres_only
 
 

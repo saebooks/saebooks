@@ -11,12 +11,12 @@ from sqlalchemy import select
 
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account
-from saebooks.models.bill import Bill, BillStatus
 from saebooks.models.contact import Contact, ContactType
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import bills as bill_svc
 from saebooks.services import tpar as svc
 from saebooks.services.companies import ensure_seed_company
+
 pytestmark = pytest.mark.postgres_only
 
 

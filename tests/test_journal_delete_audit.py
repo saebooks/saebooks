@@ -22,6 +22,7 @@ from saebooks.models.account import Account
 from saebooks.models.audit_snapshot import AuditSnapshot
 from saebooks.models.company import Company
 from saebooks.services import journal as svc
+
 pytestmark = pytest.mark.postgres_only
 
 

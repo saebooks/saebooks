@@ -15,7 +15,6 @@ import respx
 from saebooks.services.lodgement import RemoteLodgementService
 from tests.services.lodgement.conftest import TEST_BASE_URL, TEST_TOKEN
 
-
 ENVELOPE = b"<STP><Header/><Payload>foo</Payload></STP>"
 
 

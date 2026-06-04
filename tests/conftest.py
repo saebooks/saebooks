@@ -177,7 +177,7 @@ async def client() -> AsyncClient:
 # Phase G — shared fixtures for routes gated by require_role(ADMIN) /
 # require_staff(). Tests that need staff or admin auth use ``admin_client``
 # directly, or override their file-local ``client`` fixture to delegate to it.
-import uuid as _uuid_mod  # noqa: E402
+import uuid as _uuid_mod
 
 _PYTEST_ADMIN = "pytest-admin"
 

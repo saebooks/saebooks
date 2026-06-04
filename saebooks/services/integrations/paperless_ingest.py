@@ -201,7 +201,7 @@ async def ingest_document(
             content, mime = await pc.download_content(document_id)
         extracted = await extract_document(content, mime or attach.mime_type or "application/pdf")
         extract_error = extracted.get("extraction_error")
-    except (PaperlessError, Exception) as exc:  # noqa: BLE001 — fail-safe
+    except (PaperlessError, Exception) as exc:
         extract_error = f"fetch/extract failed: {exc}"
         logger.warning("paperless ingest: %s (doc %s)", extract_error, document_id)
 
@@ -221,7 +221,7 @@ async def ingest_document(
             ]
             if len(exact) == 1:
                 contact = exact[0]
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("paperless ingest: contact match failed: %s", exc)
     placeholder_used = contact is None
     if contact is None:

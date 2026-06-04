@@ -7,7 +7,6 @@ Supports:
 """
 from __future__ import annotations
 
-import json
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -40,15 +39,15 @@ async def begin_registration(user_id: uuid.UUID) -> dict[str, Any]:
     The browser will prompt the user to tap their security key.
     """
     try:
-        from webauthn import generate_registration_options
-        from webauthn import options_to_json
+        from webauthn import generate_registration_options, options_to_json
         from webauthn.helpers.structs import (
+            AuthenticatorAttachment,
             AuthenticatorSelectionCriteria,
+            ResidentKeyRequirement,
             UserVerificationRequirement,
         )
-        from webauthn.helpers.structs import AuthenticatorAttachment, ResidentKeyRequirement
     except ImportError:
-        raise FIDO2Error("webauthn library not installed")
+        raise FIDO2Error("webauthn library not installed") from None
 
     # Get user info. Auth-flow lookup by primary key where the tenant is
     # not yet known — use the BYPASSRLS owner role (LoginSessionLocal), or
@@ -90,10 +89,6 @@ async def begin_registration(user_id: uuid.UUID) -> dict[str, Any]:
             "options": opts_dict,
         }
 
-        return {
-            "challenge": challenge,
-            "options": __import__("json").loads(options_to_json(registration_options)),
-        }
 
 
 async def complete_registration(
@@ -110,7 +105,7 @@ async def complete_registration(
         from webauthn import verify_registration_response
         from webauthn.helpers import base64url_to_bytes
     except ImportError:
-        raise FIDO2Error("webauthn library not installed")
+        raise FIDO2Error("webauthn library not installed") from None
 
     # Verify challenge
     if challenge not in _challenge_store:
@@ -171,7 +166,7 @@ async def complete_registration(
 
     except Exception as e:
         logger.error(f"FIDO2 registration verification failed: {e}")
-        raise FIDO2Error(f"Registration verification failed: {e}")
+        raise FIDO2Error(f"Registration verification failed: {e}") from e
 
 
 async def begin_authentication(email: str) -> dict[str, Any]:
@@ -180,10 +175,9 @@ async def begin_authentication(email: str) -> dict[str, Any]:
     User provides email, system checks if they have FIDO2 keys registered.
     """
     try:
-        from webauthn import generate_authentication_options
-        from webauthn import options_to_json
+        from webauthn import generate_authentication_options, options_to_json
     except ImportError:
-        raise FIDO2Error("webauthn library not installed")
+        raise FIDO2Error("webauthn library not installed") from None
 
     # Pre-auth lookup BY EMAIL — tenant unknown at this point, so use the
     # BYPASSRLS owner role (LoginSessionLocal). Under the saebooks_app
@@ -220,10 +214,6 @@ async def begin_authentication(email: str) -> dict[str, Any]:
             "options": opts_dict,
         }
 
-        return {
-            "challenge": challenge,
-            "options": __import__("json").loads(options_to_json(authentication_options)),
-        }
 
 
 async def complete_authentication(
@@ -235,10 +225,10 @@ async def complete_authentication(
     Returns the authenticated user.
     """
     try:
-        from webauthn import verify_authentication_response
-        from webauthn.helpers import base64url_to_bytes
+        from webauthn import verify_authentication_response  # noqa: F401
+        from webauthn.helpers import base64url_to_bytes  # noqa: F401
     except ImportError:
-        raise FIDO2Error("webauthn library not installed")
+        raise FIDO2Error("webauthn library not installed") from None
 
     if challenge not in _challenge_store:
         raise FIDO2ChallengeInvalid("Challenge not found")
@@ -272,7 +262,7 @@ async def complete_authentication(
 
     except Exception as e:
         logger.error(f"FIDO2 authentication verification failed: {e}")
-        raise FIDO2Error(f"Authentication verification failed: {e}")
+        raise FIDO2Error(f"Authentication verification failed: {e}") from e
     finally:
         # Clean up challenge
         _challenge_store.pop(challenge, None)

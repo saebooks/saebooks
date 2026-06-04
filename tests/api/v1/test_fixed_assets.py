@@ -31,7 +31,6 @@ Covers:
 from __future__ import annotations
 
 import uuid
-from datetime import date
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -44,6 +43,7 @@ from saebooks.models.account import Account
 from saebooks.models.change_log import ChangeLog
 from saebooks.models.company import Company
 from saebooks.models.fixed_asset import FixedAsset
+
 pytestmark = pytest.mark.postgres_only
 
 

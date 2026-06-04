@@ -88,17 +88,16 @@ from collections.abc import AsyncIterator
 from fastapi import HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from saebooks.api.v1.auth import resolve_tenant_id
-from saebooks.db import AsyncSessionLocal
-from saebooks.models.user import User
-from saebooks.services import active_company as active_svc
-
 # Importing the v1 deps module has the side effect of registering the
 # ``after_begin`` listener on the synchronous Session class. Without
 # this, ``get_web_session`` would stamp ``session.info['tenant_id']``
 # but no one would issue ``SET LOCAL app.current_tenant`` — RLS would
 # silently reject every query as "no tenant set".
 from saebooks.api.v1 import deps as _v1_deps  # noqa: F401  (side-effect import)
+from saebooks.api.v1.auth import resolve_tenant_id
+from saebooks.db import AsyncSessionLocal
+from saebooks.models.user import User
+from saebooks.services import active_company as active_svc
 
 
 async def get_current_user(request: Request) -> User:

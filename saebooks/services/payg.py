@@ -85,12 +85,11 @@ from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Literal
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.models.employee import Employee, PayFrequency, TfnStatus
 from saebooks.models.payg import PaygTaxScale, StslCoefficient
-
 
 # --------------------------------------------------------------------- #
 # Public dataclasses                                                    #

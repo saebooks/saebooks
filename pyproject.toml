@@ -69,10 +69,52 @@ markers = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Generated / vendored / historical code is not hand-maintained, so it is
+# not linted: alembic/versions are immutable historical migrations,
+# saebooks/grpc_gen + saebooks/proto are protoc/connecpy output regenerated
+# at image-build time, graphify-out/grpcwebproxy are vendored artefacts.
+extend-exclude = [
+    "alembic/versions",
+    "saebooks/grpc_gen",
+    "saebooks/proto",
+    "graphify-out",
+    "grpcwebproxy",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
-ignore = ["E501"]
+# E501  line length is handled by the formatter, not the linter.
+# RUF001/002/003 flag Unicode look-alike punctuation (en-dashes, curly
+# quotes) in identifiers / strings / docstrings. Our prose, CSV seed data
+# and human-facing copy intentionally use them, so these are noise here.
+ignore = ["E501", "RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI/Starlette dependency-injection markers are evaluated once at
+# import time and are safe as argument defaults — the canonical B008
+# exemption for FastAPI apps.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Header",
+    "fastapi.Path",
+    "fastapi.Cookie",
+    "fastapi.Form",
+    "fastapi.File",
+    "fastapi.Body",
+    "fastapi.Security",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Test modules legitimately use patterns the core engine must not:
+#   E402   imports placed after a sys.path / skip-guard preamble or after
+#          fixtures are defined in long isolation harnesses;
+#   E741   single-letter loop vars (l = line) in tight assertion loops;
+#   RUF043 pytest.raises(match=...) patterns that contain regex
+#          metacharacters but are intended as literal substrings;
+#   RUF012 ClassVar-style mutable defaults on throwaway test helper classes;
+#   SIM115 open() without a context manager in a one-shot source-read assert.
+"tests/**" = ["E402", "E741", "RUF043", "RUF012", "SIM115"]
 
 [tool.mypy]
 python_version = "3.12"

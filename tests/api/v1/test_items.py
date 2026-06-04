@@ -17,7 +17,6 @@ Covers:
 from __future__ import annotations
 
 import uuid
-from decimal import Decimal
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -28,6 +27,7 @@ from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.account import Account, AccountType
 from saebooks.models.change_log import ChangeLog
+
 pytestmark = pytest.mark.postgres_only
 
 

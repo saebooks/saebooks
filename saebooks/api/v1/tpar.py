@@ -100,7 +100,7 @@ async def create_tpar_run(
         try:
             fy_start = date.fromisoformat(str(fy_start_raw))
         except ValueError:
-            raise HTTPException(422, "fy_start must be YYYY-MM-DD")
+            raise HTTPException(422, "fy_start must be YYYY-MM-DD") from None
     else:
         today = date.today()
         # AU FY runs 1 July → 30 June.
@@ -110,7 +110,7 @@ async def create_tpar_run(
         try:
             fy_end = date.fromisoformat(str(fy_end_raw))
         except ValueError:
-            raise HTTPException(422, "fy_end must be YYYY-MM-DD")
+            raise HTTPException(422, "fy_end must be YYYY-MM-DD") from None
     else:
         fy_end = date(fy_start.year + 1, 6, 30)
 
@@ -158,7 +158,8 @@ async def get_tpar_run_lines(
     session: AsyncSession = Depends(get_session),
     company_id: UUID = Depends(get_active_company_id),
 ) -> JSONResponse:
-    from saebooks.services.tpar import list_tpar_lines, get_tpar_run as _get
+    from saebooks.services.tpar import get_tpar_run as _get
+    from saebooks.services.tpar import list_tpar_lines
     tenant_id = resolve_tenant_id(request)
     if (await _get(session, tenant_id=tenant_id, company_id=company_id, run_id=run_id)) is None:
         raise HTTPException(404, "TPAR run not found")
@@ -174,7 +175,8 @@ async def get_tpar_run_csv(
     session: AsyncSession = Depends(get_session),
     company_id: UUID = Depends(get_active_company_id),
 ) -> Response:
-    from saebooks.services.tpar import list_tpar_lines, lines_to_csv, get_tpar_run as _get
+    from saebooks.services.tpar import get_tpar_run as _get
+    from saebooks.services.tpar import lines_to_csv, list_tpar_lines
     tenant_id = resolve_tenant_id(request)
     if (await _get(session, tenant_id=tenant_id, company_id=company_id, run_id=run_id)) is None:
         raise HTTPException(404, "TPAR run not found")

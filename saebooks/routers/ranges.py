@@ -1,9 +1,8 @@
 """Account ranges admin routes."""
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.config import settings
@@ -12,9 +11,9 @@ from saebooks.models.company import Company
 from saebooks.models.user import UserRole
 from saebooks.routers.deps import get_web_session
 from saebooks.services import accounts as svc
+from saebooks.services import active_company as active_svc
 from saebooks.services.authz import require_role
 from saebooks.web import templates
-from saebooks.services import active_company as active_svc
 
 router = APIRouter(
     prefix="/admin/ranges",

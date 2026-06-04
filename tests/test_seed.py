@@ -6,12 +6,13 @@ because the seed company accumulates additional accounts over time (tests,
 real usage, QBO imports) and the counts would be unreliable on a persistent
 shared DB.
 """
+import pytest
 from sqlalchemy import select
 
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
 from saebooks.services.companies import ensure_seed_company
-import pytest
+
 pytestmark = pytest.mark.postgres_only
 
 

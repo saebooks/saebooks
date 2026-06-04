@@ -12,8 +12,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from saebooks.models.contact import ContactType
 from saebooks.models.account import AccountType
+from saebooks.models.contact import ContactType
 from saebooks.models.recurring_invoice import RecurrenceFrequency, RecurrenceStatus
 
 
@@ -578,7 +578,7 @@ class JournalEntryCreate(JournalEntryBase):
     lines: list[JournalLineCreate] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _lines_must_balance(self) -> "JournalEntryCreate":
+    def _lines_must_balance(self) -> JournalEntryCreate:
         """Reject unbalanced journal entries at the schema level (fast 422)."""
         if not self.lines:
             return self
@@ -604,7 +604,7 @@ class JournalEntryUpdate(BaseModel):
     lines: list[JournalLineCreate] | None = None
 
     @model_validator(mode="after")
-    def _lines_must_balance(self) -> "JournalEntryUpdate":
+    def _lines_must_balance(self) -> JournalEntryUpdate:
         """Reject unbalanced line replacements at the schema level (fast 422)."""
         if self.lines is None or len(self.lines) == 0:
             return self
@@ -801,7 +801,7 @@ class InvoiceCreate(InvoiceBase):
     lines: list[InvoiceLineCreate] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _total_must_be_non_negative(self) -> "InvoiceCreate":
+    def _total_must_be_non_negative(self) -> InvoiceCreate:
         """Reject invoices whose computed gross total would be negative.
 
         Negative totals must go through the credit-note path instead
@@ -1428,7 +1428,7 @@ class SplitAllocation(BaseModel):
     tax_code_id: uuid.UUID | None = None
 
     @model_validator(mode="after")
-    def _not_both_zero(self) -> "SplitAllocation":
+    def _not_both_zero(self) -> SplitAllocation:
         if self.debit == 0 and self.credit == 0:
             raise ValueError("Each allocation must have a non-zero debit or credit")
         return self
@@ -2575,7 +2575,7 @@ class AllocationRuleCreate(BaseModel):
     is_active: bool = True
 
     @model_validator(mode="after")
-    def targets_sum_100(self) -> "AllocationRuleCreate":
+    def targets_sum_100(self) -> AllocationRuleCreate:
         total = sum(t.percentage for t in self.targets)
         if abs(total - Decimal("100")) > Decimal("0.01"):
             raise ValueError(
@@ -2594,7 +2594,7 @@ class AllocationRuleUpdate(BaseModel):
     is_active: bool | None = None
 
     @model_validator(mode="after")
-    def targets_sum_100(self) -> "AllocationRuleUpdate":
+    def targets_sum_100(self) -> AllocationRuleUpdate:
         if self.targets is not None:
             total = sum(t.percentage for t in self.targets)
             if abs(total - Decimal("100")) > Decimal("0.01"):
@@ -2682,7 +2682,7 @@ class PayRunCreate(BaseModel):
     description: str | None = None
 
     @model_validator(mode="after")
-    def period_end_after_start(self) -> "PayRunCreate":
+    def period_end_after_start(self) -> PayRunCreate:
         if self.period_end < self.period_start:
             raise ValueError("period_end must be >= period_start")
         return self

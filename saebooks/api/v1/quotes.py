@@ -29,8 +29,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_active_company_id, get_session
-from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.api.v1.edit_force_gate import edit_force_admin_gate
+from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.api.v1.schemas import (
     QuoteConflictBody,
     QuoteConvertOut,
@@ -175,9 +175,10 @@ async def get_quote_pdf(
     Always regenerated from current quote state; never stored. The "send" flow
     (Phase 1) will snapshot bytes from this same renderer into saebooks-vault.
     """
-    from saebooks.services.pdf import render_quote_pdf
-    from saebooks.models.contact import Contact
     from sqlalchemy import select as sa_select
+
+    from saebooks.models.contact import Contact
+    from saebooks.services.pdf import render_quote_pdf
 
     tenant_id = resolve_tenant_id(request)
     q = await svc.api_get(session, quote_id, tenant_id=tenant_id, company_id=company_id)
@@ -259,12 +260,15 @@ async def post_quote_send_email(
 
     Response: { mode, log_id, message_id?, reason?, outbox_path? }
     """
-    from saebooks.services.pdf import render_quote_pdf
-    from saebooks.services.customer_email import (
-        send_customer_email, CustomerEmailAttachment, CustomerEmailError,
-    )
-    from saebooks.models.contact import Contact
     from sqlalchemy import select as sa_select
+
+    from saebooks.models.contact import Contact
+    from saebooks.services.customer_email import (
+        CustomerEmailAttachment,
+        CustomerEmailError,
+        send_customer_email,
+    )
+    from saebooks.services.pdf import render_quote_pdf
 
     tenant_id = resolve_tenant_id(request)
     payload = await request.json()
@@ -277,7 +281,7 @@ async def post_quote_send_email(
         subject = str(payload["subject"]).strip()
         body_html = str(payload["body_html"]).strip()
     except (KeyError, TypeError) as exc:
-        raise HTTPException(422, f"missing field: {exc}")
+        raise HTTPException(422, f"missing field: {exc}") from exc
 
     # sent_by_user_id is best-effort — set by the web layer from session;
     # not present when called by the bearer-only `saebooks-verify` tool.
@@ -357,7 +361,7 @@ async def post_quote_send_email(
             )],
         )
     except CustomerEmailError as exc:
-        raise HTTPException(422, str(exc))
+        raise HTTPException(422, str(exc)) from exc
 
     await session.commit()
 

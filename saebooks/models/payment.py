@@ -21,6 +21,7 @@ import enum
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import (
     DateTime,
@@ -38,6 +39,10 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from saebooks.db import Base
 from saebooks.models._scope import CompanyScoped
+
+if TYPE_CHECKING:
+    from saebooks.models.one_off_customer import OneOffCustomer
+    from saebooks.models.one_off_vendor import OneOffVendor
 
 
 class PaymentStatus(enum.StrEnum):
@@ -143,7 +148,7 @@ class Payment(CompanyScoped, Base):
     external_id: Mapped[str | None] = mapped_column(String(255))
     external_source: Mapped[str | None] = mapped_column(String(64))
     external_etag: Mapped[str | None] = mapped_column(String(255))
-    external_payload: Mapped[dict | None] = mapped_column(JSONB)
+    external_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -170,12 +175,12 @@ class Payment(CompanyScoped, Base):
         back_populates="payment",
         cascade="all, delete-orphan",
     )
-    one_off_vendor: Mapped["OneOffVendor | None"] = relationship(
+    one_off_vendor: Mapped[OneOffVendor | None] = relationship(
         "OneOffVendor",
         foreign_keys=[one_off_vendor_id],
         lazy="raise",
     )
-    one_off_customer: Mapped["OneOffCustomer | None"] = relationship(
+    one_off_customer: Mapped[OneOffCustomer | None] = relationship(
         "OneOffCustomer",
         foreign_keys=[one_off_customer_id],
         lazy="raise",

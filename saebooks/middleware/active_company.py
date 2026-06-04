@@ -69,7 +69,7 @@ def _tenant_from_bearer(request: Request) -> uuid.UUID | None:
     if not raw:
         return None
     # Local import — avoids circular import on app boot.
-    from saebooks.services.jwt_tokens import (  # noqa: PLC0415
+    from saebooks.services.jwt_tokens import (
         JWTError,
         decode_access_token,
     )

@@ -58,6 +58,7 @@ import enum
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     Boolean,
@@ -75,8 +76,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-
-from typing import TYPE_CHECKING
 
 from saebooks.db import Base
 from saebooks.models._scope import CompanyScoped
@@ -206,12 +205,12 @@ class Quote(CompanyScoped, Base):
         cascade="all, delete-orphan",
         order_by="QuoteLine.line_no",
     )
-    customer: Mapped["Contact"] = relationship(
+    customer: Mapped[Contact] = relationship(
         "Contact",
         foreign_keys=[customer_id],
         lazy="raise_on_sql",
     )
-    invoice: Mapped["Invoice | None"] = relationship(
+    invoice: Mapped[Invoice | None] = relationship(
         "Invoice",
         foreign_keys=[invoice_id],
         lazy="raise_on_sql",

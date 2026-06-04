@@ -35,10 +35,10 @@ from saebooks.models.company import Company
 from saebooks.models.contact import Contact
 from saebooks.models.depreciation_model import DepreciationModel
 from saebooks.routers.deps import get_web_session
+from saebooks.services import active_company as active_svc
 from saebooks.services import assets as svc
 from saebooks.services import assets_import as imp_svc
 from saebooks.web import templates
-from saebooks.services import active_company as active_svc
 
 router = APIRouter(prefix="/assets")
 
@@ -321,7 +321,7 @@ async def assets_import_form(request: Request) -> HTMLResponse:
 @router.post("/import/preview", response_class=HTMLResponse)
 async def assets_import_preview(
     request: Request,
-    file: UploadFile = Form(...),  # noqa: B008
+    file: UploadFile = Form(...),
     session: AsyncSession = Depends(get_web_session),
 ) -> HTMLResponse:
     company = await _first_company()

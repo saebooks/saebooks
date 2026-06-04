@@ -24,19 +24,17 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-
-from sqlalchemy import func
 
 from saebooks.models.account import Account
 from saebooks.models.contact import Contact
 from saebooks.models.invoice import Invoice, InvoiceLine, InvoiceStatus
 from saebooks.models.item import Item
 from saebooks.models.tax_code import TaxCode
-from saebooks.services import bills as bills_svc
 from saebooks.services import audit_log as audit_log_svc
+from saebooks.services import bills as bills_svc
 from saebooks.services import change_log as change_log_svc
 from saebooks.services import items as items_svc
 from saebooks.services import journal as journal_svc
@@ -896,9 +894,7 @@ def _serialise_invoice(inv: Invoice) -> dict:
         val = getattr(inv, key, None)
         if isinstance(val, uuid.UUID):
             val = str(val)
-        elif isinstance(val, datetime):
-            val = val.isoformat()
-        elif isinstance(val, date):
+        elif isinstance(val, (datetime, date)):
             val = val.isoformat()
         elif isinstance(val, _D):
             val = str(val)

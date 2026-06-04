@@ -19,7 +19,8 @@ import json
 import os
 import time
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -29,9 +30,7 @@ from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.tenant import Tenant
 from saebooks.models.user import User
-from saebooks.services.auth_tokens import generate_token, hash_token
 from saebooks.services.jwt_tokens import _reset_secret_cache, hash_password
-
 
 _TEST_WEBHOOK_SECRET = "whsec_test_local_only_8675309"
 
@@ -41,7 +40,7 @@ def _reset_state() -> None:
     os.environ["SAEBOOKS_SECRET_KEY"] = "test-secret-billing"
     os.environ["STRIPE_WEBHOOK_SECRET"] = _TEST_WEBHOOK_SECRET
     # Force config object to pick it up
-    from saebooks.config import settings as _settings  # noqa: PLC0415
+    from saebooks.config import settings as _settings
 
     object.__setattr__(_settings, "stripe_webhook_secret", _TEST_WEBHOOK_SECRET)
     _reset_secret_cache()
@@ -244,7 +243,7 @@ async def test_checkout_session_passes_period_year(
     was called with ``period='year'``. Default-month covered by the
     next test.
     """
-    from saebooks.services.jwt_tokens import make_access_token  # noqa: PLC0415
+    from saebooks.services.jwt_tokens import make_access_token
 
     email = f"yearly-{uuid.uuid4().hex[:8]}@example.test"
     tenant_id = uuid.uuid4()
@@ -309,7 +308,7 @@ async def test_checkout_session_period_defaults_to_month(
 ) -> None:
     """Body without an explicit ``period`` defaults to month — keeps
     pre-yearly callers working."""
-    from saebooks.services.jwt_tokens import make_access_token  # noqa: PLC0415
+    from saebooks.services.jwt_tokens import make_access_token
 
     email = f"monthly-{uuid.uuid4().hex[:8]}@example.test"
     tenant_id = uuid.uuid4()
@@ -369,7 +368,7 @@ async def test_checkout_session_rejects_unknown_period(
     """Pydantic Literal validation kicks bad period values back as 422."""
     # No DB / JWT needed — validation happens before deps.
     # But we still need a bearer to get past require_bearer.
-    from saebooks.services.jwt_tokens import make_access_token  # noqa: PLC0415
+    from saebooks.services.jwt_tokens import make_access_token
 
     email = f"bad-period-{uuid.uuid4().hex[:8]}@example.test"
     tenant_id = uuid.uuid4()

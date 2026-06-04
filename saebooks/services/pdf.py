@@ -315,8 +315,8 @@ def render_credit_note_pdf(ctx: dict[str, Any]) -> bytes:
 #     }
 # ═══════════════════════════════════════════════════════════════════════════
 
-from decimal import Decimal
-from pathlib import Path
+from decimal import Decimal  # noqa: E402
+from pathlib import Path  # noqa: E402
 
 _QUOTE_TOKENS = {
     "blue":   colors.HexColor("#1B3A5C"),  # saeblue
@@ -336,8 +336,8 @@ def _register_quote_fonts() -> None:
     if _FONTS_REGISTERED:
         return
     from reportlab.pdfbase import pdfmetrics  # type: ignore[import-untyped]
-    from reportlab.pdfbase.ttfonts import TTFont  # type: ignore[import-untyped]
     from reportlab.pdfbase.pdfmetrics import registerFontFamily  # type: ignore[import-untyped]
+    from reportlab.pdfbase.ttfonts import TTFont  # type: ignore[import-untyped]
 
     fonts_dir = _ASSETS_DIR / "fonts"
     pdfmetrics.registerFont(TTFont("Montserrat",          str(fonts_dir / "Montserrat-Regular.ttf")))

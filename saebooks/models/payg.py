@@ -30,7 +30,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from saebooks.db import Base
 
-
 PAYG_PERIODS = ("WEEKLY", "FORTNIGHTLY", "MONTHLY")
 
 

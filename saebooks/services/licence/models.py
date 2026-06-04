@@ -19,12 +19,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 
 from saebooks.services.licence.caps import EditionCaps
 
 
-class LicenceSource(str, Enum):
+class LicenceSource(StrEnum):
     """How the current edition was resolved at boot."""
 
     COMMUNITY_FALLBACK = "community_fallback"

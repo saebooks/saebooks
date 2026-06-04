@@ -12,8 +12,8 @@ import pytest
 import respx
 from sqlalchemy import select
 
-from saebooks.config import Settings
 from saebooks.api.v1.auth import DEFAULT_TENANT_ID
+from saebooks.config import Settings
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company

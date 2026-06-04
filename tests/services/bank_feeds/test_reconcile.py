@@ -16,6 +16,7 @@ import uuid
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import delete, select
 
 from saebooks.api.v1.auth import DEFAULT_TENANT_ID
@@ -26,7 +27,7 @@ from saebooks.models.bank_statement import BankStatementLine, StatementLineStatu
 from saebooks.models.company import Company
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
 from saebooks.services.bank_feeds import reconcile
-import pytest
+
 pytestmark = pytest.mark.postgres_only
 
 # ---------------------------------------------------------------------- #

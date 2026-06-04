@@ -6,12 +6,9 @@ verify is the only slow op).
 """
 from __future__ import annotations
 
-import uuid
-
 import pytest
 
 from saebooks.services import api_tokens
-
 
 pytestmark = pytest.mark.asyncio
 

@@ -28,7 +28,7 @@ from alembic import context
 # postgresql.ARRAY usages inline in migrations render as JSON on the
 # SQLite dialect. Cheap to keep on the Postgres path too — it's a no-op
 # unless the dialect is sqlite.
-from saebooks import db_types  # noqa: F401, E402
+from saebooks import db_types  # noqa: F401
 from saebooks.config import settings as app_settings
 from saebooks.db import Base, bootstrap_schema
 

@@ -23,7 +23,6 @@ from saebooks.config import Settings
 from saebooks.services.bank_feeds import onboarding
 from saebooks.services.bank_feeds.onboarding import SissNotConfiguredError
 
-
 # ---------------------------------------------------------------------- #
 # Helpers                                                                 #
 # ---------------------------------------------------------------------- #
@@ -136,7 +135,7 @@ async def test_siss_client_uses_prod_key_when_sandbox_flag_but_no_sandbox_key() 
 @respx.mock
 async def test_siss_client_uses_prod_key_when_sandbox_flag_false() -> None:
     """Production path: sandbox flag off uses siss_subscription_key + siss_api_base."""
-    token_route = respx.post(_TOKEN_URL).mock(return_value=_token_response())
+    respx.post(_TOKEN_URL).mock(return_value=_token_response())
     api_route = respx.get(_PROD_URL + "sds/clients").mock(
         return_value=httpx.Response(200, json={"data": {"clients": []}})
     )

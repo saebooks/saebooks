@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_session
+from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.api.v1.schemas import (
     PermissionOut,
     UserConflictBody,
@@ -43,7 +44,6 @@ from saebooks.api.v1.schemas import (
     UserPermissionsBody,
     UserUpdate,
 )
-from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.models.permission import Permission, UserPermission
 from saebooks.models.user import VALID_ROLES, User, UserRole, has_at_least
 from saebooks.services import permissions as perm_svc

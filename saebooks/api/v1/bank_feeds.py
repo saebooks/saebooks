@@ -50,7 +50,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -425,7 +425,7 @@ async def delete_connection(
         raise _map_feeds_error(exc) from exc
 
     row.status = BankFeedExternalCredStatus.REVOKED.value
-    row.updated_at = datetime.now(timezone.utc)
+    row.updated_at = datetime.now(UTC)
     await session.flush()
     await session.commit()
 
@@ -466,7 +466,7 @@ async def sync_transactions(
 
         # Today's date in the server's local clock — the journal layer
         # uses naive dates here too, so we match.
-        today: _date = datetime.now(timezone.utc).date()
+        today: _date = datetime.now(UTC).date()
         if today <= locked_through:
             raise HTTPException(
                 status_code=422,
@@ -605,5 +605,5 @@ async def _advance_local_cursor(
     if row is None:
         return
     row.last_sync_cursor = next_cursor
-    row.updated_at = datetime.now(timezone.utc)
+    row.updated_at = datetime.now(UTC)
     await session.flush()

@@ -229,9 +229,8 @@ async def add_match(
     if target_row is None or target_row.company_id != bsl.company_id:
         raise ValueError(f"{target_type.lower()} {target_id} not found")
 
-    if target_type == TARGET_JOURNAL_ENTRY:
-        if target_row.status != EntryStatus.POSTED:
-            raise ValueError("Can only match against posted entries")
+    if target_type == TARGET_JOURNAL_ENTRY and target_row.status != EntryStatus.POSTED:
+        raise ValueError("Can only match against posted entries")
 
     # Default to the full residual so single-match callers don't need
     # to pre-compute it.
@@ -239,10 +238,7 @@ async def add_match(
     allocated = sum((m.amount for m in existing), Decimal("0"))
     residual = bsl.amount - allocated
 
-    if amount is None:
-        amount = residual
-    else:
-        amount = Decimal(amount)
+    amount = residual if amount is None else Decimal(amount)
 
     if amount == 0:
         raise ValueError("Match amount must be non-zero")
@@ -274,7 +270,7 @@ async def add_match(
     session.add(match)
     await session.flush()
 
-    await _recompute_status(session, bsl, existing + [match])
+    await _recompute_status(session, bsl, [*existing, match])
 
     if commit:
         await session.commit()
@@ -469,7 +465,7 @@ async def split_match_line(
             "description": description or "Bank withdrawal",
         }
 
-    journal_lines = [bank_line] + list(allocations)
+    journal_lines = [bank_line, *list(allocations)]
 
     txn_date = entry_date or stmt_line.txn_date
     entry = await journal_svc.create_draft(

@@ -110,7 +110,7 @@ def _build_form_data(
         data["line_items[0][quantity]"] = "1"
         data["line_items[0][price_data][currency]"] = currency
         data["line_items[0][price_data][unit_amount]"] = str(cents)
-        data[f"line_items[0][price_data][product_data][name]"] = (
+        data["line_items[0][price_data][product_data][name]"] = (
             f"Invoice {invoice_label}"
         )
 

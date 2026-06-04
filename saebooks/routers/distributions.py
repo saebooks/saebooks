@@ -23,9 +23,9 @@ from saebooks.config import settings
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.routers.deps import get_web_session
+from saebooks.services import active_company as active_svc
 from saebooks.services import distributions as svc
 from saebooks.web import templates
-from saebooks.services import active_company as active_svc
 
 router = APIRouter()
 
@@ -238,7 +238,7 @@ async def distributions_post_je(
     income_account_id: str = Form(...),
     session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse | HTMLResponse:
-    company = await _first_company()
+    await _first_company()
     try:
         acct_id = uuid.UUID(income_account_id)
     except ValueError as exc:

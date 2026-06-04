@@ -19,7 +19,6 @@ Coverage:
 from __future__ import annotations
 
 import uuid
-from datetime import date
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -31,6 +30,7 @@ from saebooks.main import app
 from saebooks.models.account import Account
 from saebooks.models.company import Company
 from saebooks.services import settings as settings_svc
+
 pytestmark = pytest.mark.postgres_only
 
 
