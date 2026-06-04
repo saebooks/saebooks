@@ -19,6 +19,7 @@ import uuid
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import json
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -668,3 +669,305 @@ async def test_ato_prefill_invalid_date_422(
         headers=_auth_headers(),
     )
     assert resp.status_code in (422, 400)
+
+# ---------------------------------------------------------------------------
+# Paperless webhook — document_type routing (Phase 2 / #28)
+# ---------------------------------------------------------------------------
+
+# Shared helper: sets up the HMAC auth mocks so tests can focus on routing.
+def _make_webhook_mocks(secret: str, tenant_id: uuid.UUID):
+    """Return (mock_session_cm_patch, mock_decrypt_patch) context managers."""
+    from cryptography.fernet import Fernet
+
+    fernet = Fernet(Fernet.generate_key())
+    mock_row = MagicMock()
+    mock_row.secret_ciphertext = fernet.encrypt(secret.encode("utf-8"))
+    mock_row.tenant_id = tenant_id
+
+    async def _fake_execute(stmt: Any) -> Any:
+        result = MagicMock()
+        result.scalars.return_value.first.return_value = mock_row
+        return result
+
+    return _fake_execute
+
+
+@pytest.mark.asyncio
+async def test_paperless_webhook_statement_type_calls_ingest_statement(
+    client: AsyncClient,
+) -> None:
+    """document_type 'Statement of Account' → ingest_statement called, action==statement."""
+    tenant_id = uuid.uuid4()
+    secret = "test-secret-stmt"
+    payload = json.dumps({
+        "doc_url": "https://paperless/documents/77/",
+        "document_type": "Statement of Account",
+    }).encode()
+    sig = _sign_paperless(payload, secret)
+
+    fake_execute = _make_webhook_mocks(secret, tenant_id)
+
+    mock_stmt = MagicMock()
+    mock_stmt.id = uuid.uuid4()
+    mock_stmt.status = "RECONCILED"
+    mock_stmt.balance_delta = None
+
+    with (
+        patch("saebooks.api.v1.integrations.AsyncSessionLocal") as mock_session_cm,
+        patch("saebooks.api.v1.integrations.decrypt_field", return_value=secret),
+        patch(
+            "saebooks.api.v1.integrations.ingest_statement",
+            new_callable=AsyncMock,
+            return_value=mock_stmt,
+        ) as mock_ingest_stmt,
+        patch(
+            "saebooks.api.v1.integrations.ingest_document",
+            new_callable=AsyncMock,
+        ) as mock_ingest_doc,
+    ):
+        # The handler creates multiple AsyncSessionLocal contexts; configure
+        # them all to return a working mock session.
+        mock_session = AsyncMock()
+        mock_session.execute = fake_execute
+
+        # Company lookup (second session) returns a company.
+        mock_company = MagicMock()
+        mock_company.id = uuid.uuid4()
+        mock_company.archived_at = None
+
+        async def _execute_with_company(stmt: Any) -> Any:
+            # First call within a session is usually the tenant GUC or
+            # PaperlessWebhookSecret or Company query — return mock_row for
+            # secret lookup; for everything else return a company.
+            from unittest.mock import MagicMock as _MM
+            r = _MM()
+            r.scalars.return_value.first.return_value = mock_company
+            return r
+
+        mock_session_company = AsyncMock()
+        mock_session_company.execute = _execute_with_company
+
+        # The handler opens sessions in order: (1) secret lookup, (2) company
+        # lookup, (3) ingest. Wire them sequentially.
+        mock_session_cm.return_value.__aenter__ = AsyncMock(side_effect=[
+            mock_session,        # secret lookup session
+            mock_session_company, # company lookup session
+            mock_session_company, # ingest session (ingest_statement is mocked)
+        ])
+        mock_session_cm.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        resp = await client.post(
+            "/api/v1/integrations/paperless/webhook",
+            content=payload,
+            headers={
+                "X-Tenant-Id": str(tenant_id),
+                "X-Paperless-Signature": sig,
+            },
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["received"] is True
+    assert data["ingest"]["action"] == "statement"
+    mock_ingest_stmt.assert_called_once()
+    mock_ingest_doc.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_paperless_webhook_bill_type_calls_ingest_document(
+    client: AsyncClient,
+) -> None:
+    """document_type 'Supplier Invoice' → ingest_document called, action==bill."""
+    tenant_id = uuid.uuid4()
+    secret = "test-secret-bill"
+    payload = json.dumps({
+        "doc_url": "https://paperless/documents/88/",
+        "document_type": "Supplier Invoice",
+    }).encode()
+    sig = _sign_paperless(payload, secret)
+
+    fake_execute = _make_webhook_mocks(secret, tenant_id)
+
+    with (
+        patch("saebooks.api.v1.integrations.AsyncSessionLocal") as mock_session_cm,
+        patch("saebooks.api.v1.integrations.decrypt_field", return_value=secret),
+        patch(
+            "saebooks.api.v1.integrations.ingest_document",
+            new_callable=AsyncMock,
+            return_value={"status": "created", "bill_id": str(uuid.uuid4()), "placeholder_supplier": False, "extraction": "ok"},
+        ) as mock_ingest_doc,
+        patch(
+            "saebooks.api.v1.integrations.ingest_statement",
+            new_callable=AsyncMock,
+        ) as mock_ingest_stmt,
+    ):
+        mock_session = AsyncMock()
+        mock_session.execute = fake_execute
+        mock_session_cm.return_value.__aenter__ = AsyncMock(side_effect=[
+            mock_session,  # secret lookup
+            mock_session,  # bill ingest session
+        ])
+        mock_session_cm.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        resp = await client.post(
+            "/api/v1/integrations/paperless/webhook",
+            content=payload,
+            headers={
+                "X-Tenant-Id": str(tenant_id),
+                "X-Paperless-Signature": sig,
+            },
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["received"] is True
+    assert data["ingest"]["action"] == "bill"
+    mock_ingest_doc.assert_called_once()
+    mock_ingest_stmt.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_paperless_webhook_unknown_type_skipped(
+    client: AsyncClient,
+) -> None:
+    """document_type 'Delivery Note' (unknown) → neither ingest called, action==skipped."""
+    tenant_id = uuid.uuid4()
+    secret = "test-secret-unknown"
+    payload = json.dumps({
+        "doc_url": "https://paperless/documents/99/",
+        "document_type": "Delivery Note",
+    }).encode()
+    sig = _sign_paperless(payload, secret)
+
+    fake_execute = _make_webhook_mocks(secret, tenant_id)
+
+    with (
+        patch("saebooks.api.v1.integrations.AsyncSessionLocal") as mock_session_cm,
+        patch("saebooks.api.v1.integrations.decrypt_field", return_value=secret),
+        patch(
+            "saebooks.api.v1.integrations.ingest_document",
+            new_callable=AsyncMock,
+        ) as mock_ingest_doc,
+        patch(
+            "saebooks.api.v1.integrations.ingest_statement",
+            new_callable=AsyncMock,
+        ) as mock_ingest_stmt,
+    ):
+        mock_session = AsyncMock()
+        mock_session.execute = fake_execute
+        mock_session_cm.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_cm.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        resp = await client.post(
+            "/api/v1/integrations/paperless/webhook",
+            content=payload,
+            headers={
+                "X-Tenant-Id": str(tenant_id),
+                "X-Paperless-Signature": sig,
+            },
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["received"] is True
+    assert data["ingest"]["action"] == "skipped"
+    assert data["ingest"]["reason"] == "doctype_not_routed"
+    mock_ingest_doc.assert_not_called()
+    mock_ingest_stmt.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_paperless_webhook_missing_document_type_skipped(
+    client: AsyncClient,
+) -> None:
+    """Missing/empty document_type → skipped, neither ingest called."""
+    tenant_id = uuid.uuid4()
+    secret = "test-secret-notype"
+    payload = json.dumps({
+        "doc_url": "https://paperless/documents/55/",
+    }).encode()
+    sig = _sign_paperless(payload, secret)
+
+    fake_execute = _make_webhook_mocks(secret, tenant_id)
+
+    with (
+        patch("saebooks.api.v1.integrations.AsyncSessionLocal") as mock_session_cm,
+        patch("saebooks.api.v1.integrations.decrypt_field", return_value=secret),
+        patch(
+            "saebooks.api.v1.integrations.ingest_document",
+            new_callable=AsyncMock,
+        ) as mock_ingest_doc,
+        patch(
+            "saebooks.api.v1.integrations.ingest_statement",
+            new_callable=AsyncMock,
+        ) as mock_ingest_stmt,
+    ):
+        mock_session = AsyncMock()
+        mock_session.execute = fake_execute
+        mock_session_cm.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_cm.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        resp = await client.post(
+            "/api/v1/integrations/paperless/webhook",
+            content=payload,
+            headers={
+                "X-Tenant-Id": str(tenant_id),
+                "X-Paperless-Signature": sig,
+            },
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ingest"]["action"] == "skipped"
+    assert data["ingest"]["reason"] == "doctype_not_routed"
+    mock_ingest_doc.assert_not_called()
+    mock_ingest_stmt.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_paperless_webhook_ingest_exception_returns_200_error(
+    client: AsyncClient,
+) -> None:
+    """An ingest path raising an exception → 200 with status==error (fail-safe)."""
+    tenant_id = uuid.uuid4()
+    secret = "test-secret-exc"
+    payload = json.dumps({
+        "doc_url": "https://paperless/documents/66/",
+        "document_type": "Tax Invoice",
+    }).encode()
+    sig = _sign_paperless(payload, secret)
+
+    fake_execute = _make_webhook_mocks(secret, tenant_id)
+
+    with (
+        patch("saebooks.api.v1.integrations.AsyncSessionLocal") as mock_session_cm,
+        patch("saebooks.api.v1.integrations.decrypt_field", return_value=secret),
+        patch(
+            "saebooks.api.v1.integrations.ingest_document",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("DB is on fire"),
+        ),
+    ):
+        mock_session = AsyncMock()
+        mock_session.execute = fake_execute
+        mock_session_cm.return_value.__aenter__ = AsyncMock(side_effect=[
+            mock_session,  # secret lookup
+            mock_session,  # bill ingest session (raises inside ingest_document mock)
+        ])
+        mock_session_cm.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        resp = await client.post(
+            "/api/v1/integrations/paperless/webhook",
+            content=payload,
+            headers={
+                "X-Tenant-Id": str(tenant_id),
+                "X-Paperless-Signature": sig,
+            },
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["received"] is True
+    assert data["ingest"]["action"] == "bill"
+    assert data["ingest"]["status"] == "error"
+    assert "DB is on fire" in data["ingest"]["detail"]

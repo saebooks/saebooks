@@ -99,6 +99,8 @@ from saebooks.services.integrations.paperless_ingest import (
     extract_document_id,
     ingest_document,
 )
+from saebooks.services.statements.ingest import ingest_statement
+from saebooks.services.tenant import reset_current_company, set_current_company
 
 logger = logging.getLogger("saebooks.api.v1.integrations")
 
@@ -143,6 +145,27 @@ class AtoPrefillRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 _STRIPE_CONNECT_STATES: dict[str, str] = {}  # state -> str(tenant_id)
+
+# ---------------------------------------------------------------------------
+# Document-type routing sets — case-insensitive normalised keys.
+# ---------------------------------------------------------------------------
+
+_STATEMENT_TYPES: frozenset[str] = frozenset({
+    "statement of account",
+    "statement",
+    "supplier statement",
+})
+
+_BILL_TYPES: frozenset[str] = frozenset({
+    "supplier invoice",
+    "tax invoice",
+    "invoice",
+    "bill",
+    "receipt",
+    "tax receipt",
+    "purchase invoice",
+    "remittance advice",
+})
 
 
 # ---------------------------------------------------------------------------
@@ -279,6 +302,16 @@ async def paperless_webhook(
     (e.g. as a custom header). The handler loads the matching secret
     from the RLS-protected table and validates the signature.
 
+    Document-type routing
+    ---------------------
+    After auth, the handler reads ``document_type`` from the JSON body
+    and routes:
+
+    * ``_STATEMENT_TYPES`` → statement reconciliation (``ingest_statement``).
+    * ``_BILL_TYPES`` → draft bill creation (``ingest_document``).
+    * unknown / empty type → skipped (no draft created — noise fix).
+    * missing ``doc_id`` → skipped regardless of type (unchanged behaviour).
+
     Returns:
         200 ``{"received": true, "tenant_id": "<uuid>"}`` on success.
         400 on signature mismatch.
@@ -399,34 +432,131 @@ async def paperless_webhook(
         tenant_uuid,
     )
 
-    # --- Ingest → DRAFT bill (review-before-post; never touches the GL). ---
-    # Fail-safe: any error is logged and swallowed (return 200) so Paperless
-    # does not retry-storm; the source document is unharmed in Paperless and
-    # can be re-triggered. The session is tenant-bound via session.info so the
-    # after_begin listener re-applies app.current_tenant across create_draft's
-    # internal commit (RLS stays enforced — no cross-tenant write).
+    # --- Parse body and route by document_type. ---
+    # Fail-safe: any error in the ingest path is logged and swallowed (return
+    # 200) so Paperless does not retry-storm; the source document is unharmed
+    # and can be re-triggered. The session is tenant-bound via session.info so
+    # the after_begin listener re-applies app.current_tenant across the
+    # ingest's internal commits (RLS stays enforced — no cross-tenant write).
     try:
         payload = json.loads(raw_body or b"{}")
     except (json.JSONDecodeError, ValueError):
         payload = {}
+
     doc_id = extract_document_id(payload) if isinstance(payload, dict) else None
-    ingest: dict = {"status": "skipped_no_document_id"}
-    if doc_id is not None:
+
+    if doc_id is None:
+        return JSONResponse(
+            {
+                "received": True,
+                "tenant_id": str(tenant_uuid),
+                "ingest": {"action": "skipped", "reason": "no_document_id"},
+            }
+        )
+
+    dtype = (payload.get("document_type") or "").strip().lower()
+
+    ingest: dict
+
+    if dtype in _STATEMENT_TYPES:
+        # --- Statement reconciliation path ---
+        try:
+            from saebooks.models.company import Company
+
+            async with AsyncSessionLocal() as ing_session:
+                ing_session.info["tenant_id"] = tenant_uuid
+                await ing_session.execute(
+                    text(f"SET LOCAL app.current_tenant = '{tenant_uuid}'")
+                )
+                company_result = await ing_session.execute(
+                    select(Company)
+                    .where(Company.archived_at.is_(None))
+                    .order_by(Company.created_at)
+                    .limit(1)
+                )
+                company = company_result.scalars().first()
+
+            if company is None:
+                logger.warning(
+                    "integrations: paperless statement ingest — no active company for tenant=%s",
+                    tenant_uuid,
+                )
+                ingest = {"action": "statement", "status": "no_company"}
+            else:
+                company_id = company.id
+                async with AsyncSessionLocal() as ing_session:
+                    ing_session.info["tenant_id"] = tenant_uuid
+                    ing_session.info["company_id"] = company_id
+                    tok = set_current_company(company_id)
+                    try:
+                        stmt = await ingest_statement(
+                            ing_session,
+                            tenant_id=tenant_uuid,
+                            company_id=company_id,
+                            paperless_document_id=doc_id,
+                            settings=settings,
+                        )
+                        ingest = {
+                            "action": "statement",
+                            "status": "created",
+                            "statement_id": str(stmt.id),
+                            "statement_status": stmt.status,
+                            "balance_delta": (
+                                str(stmt.balance_delta)
+                                if stmt.balance_delta is not None
+                                else None
+                            ),
+                        }
+                    finally:
+                        reset_current_company(tok)
+        except Exception as exc:
+            logger.exception(
+                "integrations: paperless statement ingest failed tenant=%s doc=%s",
+                tenant_uuid,
+                doc_id,
+            )
+            ingest = {"action": "statement", "status": "error", "detail": str(exc)}
+
+    elif dtype in _BILL_TYPES:
+        # --- Draft bill path (existing behaviour) ---
+        # ingest_document resolves company internally from the session; it does
+        # not rely on set_current_company / the CompanyScoped contextvar for
+        # correctness — its Bill/Contact SELECTs carry explicit company_id WHERE
+        # clauses. The contextvar is therefore not applied here to avoid
+        # inadvertently narrowing queries before company is resolved.
         try:
             async with AsyncSessionLocal() as ing_session:
                 ing_session.info["tenant_id"] = tenant_uuid
-                ingest = await ingest_document(
+                result_dict = await ingest_document(
                     ing_session,
                     tenant_id=tenant_uuid,
                     document_id=doc_id,
                     settings=settings,
                 )
+            ingest = {"action": "bill", **result_dict}
         except Exception as exc:
             logger.exception(
-                "integrations: paperless ingest failed tenant=%s doc=%s",
-                tenant_uuid, doc_id,
+                "integrations: paperless bill ingest failed tenant=%s doc=%s",
+                tenant_uuid,
+                doc_id,
             )
-            ingest = {"status": "error", "detail": str(exc)}
+            ingest = {"action": "bill", "status": "error", "detail": str(exc)}
+
+    else:
+        # Unknown or empty document_type — skip silently.
+        # This is the noise fix: untyped documents (thumbnails, attachments,
+        # non-invoices) no longer create draft bills.
+        logger.info(
+            "integrations: paperless webhook — unrouted doctype=%r tenant=%s doc=%s",
+            dtype,
+            tenant_uuid,
+            doc_id,
+        )
+        ingest = {
+            "action": "skipped",
+            "reason": "doctype_not_routed",
+            "document_type": dtype,
+        }
 
     return JSONResponse(
         {"received": True, "tenant_id": str(tenant_uuid), "ingest": ingest}
