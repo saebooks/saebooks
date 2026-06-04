@@ -1964,9 +1964,9 @@ class BASSummary(BaseModel):
 
     BAS labels follow ATO nomenclature:
       G1  — Total taxable sales (inc. GST)
-      G2  — Export sales (always 0 in v1 — no export tracking)
+      G2  — Export sales (income lines tagged reporting_type "export")
       G3  — Other GST-free sales
-      G10 — Capital acquisitions (always 0 in v1 — no capital tracking)
+      G10 — Capital acquisitions (purchase lines tagged "capital", GST-inclusive)
       G11 — Other (non-capital) acquisitions (taxable expenses)
       1A  — GST collected on sales (G1 × 10%)
       1B  — GST credits on purchases (G11 × 1/11, i.e. tax-inclusive component)
