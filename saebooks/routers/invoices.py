@@ -509,7 +509,9 @@ async def _render_invoice_context(
     inv = await svc.get(session, invoice_id)
     company = await session.get(Company, inv.company_id)
     contact = await session.get(Contact, inv.contact_id)
-    return _build_invoice_ctx(inv, contact, company)
+    ctx = _build_invoice_ctx(inv, contact, company)
+    ctx["kind"] = "Tax Invoice"
+    return ctx
 
 
 @router.post("/{invoice_id}/email")
