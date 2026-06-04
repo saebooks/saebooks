@@ -894,3 +894,166 @@ async def test_cashflow_investing(
     assert body["investing"]["total_investing"] <= -4000.0, (
         f"Expected total_investing <= -4000, got {body['investing']['total_investing']}"
     )
+
+
+# ---------------------------------------------------------------------------
+# C3 — G2/G10 reconciliation between the two BAS implementations.
+#
+# ``api/v1/reports.py::bas_summary`` historically HARDCODED
+# ``g2_export_sales=0.0`` and ``g10_capital_acquisitions=0.0`` ("always 0
+# in v1"), while ``services/tax_engine/au.py::bas_report`` COMPUTES them
+# from ``TaxCode.reporting_type`` (export -> G2, capital -> G10). After
+# C1 fixed the seed so EXP->export and CAP->capital tax codes exist, that
+# divergence is real for any trader with export or capital lines.
+#
+# This guard posts an export-tagged sale + a capital-tagged purchase and
+# asserts bas_summary reports NON-ZERO G2/G10 that EQUAL au.bas_reports.
+
+
+# ---------------------------------------------------------------------------
+# C3 — G2/G10 reconciliation between the two BAS implementations.
+#
+# ``api/v1/reports.py::bas_summary`` historically HARDCODED
+# ``g2_export_sales=0.0`` and ``g10_capital_acquisitions=0.0`` ("always 0
+# in v1"), while ``services/tax_engine/au.py::bas_report`` COMPUTES them
+# from ``TaxCode.reporting_type`` (export -> G2, capital -> G10). After
+# C1 fixed the seed so EXP->export and CAP->capital tax codes exist, that
+# divergence is real for any trader with export or capital lines.
+#
+# This guard posts an export-tagged sale + a capital-tagged purchase and
+# asserts bas_summary reports NON-ZERO G2/G10 that EQUAL au.bas_report's.
+# Pre-fix: bas_summary returns 0 while au computes the real value -> fail.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+async def export_capital_tax_codes() -> dict[str, str]:
+    """Return tax code IDs for the export (EXP) and capital (CAP) reporting
+    types from the seeded AU tax codes, scoped to the seed company +
+    DEFAULT_TENANT_ID so the JE create path tenant guard accepts them.
+    """
+    async with AsyncSessionLocal() as session:
+        seed_company = (
+            await session.execute(
+                select(Company)
+                .where(Company.archived_at.is_(None))
+                .order_by(Company.created_at)
+                .limit(1)
+            )
+        ).scalars().first()
+        assert seed_company is not None
+        out: dict[str, str] = {}
+        for key, code in (("export", "EXP"), ("capital", "CAP")):
+            row = (
+                await session.execute(
+                    select(TaxCode).where(
+                        TaxCode.archived_at.is_(None),
+                        TaxCode.code == code,
+                        TaxCode.tenant_id == DEFAULT_TENANT_ID,
+                        TaxCode.company_id == seed_company.id,
+                    )
+                )
+            ).scalars().first()
+            assert row is not None, f"Seed AU tax code {code} not found (C1 seed fix?)"
+            out[key] = str(row.id)
+        return out
+
+
+async def test_bas_g2_g10_reconcile_with_au_bas_report(
+    api_client: AsyncClient,
+    gl_accounts: dict[str, str],
+    export_capital_tax_codes: dict[str, str],
+) -> None:
+    """bas_summary G2/G10 must be NON-ZERO and EQUAL au.bas_report's.
+
+    Scenario (clean period 2029-01, no overlap with other tests):
+      * export-tagged INCOME sale, net $4000 -> G2
+      * capital-tagged ASSET purchase, net $7000 + $700 GST -> G10
+    """
+    income_id = gl_accounts[AccountType.INCOME.value]
+    asset_id = gl_accounts[AccountType.ASSET.value]
+    gst_paid_id = gl_accounts["GST_PAID"]
+    exp_id = export_capital_tax_codes["export"]
+    cap_id = export_capital_tax_codes["capital"]
+
+    # Export sale: export supplies carry no GST (GST-free for export), so
+    # the JE is a clean Dr bank / Cr income with the EXP tax code.
+    await _create_and_post_je(
+        api_client,
+        "2029-01-10",
+        lines=[
+            {"account_id": asset_id, "debit": "4000.00", "credit": "0"},
+            {
+                "account_id": income_id,
+                "debit": "0",
+                "credit": "4000.00",
+                "tax_code_id": exp_id,
+            },
+        ],
+    )
+
+    # Capital acquisition: $7000 net asset + $700 GST credit. The capital
+    # line carries the CAP tax code; the GST Paid control leg is explicit
+    # (auto-post is off in these tests).
+    await _create_and_post_je(
+        api_client,
+        "2029-01-20",
+        lines=[
+            {
+                "account_id": asset_id,
+                "debit": "7000.00",
+                "credit": "0",
+                "tax_code_id": cap_id,
+            },
+            {"account_id": gst_paid_id, "debit": "700.00", "credit": "0"},
+            {"account_id": income_id, "debit": "0", "credit": "7700.00"},
+        ],
+    )
+
+    # bas_summary via the HTTP API.
+    r = await api_client.get(
+        "/api/v1/reports/bas_summary",
+        params={"from_date": "2029-01-01", "to_date": "2029-01-31"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    # au.bas_report directly, for the same company + period.
+    from decimal import Decimal
+    from saebooks.services.tax_engine import au as au_engine
+
+    async with AsyncSessionLocal() as session:
+        seed_company = (
+            await session.execute(
+                select(Company)
+                .where(Company.archived_at.is_(None))
+                .order_by(Company.created_at)
+                .limit(1)
+            )
+        ).scalars().first()
+        assert seed_company is not None
+        au_report = await au_engine.bas_report(
+            session,
+            seed_company.id,
+            from_date=date(2029, 1, 1),
+            to_date=date(2029, 1, 31),
+        )
+
+    au_g2 = au_report.g2.amount
+    au_g10 = au_report.g10.amount
+
+    # au itself must produce non-zero G2/G10 in this scenario (seed sanity).
+    assert au_g2 >= Decimal("4000"), f"au G2={au_g2}"
+    assert au_g10 >= Decimal("7000"), f"au G10={au_g10}"
+
+    # The reconciliation the gate wants: bas_summary agrees with au.
+    assert body["g2_export_sales"] == pytest.approx(float(au_g2), abs=0.01), (
+        f"bas_summary G2={body['g2_export_sales']} != au.bas_report G2={au_g2}"
+    )
+    assert body["g10_capital_acquisitions"] == pytest.approx(float(au_g10), abs=0.01), (
+        f"bas_summary G10={body['g10_capital_acquisitions']} != "
+        f"au.bas_report G10={au_g10}"
+    )
+    # And both must be non-zero (the pre-fix hardcoded 0.0 fails here).
+    assert body["g2_export_sales"] >= 4000.0
+    assert body["g10_capital_acquisitions"] >= 7000.0
