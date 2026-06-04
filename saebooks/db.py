@@ -441,7 +441,7 @@ async def bootstrap_schema(engine_to_init: AsyncEngine | None = None) -> None:
     import importlib
     import pkgutil
 
-    import saebooks.models as _models  # noqa: F401
+    import saebooks.models as _models
 
     for mod_info in pkgutil.iter_modules(_models.__path__):
         importlib.import_module(f"saebooks.models.{mod_info.name}")

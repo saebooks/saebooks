@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
 from sqlalchemy import delete
 
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.user import User, UserRole
 from saebooks.services import users as users_svc
-import pytest
+
 pytestmark = pytest.mark.postgres_only
 
 

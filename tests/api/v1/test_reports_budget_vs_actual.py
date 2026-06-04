@@ -21,7 +21,7 @@ from saebooks.main import app
 from saebooks.models.account import Account, AccountType
 from saebooks.models.budget import Budget
 from saebooks.models.company import Company
-from saebooks.models.journal import EntryStatus
+
 pytestmark = pytest.mark.postgres_only
 
 

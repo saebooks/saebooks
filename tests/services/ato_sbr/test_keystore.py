@@ -121,7 +121,7 @@ def test_loads_ato_sbr_credential_store() -> None:
         f'    <protectedPrivateKey>dGVzdA==</protectedPrivateKey>\n'
         f'  </credential></credentials>\n'
         f'</credentialStore>\n'
-    ).encode("utf-8")
+    ).encode()
     loaded = load_keystore(xml, "password-not-needed-for-cert-read")
     assert loaded.subject_cn == "SAE-Books"
     assert loaded.not_after > datetime.now(UTC)

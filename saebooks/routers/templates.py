@@ -11,10 +11,10 @@ from saebooks.models.account import Account
 from saebooks.models.company import Company
 from saebooks.models.tax_code import TaxCode
 from saebooks.routers.deps import get_web_session
+from saebooks.services import active_company as active_svc
 from saebooks.services import journal as journal_svc
 from saebooks.services import journal_templates as svc
 from saebooks.web import templates
-from saebooks.services import active_company as active_svc
 
 router = APIRouter(prefix="/templates")
 

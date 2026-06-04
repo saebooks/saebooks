@@ -133,7 +133,7 @@ class JournalLine(Base):
     # TaxEngine.compute() so that audit history stays self-consistent
     # even if the underlying tax_code definition changes later.
     # Pre-existing rows from before 0104 stay null — no backfill.
-    tax_treatment: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    tax_treatment: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     entry: Mapped[JournalEntry] = relationship(back_populates="lines")
     account: Mapped["Account"] = relationship(

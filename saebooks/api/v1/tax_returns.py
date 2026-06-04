@@ -247,10 +247,14 @@ async def lodge_tax_return(
     modules land.
     """
     import base64
+
     from saebooks.api.v1.deps import get_lodgement
     from saebooks.services.lodgement import (
-        LodgementAuthError, LodgementEditionError, LodgementService,
-        LodgementUnsupportedEdition, LodgementUpstreamUnavailable,
+        LodgementAuthError,
+        LodgementEditionError,
+        LodgementService,
+        LodgementUnsupportedEdition,
+        LodgementUpstreamUnavailable,
     )
 
     tenant_id = resolve_tenant_id(request)

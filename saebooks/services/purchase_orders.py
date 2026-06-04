@@ -50,7 +50,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from saebooks.models.account import Account
-from saebooks.models.bill import Bill, BillLine, BillStatus
+from saebooks.models.bill import Bill, BillStatus
 from saebooks.models.contact import Contact
 from saebooks.models.purchase_order import (
     PurchaseOrder,
@@ -375,9 +375,7 @@ def _serialise(po: PurchaseOrder) -> dict:
         val = getattr(po, key, None)
         if isinstance(val, uuid.UUID):
             val = str(val)
-        elif isinstance(val, datetime):
-            val = val.isoformat()
-        elif isinstance(val, date):
+        elif isinstance(val, (datetime, date)):
             val = val.isoformat()
         elif isinstance(val, Decimal):
             val = str(val)

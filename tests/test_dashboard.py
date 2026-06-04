@@ -6,7 +6,7 @@ widget queries hitting Postgres via ``AsyncSessionLocal``.
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from itertools import pairwise
 
@@ -250,7 +250,7 @@ async def test_bank_balances_excludes_unposted_lines_no_join_leak() -> None:
             ref=f"POST-{tag}",
             entry_date=date(2026, 5, 1),
             status=EntryStatus.POSTED,
-            posted_at=datetime.now(timezone.utc),
+            posted_at=datetime.now(UTC),
             posted_by="test",
         )
         # DRAFT entry: $500 Dr bank / $500 Cr offset. Must NOT count.

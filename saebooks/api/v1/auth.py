@@ -95,8 +95,8 @@ async def _stamp_user_from_sub(request: Request, claims: dict[str, object]) -> N
         return
 
     # Local imports to avoid circulars at module load time.
-    from saebooks.db import AsyncSessionLocal  # noqa: PLC0415
-    from saebooks.models.user import User  # noqa: PLC0415
+    from saebooks.db import AsyncSessionLocal
+    from saebooks.models.user import User
 
     # Bind app.current_tenant from the JWT claim BEFORE the SELECT, otherwise
     # FORCE-RLS on ``users`` silently drops every row and the caller looks
@@ -175,11 +175,14 @@ def resolve_tenant_id(request: Request | None = None) -> uuid.UUID:
         x_tenant = request.headers.get("x-active-tenant", "").strip()
         if x_tenant:
             try:
-                from saebooks.services.features import (
-                    FLAG_TENANT_SWITCHER, is_enabled as _flag_enabled,
-                )
-                from saebooks.models.user import UserRole, has_at_least
                 from saebooks.config import settings as _s
+                from saebooks.models.user import UserRole, has_at_least
+                from saebooks.services.features import (
+                    FLAG_TENANT_SWITCHER,
+                )
+                from saebooks.services.features import (
+                    is_enabled as _flag_enabled,
+                )
                 if _flag_enabled(FLAG_TENANT_SWITCHER, settings=_s):
                     role = getattr(request.state, "role", None)
                     if not role:
@@ -253,7 +256,7 @@ async def require_bearer(
     presented = authorization.split(None, 1)[1].strip()
 
     # Accept valid JWTs issued by /auth/login.
-    from saebooks.services.jwt_tokens import JWTError, decode_access_token  # noqa: PLC0415
+    from saebooks.services.jwt_tokens import JWTError, decode_access_token
     try:
         claims = decode_access_token(presented)
         # Stamp the claims onto request.state so the session dep and
@@ -269,9 +272,11 @@ async def require_bearer(
     # from the JWT path so an invalid JWT doesn't accidentally match
     # the prefix and skip ahead. Used by the CLI, MCP server, and any
     # third-party automation. See ``services/api_tokens.py``.
-    from saebooks.services.api_tokens import (  # noqa: PLC0415
+    from saebooks.services.api_tokens import (
         TOKEN_PREFIX_HEADER,
         TokenVerifyError,
+    )
+    from saebooks.services.api_tokens import (
         verify as verify_api_token,
     )
     if presented.startswith(TOKEN_PREFIX_HEADER):
@@ -282,7 +287,7 @@ async def require_bearer(
         # role (LoginSessionLocal), exactly like the JWT login path does for
         # the users table. The tenant-scoped session is established afterwards
         # from request.state.jwt_claims stamped below.
-        from saebooks.db import LoginSessionLocal  # noqa: PLC0415
+        from saebooks.db import LoginSessionLocal
         try:
             async with LoginSessionLocal() as session:
                 token_row = await verify_api_token(session, presented)
@@ -304,7 +309,7 @@ async def require_bearer(
         # token (issued with the default scopes=[]) is unaffected. Only an
         # explicitly restrictive set (e.g. ["read"]) is limited: safe
         # methods need "read", mutating methods need "write".
-        from saebooks.services.scopes import (  # noqa: PLC0415
+        from saebooks.services.scopes import (
             method_requires_scope,
             token_allows,
         )

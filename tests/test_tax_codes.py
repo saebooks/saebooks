@@ -1,7 +1,6 @@
 from decimal import Decimal
 
 import pytest
-from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
@@ -9,6 +8,7 @@ from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import tax_codes as svc
+
 pytestmark = pytest.mark.postgres_only
 
 

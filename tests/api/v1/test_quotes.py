@@ -36,6 +36,7 @@ from saebooks.models.change_log import ChangeLog
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
 from saebooks.models.tenant import Tenant
+
 pytestmark = pytest.mark.postgres_only
 
 
@@ -862,9 +863,9 @@ async def test_quotes_tenant_isolation(
     two_tenant_quotes_seed: dict,
 ) -> None:
     """Tenant A cannot see tenant B's quotes via the service layer."""
-    from saebooks.services import quotes as svc
-    from saebooks.models.quote import QuoteStatus
     from datetime import date
+
+    from saebooks.services import quotes as svc
 
     alpha = two_tenant_quotes_seed["alpha"]
     beta = two_tenant_quotes_seed["beta"]

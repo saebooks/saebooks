@@ -32,6 +32,7 @@ import hashlib
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from typing import Any
 
 from lxml import etree
 

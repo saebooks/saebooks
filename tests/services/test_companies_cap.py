@@ -19,7 +19,6 @@ from sqlalchemy import delete, select
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 from saebooks.services import companies as companies_svc
-from saebooks.services import licence as licence_svc
 from saebooks.services.licence import LicenceSource, ResolvedLicence, caps_for
 
 

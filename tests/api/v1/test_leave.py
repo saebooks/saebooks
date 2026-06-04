@@ -33,7 +33,6 @@ from saebooks.models.contact import Contact, ContactType
 from saebooks.models.employee import Employee
 from saebooks.models.leave import LeaveAccrual, LeaveBalance
 
-
 _DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 

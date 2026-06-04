@@ -55,14 +55,13 @@ import os
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Header, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
+from saebooks.api.v1.auth import require_bearer
 from saebooks.api.v1.deps import get_session
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.user import User
@@ -254,7 +253,7 @@ async def register_begin(
         )
     except ImportError as exc:
         logger.error("webauthn library missing: %s", exc)
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "webauthn_library_missing")
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "webauthn_library_missing") from exc
 
     options = generate_registration_options(
         rp_id=rp_id,

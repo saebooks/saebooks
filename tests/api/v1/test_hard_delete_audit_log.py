@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import inspect, text
+from sqlalchemy import text
 
-from saebooks.db import engine, AsyncSessionLocal
+from saebooks.db import engine
+
 pytestmark = pytest.mark.postgres_only
 
 

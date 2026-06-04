@@ -66,9 +66,7 @@ async def _validate_line_accounts(
     bad_header: list[uuid.UUID] = []
     for i in ids:
         row = rows.get(i)
-        if row is None or row.company_id != company_id:
-            bad_company.append(i)
-        elif tenant_id is not None and row.tenant_id != tenant_id:
+        if row is None or row.company_id != company_id or (tenant_id is not None and row.tenant_id != tenant_id):
             bad_company.append(i)
         elif row.is_header:
             bad_header.append(i)

@@ -31,22 +31,22 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.config import settings
-from saebooks.routers.deps import get_web_session
 from saebooks.models.account import Account, AccountType
+from saebooks.models.bill import Bill, BillStatus
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact
 from saebooks.models.invoice import Invoice, InvoiceStatus
-from saebooks.models.bill import Bill, BillStatus
 from saebooks.models.payment import (
     PaymentDirection,
     PaymentMethod,
     PaymentStatus,
 )
+from saebooks.routers.deps import get_web_session
+from saebooks.services import active_company as active_svc
 from saebooks.services import numbering
 from saebooks.services import payments as svc
 from saebooks.services.journal import PostingError
 from saebooks.web import templates
-from saebooks.services import active_company as active_svc
 
 router = APIRouter(prefix="/payments")
 

@@ -44,6 +44,7 @@ called from a small middleware in this module — see ``BearerInterceptor``.
 """
 from __future__ import annotations
 
+import contextlib
 import contextvars
 import logging
 import secrets
@@ -183,7 +184,7 @@ class BearerAuthInterceptor:
             )
 
         # 1. JWT branch
-        from saebooks.services.jwt_tokens import (  # noqa: PLC0415
+        from saebooks.services.jwt_tokens import (
             JWTError,
             decode_access_token,
         )
@@ -198,9 +199,11 @@ class BearerAuthInterceptor:
             return
 
         # 2. saebk_ branch
-        from saebooks.services.api_tokens import (  # noqa: PLC0415
+        from saebooks.services.api_tokens import (
             TOKEN_PREFIX_HEADER,
             TokenVerifyError,
+        )
+        from saebooks.services.api_tokens import (
             verify as verify_api_token,
         )
 
@@ -227,7 +230,7 @@ class BearerAuthInterceptor:
             return
 
         # 3. Dev static bearer — only honoured when explicitly set
-        import os  # noqa: PLC0415
+        import os
         dev_token = os.environ.get("SAEBOOKS_DEV_API_TOKEN", "").strip()
         if dev_token and secrets.compare_digest(bearer, dev_token):
             # Dev fallback: no user, default tenant. Useful for scripts
@@ -244,7 +247,7 @@ class BearerAuthInterceptor:
         token portion or None."""
         try:
             headers = ctx.request_headers()
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
         auth = headers.get("authorization") or headers.get("Authorization") or ""
         if not auth.lower().startswith("bearer "):
@@ -256,24 +259,18 @@ class BearerAuthInterceptor:
         """Set contextvars from a verified JWT's claims."""
         sub = claims.get("sub")
         if sub:
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 _current_user_id.set(uuid.UUID(str(sub)))
-            except (ValueError, TypeError):
-                pass
 
         tenant_claim = claims.get("tenant_id")
         if tenant_claim:
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 _current_tenant_id.set(uuid.UUID(str(tenant_claim)))
-            except (ValueError, TypeError):
-                pass
 
         company_claim = claims.get("company_id")
         if company_claim:
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 _current_company_id.set(uuid.UUID(str(company_claim)))
-            except (ValueError, TypeError):
-                pass
 
 
 # ---------------------------------------------------------------------------
@@ -348,7 +345,7 @@ async def _bind_request_tenant(session: Any) -> None:
     """Bind ``app.current_tenant`` to whatever the auth interceptor stamped
     (default tenant on fully-anonymous calls). RLS-scoped tables need
     this set before any SELECT or they return zero rows."""
-    from sqlalchemy import text  # noqa: PLC0415
+    from sqlalchemy import text
 
     await session.execute(
         text(f"SET LOCAL app.current_tenant = '{current_tenant_id()}'")
@@ -372,8 +369,9 @@ async def _resolve_company_id(session: Any) -> uuid.UUID:
     if stamped is not None:
         return stamped
 
-    from saebooks.models.company import Company  # noqa: PLC0415
-    from sqlalchemy import select  # noqa: PLC0415
+    from sqlalchemy import select
+
+    from saebooks.models.company import Company
 
     result = await session.execute(
         select(Company)
@@ -485,7 +483,7 @@ class SAEBooksConnectImpl(saebooks_connecpy.SAEBooks):
                     phone=request.phone or None,
                 )
                 await session.commit()
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 raise ConnecpyException(Code.INVALID_ARGUMENT, str(exc)) from exc
 
         return saebooks_pb2.ContactResponse(contact=_contact_to_proto(contact))
@@ -842,10 +840,10 @@ class SAEBooksConnectImpl(saebooks_connecpy.SAEBooks):
         envelopes automatically; cancellation propagates as
         ``asyncio.CancelledError`` from the generator's caller.
         """
-        import asyncio  # noqa: PLC0415
-        import json  # noqa: PLC0415
+        import asyncio
+        import json
 
-        from saebooks.services import change_log as change_log_svc  # noqa: PLC0415
+        from saebooks.services import change_log as change_log_svc
 
         cursor = request.cursor
         poll_interval = 2.0
@@ -891,9 +889,9 @@ class SAEBooksConnectImpl(saebooks_connecpy.SAEBooks):
         viewers in real time. This is deliberate: a desktop client on
         gRPC and a browser on Connect should not be mutually invisible.
         """
-        import asyncio  # noqa: PLC0415
+        import asyncio
 
-        from saebooks.grpc_server import (  # noqa: PLC0415
+        from saebooks.grpc_server import (
             _now_utc,
             _presence_queues,
             _presence_store,
@@ -916,10 +914,8 @@ class SAEBooksConnectImpl(saebooks_connecpy.SAEBooks):
 
         def _fan_out(event: saebooks_pb2.PresenceEvent) -> None:
             for q in list(_presence_queues.get(tenant_id, [])):
-                try:
+                with contextlib.suppress(asyncio.QueueFull):
                     q.put_nowait(event)
-                except asyncio.QueueFull:
-                    pass
 
         try:
             for existing_uid in list(
@@ -953,7 +949,7 @@ class SAEBooksConnectImpl(saebooks_connecpy.SAEBooks):
                         and event.entity_id == entity_id
                     ):
                         yield event
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     continue
                 except asyncio.CancelledError:
                     break
@@ -986,9 +982,9 @@ class SAEBooksConnectImpl(saebooks_connecpy.SAEBooks):
         """Acquire an entity lock with lazy expiry. Shares ``_lock_store``
         with the grpcio :50051 servicer so locks are honoured across
         both transports."""
-        import datetime as _dt  # noqa: PLC0415
+        import datetime as _dt
 
-        from saebooks.grpc_server import _lock_store, _now_utc  # noqa: PLC0415
+        from saebooks.grpc_server import _lock_store, _now_utc
 
         tenant_id = request.tenant_id
         entity_type = request.entity_type
@@ -1025,7 +1021,7 @@ class SAEBooksConnectImpl(saebooks_connecpy.SAEBooks):
         ctx: Any,
     ) -> saebooks_pb2.ReleaseLockResponse:
         """Release a lock if it belongs to the requesting user."""
-        from saebooks.grpc_server import _lock_store  # noqa: PLC0415
+        from saebooks.grpc_server import _lock_store
 
         lock_key = (request.tenant_id, request.entity_type, request.entity_id)
         existing = _lock_store.get(lock_key)
@@ -1092,8 +1088,8 @@ class ConnectDispatchMiddleware:
 
 
 __all__ = [
-    "BearerAuthInterceptor",
     "CONNECT_PATH_PREFIX",
+    "BearerAuthInterceptor",
     "ConnectDispatchMiddleware",
     "SAEBooksConnectImpl",
     "build_connect_app",

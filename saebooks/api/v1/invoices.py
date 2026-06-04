@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import date
+from datetime import UTC, date
 from typing import Any
 from uuid import UUID
 
@@ -34,6 +34,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_active_company_id, get_active_user_id, get_session
+from saebooks.api.v1.edit_force_gate import edit_force_admin_gate
+from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.api.v1.schemas import (
     InvoiceConflictBody,
     InvoiceCreate,
@@ -42,8 +44,6 @@ from saebooks.api.v1.schemas import (
     InvoiceUpdate,
 )
 from saebooks.config import settings
-from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
-from saebooks.api.v1.edit_force_gate import edit_force_admin_gate
 from saebooks.models.invoice import InvoiceStatus
 from saebooks.services import invoices as svc
 from saebooks.services.features import FLAG_STRIPE_INTEGRATION, require_feature
@@ -654,10 +654,11 @@ async def get_invoice_pdf(
     company_id: UUID = Depends(get_active_company_id),
 ) -> Response:
     """Render an invoice as PDF (Tax Invoice layout). Always regenerated; never stored."""
-    from saebooks.services.pdf import render_invoice_pdf
-    from saebooks.models.contact import Contact
-    from saebooks.models.company import Company
     from sqlalchemy import select as sa_select
+
+    from saebooks.models.company import Company
+    from saebooks.models.contact import Contact
+    from saebooks.services.pdf import render_invoice_pdf
 
     tenant_id = resolve_tenant_id(request)
     inv = await svc.api_get(session, invoice_id, tenant_id=tenant_id, company_id=company_id)
@@ -702,13 +703,16 @@ async def post_invoice_send_email(
         }
     Response: { mode, log_id, message_id?, reason?, outbox_path? }
     """
-    from saebooks.services.pdf import render_invoice_pdf
-    from saebooks.services.customer_email import (
-        send_customer_email, CustomerEmailAttachment, CustomerEmailError,
-    )
-    from saebooks.models.contact import Contact
-    from saebooks.models.company import Company
     from sqlalchemy import select as sa_select
+
+    from saebooks.models.company import Company
+    from saebooks.models.contact import Contact
+    from saebooks.services.customer_email import (
+        CustomerEmailAttachment,
+        CustomerEmailError,
+        send_customer_email,
+    )
+    from saebooks.services.pdf import render_invoice_pdf
 
     tenant_id = resolve_tenant_id(request)
     payload = await request.json()
@@ -720,7 +724,7 @@ async def post_invoice_send_email(
         subject = str(payload["subject"]).strip()
         body_html = str(payload["body_html"]).strip()
     except (KeyError, TypeError) as exc:
-        raise HTTPException(422, f"missing field: {exc}")
+        raise HTTPException(422, f"missing field: {exc}") from exc
 
     sent_by_uid_raw = payload.get("sent_by_user_id")
     sent_by_user_id: UUID | None = None
@@ -767,13 +771,13 @@ async def post_invoice_send_email(
             )],
         )
     except CustomerEmailError as exc:
-        raise HTTPException(422, str(exc))
+        raise HTTPException(422, str(exc)) from exc
 
     # Stamp sent_at on POSTED invoices (drafts can be re-rendered; sent_at
     # is only meaningful once the document is final).
     if inv.status == InvoiceStatus.POSTED and inv.sent_at is None:
-        from datetime import datetime, timezone
-        inv.sent_at = datetime.now(timezone.utc)
+        from datetime import datetime
+        inv.sent_at = datetime.now(UTC)
     await session.commit()
 
     return JSONResponse({

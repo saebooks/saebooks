@@ -34,6 +34,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_active_company_id, get_active_user_id, get_session
+from saebooks.api.v1.edit_force_gate import edit_force_admin_gate
+from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.api.v1.schemas import (
     BillConflictBody,
     BillCreate,
@@ -41,8 +43,6 @@ from saebooks.api.v1.schemas import (
     BillOut,
     BillUpdate,
 )
-from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
-from saebooks.api.v1.edit_force_gate import edit_force_admin_gate
 from saebooks.models.bill import BillStatus
 from saebooks.services import bills as svc
 from saebooks.services.hard_delete import hard_delete_with_audit
@@ -583,10 +583,11 @@ async def get_bill_pdf(
     company_id: UUID = Depends(get_active_company_id),
 ) -> Response:
     """Render a bill as PDF (Bill layout). Always regenerated; never stored."""
-    from saebooks.services.pdf import render_bill_pdf
-    from saebooks.models.contact import Contact
-    from saebooks.models.company import Company
     from sqlalchemy import select as sa_select
+
+    from saebooks.models.company import Company
+    from saebooks.models.contact import Contact
+    from saebooks.services.pdf import render_bill_pdf
 
     tenant_id = resolve_tenant_id(request)
     bill = await svc.api_get(session, bill_id, tenant_id=tenant_id, company_id=company_id)
@@ -619,13 +620,16 @@ async def post_bill_send_email(
     company_id: UUID = Depends(get_active_company_id),
 ) -> Response:
     """Render the bill PDF and send via customer_email (kill-switch gated)."""
-    from saebooks.services.pdf import render_bill_pdf
-    from saebooks.services.customer_email import (
-        send_customer_email, CustomerEmailAttachment, CustomerEmailError,
-    )
-    from saebooks.models.contact import Contact
-    from saebooks.models.company import Company
     from sqlalchemy import select as sa_select
+
+    from saebooks.models.company import Company
+    from saebooks.models.contact import Contact
+    from saebooks.services.customer_email import (
+        CustomerEmailAttachment,
+        CustomerEmailError,
+        send_customer_email,
+    )
+    from saebooks.services.pdf import render_bill_pdf
 
     tenant_id = resolve_tenant_id(request)
     payload = await request.json()
@@ -637,7 +641,7 @@ async def post_bill_send_email(
         subject = str(payload["subject"]).strip()
         body_html = str(payload["body_html"]).strip()
     except (KeyError, TypeError) as exc:
-        raise HTTPException(422, f"missing field: {exc}")
+        raise HTTPException(422, f"missing field: {exc}") from exc
 
     sent_by_uid_raw = payload.get("sent_by_user_id")
     sent_by_user_id: UUID | None = None
@@ -684,7 +688,7 @@ async def post_bill_send_email(
             )],
         )
     except CustomerEmailError as exc:
-        raise HTTPException(422, str(exc))
+        raise HTTPException(422, str(exc)) from exc
 
     await session.commit()
 

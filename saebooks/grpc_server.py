@@ -21,6 +21,7 @@ follow-up once the portal JWT JWKS is in scope.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import datetime
 import json
 import logging
@@ -30,23 +31,22 @@ from typing import Any
 
 import grpc
 from grpc import aio
+from sqlalchemy import select
 
 from saebooks.db import AsyncSessionLocal, LoginSessionLocal
 from saebooks.grpc_gen import saebooks_pb2, saebooks_pb2_grpc
-from saebooks.models.change_log import ChangeLog
+from saebooks.models.bill import BillStatus
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
 from saebooks.models.invoice import InvoiceStatus
-from saebooks.models.bill import BillStatus
-from saebooks.models.payment import PaymentDirection
 from saebooks.models.journal import EntryStatus
-from saebooks.services import contacts as contact_svc
-from saebooks.services import change_log as change_log_svc
-from saebooks.services import invoices as invoice_svc
+from saebooks.models.payment import PaymentDirection
 from saebooks.services import bills as bill_svc
-from saebooks.services import payments as payment_svc
+from saebooks.services import change_log as change_log_svc
+from saebooks.services import contacts as contact_svc
+from saebooks.services import invoices as invoice_svc
 from saebooks.services import journal_entries as je_svc
-from sqlalchemy import select
+from saebooks.services import payments as payment_svc
 
 logger = logging.getLogger("saebooks.grpc_server")
 
@@ -80,7 +80,7 @@ async def _bind_request_tenant(session: Any) -> None:
     Reads the contextvar stamped by BearerAuthInterceptor on auth
     success; falls back to the default tenant for the bearer-less
     Heartbeat path."""
-    from sqlalchemy import text  # noqa: PLC0415
+    from sqlalchemy import text
 
     await session.execute(
         text(f"SET LOCAL app.current_tenant = '{_current_tenant_id.get()}'")
@@ -209,7 +209,7 @@ _presence_queues: dict[str, list[asyncio.Queue]] = {}  # key = tenant_id
 
 
 def _now_utc() -> datetime.datetime:
-    return datetime.datetime.now(datetime.timezone.utc)
+    return datetime.datetime.now(datetime.UTC)
 
 
 def _scope_key(entity_type: str, entity_id: str) -> str:
@@ -307,7 +307,7 @@ class SAEBooksServicer(saebooks_pb2_grpc.SAEBooksServicer):
                     email=request.email or None,
                     phone=request.phone or None,
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
                 return saebooks_pb2.ContactResponse()
 
@@ -758,10 +758,8 @@ class SAEBooksServicer(saebooks_pb2_grpc.SAEBooksServicer):
         # Helper: fan-out an event to all queues in this tenant.
         def _fan_out(event: saebooks_pb2.PresenceEvent) -> None:
             for q in list(_presence_queues.get(tenant_id, [])):
-                try:
+                with contextlib.suppress(asyncio.QueueFull):
                     q.put_nowait(event)
-                except asyncio.QueueFull:
-                    pass
 
         try:
             # Emit initial "viewing" snapshot for all active users in scope.
@@ -796,7 +794,7 @@ class SAEBooksServicer(saebooks_pb2_grpc.SAEBooksServicer):
                     # Only yield events relevant to this subscriber's scope.
                     if event.entity_type == entity_type and event.entity_id == entity_id:
                         yield event
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     # Heartbeat — keep the stream alive.
                     continue
                 except asyncio.CancelledError:
@@ -934,7 +932,7 @@ class BearerAuthInterceptor(aio.ServerInterceptor):
         bearer = auth.split(None, 1)[1].strip()
 
         # 1. JWT
-        from saebooks.services.jwt_tokens import (  # noqa: PLC0415
+        from saebooks.services.jwt_tokens import (
             JWTError,
             decode_access_token,
         )
@@ -947,30 +945,26 @@ class BearerAuthInterceptor(aio.ServerInterceptor):
             # Mirrors connect_app.BearerAuthInterceptor._stamp_from_jwt.
             sub = claims.get("sub")
             if sub:
-                try:
+                with contextlib.suppress(ValueError, TypeError):
                     _current_user_id.set(uuid.UUID(str(sub)))
-                except (ValueError, TypeError):
-                    pass
             tenant_claim = claims.get("tenant_id")
             if tenant_claim:
-                try:
+                with contextlib.suppress(ValueError, TypeError):
                     _current_tenant_id.set(uuid.UUID(str(tenant_claim)))
-                except (ValueError, TypeError):
-                    pass
             company_claim = claims.get("company_id")
             if company_claim:
-                try:
+                with contextlib.suppress(ValueError, TypeError):
                     _current_company_id.set(uuid.UUID(str(company_claim)))
-                except (ValueError, TypeError):
-                    pass
             return await continuation(handler_call_details)
         except JWTError:
             pass
 
         # 2. saebk_
-        from saebooks.services.api_tokens import (  # noqa: PLC0415
+        from saebooks.services.api_tokens import (
             TOKEN_PREFIX_HEADER,
             TokenVerifyError,
+        )
+        from saebooks.services.api_tokens import (
             verify as verify_api_token,
         )
         if bearer.startswith(TOKEN_PREFIX_HEADER):
@@ -996,8 +990,8 @@ class BearerAuthInterceptor(aio.ServerInterceptor):
                 )
 
         # 3. Dev static bearer
-        import os  # noqa: PLC0415
-        import secrets as _secrets  # noqa: PLC0415
+        import os
+        import secrets as _secrets
 
         dev_token = os.environ.get("SAEBOOKS_DEV_API_TOKEN", "").strip()
         if dev_token and _secrets.compare_digest(bearer, dev_token):

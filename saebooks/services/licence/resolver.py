@@ -69,7 +69,7 @@ def resolve_licence(*, force: bool = False) -> ResolvedLicence:
     refresh button). Callers outside of those two paths should not
     need it — the resolver is idempotent-on-boot.
     """
-    global _RESOLVED_LICENCE  # noqa: PLW0603
+    global _RESOLVED_LICENCE
     with _LOCK:
         if _RESOLVED_LICENCE is not None and not force:
             return _RESOLVED_LICENCE
@@ -79,7 +79,7 @@ def resolve_licence(*, force: bool = False) -> ResolvedLicence:
         return resolved
 
 
-def resolve_licence_for_user(user: "User | None") -> ResolvedLicence:
+def resolve_licence_for_user(user: User | None) -> ResolvedLicence:
     """Resolve the effective licence for a given request user.
 
     Order of preference:
@@ -195,6 +195,6 @@ def _resolve() -> ResolvedLicence:
 
 def _reset_for_tests() -> None:
     """Clear the cached resolution. Test-only."""
-    global _RESOLVED_LICENCE  # noqa: PLW0603
+    global _RESOLVED_LICENCE
     with _LOCK:
         _RESOLVED_LICENCE = None

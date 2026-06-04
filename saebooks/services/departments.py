@@ -20,7 +20,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.models.department import CostCentre, Department
 
-
 # ---------------------------------------------------------------------------
 # Departments
 # ---------------------------------------------------------------------------

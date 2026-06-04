@@ -170,6 +170,6 @@ def test_all_four_themes_registered() -> None:
         DENSE_THEME,
     )
 
-    assert ACTIVE_THEMES == frozenset(
+    assert frozenset(
         {DEFAULT_THEME, CLASSIC_THEME, CLOUD_THEME, DENSE_THEME}
-    )
+    ) == ACTIVE_THEMES

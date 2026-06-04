@@ -242,7 +242,7 @@ async def _sync_feeds(company_id: str | None, *, allow_bypass: bool) -> int:
 
     for (group_company_id, tenant_id), account_ids in groups.items():
         try:
-            async with SessionFactory() as session:
+            async with SessionFactory() as session:  # noqa: SIM117  inner begin() binds the GUC txn; comment must stay
                 # SET LOCAL only lasts for the current transaction. We
                 # open one explicitly so the GUC is bound, then the
                 # nested sync_all_active runs all its writes inside
@@ -277,7 +277,7 @@ async def _sync_feeds(company_id: str | None, *, allow_bypass: bool) -> int:
             # the same error N times once per tenant.
             logger.error("sync-feeds: %s", exc)
             return 1
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             failed_groups += 1
             logger.exception(
                 "sync-feeds: company=%s tenant=%s failed: %s",
@@ -571,7 +571,8 @@ def main(argv: list[str] | None = None) -> int:
         return asyncio.run(_fx_revalue(args.company_id, args.through))
     if args.command == "reference-load":
         from saebooks.services.reference.loader import (
-            SeedLoaderNotConfiguredError, load_seeds,
+            SeedLoaderNotConfiguredError,
+            load_seeds,
         )
         jur = None if args.all else args.jurisdiction
         try:

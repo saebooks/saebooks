@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import base64
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -69,7 +69,7 @@ def test_returns_none_when_file_missing(
 def test_valid_jwt_parsed_and_returned(
     keypair_b64: Ed25519PrivateKey, tmp_path: Path
 ) -> None:
-    exp = datetime.now(timezone.utc) + timedelta(days=30)
+    exp = datetime.now(UTC) + timedelta(days=30)
     token = _encode_jwt(
         {
             "iss": "saebooks-portal",
@@ -100,7 +100,7 @@ def test_bad_signature_returns_none(
     keypair_b64: Ed25519PrivateKey, tmp_path: Path
 ) -> None:
     other = Ed25519PrivateKey.generate()
-    exp = datetime.now(timezone.utc) + timedelta(days=30)
+    exp = datetime.now(UTC) + timedelta(days=30)
     token = _encode_jwt(
         {
             "edition": "business",
@@ -117,7 +117,7 @@ def test_bad_signature_returns_none(
 def test_expired_past_grace_returns_none(
     keypair_b64: Ed25519PrivateKey, tmp_path: Path
 ) -> None:
-    exp = datetime.now(timezone.utc) - timedelta(days=90)
+    exp = datetime.now(UTC) - timedelta(days=90)
     token = _encode_jwt(
         {
             "edition": "business",
@@ -135,7 +135,7 @@ def test_expired_within_grace_still_returned(
     keypair_b64: Ed25519PrivateKey, tmp_path: Path
 ) -> None:
     # 20 days past exp — within the 60-day grace cascade.
-    exp = datetime.now(timezone.utc) - timedelta(days=20)
+    exp = datetime.now(UTC) - timedelta(days=20)
     token = _encode_jwt(
         {
             "edition": "business",
@@ -155,7 +155,7 @@ def test_expired_within_grace_still_returned(
 def test_unknown_edition_rejected(
     keypair_b64: Ed25519PrivateKey, tmp_path: Path
 ) -> None:
-    exp = datetime.now(timezone.utc) + timedelta(days=10)
+    exp = datetime.now(UTC) + timedelta(days=10)
     token = _encode_jwt(
         {
             "edition": "platinum",

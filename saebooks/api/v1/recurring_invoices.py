@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_active_company_id, get_session
+from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.api.v1.schemas import (
     InvoiceOut,
     RecurringInvoiceConflictBody,
@@ -38,7 +39,6 @@ from saebooks.api.v1.schemas import (
     RecurringInvoiceOut,
     RecurringInvoiceUpdate,
 )
-from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.models.recurring_invoice import RecurrenceStatus
 from saebooks.services import recurrence as recurrence_svc
 from saebooks.services import recurring_invoices as svc

@@ -34,6 +34,7 @@ from saebooks.models.journal import JournalEntry
 from saebooks.models.payment import Payment
 from saebooks.models.project import Project
 from saebooks.models.tax_code import TaxCode
+
 pytestmark = pytest.mark.postgres_only
 
 # ---------------------------------------------------------------------------
@@ -420,12 +421,10 @@ async def test_snapshot_empty_company_all_markers_count_zero(
 ) -> None:
     """When no active company exists the snapshot emits all 14 markers with
     count 0 followed by a cursor — no entity data rows."""
-    from unittest.mock import AsyncMock, patch
 
     # Patch the snapshot route's Company query to return None (no company).
     import saebooks.api.v1.snapshot as _snap_mod
 
-    original_generate = _snap_mod._generate
 
     async def _patched_snapshot() -> AsyncClient:
         # We monkeypatch by calling the real endpoint but mocking
@@ -448,7 +447,6 @@ async def test_snapshot_empty_company_all_markers_count_zero(
 
     from unittest.mock import MagicMock
 
-    real_session_local = _snap_mod.AsyncSessionLocal
 
     class _MockSession:
         info: dict = {}

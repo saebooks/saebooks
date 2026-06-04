@@ -35,6 +35,7 @@ from saebooks.models.journal import JournalLine
 from saebooks.services import bills as bill_svc
 from saebooks.services import invoices as inv_svc
 from saebooks.services import items as items_svc
+
 pytestmark = pytest.mark.postgres_only
 
 # ------------------------------------------------------------------ #

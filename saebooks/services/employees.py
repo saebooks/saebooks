@@ -40,9 +40,7 @@ from saebooks.models.employee import (
     TerminationReason,
     TfnStatus,
 )
-from saebooks.models.super_fund import SuperFund
-from saebooks.services import crypto
-from saebooks.services import numbering
+from saebooks.services import crypto, numbering
 from saebooks.services import super_funds as super_funds_svc
 
 _DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")

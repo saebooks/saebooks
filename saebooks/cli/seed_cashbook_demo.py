@@ -34,9 +34,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from saebooks.db import LoginSessionLocal
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
+from saebooks.models.contact import Contact, ContactType
+from saebooks.models.invoice import Invoice
 from saebooks.models.journal import JournalEntry
+from saebooks.models.quote import Quote
+from saebooks.models.tax_code import TaxCode
 from saebooks.models.user import User, UserRole
 from saebooks.seed.load_au_coa import main as load_au_coa
+from saebooks.services import contacts as contacts_svc
+from saebooks.services import invoices as invoices_svc
+from saebooks.services import quotes as quotes_svc
 from saebooks.services.cashbook import (
     CashbookError,
     record_cashbook_entry,
@@ -45,13 +52,6 @@ from saebooks.services.cashbook import (
 from saebooks.services.companies import ensure_seed_company
 from saebooks.services.jwt_tokens import hash_password
 from saebooks.services.tax_codes import ensure_au_seed as ensure_tax_codes
-from saebooks.models.contact import Contact, ContactType
-from saebooks.models.invoice import Invoice, InvoiceStatus
-from saebooks.models.quote import Quote, QuoteStatus
-from saebooks.models.tax_code import TaxCode
-from saebooks.services import contacts as contacts_svc
-from saebooks.services import invoices as invoices_svc
-from saebooks.services import quotes as quotes_svc
 
 logger = logging.getLogger("saebooks.cli.seed_cashbook_demo")
 
@@ -210,7 +210,7 @@ async def _seed_entries(
             logger.warning(
                 "skip entry %d (%s %s): %s", idx, direction, amount_s, exc
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning(
                 "skip entry %d (%s %s): unexpected %r", idx, direction, amount_s, exc
             )
@@ -353,14 +353,14 @@ async def _seed_invoices(
                         expected_version=inv.version,
                         tenant_id=_TENANT_ID,
                     )
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     logger.warning(
                         "demo invoice %s: could not post (%r); leaving as draft",
                         inv.id,
                         exc,
                     )
             inserted += 1
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("demo invoice %s skip: %r", desc, exc)
     return inserted
 
@@ -433,12 +433,12 @@ async def _seed_quotes(
                         expected_version=q.version,
                         tenant_id=_TENANT_ID,
                     )
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     logger.warning(
                         "demo quote %s: could not send (%r); leaving as draft", q.id, exc
                     )
             inserted += 1
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("demo quote %s skip: %r", desc, exc)
     return inserted
 

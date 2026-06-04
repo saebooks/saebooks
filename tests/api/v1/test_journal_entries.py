@@ -31,6 +31,7 @@ from saebooks.models.account import Account, AccountType
 from saebooks.models.change_log import ChangeLog
 from saebooks.models.company import Company
 from saebooks.models.tenant import Tenant
+
 pytestmark = pytest.mark.postgres_only
 
 
@@ -734,7 +735,7 @@ async def test_je_reverse_creates_reversal(
     original_lines = sorted(r1.json()["lines"], key=lambda l: l["line_no"])
     reversal_lines = sorted(reversal["lines"], key=lambda l: l["line_no"])
     assert len(reversal_lines) == len(original_lines)
-    for orig, rev in zip(original_lines, reversal_lines):
+    for orig, rev in zip(original_lines, reversal_lines, strict=False):
         assert orig["account_id"] == rev["account_id"]
         assert orig["debit"] == rev["credit"]
         assert orig["credit"] == rev["debit"]
@@ -1016,7 +1017,6 @@ async def test_je_post_blocked_by_period_lock(
     March 2026, then try to post a JE dated 2026-03-15 (inside the lock).
     """
     from saebooks.models.company import Company
-    from saebooks.models.journal import PeriodLock
     from saebooks.services import journal as journal_svc
 
     # Create an isolated company under the DEFAULT tenant so the dev bearer
@@ -1062,7 +1062,9 @@ async def test_je_post_blocked_by_period_lock(
     # Use the standard API client but direct it at the isolated company via header
     from saebooks.api.v1.auth import current_token
     token = current_token()
-    from httpx import ASGITransport, AsyncClient as _AC
+    from httpx import ASGITransport
+    from httpx import AsyncClient as _AC
+
     from saebooks.main import app as _app
     async with _AC(
         transport=ASGITransport(app=_app),
@@ -1188,8 +1190,10 @@ async def test_fitc4_period_lock_gate_and_override(
         asset_id = str(asset_acct.id)
         expense_id = str(expense_acct.id)
 
+    from httpx import ASGITransport
+    from httpx import AsyncClient as _AC
+
     from saebooks.api.v1.auth import current_token
-    from httpx import ASGITransport, AsyncClient as _AC
     from saebooks.main import app as _app
 
     token = current_token()
@@ -1227,7 +1231,7 @@ async def test_fitc4_period_lock_gate_and_override(
         # Entry must still be DRAFT after rejected post
         r_check = await iso.get(f"/api/v1/journal_entries/{entry_id}")
         assert r_check.json()["status"] == "DRAFT", (
-            f"FITC-4: entry must remain DRAFT after rejected post"
+            "FITC-4: entry must remain DRAFT after rejected post"
         )
 
         # 3. Post with override_reason → must succeed
@@ -1240,7 +1244,7 @@ async def test_fitc4_period_lock_gate_and_override(
             f"FITC-4: expected 200 with override_reason, got {r_override.status_code}: {r_override.text}"
         )
         posted = r_override.json()
-        assert posted["status"] == "POSTED", f"FITC-4: entry must be POSTED after override"
+        assert posted["status"] == "POSTED", "FITC-4: entry must be POSTED after override"
         assert posted["override_reason"] is not None, "FITC-4: override_reason must be stored"
         assert "CFO" in posted["override_reason"], (
             f"FITC-4: override_reason not persisted correctly: {posted['override_reason']}"

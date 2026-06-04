@@ -23,7 +23,6 @@ from sqlalchemy.exc import IntegrityError
 
 from saebooks.db import AsyncSessionLocal
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

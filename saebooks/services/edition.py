@@ -31,7 +31,6 @@ from saebooks.models.account import Account
 from saebooks.models.company import Company
 from saebooks.models.invoice import Invoice, InvoiceStatus
 
-
 _AR_CODE = "1-1200"
 
 
@@ -172,7 +171,7 @@ async def backfill_invoice_journals(
 
 
 __all__ = [
+    "backfill_invoice_journals",
     "is_cashbook_mode",
     "list_open_invoices_for_backfill",
-    "backfill_invoice_journals",
 ]

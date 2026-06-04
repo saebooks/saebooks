@@ -18,7 +18,8 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import delete, func as sa_func, select
+from sqlalchemy import delete, select
+from sqlalchemy import func as sa_func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -375,9 +376,8 @@ async def api_update(
     for key, value in kwargs.items():
         if key not in _ALLOWED_FIELDS:
             raise BudgetApiError(f"Unknown or non-editable field: {key}")
-        if key == "month" and value is not None:
-            if not 1 <= int(value) <= 12:
-                raise BudgetApiError(f"month {value} is out of range 1..12")
+        if key == "month" and value is not None and not 1 <= int(value) <= 12:
+            raise BudgetApiError(f"month {value} is out of range 1..12")
         setattr(b, key, value)
 
     b.version = b.version + 1

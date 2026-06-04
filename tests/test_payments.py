@@ -24,7 +24,6 @@ from saebooks.models.account import Account
 from saebooks.models.bill import Bill, BillStatus
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
-from saebooks.models.credit_note import CreditNote
 from saebooks.models.document_counter import DocumentCounter
 from saebooks.models.invoice import Invoice, InvoiceStatus
 from saebooks.models.journal import JournalLine
@@ -39,6 +38,7 @@ from saebooks.services import bills as bill_svc
 from saebooks.services import credit_notes as cn_svc
 from saebooks.services import invoices as inv_svc
 from saebooks.services import payments as svc
+
 pytestmark = pytest.mark.postgres_only
 
 

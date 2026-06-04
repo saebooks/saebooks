@@ -20,7 +20,6 @@ Covers (matching the W5 brief):
 """
 from __future__ import annotations
 
-import os
 import uuid
 
 import pytest
@@ -31,7 +30,6 @@ from saebooks.api.v1.auth import current_token
 from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.change_log import ChangeLog
-
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgres_only]
 

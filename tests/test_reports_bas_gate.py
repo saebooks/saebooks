@@ -10,13 +10,12 @@ from __future__ import annotations
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select, update
+from sqlalchemy import update
 
 from saebooks.api.v1.auth import DEFAULT_TENANT_ID, current_token
 from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.company import Company
-
 
 pytestmark = pytest.mark.asyncio
 

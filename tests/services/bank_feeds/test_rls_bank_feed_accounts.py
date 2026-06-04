@@ -65,7 +65,6 @@ from saebooks.models.bank_feed import BankFeedAccount, BankFeedClient
 from saebooks.models.company import Company
 from saebooks.models.tenant import Tenant
 
-
 # --------------------------------------------------------------------------- #
 # saebooks_app engine — connects via the locked-down runtime role.            #
 # --------------------------------------------------------------------------- #
@@ -316,18 +315,17 @@ async def test_bank_feed_accounts_visible_to_own_tenant(
         app_engine, expire_on_commit=False, class_=AsyncSession
     )
     a = seeded["tenant_a"]
-    async with AppSession() as session:
-        async with session.begin():
+    async with AppSession() as session, session.begin():
+        await session.execute(
+            text("SELECT set_config('app.current_tenant', :tid, true)"),
+            {"tid": str(a["tenant_id"])},
+        )
+        visible = (
             await session.execute(
-                text("SELECT set_config('app.current_tenant', :tid, true)"),
-                {"tid": str(a["tenant_id"])},
+                text("SELECT id FROM bank_feed_accounts WHERE id = :aid"),
+                {"aid": a["account_id"]},
             )
-            visible = (
-                await session.execute(
-                    text("SELECT id FROM bank_feed_accounts WHERE id = :aid"),
-                    {"aid": a["account_id"]},
-                )
-            ).all()
+        ).all()
     assert len(visible) == 1, (
         f"tenant A could not see its own bank_feed_account "
         f"{a['account_id']} — RLS predicate is too tight"
@@ -349,18 +347,17 @@ async def test_bank_feed_accounts_invisible_across_tenant(
     a_tenant = seeded["tenant_a"]["tenant_id"]
     b_account = seeded["tenant_b"]["account_id"]
 
-    async with AppSession() as session:
-        async with session.begin():
+    async with AppSession() as session, session.begin():
+        await session.execute(
+            text("SELECT set_config('app.current_tenant', :tid, true)"),
+            {"tid": str(a_tenant)},
+        )
+        visible = (
             await session.execute(
-                text("SELECT set_config('app.current_tenant', :tid, true)"),
-                {"tid": str(a_tenant)},
+                text("SELECT id FROM bank_feed_accounts WHERE id = :aid"),
+                {"aid": b_account},
             )
-            visible = (
-                await session.execute(
-                    text("SELECT id FROM bank_feed_accounts WHERE id = :aid"),
-                    {"aid": b_account},
-                )
-            ).all()
+        ).all()
     assert len(visible) == 0, (
         f"tenant A leaked tenant B's bank_feed_account {b_account} — "
         f"the tenant_isolation policy on bank_feed_accounts is broken "
@@ -378,20 +375,19 @@ async def test_bank_feed_accounts_full_table_scoped(
     a = seeded["tenant_a"]
     b = seeded["tenant_b"]
 
-    async with AppSession() as session:
-        async with session.begin():
-            await session.execute(
-                text("SELECT set_config('app.current_tenant', :tid, true)"),
-                {"tid": str(a["tenant_id"])},
-            )
-            ids = {
-                row.id
-                for row in (
-                    await session.execute(
-                        text("SELECT id FROM bank_feed_accounts")
-                    )
-                ).all()
-            }
+    async with AppSession() as session, session.begin():
+        await session.execute(
+            text("SELECT set_config('app.current_tenant', :tid, true)"),
+            {"tid": str(a["tenant_id"])},
+        )
+        ids = {
+            row.id
+            for row in (
+                await session.execute(
+                    text("SELECT id FROM bank_feed_accounts")
+                )
+            ).all()
+        }
     assert a["account_id"] in ids, "own row missing from full-table SELECT"
     assert b["account_id"] not in ids, (
         "cross-tenant row leaked through SELECT * — bank_feed_accounts "
@@ -413,14 +409,13 @@ async def test_bank_feed_accounts_no_tenant_set_returns_zero(
     AppSession = async_sessionmaker(
         app_engine, expire_on_commit=False, class_=AsyncSession
     )
-    async with AppSession() as session:
-        async with session.begin():
-            # No SET LOCAL — GUC is unset.
-            rows = (
-                await session.execute(
-                    text("SELECT count(*) FROM bank_feed_accounts")
-                )
-            ).scalar_one()
+    async with AppSession() as session, session.begin():
+        # No SET LOCAL — GUC is unset.
+        rows = (
+            await session.execute(
+                text("SELECT count(*) FROM bank_feed_accounts")
+            )
+        ).scalar_one()
     assert rows == 0, (
         f"expected 0 visible bank_feed_accounts with no tenant set, "
         f"got {rows} — RLS is not denying by default"

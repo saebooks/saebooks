@@ -26,13 +26,12 @@ import uuid
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import delete, select
+from sqlalchemy import delete
 
 from saebooks.api.v1.auth import current_token
 from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.change_log import ChangeLog
-
 
 _DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 _OTHER_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-0000ffffffff")

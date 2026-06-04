@@ -27,6 +27,7 @@ from saebooks.models.account import Account, AccountType
 from saebooks.models.bank_statement import BankStatementLine, StatementLineStatus
 from saebooks.models.company import Company
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
+
 pytestmark = pytest.mark.postgres_only
 
 
@@ -339,7 +340,7 @@ async def test_reconciliation_match_422_unposted_entry(
 ) -> None:
     """POST /match against a DRAFT journal entry returns 422."""
     company_id = await _get_company_id()
-    expense_id = await _get_expense_account_id()
+    await _get_expense_account_id()
 
     # Create a DRAFT entry (not posted)
     async with AsyncSessionLocal() as session:

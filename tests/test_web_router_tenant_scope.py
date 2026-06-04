@@ -37,10 +37,9 @@ column add or the policy install fails this test loudly.
 """
 from __future__ import annotations
 
-import os
 import uuid
 from collections.abc import AsyncIterator
-from datetime import date, datetime, timezone
+from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -50,7 +49,6 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from saebooks.api.v1.auth import DEFAULT_TENANT_ID
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 from saebooks.models.distribution import TrustDistribution
@@ -201,8 +199,7 @@ def _make_test_app(tenant_id: uuid.UUID) -> FastAPI:
 
 
 # Local Depends import so the closure above resolves cleanly.
-from fastapi import Depends  # noqa: E402  (after _make_test_app for grouping)
-
+from fastapi import Depends
 
 # --------------------------------------------------------------------- #
 # Tests                                                                #
@@ -457,8 +454,9 @@ async def test_active_company_resolution_needs_guc_under_nobypass(
             pytest.skip(f"cannot create non-bypass role on this DB ({exc!r})")
 
     try:
-        import asyncpg
         from urllib.parse import urlparse, urlunparse
+
+        import asyncpg
 
         from saebooks.config import settings
 

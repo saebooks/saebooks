@@ -44,34 +44,33 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid as _uuid_mod
-from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from saebooks.api.v1._wizard import Wizard, WizardExpiredError, WizardNotFoundError
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_active_company_id, get_session
-from saebooks.api.v1._wizard import Wizard, WizardExpiredError, WizardNotFoundError
+from saebooks.models.account import Account
+
+# Model imports for QBO contacts apply
+from saebooks.models.contact import Contact
+from saebooks.services import change_log as change_log_svc
 from saebooks.services.features import FLAG_QBO_IMPORT, require_feature
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
-from saebooks.services import change_log as change_log_svc
 
 # Import service helpers (parsers + persister)
 from saebooks.services.imports import bank_csv as bank_csv_svc
-from saebooks.services.imports import bill_csv as bill_csv_svc
 from saebooks.services.imports import bank_ofx as bank_ofx_svc
+from saebooks.services.imports import bill_csv as bill_csv_svc
 from saebooks.services.imports import coa as coa_svc
 from saebooks.services.imports import persist as persist_svc
 from saebooks.services.imports import qbo as qbo_svc
-
-# Model imports for QBO contacts apply
-from saebooks.models.contact import Contact, ContactType
-from saebooks.models.account import Account, AccountType
-from sqlalchemy import select
 
 router = APIRouter(
     prefix="/imports",
@@ -233,9 +232,9 @@ async def advance_wizard_step(
     try:
         merged = await Wizard.step(session, wizard_id, patch)
     except WizardNotFoundError:
-        raise HTTPException(404, "Wizard not found or expired")
+        raise HTTPException(404, "Wizard not found or expired") from None
     except WizardExpiredError:
-        raise HTTPException(410, "Wizard has expired — start a new one")
+        raise HTTPException(410, "Wizard has expired — start a new one") from None
 
     await session.commit()
 

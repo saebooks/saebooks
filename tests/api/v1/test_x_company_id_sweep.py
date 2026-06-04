@@ -36,9 +36,8 @@ from saebooks.api.v1.auth import current_token
 from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.account import Account
-from saebooks.models.bank_rule import BankRule, MatchType
+from saebooks.models.bank_rule import BankRule
 from saebooks.models.company import Company
-
 
 _DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 

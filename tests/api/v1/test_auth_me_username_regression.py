@@ -37,11 +37,11 @@ from sqlalchemy import text
 os.environ.setdefault("SAEBOOKS_ENV", "test")
 os.environ.setdefault("SAEBOOKS_SECRET_KEY", "test-secret-key-for-auth-me-regression")
 
-from saebooks.db import AsyncSessionLocal, engine as _owner_engine  # noqa: E402
-from saebooks.main import app  # noqa: E402
-from saebooks.models.user import User  # noqa: E402
-from saebooks.services.jwt_tokens import _reset_secret_cache, hash_password  # noqa: E402
-
+from saebooks.db import AsyncSessionLocal
+from saebooks.db import engine as _owner_engine
+from saebooks.main import app
+from saebooks.models.user import User
+from saebooks.services.jwt_tokens import _reset_secret_cache, hash_password
 
 # ---------------------------------------------------------------------------
 # Skip guard

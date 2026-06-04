@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -138,7 +138,7 @@ async def test_seed_admin_user_creates_when_absent(monkeypatch: pytest.MonkeyPat
     monkeypatch.setenv("SAEBOOKS_DEV_ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("SAEBOOKS_DEV_ADMIN_PASSWORD", "changeme")
 
-    user, created = await mod.seed_admin_user(session)
+    _user, created = await mod.seed_admin_user(session)
     assert created is True
     assert len(added) == 1
     new_user = added[0]

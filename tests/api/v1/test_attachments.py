@@ -17,7 +17,6 @@ contract is the saebooks-side router behaviour:
 """
 from __future__ import annotations
 
-import io
 import uuid
 from typing import Any
 
@@ -31,8 +30,9 @@ from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.account import Account, AccountType
 from saebooks.models.bill import Bill, BillStatus
-from saebooks.models.contact import Contact, ContactType
+from saebooks.models.contact import Contact
 from saebooks.services import vault as vault_client
+
 pytestmark = pytest.mark.postgres_only
 
 

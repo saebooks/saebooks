@@ -50,15 +50,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_active_company_id, get_session
+from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.api.v1.schemas import (
     ConflictBody,
     ContactCreate,
     ContactListOut,
     ContactOut,
     ContactUpdate,
-
 )
-from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.models.contact import Contact, ContactType
 from saebooks.services import contacts as svc
 from saebooks.services.hard_delete import hard_delete_with_audit
@@ -106,7 +105,7 @@ def _dump(contact: Contact) -> dict[str, Any]:
 
 @router.get("", response_model=ContactListOut)
 async def list_contacts(
-    contact_type: ContactType | None = Query(default=None, alias="type"),  # noqa: B008
+    contact_type: ContactType | None = Query(default=None, alias="type"),
     search: str | None = Query(default=None, alias="q"),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
@@ -507,9 +506,10 @@ async def get_contact_statement_pdf(
     company_id: UUID = Depends(get_active_company_id),
 ) -> Response:
     """Return the customer statement as a PDF (engineering-style document)."""
-    from saebooks.services.statements import build_statement, render_statement_pdf
-    from saebooks.models.company import Company
     from sqlalchemy import select as sa_select
+
+    from saebooks.models.company import Company
+    from saebooks.services.statements import build_statement, render_statement_pdf
 
     tenant_id = resolve_tenant_id(request)
     if period_to < period_from:

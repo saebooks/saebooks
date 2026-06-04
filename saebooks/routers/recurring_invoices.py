@@ -15,6 +15,7 @@ into a UUID and 422.
 """
 from __future__ import annotations
 
+import contextlib
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
@@ -28,7 +29,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import resolve_tenant_id
 from saebooks.config import settings
-from saebooks.routers.deps import get_web_session
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact
@@ -38,9 +38,10 @@ from saebooks.models.recurring_invoice import (
     RecurrenceStatus,
 )
 from saebooks.models.tax_code import TaxCode
+from saebooks.routers.deps import get_web_session
+from saebooks.services import active_company as active_svc
 from saebooks.services import recurrence as svc
 from saebooks.web import templates
-from saebooks.services import active_company as active_svc
 
 router = APIRouter(prefix="/invoices/recurring")
 
@@ -465,10 +466,8 @@ async def recurring_pause(
     session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse:
     tenant_id = resolve_tenant_id(request)
-    try:
+    with contextlib.suppress(svc.RecurrenceError):
         await svc.pause(session, template_id, tenant_id=tenant_id)
-    except svc.RecurrenceError:
-        pass
     return RedirectResponse(
         f"/invoices/recurring/{template_id}", status_code=303
     )
@@ -481,10 +480,8 @@ async def recurring_resume(
     session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse:
     tenant_id = resolve_tenant_id(request)
-    try:
+    with contextlib.suppress(svc.RecurrenceError):
         await svc.resume(session, template_id, tenant_id=tenant_id)
-    except svc.RecurrenceError:
-        pass
     return RedirectResponse(
         f"/invoices/recurring/{template_id}", status_code=303
     )
@@ -497,10 +494,8 @@ async def recurring_end(
     session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse:
     tenant_id = resolve_tenant_id(request)
-    try:
+    with contextlib.suppress(svc.RecurrenceError):
         await svc.end(session, template_id, tenant_id=tenant_id)
-    except svc.RecurrenceError:
-        pass
     return RedirectResponse(
         f"/invoices/recurring/{template_id}", status_code=303
     )
@@ -513,10 +508,8 @@ async def recurring_archive(
     session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse:
     tenant_id = resolve_tenant_id(request)
-    try:
+    with contextlib.suppress(svc.RecurrenceError):
         await svc.archive(session, template_id, tenant_id=tenant_id)
-    except svc.RecurrenceError:
-        pass
     return RedirectResponse("/invoices/recurring", status_code=303)
 
 

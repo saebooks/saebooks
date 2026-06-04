@@ -65,6 +65,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import NullPool
 
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
+
 pytestmark = pytest.mark.postgres_only
 
 # ---------------------------------------------------------------------------

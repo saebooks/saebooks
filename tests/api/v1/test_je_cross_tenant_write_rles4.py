@@ -28,6 +28,7 @@ from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.models.tenant import Tenant
 from saebooks.services import journal_entries as svc
+
 pytestmark = pytest.mark.postgres_only
 
 

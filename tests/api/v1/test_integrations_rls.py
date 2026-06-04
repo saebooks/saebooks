@@ -25,7 +25,6 @@ import hashlib
 import hmac
 import os
 import uuid
-from typing import Any
 
 import pytest
 import pytest_asyncio
@@ -37,9 +36,9 @@ from sqlalchemy.pool import NullPool
 os.environ.setdefault("SAEBOOKS_ENV", "test")
 os.environ.setdefault("SAEBOOKS_TEST_TRUSTED_USER_HEADER", "1")
 
-from saebooks.config import settings  # noqa: E402
-from saebooks.db import AsyncSessionLocal, engine  # noqa: E402
-from saebooks.main import app  # noqa: E402
+from saebooks.config import settings
+from saebooks.db import AsyncSessionLocal
+from saebooks.main import app
 
 
 @pytest.fixture(autouse=True)

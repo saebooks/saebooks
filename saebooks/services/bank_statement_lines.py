@@ -13,12 +13,12 @@ conventions as every other API-tier service.
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import func as sa_func, select
+from sqlalchemy import func as sa_func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.models.bank_statement import BankStatementLine, StatementLineStatus
@@ -85,9 +85,7 @@ def _serialise(line: BankStatementLine) -> dict[str, Any]:
         val = getattr(line, key, None)
         if isinstance(val, uuid.UUID):
             val = str(val)
-        elif isinstance(val, datetime):
-            val = val.isoformat()
-        elif isinstance(val, date):
+        elif isinstance(val, (datetime, date)):
             val = val.isoformat()
         elif isinstance(val, Decimal):
             val = str(val)

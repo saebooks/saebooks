@@ -21,13 +21,14 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
-from saebooks.api.v1.auth import current_token, DEFAULT_TENANT_ID
+from saebooks.api.v1.auth import DEFAULT_TENANT_ID, current_token
 from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import settings as settings_svc
+
 pytestmark = pytest.mark.postgres_only
 
 
@@ -1020,6 +1021,7 @@ async def test_bas_g2_g10_reconcile_with_au_bas_report(
 
     # au.bas_report directly, for the same company + period.
     from decimal import Decimal
+
     from saebooks.services.tax_engine import au as au_engine
 
     async with AsyncSessionLocal() as session:

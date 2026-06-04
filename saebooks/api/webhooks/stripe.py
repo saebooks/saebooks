@@ -88,7 +88,7 @@ async def _handle_subscription_updated(event: dict[str, Any]) -> bool:
 
     Returns ``True`` when a tenant was found and updated.
     """
-    from saebooks.models.tenant import Tenant  # noqa: PLC0415
+    from saebooks.models.tenant import Tenant
 
     data = event.get("data") or {}
     subscription = data.get("object") or {}
@@ -138,7 +138,7 @@ async def _handle_subscription_deleted(event: dict[str, Any]) -> bool:
     Reverts tenant to community edition and clears
     ``stripe_subscription_id``.
     """
-    from saebooks.models.tenant import Tenant  # noqa: PLC0415
+    from saebooks.models.tenant import Tenant
 
     data = event.get("data") or {}
     subscription = data.get("object") or {}

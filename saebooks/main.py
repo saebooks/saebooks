@@ -9,10 +9,10 @@ from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from saebooks import __version__
 from saebooks.api.errors import register_handlers
 from saebooks.api.v1 import router as api_v1_router
 from saebooks.api.webhooks.stripe import router as _stripe_webhook_router
-from saebooks import __version__
 from saebooks.config import settings
 from saebooks.connect_app import (
     ConnectDispatchMiddleware,
@@ -20,14 +20,14 @@ from saebooks.connect_app import (
 )
 from saebooks.grpc_server import serve as grpc_serve
 from saebooks.middleware.active_company import ActiveCompanyMiddleware
-from saebooks.middleware.skip_audit import SkipAuditMiddleware
 from saebooks.middleware.auth import ForwardAuthMiddleware
 from saebooks.middleware.request_id import RequestIdMiddleware
+from saebooks.middleware.skip_audit import SkipAuditMiddleware
 from saebooks.routers import (
     account_tokens,
     accounts,
-    auth,
     assets,
+    auth,
     bank_rules,
     bills,
     budgets,

@@ -31,6 +31,7 @@ from saebooks.models.project import Project
 from saebooks.services import journal as journal_svc
 from saebooks.services import projects as project_svc
 from saebooks.services import reports as svc
+
 pytestmark = pytest.mark.postgres_only
 
 TEST_PROJECT_PREFIX = "SEG-TEST"
@@ -225,8 +226,8 @@ async def test_pl_by_segment_rejects_unsupported_segment() -> None:
 
 async def test_pl_by_segment_department_returns_rows() -> None:
     """Department-tagged lines appear under the correct segment label."""
-    from saebooks.models.department import Department
     from saebooks.db import AsyncSessionLocal as S
+    from saebooks.models.department import Department
 
     cid, income, expense = await _ctx()
 
@@ -301,8 +302,8 @@ async def test_pl_by_segment_department_returns_rows() -> None:
 
 async def test_pl_by_segment_cost_centre_returns_rows() -> None:
     """Cost-centre-tagged lines appear under the correct segment label."""
-    from saebooks.models.department import CostCentre
     from saebooks.db import AsyncSessionLocal as S
+    from saebooks.models.department import CostCentre
 
     cid, income, expense = await _ctx()
 
