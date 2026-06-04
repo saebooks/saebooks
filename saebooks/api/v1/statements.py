@@ -304,6 +304,7 @@ async def ingest(
 async def list_statements(
     request: Request,
     status_filter: str | None = Query(default=None, alias="status"),
+    contact_id: UUID | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
@@ -324,6 +325,8 @@ async def list_statements(
     )
     if status_filter is not None:
         q = q.where(SupplierStatement.status == status_filter)
+    if contact_id is not None:
+        q = q.where(SupplierStatement.contact_id == contact_id)
 
     count_q = select(func.count()).select_from(
         q.order_by(None).subquery()

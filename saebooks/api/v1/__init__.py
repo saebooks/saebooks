@@ -84,6 +84,7 @@ from saebooks.api.v1.search import router as search_router
 from saebooks.api.v1.signup import router as signup_router
 from saebooks.api.v1.snapshot import router as snapshot_router
 from saebooks.api.v1.statements import router as statements_router
+from saebooks.api.v1.statement_templates import router as statement_templates_router
 from saebooks.api.v1.stp import router as stp_router
 from saebooks.api.v1.super_funds import router as super_funds_router
 from saebooks.api.v1.super_lodgements import router as super_lodgements_router
@@ -214,5 +215,7 @@ router.include_router(tax_returns_router)
 
 # Gitea #28: supplier-statement reconciliation queue (Phase 1)
 router.include_router(statements_router)
+# Gitea #28 P4: supplier-statement extraction-hint templates
+router.include_router(statement_templates_router)
 
 __all__ = ["router"]
