@@ -23,6 +23,7 @@ import enum
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import (
     TIMESTAMP,
@@ -123,7 +124,7 @@ class SupplierStatement(CompanyScoped, Base):
     our_ap_as_at: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
     balance_delta: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
     # Extraction provenance: model used, whether opus-escalated, anomalies, gate results.
-    extraction_meta: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    extraction_meta: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=func.now(), nullable=False
