@@ -55,6 +55,7 @@ from uuid import UUID
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -269,11 +270,17 @@ async def ingest(
     # lazy-loads during Pydantic serialization → MissingGreenlet (no async
     # greenlet active). Force a fresh SELECT with populate_existing so scalars
     # are refreshed and lines are genuinely eager-loaded before model_validate.
-    session.expire_all()
+    # Get the PK from the identity map WITHOUT touching the ORM object: after
+    # ingest_statement's internal commit `stmt` is expired, so `stmt.id` would
+    # trigger a synchronous refresh (IO) outside the async greenlet →
+    # MissingGreenlet. inspect().identity reads the PK with no IO. Then a fresh
+    # SELECT with populate_existing refreshes scalars + eager-loads lines, so
+    # Pydantic serialization reads everything from memory.
+    sid = sa_inspect(stmt).identity[0]
     stmt_with_lines = (
         await session.execute(
             select(SupplierStatement)
-            .where(SupplierStatement.id == stmt.id)
+            .where(SupplierStatement.id == sid)
             .options(selectinload(SupplierStatement.lines))
             .execution_options(populate_existing=True)
         )
