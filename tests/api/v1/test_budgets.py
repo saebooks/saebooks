@@ -38,7 +38,6 @@ from saebooks.main import app
 from saebooks.models.account import Account, AccountType
 from saebooks.models.change_log import ChangeLog
 
-
 # ---------------------------------------------------------------------------
 # Helpers — resolve IDs from the seeded DB
 # ---------------------------------------------------------------------------
@@ -91,6 +90,7 @@ async def deps() -> dict[str, str]:
 
 import os as _os
 import time as _time
+
 pytestmark = pytest.mark.postgres_only
 
 # Session-unique base: combine PID and epoch-second to pick a starting

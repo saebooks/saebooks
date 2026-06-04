@@ -29,19 +29,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import resolve_tenant_id
 from saebooks.config import settings
-from saebooks.routers.deps import get_web_session
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact
 from saebooks.models.invoice import InvoiceStatus
 from saebooks.models.project import Project, ProjectStatus
 from saebooks.models.tax_code import TaxCode
+from saebooks.routers.deps import get_web_session
+from saebooks.services import active_company as active_svc
 from saebooks.services import invoices as svc
 from saebooks.services import mailer as mailer_svc
 from saebooks.services import numbering
 from saebooks.services import pdf as pdf_svc
 from saebooks.web import templates
-from saebooks.services import active_company as active_svc
 
 router = APIRouter(prefix="/invoices")
 
@@ -488,12 +488,10 @@ async def invoices_archive(
     session: AsyncSession = Depends(get_web_session),
 ) -> RedirectResponse:
     tenant_id = resolve_tenant_id(request)
-    try:
+    # Cross-tenant archive — silently no-op (303 to list per
+    # forum#2 acceptance criteria; row stays untouched).
+    with contextlib.suppress(svc.InvoiceError):
         await svc.archive(session, invoice_id, tenant_id=tenant_id)
-    except svc.InvoiceError:
-        # Cross-tenant archive — silently no-op (303 to list per
-        # forum#2 acceptance criteria; row stays untouched).
-        pass
     return RedirectResponse("/invoices", status_code=303)
 
 

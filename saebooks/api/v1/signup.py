@@ -88,7 +88,7 @@ class SignupRequest(BaseModel):
 
     @field_validator("email")
     @classmethod
-    def _v_email(cls, v: str) -> str:  # noqa: D401
+    def _v_email(cls, v: str) -> str:
         return _check_email(v)
 
 

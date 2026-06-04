@@ -24,6 +24,7 @@ from httpx import ASGITransport, AsyncClient, Response
 
 from saebooks.api.v1.auth import current_token
 from saebooks.main import app
+
 pytestmark = pytest.mark.postgres_only
 
 # ---------------------------------------------------------------------- #
@@ -32,7 +33,8 @@ pytestmark = pytest.mark.postgres_only
 
 # Read from settings so the mock matches whatever LITELLM_BASE_URL is
 # configured in the test environment (default: https://api.openai.com/v1).
-from saebooks.config import settings as _ai_settings  # noqa: E402
+from saebooks.config import settings as _ai_settings
+
 _LITELLM_URL = _ai_settings.litellm_base_url.rstrip("/") + "/chat/completions"
 
 

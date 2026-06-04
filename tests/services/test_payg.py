@@ -47,12 +47,10 @@ from saebooks.services.payg import (
     resolve_scale_no,
 )
 from saebooks.services.super_calc import (
-    SuperResult,
     compute_super,
     current_sg_rate,
     quarterly_cap,
 )
-
 
 # --------------------------------------------------------------------- #
 # Fixtures                                                              #

@@ -23,7 +23,6 @@ from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account
 from saebooks.models.company import Company
 from saebooks.models.journal import EntryStatus, JournalEntry
-from saebooks.services import cashbook
 from saebooks.services import settings as settings_svc
 from saebooks.services.cashbook import (
     CashbookCategoryError,
@@ -32,6 +31,7 @@ from saebooks.services.cashbook import (
     CashbookNotConfigured,
     record_cashbook_entry,
 )
+
 pytestmark = pytest.mark.postgres_only
 
 

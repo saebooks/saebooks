@@ -278,9 +278,7 @@ def _serialise(quote: Quote) -> dict:
         val = getattr(quote, key, None)
         if isinstance(val, uuid.UUID):
             val = str(val)
-        elif isinstance(val, datetime):
-            val = val.isoformat()
-        elif isinstance(val, date):
+        elif isinstance(val, (datetime, date)):
             val = val.isoformat()
         elif isinstance(val, Decimal):
             val = str(val)
@@ -824,8 +822,9 @@ async def convert_to_invoice(
     )
 
     # Stamp source_quote_id on the invoice (column added in 0097)
-    from saebooks.db import AsyncSessionLocal as _ASL  # noqa: F401
     from sqlalchemy import update as sa_update
+
+    from saebooks.db import AsyncSessionLocal as _ASL  # noqa: F401
     from saebooks.models.invoice import Invoice
 
     await session.execute(

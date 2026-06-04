@@ -37,6 +37,7 @@ from saebooks.services import bills as bills_svc
 from saebooks.services import credit_notes as cn_svc
 from saebooks.services import invoices as inv_svc
 from saebooks.services import journal_entries as je_svc
+
 pytestmark = pytest.mark.postgres_only
 
 _DEFAULT_TENANT = uuid.UUID("00000000-0000-0000-0000-000000000001")

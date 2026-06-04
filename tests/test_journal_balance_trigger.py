@@ -20,6 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account
 from saebooks.models.company import Company
+
 pytestmark = pytest.mark.postgres_only
 
 
@@ -101,7 +102,7 @@ async def _insert_je_raw(
 @pytest.mark.asyncio
 async def test_draft_unbalanced_is_allowed() -> None:
     """DRAFT entries are explicitly outside the trigger's scope."""
-    company_id, tenant_id, a, b = await _ctx()
+    company_id, tenant_id, a, _b = await _ctx()
     je_id = await _insert_je_raw(
         company_id,
         tenant_id,

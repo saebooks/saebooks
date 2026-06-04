@@ -30,6 +30,7 @@ from saebooks.models.company import Company
 from saebooks.models.journal import EntryStatus, JournalEntry, PeriodLock
 from saebooks.services import journal as journal_svc
 from saebooks.services import period_close as svc
+
 pytestmark = pytest.mark.postgres_only
 
 # ---------------------------------------------------------------------- #

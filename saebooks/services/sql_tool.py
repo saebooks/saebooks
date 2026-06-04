@@ -42,12 +42,11 @@ from __future__ import annotations
 
 import csv
 import io
-import os
 import re
 import time
 import uuid
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote_plus, urlparse, urlunparse
 
@@ -59,7 +58,6 @@ from saebooks.config import settings
 from saebooks.db import engine as _runtime_engine
 from saebooks.models.change_log import ChangeLog
 from saebooks.models.sql_query import SqlQuery
-
 
 # Max rows returned to the browser. Larger results force export to CSV.
 RESULT_LIMIT = 500
@@ -267,7 +265,7 @@ async def _append_audit(
         "role_used": role_used,
         "status": status,
         "rowcount": rowcount,
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "user_id": str(user_id) if user_id is not None else None,
         "tenant_id": str(tenant_id) if tenant_id is not None else None,
     }
@@ -405,7 +403,7 @@ async def execute(
         columns, rows, rowcount, truncated = await _run_on_role(
             engine, statement=s, tenant_id=tenant_id
         )
-    except Exception as exc:  # noqa: BLE001 — audit and re-raise as QueryError
+    except Exception as exc:
         audit_id = await _append_audit(
             audit_session,
             statement=s,

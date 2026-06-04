@@ -24,15 +24,14 @@ from fastapi import APIRouter
 from saebooks.api.v1.account_ranges import router as account_ranges_router
 from saebooks.api.v1.accounts import router as accounts_router
 from saebooks.api.v1.admin import router as admin_router
-from saebooks.api.v1.audit_log import router as audit_log_router
 from saebooks.api.v1.admin_inspect import router as admin_inspect_router
 from saebooks.api.v1.admin_tenants import router as admin_tenants_router
-from saebooks.api.v1.api_tokens import router as api_tokens_router
-from saebooks.api.v1.webauthn import router as webauthn_router
 from saebooks.api.v1.ai_extraction import router as ai_extraction_router
 from saebooks.api.v1.allocations import router as allocations_router
-from saebooks.api.v1.attachments import router as attachments_router
+from saebooks.api.v1.api_tokens import router as api_tokens_router
 from saebooks.api.v1.ato_sbr import router as ato_sbr_router
+from saebooks.api.v1.attachments import router as attachments_router
+from saebooks.api.v1.audit_log import router as audit_log_router
 from saebooks.api.v1.bank_accounts import router as bank_accounts_router
 from saebooks.api.v1.bank_feeds import router as bank_feeds_router
 from saebooks.api.v1.bank_rules import router as bank_rules_router
@@ -40,56 +39,61 @@ from saebooks.api.v1.bank_statement_lines import router as bank_statement_lines_
 from saebooks.api.v1.billing import router as billing_router
 from saebooks.api.v1.bills import router as bills_router
 from saebooks.api.v1.branches import router as branches_router
-from saebooks.api.v1.employees import router as employees_router
-from saebooks.api.v1.expenses import router as expenses_router
-from saebooks.api.v1.leave import router as leave_router
-from saebooks.api.v1.stp import router as stp_router
-from saebooks.api.v1.tpar import router as tpar_router
-from saebooks.api.v1.super_lodgements import router as super_lodgements_router
-from saebooks.api.v1.tax_returns import router as tax_returns_router
-from saebooks.api.v1.super_funds import router as super_funds_router
-from saebooks.api.v1.time_entries import router as time_entries_router
 from saebooks.api.v1.budgets import router as budgets_router
 from saebooks.api.v1.cashbook import router as cashbook_router
 from saebooks.api.v1.changes import router as changes_router
 from saebooks.api.v1.companies import router as companies_router
 from saebooks.api.v1.contact_public import router as contact_public_router
 from saebooks.api.v1.contacts import router as contacts_router
-from saebooks.api.v1.one_off_vendors import router as one_off_vendors_router
-from saebooks.api.v1.one_off_customers import router as one_off_customers_router
 from saebooks.api.v1.credit_notes import router as credit_notes_router
 from saebooks.api.v1.depreciation_models import router as depreciation_models_router
+from saebooks.api.v1.email_log import router as email_log_router
+from saebooks.api.v1.employees import router as employees_router
+from saebooks.api.v1.expenses import router as expenses_router
 from saebooks.api.v1.fixed_assets import router as fixed_assets_router
 from saebooks.api.v1.health import router as health_router
 from saebooks.api.v1.imports import router as imports_router
 from saebooks.api.v1.integrations import (
     public_router as integrations_public_router,
+)
+from saebooks.api.v1.integrations import (
     router as integrations_router,
 )
 from saebooks.api.v1.invoices import router as invoices_router
 from saebooks.api.v1.items import router as items_router
 from saebooks.api.v1.journal_entries import router as journal_entries_router
 from saebooks.api.v1.journal_templates import router as journal_templates_router
-from saebooks.api.v1.license import router as license_router, _promo_router as promo_stats_router
+from saebooks.api.v1.leave import router as leave_router
+from saebooks.api.v1.license import _promo_router as promo_stats_router
+from saebooks.api.v1.license import router as license_router
 from saebooks.api.v1.lodgement import router as lodgement_router
 from saebooks.api.v1.login import router as login_router
+from saebooks.api.v1.one_off_customers import router as one_off_customers_router
+from saebooks.api.v1.one_off_vendors import router as one_off_vendors_router
 from saebooks.api.v1.pay_run import router as pay_run_router
 from saebooks.api.v1.payments import router as payments_router
+from saebooks.api.v1.period_close import router as period_close_router
 from saebooks.api.v1.projects import router as projects_router
 from saebooks.api.v1.proration import router as proration_router
 from saebooks.api.v1.purchase_orders import router as purchase_orders_router
-from saebooks.api.v1.email_log import router as email_log_router
-from saebooks.api.v1.webhooks_resend import router as webhooks_resend_router
 from saebooks.api.v1.quotes import router as quotes_router
 from saebooks.api.v1.reconciliation import router as reconciliation_router
 from saebooks.api.v1.recurring_invoices import router as recurring_invoices_router
 from saebooks.api.v1.reports import router as reports_router
-from saebooks.api.v1.period_close import router as period_close_router
 from saebooks.api.v1.search import router as search_router
 from saebooks.api.v1.signup import router as signup_router
 from saebooks.api.v1.snapshot import router as snapshot_router
+from saebooks.api.v1.stp import router as stp_router
+from saebooks.api.v1.super_funds import router as super_funds_router
+from saebooks.api.v1.super_lodgements import router as super_lodgements_router
 from saebooks.api.v1.tax_codes import router as tax_codes_router
-from saebooks.api.v1.users import permissions_router, router as users_router
+from saebooks.api.v1.tax_returns import router as tax_returns_router
+from saebooks.api.v1.time_entries import router as time_entries_router
+from saebooks.api.v1.tpar import router as tpar_router
+from saebooks.api.v1.users import permissions_router
+from saebooks.api.v1.users import router as users_router
+from saebooks.api.v1.webauthn import router as webauthn_router
+from saebooks.api.v1.webhooks_resend import router as webhooks_resend_router
 
 # One umbrella router — main.py mounts this at /api/v1.
 router = APIRouter(prefix="/api/v1")

@@ -26,7 +26,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_active_company_id, get_session
 from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
-from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.api.v1.schemas import (
     EmployeeCreate,
     EmployeeListOut,
@@ -38,6 +37,7 @@ from saebooks.api.v1.schemas import (
 from saebooks.models.employee import Employee
 from saebooks.services import employees as svc
 from saebooks.services.employees import EmployeeError, EmployeeFilters
+from saebooks.services.hard_delete import hard_delete_with_audit
 
 router = APIRouter(
     prefix="/employees",

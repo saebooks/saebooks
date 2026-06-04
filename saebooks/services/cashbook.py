@@ -37,7 +37,7 @@ from sqlalchemy.orm import selectinload
 
 from saebooks.models.account import Account
 from saebooks.models.company import Company
-from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
+from saebooks.models.journal import EntryStatus, JournalEntry
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import journal as journal_svc
 from saebooks.services.cashbook_categories import (
@@ -519,7 +519,7 @@ async def record_cashbook_entry(
             raise CashbookError(
                 "Idempotency conflict but no existing entry found — "
                 "DB state inconsistent."
-            )
+            ) from None
         return existing
 
     # Post — runs GST auto-post + balance check + period-lock check
@@ -1019,18 +1019,18 @@ async def upgrade_cashbook_to_full(
 
 
 __all__ = [
+    "CashbookAccountResolutionError",
+    "CashbookCategoryError",
+    "CashbookCurrencyError",
+    "CashbookEntryNotEditable",
+    "CashbookEntryNotFound",
     "CashbookError",
     "CashbookNotConfigured",
-    "CashbookCurrencyError",
-    "CashbookCategoryError",
-    "CashbookAccountResolutionError",
-    "CashbookEntryNotFound",
-    "CashbookEntryNotEditable",
     "CashbookSetupError",
+    "downgrade_full_to_cashbook",
     "record_cashbook_entry",
-    "void_cashbook_entry",
     "replace_cashbook_entry",
     "setup_cashbook_mode",
-    "downgrade_full_to_cashbook",
     "upgrade_cashbook_to_full",
+    "void_cashbook_entry",
 ]

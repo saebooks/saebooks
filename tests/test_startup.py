@@ -9,6 +9,7 @@ import os
 
 import pytest
 from httpx import AsyncClient
+
 pytestmark = pytest.mark.postgres_only
 
 
@@ -33,7 +34,7 @@ async def test_openapi_json_returns_200(client: AsyncClient) -> None:
 
 async def test_grpc_server_importable() -> None:
     """grpc_server module and serve() callable exist — no port binding needed."""
-    from saebooks.grpc_server import SAEBooksServicer, serve  # noqa: PLC0415
+    from saebooks.grpc_server import SAEBooksServicer, serve
 
     assert callable(serve)
     assert SAEBooksServicer is not None
@@ -51,8 +52,8 @@ async def test_grpc_server_importable() -> None:
 async def test_grpc_heartbeat_live() -> None:
     """Open a real gRPC channel to a live server and call Heartbeat."""
     from grpc import aio
-
     from saebooks.grpc_gen import saebooks_pb2, saebooks_pb2_grpc
+
     from saebooks.grpc_server import serve
 
     port = 50098  # non-default to avoid clash with dev server

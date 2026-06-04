@@ -17,14 +17,13 @@ two are reorganised.
 from __future__ import annotations
 
 import os
-from datetime import datetime
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from saebooks.services import features as _features
-from saebooks.services.licence.models import LicenceSource, ResolvedLicence
+from saebooks.services.licence.models import ResolvedLicence
 from saebooks.services.licence.resolver import resolve_licence
-
 
 # Cache file path mirrored from saebooks.api.v1.license. Kept in sync
 # manually (this module must not import from the API package — that

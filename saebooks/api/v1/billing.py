@@ -39,7 +39,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Header, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy import select
 
@@ -429,4 +429,4 @@ async def stripe_webhook(
 
 
 # Used by /billing/checkout-success on the web side.
-__all__ = ["EDITIONS", "router", "resolve_tenant_id"]
+__all__ = ["EDITIONS", "resolve_tenant_id", "router"]

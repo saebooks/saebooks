@@ -98,7 +98,7 @@ def _client_id() -> str:
 
 def _secret_key() -> str:
     """Resolve SAE Engineering's Stripe secret key for token exchange."""
-    from saebooks.config import settings  # noqa: PLC0415 — late to avoid circular
+    from saebooks.config import settings
 
     key = (settings.stripe_secret_key or os.environ.get("STRIPE_SECRET_KEY", "")).strip()
     if not key:

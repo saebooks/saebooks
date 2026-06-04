@@ -40,9 +40,8 @@ import os
 import subprocess
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Header, HTTPException, Request, status
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal, LoginSessionLocal
@@ -140,7 +139,7 @@ async def receive_resend_webhook(
     try:
         event = json.loads(body)
     except json.JSONDecodeError:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "invalid JSON")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "invalid JSON") from None
 
     event_type = event.get("type", "")
     data = event.get("data") or {}

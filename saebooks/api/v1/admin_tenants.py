@@ -37,9 +37,7 @@ async def list_tenants(
     if not role:
         u = getattr(request.state, "user", None)
         role = getattr(u, "role", None) if u else None
-    if role and has_at_least(role, UserRole.ADMIN.value):
-        pass
-    elif request.headers.get("x-admin", "").strip().lower() == "true":
+    if (role and has_at_least(role, UserRole.ADMIN.value)) or request.headers.get("x-admin", "").strip().lower() == "true":
         pass
     else:
         raise HTTPException(403, "Admin role required")

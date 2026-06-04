@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import contextvars
 import uuid
-from typing import Sequence
+from collections.abc import Sequence
 
 from fastapi import HTTPException, Request, Response
 from sqlalchemy import select

@@ -15,6 +15,7 @@ from saebooks.config import settings as app_settings
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
+
 pytestmark = pytest.mark.postgres_only
 
 

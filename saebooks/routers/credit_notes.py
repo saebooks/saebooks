@@ -36,10 +36,10 @@ from saebooks.models.contact import Contact
 from saebooks.models.credit_note import CreditNoteStatus
 from saebooks.models.tax_code import TaxCode
 from saebooks.routers.deps import get_web_session
+from saebooks.services import active_company as active_svc
 from saebooks.services import credit_notes as svc
 from saebooks.services import numbering
 from saebooks.web import templates
-from saebooks.services import active_company as active_svc
 
 router = APIRouter(prefix="/credit-notes")
 

@@ -14,11 +14,11 @@ from saebooks.models.company import Company
 from saebooks.models.contact import ContactType
 from saebooks.models.tax_code import TaxCode
 from saebooks.routers.deps import get_web_session
+from saebooks.services import active_company as active_svc
 from saebooks.services import contacts as svc
 from saebooks.services.abr import AbrError, AbrNotConfiguredError, lookup_abn
 from saebooks.services.features import FLAG_ABR_LOOKUP, is_enabled, require_feature
 from saebooks.web import templates
-from saebooks.services import active_company as active_svc
 
 router = APIRouter(prefix="/contacts")
 # Beneficiary register lives at /beneficiaries (no prefix) — separate router so
@@ -83,7 +83,7 @@ def _parse_form_fields(
         try:
             share_pct = Decimal(share_percentage.strip())
         except InvalidOperation:
-            raise ValueError(f"Invalid share percentage: {share_percentage!r}")
+            raise ValueError(f"Invalid share percentage: {share_percentage!r}") from None
 
     return {
         "name": name,

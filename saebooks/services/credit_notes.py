@@ -451,7 +451,6 @@ async def archive(
 from saebooks.services import audit_log as audit_log_svc  # noqa: E402
 from saebooks.services import change_log as change_log_svc  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # Exceptions
 # ---------------------------------------------------------------------------
@@ -500,9 +499,7 @@ def _serialise_cn(cn: CreditNote) -> dict:
         val = getattr(cn, key, None)
         if isinstance(val, uuid.UUID):
             val = str(val)
-        elif isinstance(val, datetime):
-            val = val.isoformat()
-        elif isinstance(val, date):
+        elif isinstance(val, (datetime, date)):
             val = val.isoformat()
         elif isinstance(val, Decimal):
             val = str(val)

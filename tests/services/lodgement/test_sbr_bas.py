@@ -14,7 +14,7 @@ from saebooks.services.lodgement.sbr import (
     build_bas_document,
     envelope_parts,
 )
-from saebooks.services.lodgement.sbr.bas import AS_TAXONOMY_NS, _AS_CONCEPTS
+from saebooks.services.lodgement.sbr.bas import _AS_CONCEPTS, AS_TAXONOMY_NS
 
 XBRLI = "http://www.xbrl.org/2003/instance"
 

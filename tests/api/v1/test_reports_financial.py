@@ -16,17 +16,17 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import date
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
-from saebooks.api.v1.auth import current_token, DEFAULT_TENANT_ID
+from saebooks.api.v1.auth import DEFAULT_TENANT_ID, current_token
 from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
+
 pytestmark = pytest.mark.postgres_only
 
 
@@ -283,7 +283,7 @@ async def test_pnl_date_range_filter(
     body = r.json()
 
     # The May JE should not appear in June totals
-    for line in body["income"]["INCOME"]:
+    for _line in body["income"]["INCOME"]:
         # If the account does appear it must not include the 9999 amount from May
         # (there may be other JEs for this account from other tests in June)
         pass

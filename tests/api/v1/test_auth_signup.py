@@ -29,13 +29,13 @@ from sqlalchemy import delete, text
 
 from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
-from saebooks.models.tenant import Tenant
 from saebooks.models.user import User
 from saebooks.services.auth_tokens import generate_token, hash_token
 from saebooks.services.jwt_tokens import (
     _b64url_decode,
     _reset_secret_cache,
 )
+
 pytestmark = pytest.mark.postgres_only
 
 

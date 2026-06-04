@@ -35,7 +35,7 @@ from __future__ import annotations
 import enum
 from calendar import monthrange
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
 _TWOPLACES = Decimal("0.01")

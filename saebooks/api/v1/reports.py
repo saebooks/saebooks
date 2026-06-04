@@ -680,6 +680,8 @@ _CAPITAL_REPORTING_TYPE = "capital"
 # (used by the other report routes) untouched.
 from saebooks.services.tax_engine.au import (  # noqa: E402
     _BAS_INCOME_TYPES as _AU_BAS_INCOME_TYPES,
+)
+from saebooks.services.tax_engine.au import (  # noqa: E402  aliased import, see comment above
     _BAS_PURCHASE_TYPES as _AU_BAS_PURCHASE_TYPES,
 )
 

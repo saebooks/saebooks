@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_active_company_id, get_session
+from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.api.v1.schemas import (
     ItemConflictBody,
     ItemCreate,
@@ -34,7 +35,6 @@ from saebooks.api.v1.schemas import (
     ItemUpdate,
     StockOut,
 )
-from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.models.item import Item, ItemType
 from saebooks.services import items as svc
 from saebooks.services.hard_delete import hard_delete_with_audit

@@ -25,12 +25,11 @@ from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.models.distribution import (
-    BeneficiaryEntitlement,
-    DistributionStatus,
     TrustDistribution,
 )
 from saebooks.models.journal import JournalEntry, JournalLine
 from saebooks.services import distributions as svc
+
 pytestmark = pytest.mark.postgres_only
 
 TEST_DATE = date(2099, 6, 30)
@@ -145,7 +144,7 @@ async def test_beneficiary_entitlements_has_franking_column() -> None:
 @pytest.mark.asyncio
 async def test_grossed_up_income_calculation() -> None:
     """$7,000 cash + $3,000 franking = $10,000 grossed-up distributable income."""
-    company_id, equity_id, liab_id = await _ctx()
+    company_id, _equity_id, liab_id = await _ctx()
 
     async with AsyncSessionLocal() as session:
         dist = await svc.create(
@@ -186,7 +185,7 @@ async def test_grossed_up_income_calculation() -> None:
 @pytest.mark.asyncio
 async def test_franking_credits_split_by_percentage() -> None:
     """Two beneficiaries — 60/40 split, franking credits allocated proportionally."""
-    company_id, equity_id, liab_id = await _ctx()
+    company_id, _equity_id, liab_id = await _ctx()
 
     async with AsyncSessionLocal() as session:
         dist = await svc.create(
@@ -239,7 +238,7 @@ async def test_franking_credits_split_by_percentage() -> None:
 @pytest.mark.asyncio
 async def test_explicit_franking_credit_per_entitlement() -> None:
     """Caller can supply franking_credit_amount explicitly per entitlement."""
-    company_id, equity_id, liab_id = await _ctx()
+    company_id, _equity_id, liab_id = await _ctx()
 
     async with AsyncSessionLocal() as session:
         dist = await svc.create(
@@ -278,7 +277,7 @@ async def test_explicit_franking_credit_per_entitlement() -> None:
 @pytest.mark.asyncio
 async def test_zero_franking_credits_default_behaviour() -> None:
     """Distributions without franking credits work exactly as before."""
-    company_id, equity_id, liab_id = await _ctx()
+    company_id, _equity_id, liab_id = await _ctx()
 
     async with AsyncSessionLocal() as session:
         dist = await svc.create(

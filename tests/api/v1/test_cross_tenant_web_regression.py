@@ -67,19 +67,18 @@ from sqlalchemy.pool import NullPool
 os.environ.setdefault("SAEBOOKS_SECRET_KEY", "test-secret-key-for-ct-web-regression")
 os.environ.setdefault("SAEBOOKS_ENV", "test")
 
-from saebooks.db import engine as _owner_engine  # noqa: E402
-from saebooks.main import app  # noqa: E402
-from saebooks.models.account import Account, AccountType  # noqa: E402
-from saebooks.models.bill import Bill, BillStatus  # noqa: E402
-from saebooks.models.company import Company  # noqa: E402
-from saebooks.models.contact import Contact, ContactType  # noqa: E402
-from saebooks.models.invoice import Invoice, InvoiceLine, InvoiceStatus  # noqa: E402
-from saebooks.models.journal import EntryStatus, JournalEntry  # noqa: E402
-from saebooks.models.project import Project  # noqa: E402
-from saebooks.models.recurring_invoice import RecurringInvoice, RecurrenceFrequency  # noqa: E402
-from saebooks.models.tenant import Tenant  # noqa: E402
-from saebooks.services.jwt_tokens import _reset_secret_cache, create_access_token  # noqa: E402
-
+from saebooks.db import engine as _owner_engine
+from saebooks.main import app
+from saebooks.models.account import Account, AccountType
+from saebooks.models.bill import Bill, BillStatus
+from saebooks.models.company import Company
+from saebooks.models.contact import Contact, ContactType
+from saebooks.models.invoice import Invoice, InvoiceLine, InvoiceStatus
+from saebooks.models.journal import EntryStatus, JournalEntry
+from saebooks.models.project import Project
+from saebooks.models.recurring_invoice import RecurrenceFrequency, RecurringInvoice
+from saebooks.models.tenant import Tenant
+from saebooks.services.jwt_tokens import _reset_secret_cache, create_access_token
 
 # ---------------------------------------------------------------------------
 # Skip guard

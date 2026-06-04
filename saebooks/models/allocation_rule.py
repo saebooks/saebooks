@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     Boolean,
@@ -62,7 +63,7 @@ class AllocationRule(CompanyScoped, Base):
         nullable=False,
     )
     # Array of {account_id, label, percentage} objects
-    targets: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    targets: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(

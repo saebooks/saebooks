@@ -26,7 +26,7 @@ import base64
 import dataclasses
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -44,7 +44,8 @@ log = logging.getLogger(__name__)
 # means no portal pubkey is configured — the JWT driver returns None
 # in resolve(), so the resolver falls through to USB / community.
 # Set in production builds via the env (Compose passes it through).
-import os as _os
+import os as _os  # noqa: E402  read after the module docstring/comment block above
+
 PORTAL_PUBKEY_B64: str = _os.environ.get("SAEBOOKS_PORTAL_PUBKEY", "")
 
 # Maximum days past ``exp`` we'll still accept a JWT as "read-only".
@@ -145,10 +146,10 @@ def _payload_to_licence(payload: dict[str, Any]) -> ResolvedLicence | None:
 
     exp = payload.get("exp")
     expires_at = (
-        datetime.fromtimestamp(int(exp), tz=timezone.utc) if exp else None
+        datetime.fromtimestamp(int(exp), tz=UTC) if exp else None
     )
     if expires_at is not None:
-        days_past = (datetime.now(timezone.utc) - expires_at).days
+        days_past = (datetime.now(UTC) - expires_at).days
         if days_past > MAX_GRACE_DAYS:
             log.info(
                 "JWT expired %d days ago (> %d grace) — falling through",

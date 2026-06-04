@@ -28,6 +28,7 @@ from saebooks.main import app
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
+
 pytestmark = pytest.mark.postgres_only
 
 
@@ -272,7 +273,7 @@ async def test_aged_receivables_current(
         issue_date=today.isoformat(),
         due_date=tomorrow.isoformat(),
     )
-    inv_id = posted["id"]
+    posted["id"]
 
     r = await api_client.get(
         "/api/v1/reports/aged_receivables",

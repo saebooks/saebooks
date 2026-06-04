@@ -10,9 +10,9 @@ only covers admin seats, not companies.
 """
 from __future__ import annotations
 
+import uuid
 from datetime import date
 from typing import Any
-import uuid
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -54,16 +54,15 @@ _COMPANY_COLUMNS: tuple[str, ...] = (
 
 def _serialise(company: Company) -> dict[str, Any]:
     """Row → JSON-safe dict for change_log.payload (excludes encrypted SISS fields)."""
-    from datetime import date as _date, datetime as _dt
+    from datetime import date as _date
+    from datetime import datetime as _dt
 
     data: dict[str, Any] = {}
     for key in _COMPANY_COLUMNS:
         val = getattr(company, key)
         if isinstance(val, uuid.UUID):
             val = str(val)
-        elif isinstance(val, _dt):
-            val = val.isoformat()
-        elif isinstance(val, _date):
+        elif isinstance(val, (_dt, _date)):
             val = val.isoformat()
         data[key] = val
     return data

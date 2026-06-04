@@ -14,7 +14,6 @@ Generated journal:
 """
 import re
 import uuid
-from datetime import date
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -22,11 +21,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.models.bank_rule import BankRule, MatchType
 from saebooks.models.bank_statement import BankStatementLine, StatementLineStatus
-from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
+from saebooks.models.journal import JournalEntry
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import audit as audit_svc
 from saebooks.services import journal as journal_svc
-
 
 # ---------------------------------------------------------------------------
 # CRUD

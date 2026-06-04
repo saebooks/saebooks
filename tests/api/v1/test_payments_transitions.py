@@ -24,7 +24,6 @@ from saebooks.main import app
 from saebooks.models.account import Account, AccountType
 from saebooks.models.contact import Contact
 
-
 pytestmark = pytest.mark.asyncio
 
 

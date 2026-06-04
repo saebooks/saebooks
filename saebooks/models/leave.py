@@ -23,8 +23,8 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
-    DateTime,
     Date,
+    DateTime,
     Enum,
     ForeignKey,
     Integer,

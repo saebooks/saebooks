@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 import os
 import uuid
 from typing import Any
@@ -26,8 +25,7 @@ from httpx import ASGITransport, AsyncClient
 os.environ.setdefault("SAEBOOKS_ENV", "test")
 os.environ.setdefault("SAEBOOKS_TEST_TRUSTED_USER_HEADER", "1")
 
-from saebooks.main import app  # noqa: E402
-
+from saebooks.main import app
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -463,8 +461,9 @@ async def test_paperless_webhook_tenant_isolation_rls_smoke() -> None:
     requires a live DB with a non-BYPASSRLS role; that is covered by
     the prod-side migration assertions.
     """
-    from saebooks.models.integrations import PaperlessWebhookSecret  # noqa: PLC0415
-    from sqlalchemy import inspect as _inspect  # noqa: PLC0415
+    from sqlalchemy import inspect as _inspect
+
+    from saebooks.models.integrations import PaperlessWebhookSecret
 
     col_names = [c.key for c in _inspect(PaperlessWebhookSecret).mapper.column_attrs]
     assert "tenant_id" in col_names, "PaperlessWebhookSecret must have tenant_id for RLS"
@@ -504,7 +503,7 @@ async def test_lei_lookup_404_on_not_found(
     client: AsyncClient,
 ) -> None:
     """POST /integrations/lei/lookup → 404 when LEI not found."""
-    from saebooks.services.integrations.lei import LeiNotFoundError  # noqa: PLC0415
+    from saebooks.services.integrations.lei import LeiNotFoundError
 
     with patch(
         "saebooks.api.v1.integrations.lookup_lei",
@@ -603,7 +602,7 @@ async def test_companies_house_search_503_not_configured(
     client: AsyncClient,
 ) -> None:
     """POST /integrations/companies-house/search → 503 when CH_API_KEY unset."""
-    from saebooks.services.integrations.companies_house import (  # noqa: PLC0415
+    from saebooks.services.integrations.companies_house import (
         CompaniesHouseNotConfiguredError,
     )
 

@@ -17,12 +17,12 @@ conventions as every other API-tier service.
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import func as sa_func, select
+from sqlalchemy import func as sa_func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.models.account import Account, AccountType
@@ -115,9 +115,7 @@ def _serialise(account: Account) -> dict[str, Any]:
     data: dict[str, Any] = {}
     for key in _BA_COLUMNS:
         val = getattr(account, key, None)
-        if isinstance(val, uuid.UUID):
-            val = str(val)
-        elif isinstance(val, Decimal):
+        if isinstance(val, (uuid.UUID, Decimal)):
             val = str(val)
         elif isinstance(val, datetime):
             val = val.isoformat()

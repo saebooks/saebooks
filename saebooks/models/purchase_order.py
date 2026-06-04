@@ -54,6 +54,7 @@ import enum
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import (
     Date,
@@ -148,7 +149,7 @@ class PurchaseOrder(CompanyScoped, Base):
     external_id: Mapped[str | None] = mapped_column(String(255))
     external_source: Mapped[str | None] = mapped_column(String(64))
     external_etag: Mapped[str | None] = mapped_column(String(255))
-    external_payload: Mapped[dict | None] = mapped_column(JSONB)
+    external_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     tenant_id: Mapped[uuid.UUID] = mapped_column(

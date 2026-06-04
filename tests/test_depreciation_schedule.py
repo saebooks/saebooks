@@ -23,17 +23,18 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from saebooks.db import AsyncSessionLocal
+from saebooks.main import create_app
 from saebooks.models.account import Account
 from saebooks.models.company import Company
 from saebooks.models.fixed_asset import FixedAsset
 from saebooks.services import assets as asset_svc
 from saebooks.services import assets_reports as svc
-from saebooks.main import create_app
-import pytest
+
 pytestmark = pytest.mark.postgres_only
 
 

@@ -1,0 +1,146 @@
+# SAE Books — CI test / lint / type / migration gate
+#
+# This is the correctness gate (separate from build-images.yml, which only
+# proves the Docker image builds). It runs on GitHub-hosted ubuntu-latest
+# runners, which are free for public repositories.
+#
+# BLOCKING jobs (a red here must block a merge):
+#   * lint        — ruff check . (whole repo, config in pyproject.toml)
+#   * typecheck   — mypy --strict on the core domain-model + config layer
+#                   (saebooks/models + config.py + db_types.py + web.py).
+#                   Generated gRPC stubs (saebooks/grpc_gen), the optional
+#                   MCP server (saebooks/mcp) and the heavily-decorated
+#                   API/service layers are NOT yet strict-clean and are
+#                   tracked as a follow-up — see typecheck job notes below.
+#   * migrations  — alembic upgrade head on a fresh Postgres 16, proving the
+#                   whole 0001..head chain applies from empty.
+#
+# INFORMATIONAL job (reported, never blocks — clearly labelled):
+#   * tests       — full pytest suite via the isolated docker-compose stack.
+#                   The suite is NOT fully green yet (known baseline reds +
+#                   harness artefacts); making it green is a separate triage
+#                   tracked in tests/KNOWN_FAILURES.txt. continue-on-error
+#                   keeps the signal visible without faking a green gate.
+
+name: CI gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same ref to save runner minutes.
+concurrency:
+  group: ci-gate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: lint (ruff) — BLOCKING
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Set up Python
+        run: uv python install 3.12
+      - name: ruff check (whole repo, pyproject config)
+        # Pinned to the version in uv.lock so CI matches local dev exactly.
+        run: uvx ruff@0.15.11 check .
+
+  typecheck:
+    name: typecheck (mypy --strict, core) — BLOCKING
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Set up Python + project deps
+        # mypy --strict needs the real dependency types (sqlalchemy,
+        # pydantic, fastapi) installed, or it floods with import-not-found.
+        run: |
+          uv venv
+          uv pip install -e ".[dev]"
+      - name: mypy --strict (core domain-model + config layer)
+        # Scope = the green-or-near-green core. The wider api/service/mcp
+        # layers carry ~840 strict findings (mostly untyped connecpy/grpc
+        # decorators + Any-returns) and are excluded until triaged; widening
+        # this scope is the follow-up. Generated code is excluded in
+        # pyproject [tool.mypy].
+        run: |
+          uv run mypy saebooks/models saebooks/config.py saebooks/db_types.py saebooks/web.py
+
+  migrations:
+    name: migrations (alembic upgrade head) — BLOCKING
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: saebooks_test
+          POSTGRES_PASSWORD: saebooks_test_pw
+          POSTGRES_DB: saebooks_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U saebooks_test -d saebooks_test"
+          --health-interval 3s --health-timeout 3s --health-retries 30
+    env:
+      # asyncpg URL the alembic env.py reads via saebooks.config.settings.
+      DATABASE_URL: "postgresql+asyncpg://saebooks_test:saebooks_test_pw@localhost:5432/saebooks_test"
+      SAEBOOKS_ENV: "test"
+      # Migration 0087 creates the saebooks_sql_ro role with a password;
+      # 0128 ALTERs the saebooks_app role password — both read from env.
+      SAEBOOKS_SQL_RO_PASSWORD: "saebooks_sql_ro_test_pw"
+      SAEBOOKS_APP_DB_PASSWORD: "saebooks_app_test_pw"
+      # Encrypted-field key so config import does not raise.
+      SAEBOOKS_FIELD_ENCRYPTION_KEY: "c2FlYm9va3MtdGVzdC1rZXktZG8tbm90LXVzZS1wcm8="
+      SENTRY_DSN: ""
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Set up Python + project deps
+        run: |
+          uv venv
+          uv pip install -e ".[dev]"
+      - name: Bootstrap migration-owner roles
+        # Migrations reference the saebooks / saebooks_app roles by name
+        # (the docker test stack seeds them via docker/test-initdb). Replay
+        # that exact SQL against the service Postgres with psql
+        # (postgresql-client is preinstalled on ubuntu-latest). Using the
+        # committed init script avoids duplicating the role definitions.
+        env:
+          PGPASSWORD: saebooks_test_pw
+        run: |
+          psql -h localhost -p 5432 -U saebooks_test -d saebooks_test \
+            -v ON_ERROR_STOP=1 -f docker/test-initdb/01-test-roles.sql
+      - name: alembic upgrade head (fresh DB, full 0001..head chain)
+        run: uv run alembic upgrade head
+
+  tests:
+    name: tests (pytest, full suite) — INFORMATIONAL
+    runs-on: ubuntu-latest
+    # The suite is not fully green yet (see tests/KNOWN_FAILURES.txt). This
+    # job reports the result on every push/PR but does NOT block merges
+    # until the suite is triaged green. Lint / typecheck / migrations above
+    # are the blocking gate.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the isolated test stack
+        # scripts/run-tests.sh builds Dockerfile.test (which generates the
+        # gRPC stubs + installs dev deps) and runs alembic upgrade head then
+        # pytest against an ephemeral postgres:16-alpine, tearing everything
+        # down afterwards. Actions runners ship docker + compose v2.
+        run: ./scripts/run-tests.sh

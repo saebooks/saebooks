@@ -1,7 +1,8 @@
 import os
 
-from httpx import AsyncClient
 import pytest
+from httpx import AsyncClient
+
 pytestmark = pytest.mark.postgres_only
 
 

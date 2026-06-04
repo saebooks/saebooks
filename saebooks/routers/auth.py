@@ -3,29 +3,28 @@
 OAuth/Discourse SSO is handled in saebooks-web; this router only owns the
 self-service magic-link and FIDO2 flows that talk to the API directly.
 """
-from typing import Optional
 
-from fastapi import APIRouter, Request, HTTPException, status, responses, Depends
+from fastapi import APIRouter, Depends, HTTPException, Request, responses
 from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from saebooks.config import settings
 from saebooks.db import get_session
 from saebooks.models.user import User
-from saebooks.services.magic_link_service import (
-    generate_magic_link,
-    verify_magic_link,
-    MagicLinkTokenExpired,
-    MagicLinkTokenInvalid,
-)
 from saebooks.services.fido2_service import (
-    begin_registration,
-    complete_registration,
     begin_authentication,
+    begin_registration,
     complete_authentication,
+    complete_registration,
 )
 from saebooks.services.jwt_tokens import create_access_token
-from saebooks.config import settings
+from saebooks.services.magic_link_service import (
+    MagicLinkTokenExpired,
+    MagicLinkTokenInvalid,
+    generate_magic_link,
+    verify_magic_link,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -93,7 +92,7 @@ async def send_magic_link(request: Request, db: AsyncSession = Depends(get_sessi
     try:
         body = await request.json()
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON")
+        raise HTTPException(status_code=400, detail="Invalid JSON") from None
     
     email = body.get('email', '').strip().lower()
     if not email or '@' not in email:
@@ -101,9 +100,9 @@ async def send_magic_link(request: Request, db: AsyncSession = Depends(get_sessi
     
     try:
         # Generate and send magic link
-        token = await generate_magic_link(email)
+        await generate_magic_link(email)
         return {"status": "sent", "message": f"Login link sent to {email}"}
-    except Exception as e:
+    except Exception:
         # Don't reveal whether email exists
         return {"status": "sent", "message": "If an account exists, a login link has been sent"}
 
@@ -118,11 +117,11 @@ async def verify_magic_link_endpoint(token: str, db: AsyncSession = Depends(get_
         return _auth_response(user, redirect_to="/")
         
     except MagicLinkTokenExpired:
-        raise HTTPException(status_code=401, detail="Magic link has expired (15 minutes)")
+        raise HTTPException(status_code=401, detail="Magic link has expired (15 minutes)") from None
     except MagicLinkTokenInvalid:
-        raise HTTPException(status_code=401, detail="Invalid or already-used magic link")
+        raise HTTPException(status_code=401, detail="Invalid or already-used magic link") from None
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Login error: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Login error: {e!s}") from e
 
 
 @router.post("/fido2/register/begin")
@@ -134,7 +133,7 @@ async def fido2_register_begin(request: Request, db: AsyncSession = Depends(get_
     try:
         body = await request.json()
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON")
+        raise HTTPException(status_code=400, detail="Invalid JSON") from None
     
     user_id = body.get('user_id')
     email = body.get('email')
@@ -147,7 +146,7 @@ async def fido2_register_begin(request: Request, db: AsyncSession = Depends(get_
         challenge_data = await begin_registration(_uuid.UUID(user_id))
         return challenge_data
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Registration error: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Registration error: {e!s}") from e
 
 
 @router.post("/fido2/register/complete")
@@ -159,7 +158,7 @@ async def fido2_register_complete(request: Request, db: AsyncSession = Depends(g
     try:
         body = await request.json()
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON")
+        raise HTTPException(status_code=400, detail="Invalid JSON") from None
     
     user_id = body.get('user_id')
     credential_id = body.get('credential_id')
@@ -167,7 +166,7 @@ async def fido2_register_complete(request: Request, db: AsyncSession = Depends(g
     client_data_json = body.get('client_data_json')
     
     try:
-        result = await complete_registration(
+        await complete_registration(
             user_id,
             credential_id,
             attestation_object,
@@ -175,7 +174,7 @@ async def fido2_register_complete(request: Request, db: AsyncSession = Depends(g
         )
         return {"status": "success", "message": "Security key registered"}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Registration error: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Registration error: {e!s}") from e
 
 
 @router.post("/fido2/authenticate/begin")
@@ -187,7 +186,7 @@ async def fido2_authenticate_begin(request: Request, db: AsyncSession = Depends(
     try:
         body = await request.json()
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON")
+        raise HTTPException(status_code=400, detail="Invalid JSON") from None
     
     email = body.get('email')
     if not email:
@@ -197,7 +196,7 @@ async def fido2_authenticate_begin(request: Request, db: AsyncSession = Depends(
         challenge_data = await begin_authentication(email)
         return challenge_data
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Auth error: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Auth error: {e!s}") from e
 
 
 @router.post("/fido2/authenticate/complete")
@@ -209,7 +208,7 @@ async def fido2_authenticate_complete(request: Request, db: AsyncSession = Depen
     try:
         body = await request.json()
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON")
+        raise HTTPException(status_code=400, detail="Invalid JSON") from None
     
     user_id = body.get('user_id')
     credential_id = body.get('credential_id')
@@ -230,4 +229,4 @@ async def fido2_authenticate_complete(request: Request, db: AsyncSession = Depen
         return _auth_response(user, redirect_to="/")
         
     except Exception as e:
-        raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
+        raise HTTPException(status_code=401, detail=f"Authentication failed: {e!s}") from e

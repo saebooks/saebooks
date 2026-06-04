@@ -11,9 +11,8 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 from saebooks.api.v1.auth import current_token
-from saebooks.main import app
-
 from saebooks.db import AsyncSessionLocal
+from saebooks.main import app
 from saebooks.models.account import Account, AccountType
 
 pytestmark = pytest.mark.asyncio

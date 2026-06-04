@@ -1,0 +1,28 @@
+SAE Books — known test-suite failures (CI triage tracker)
+=========================================================
+
+The CI "tests" job (.github/workflows/test.yml) runs the FULL pytest suite
+via the isolated docker-compose stack (scripts/run-tests.sh). As of the
+introduction of the CI gate the suite is NOT fully green, so that job is
+marked INFORMATIONAL (continue-on-error: true) — it reports red/green on
+every push and PR but does NOT block merges.
+
+The BLOCKING gate is lint (ruff) + typecheck (mypy --strict on the core
+domain-model/config layer) + migrations (alembic upgrade head on a fresh
+DB). Those three must be green to merge.
+
+This file tracks the path to a green, BLOCKING test job. The end state is
+to flip the tests job to blocking (remove continue-on-error) once the suite
+is green or once every remaining red is listed here with a reason and a
+tracked deselect/xfail.
+
+Harness deselects (already excluded in docker-compose.test.yml):
+  - tests/services/lodgement/test_adapter_registry.py
+  - tests/test_m0_synthetic_nz_company.py
+
+Known-red baseline (full-suite run on origin/main + this branch):
+  See the latest CI "tests" job log for the live FAILED/ERROR node ids.
+  These are pre-existing reds (journal ordering flake, projects/tpar/
+  void-archive clusters per the build-rebuild notes), NOT regressions
+  introduced by the lint/type cleanup in this branch. Triaging them to
+  green is the follow-up that unblocks flipping this job to BLOCKING.
