@@ -8,17 +8,17 @@ from __future__ import annotations
 import json
 import uuid
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from saebooks.config import Settings
 from saebooks.services.statements import extract as extract_mod
 from saebooks.services.statements.extract import (
+    _SYSTEM_PROMPT,
+    _build_system_prompt,
     extract_statement,
     extract_statement_vision,
-    _build_system_prompt,
-    _SYSTEM_PROMPT,
 )
 
 # ---------------------------------------------------------------------------
@@ -277,9 +277,10 @@ class _FakePaperlessClientWithOCR:
 async def test_ingest_uses_vision_when_ocr_empty():
     """When OCR is empty, ingest calls download_content + vision path;
     extraction_meta['vision'] is True."""
+    from sqlalchemy import select
+
     from saebooks.db import AsyncSessionLocal
     from saebooks.models.company import Company
-    from sqlalchemy import select
 
     settings = _fake_settings_ingest()
 
@@ -325,9 +326,10 @@ async def test_ingest_uses_vision_when_ocr_empty():
 @pytest.mark.asyncio
 async def test_ingest_uses_vision_when_ocr_short():
     """When OCR is fewer than 40 chars, ingest uses vision fallback."""
+    from sqlalchemy import select
+
     from saebooks.db import AsyncSessionLocal
     from saebooks.models.company import Company
-    from sqlalchemy import select
 
     settings = _fake_settings_ingest()
 
@@ -373,9 +375,10 @@ async def test_ingest_uses_vision_when_ocr_short():
 async def test_ingest_does_not_use_vision_when_ocr_present():
     """When OCR text is >= 40 chars, vision path is NOT used; download_content
     is never called."""
+    from sqlalchemy import select
+
     from saebooks.db import AsyncSessionLocal
     from saebooks.models.company import Company
-    from sqlalchemy import select
 
     settings = _fake_settings_ingest()
 
@@ -427,13 +430,14 @@ async def test_ingest_applies_template_hint_on_reingest():
     """On re-ingest, if an active SupplierStatementTemplate exists for the
     resolved contact_id, its prompt_hint is appended to the system prompt
     and extraction_meta['template_id'] is set."""
+    from sqlalchemy import select
+
     from saebooks.db import AsyncSessionLocal
     from saebooks.models.company import Company
     from saebooks.models.contact import Contact, ContactType
     from saebooks.models.supplier_statement_template import SupplierStatementTemplate
     from saebooks.services.statements import extract as extract_mod_inner
     from saebooks.services.statements.ingest import ingest_statement
-    from sqlalchemy import select
 
     settings = _fake_settings_ingest()
 
@@ -540,12 +544,13 @@ async def test_ingest_applies_template_hint_on_reingest():
 @pytest.mark.asyncio
 async def test_template_contact_id_wins_over_abn():
     """contact_id match takes priority over supplier_abn match."""
+    from sqlalchemy import select
+
     from saebooks.db import AsyncSessionLocal
     from saebooks.models.company import Company
     from saebooks.models.contact import Contact, ContactType
     from saebooks.models.supplier_statement_template import SupplierStatementTemplate
     from saebooks.services.statements.ingest import _lookup_template
-    from sqlalchemy import select
 
     async with AsyncSessionLocal() as s:
         s.info["tenant_id"] = _TENANT

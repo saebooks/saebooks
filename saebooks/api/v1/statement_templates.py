@@ -35,9 +35,8 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from saebooks.api.v1.auth import require_bearer
+from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_active_company_id, get_session
-from saebooks.api.v1.auth import resolve_tenant_id
 from saebooks.models.supplier_statement_template import SupplierStatementTemplate
 
 logger = logging.getLogger("saebooks.api.v1.statement_templates")
@@ -62,7 +61,7 @@ class TemplateCreateRequest(BaseModel):
     page_scope: str | None = None
 
     @model_validator(mode="after")
-    def at_least_one_match_key(self) -> "TemplateCreateRequest":
+    def at_least_one_match_key(self) -> TemplateCreateRequest:
         if not any([self.contact_id, self.supplier_abn, self.supplier_name]):
             raise ValueError(
                 "At least one match key (contact_id, supplier_abn, or supplier_name) "
