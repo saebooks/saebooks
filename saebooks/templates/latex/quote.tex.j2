@@ -165,7 +165,7 @@
     {\small\color{saegrey} \textbf{Date:} \quad {{ fmt_date(issue_date) | latex_escape }}}\\
     {\small\color{saegrey} \textbf{Valid Until:} \quad
       {% if expiry_date -%}{{ fmt_date(expiry_date) | latex_escape }}{%- else -%}---{%- endif %}
-    }\\
+    }
     \vspace{2mm}
   \end{minipage}
 \end{tabularx}
@@ -276,7 +276,7 @@
 \begin{tabularx}{\textwidth}{@{}Xr@{}}
   \rowcolor{saeblue}
   {\large\bfseries\color{white} TOTAL ESTIMATE (ex GST)} &
-  {\large\bfseries\color{white} {{ fmt_money(subtotal) }}} \\
+  {\large\bfseries\color{white} {{ fmt_money(subtotal) }}}
 \end{tabularx}
 
 \vspace{6mm}
@@ -323,7 +323,7 @@
     {\small\color{saegrey} \textbf{Account Name:} \quad Sauer Pty Ltd}\\
     {\small\color{saegrey} \textbf{BSB:} \quad 034-193}\\
     {\small\color{saegrey} \textbf{Account No:} \quad 485846}\\
-    {\small\color{saegrey} \textbf{Reference:} \quad SAE-2026-{{ number | latex_escape }}}\\
+    {\small\color{saegrey} \textbf{Reference:} \quad SAE-2026-{{ number | latex_escape }}}
     \vspace{2mm}
   \end{minipage}
 \end{tabularx}
