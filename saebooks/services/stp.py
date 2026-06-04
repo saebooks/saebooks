@@ -574,3 +574,211 @@ async def submit_event(
         submission_id=submission.id,
         errors=list(submission.errors or []),
     )
+
+
+# --------------------------------------------------------------------------- #
+# STP2 reconcile orchestration (QUEUED -> ACCEPTED, gate-independent half)
+# --------------------------------------------------------------------------- #
+#
+# submit_event leaves a QUEUED (deferred) lodgement in StpStatus.SUBMITTED.
+# The correlation handle it stores is the submission id itself: that id is the
+# server-side ``payevent_id`` idempotency key (``(license_id, payevent_id)``),
+# so it uniquely identifies the lodged envelope on the relay/ATO side even when
+# no ``ato_receipt_number`` was issued yet (a 202/QUEUED may carry a null
+# receipt). We therefore poll by the submission id (falling back to the stored
+# receipt number only as an optional hint), and resolve the deferred outcome.
+#
+# The REAL status retrieval (ebMS3 response-retrieval via a lodge-server status
+# route) is gated on the ATO PVT pack and is a documented stub on the remote
+# client; this orchestration is exercised against an injected test double.
+
+
+def _poll_correlation_ref(submission: StpSubmission) -> str:
+    """The handle we poll by.
+
+    The submission id == the ``payevent_id`` lodged under, and is always
+    present. A ``ato_receipt_number`` (if the relay issued one on QUEUED) is a
+    weaker hint — the id is the canonical correlation key, so we poll by it.
+    """
+    return str(submission.id)
+
+
+async def _apply_poll_result(
+    session: AsyncSession,
+    submission: StpSubmission,
+    result: LodgementResult,
+) -> StpSubmitResult:
+    """Transition a SUBMITTED submission per a poll outcome.
+
+    ACCEPTED -> StpStatus.ACCEPTED (store receipt + clear errors);
+    QUEUED / STUB -> stays SUBMITTED (no-op, re-pollable later).
+    A REJECTED poll surfaces as ``LodgementRejected`` and is handled by the
+    caller, mirroring submit_event.
+    """
+    if result.status == LodgementStatus.ACCEPTED:
+        submission.status = StpStatus.ACCEPTED.value
+        submission.ato_receipt_number = result.ato_receipt_id
+        submission.ato_response_payload = result.raw_response or None
+        submission.errors = []
+        await session.flush()
+        logger.info(
+            "STP submission %s reconciled: ACCEPTED receipt=%s",
+            submission.id,
+            submission.ato_receipt_number,
+        )
+    else:
+        # QUEUED / STUB — still deferred. Refresh the stored response so the
+        # operator can see the latest poll, but leave the state in-flight.
+        submission.ato_response_payload = result.raw_response or submission.ato_response_payload
+        await session.flush()
+        logger.info(
+            "STP submission %s still %s on poll — leaving SUBMITTED",
+            submission.id,
+            result.status.value,
+        )
+    return StpSubmitResult(
+        status=submission.status,
+        ato_receipt_number=submission.ato_receipt_number,
+        submission_id=submission.id,
+        errors=list(submission.errors or []),
+    )
+
+
+async def reconcile_stp_submission(
+    session: AsyncSession,
+    submission_id: uuid.UUID,
+    *,
+    lodgement_service: LodgementService,
+) -> StpSubmitResult:
+    """Resolve a deferred (QUEUED) STP submission by polling its ATO status.
+
+    Loads a SUBMITTED submission and polls the lodgement service by the
+    correlation handle (the submission id). Transitions:
+
+      * poll -> ACCEPTED  => StpStatus.ACCEPTED (store receipt + timestamp);
+      * poll -> REJECTED  => StpStatus.REJECTED (store ATO errors);
+      * poll -> QUEUED    => stays SUBMITTED (no-op, returns current state).
+
+    A non-SUBMITTED submission is a no-op for terminal states (ACCEPTED /
+    REJECTED / SUPERSEDED return their current state WITHOUT re-polling) and a
+    clear error for READY (never submitted, nothing to reconcile).
+
+    The lodgement call NEVER touches a real ATO in tests — callers inject a
+    deterministic test double. The remote status route is gated on the PVT
+    pack (RemoteLodgementService.poll_status raises NotImplementedError).
+    """
+    submission = await session.get(StpSubmission, submission_id)
+    if submission is None:
+        raise StpError("submission not found", code="not_found")
+
+    # Terminal states — do NOT re-poll. Return the current cached state.
+    if submission.status in (
+        StpStatus.ACCEPTED.value,
+        StpStatus.REJECTED.value,
+        StpStatus.SUPERSEDED.value,
+    ):
+        return StpSubmitResult(
+            status=submission.status,
+            ato_receipt_number=submission.ato_receipt_number,
+            submission_id=submission.id,
+            errors=list(submission.errors or []),
+        )
+
+    # READY has never been submitted — there is nothing to reconcile.
+    if submission.status != StpStatus.SUBMITTED.value:
+        raise StpError(
+            f"submission in state {submission.status} cannot be reconciled "
+            f"(expected SUBMITTED)",
+            code="invalid_state",
+        )
+
+    metadata = {
+        "submission_id": str(submission.id),
+        "company_id": str(submission.company_id),
+        "pay_run_id": str(submission.pay_run_id),
+        "event_type": submission.event_type,
+    }
+
+    try:
+        result: LodgementResult = await lodgement_service.poll_status(
+            receipt_ref=_poll_correlation_ref(submission),
+            product="stp",
+            metadata=metadata,
+        )
+    except LodgementRejected as exc:
+        submission.status = StpStatus.REJECTED.value
+        submission.errors = exc.ato_errors or [{"message": exc.detail}]
+        submission.ato_response_payload = exc.raw_response or None
+        submission.ato_receipt_number = None
+        await session.flush()
+        logger.info(
+            "STP submission %s rejected by ATO on poll (%d errors)",
+            submission.id,
+            len(submission.errors),
+        )
+        return StpSubmitResult(
+            status=submission.status,
+            ato_receipt_number=None,
+            submission_id=submission.id,
+            errors=list(submission.errors),
+        )
+
+    return await _apply_poll_result(session, submission, result)
+
+
+async def reconcile_pending_stp(
+    session: AsyncSession,
+    *,
+    lodgement_service: LodgementService,
+    company_id: uuid.UUID | None = None,
+    limit: int = 100,
+) -> list[StpSubmitResult]:
+    """Reconcile all in-flight (SUBMITTED) STP submissions.
+
+    Finds SUBMITTED submissions (optionally scoped to one company, matching how
+    submit_event is company-scoped) and reconciles each. A per-submission poll
+    failure (any ``LodgementError`` — auth, edition, transient 5xx) is caught,
+    logged, surfaced on that item's result, and leaves the row SUBMITTED so a
+    later batch retries it. One failing poll does NOT abort the batch.
+
+    Returns one ``StpSubmitResult`` per submission attempted.
+    """
+    stmt = (
+        sa.select(StpSubmission.id)
+        .where(StpSubmission.status == StpStatus.SUBMITTED.value)
+        .order_by(StpSubmission.submitted_at.asc().nulls_last(),
+                  StpSubmission.created_at.asc())
+        .limit(limit)
+    )
+    if company_id is not None:
+        stmt = stmt.where(StpSubmission.company_id == company_id)
+
+    ids = list((await session.execute(stmt)).scalars().all())
+
+    results: list[StpSubmitResult] = []
+    for sub_id in ids:
+        try:
+            results.append(
+                await reconcile_stp_submission(
+                    session, sub_id, lodgement_service=lodgement_service
+                )
+            )
+        except LodgementError as exc:
+            # Transient / auth / edition failure for THIS submission only.
+            # Leave it SUBMITTED, record the failure on its result item, and
+            # carry on with the rest of the batch.
+            logger.warning(
+                "STP reconcile poll failed for %s (left SUBMITTED): %s",
+                sub_id,
+                exc,
+            )
+            detail = getattr(exc, "detail", None) or str(exc)
+            results.append(
+                StpSubmitResult(
+                    status=StpStatus.SUBMITTED.value,
+                    ato_receipt_number=None,
+                    submission_id=sub_id,
+                    errors=[{"message": detail, "transient": True}],
+                )
+            )
+    return results

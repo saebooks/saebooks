@@ -69,6 +69,16 @@ class NullLodgementService(LodgementService):
         self._refuse()
         raise RuntimeError("unreachable")  # pragma: no cover
 
+    async def poll_status(
+        self,
+        *,
+        receipt_ref: str,
+        product: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> LodgementResult:
+        self._refuse()
+        raise RuntimeError("unreachable")  # pragma: no cover
+
     async def lookup_abr(self, abn: str) -> dict[str, Any]:
         self._refuse()
         raise RuntimeError("unreachable")  # pragma: no cover
