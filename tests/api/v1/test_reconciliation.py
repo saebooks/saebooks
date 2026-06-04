@@ -102,6 +102,7 @@ async def _get_expense_account_id() -> uuid.UUID:
             select(Account).where(
                 Account.archived_at.is_(None),
                 Account.account_type == AccountType.EXPENSE,
+                Account.is_header.is_(False),
             ).limit(1)
         )
         account = result.scalars().first()
@@ -580,6 +581,7 @@ async def _get_ar_account_id() -> uuid.UUID:
             select(Account).where(
                 Account.archived_at.is_(None),
                 Account.account_type == AccountType.ASSET,
+                Account.is_header.is_(False),
                 Account.reconcile.is_(False),
             ).limit(1)
         )
@@ -591,6 +593,7 @@ async def _get_ar_account_id() -> uuid.UUID:
                 select(Account).where(
                     Account.archived_at.is_(None),
                     Account.account_type == AccountType.ASSET,
+                    Account.is_header.is_(False),
                 ).limit(1)
             )
             account = result.scalars().first()

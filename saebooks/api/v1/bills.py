@@ -318,13 +318,23 @@ async def void_bill(
         raise HTTPException(428, "If-Match header with bill version is required")
 
     try:
-        await svc.api_void_bill(
-            session,
-            bill_id,
-            actor=f"api:{bearer[:8]}…",
-            expected_version=expected,
-            tenant_id=tenant_id,
-        )
+        if existing.status == svc.BillStatus.DRAFT:
+            # DELETE soft-deletes: a DRAFT archives (no JE reversal, op="archive").
+            # POST /{id}/void stays strict (api_void_bill rejects DRAFT 422).
+            await svc.api_void(
+                session,
+                bill_id,
+                actor=f"api:{bearer[:8]}…",
+                expected_version=expected,
+            )
+        else:
+            await svc.api_void_bill(
+                session,
+                bill_id,
+                actor=f"api:{bearer[:8]}…",
+                expected_version=expected,
+                tenant_id=tenant_id,
+            )
     except svc.VersionConflict as exc:
         body = BillConflictBody(
             detail="version mismatch",

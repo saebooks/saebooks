@@ -695,6 +695,19 @@ class JournalEntryPostBody(BaseModel):
     override_reason: str | None = None
 
 
+class JournalEntryReverseBody(BaseModel):
+    """Optional body for POST /{id}/reverse.
+
+    ``reversal_date`` lands the mirror entry on a chosen date — e.g. a
+    30-Jun accrual reversed on 1-Jul — instead of the original entry's
+    date (the default). ``override_reason`` satisfies the period-lock
+    gate (F-04) if the reversal date falls in a locked range.
+    """
+
+    reversal_date: date | None = None
+    override_reason: str | None = None
+
+
 class PermissionOut(BaseModel):
     """One entry in the permission catalogue."""
 

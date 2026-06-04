@@ -71,12 +71,28 @@ async def quote_deps() -> dict[str, str]:
     company / default tenant if they don't already exist.
     """
     async with AsyncSessionLocal() as session:
+        # Resolve the ACTIVE company first (oldest by created_at — what
+        # get_active_company_id falls back to) and scope both the income
+        # account and the customer to it. Filtering by tenant alone can pick
+        # a contact/account from another company created by an earlier test,
+        # which then trips contact_company_mismatch at convert-to-invoice.
+        company = (
+            await session.execute(
+                select(Company).where(
+                    Company.tenant_id == DEFAULT_TENANT_ID,
+                    Company.archived_at.is_(None),
+                ).order_by(Company.created_at).limit(1)
+            )
+        ).scalars().first()
+        assert company is not None, "Seed company missing"
+
         income = (
             await session.execute(
                 select(Account).where(
                     Account.archived_at.is_(None),
                     Account.account_type == AccountType.INCOME,
-                    Account.tenant_id == DEFAULT_TENANT_ID,
+                    Account.is_header.is_(False),
+                    Account.company_id == company.id,
                 ).limit(1)
             )
         ).scalars().first()
@@ -85,22 +101,13 @@ async def quote_deps() -> dict[str, str]:
             await session.execute(
                 select(Contact).where(
                     Contact.archived_at.is_(None),
-                    Contact.tenant_id == DEFAULT_TENANT_ID,
+                    Contact.company_id == company.id,
                     Contact.contact_type == ContactType.CUSTOMER,
                 ).limit(1)
             )
         ).scalars().first()
 
         if customer is None:
-            company = (
-                await session.execute(
-                    select(Company).where(
-                        Company.tenant_id == DEFAULT_TENANT_ID,
-                        Company.archived_at.is_(None),
-                    ).limit(1)
-                )
-            ).scalars().first()
-            assert company is not None, "Seed company missing"
             customer = Contact(
                 tenant_id=DEFAULT_TENANT_ID,
                 company_id=company.id,
@@ -729,21 +736,16 @@ async def test_quotes_convert_hard_fails_on_missing_account_id(
     assert r2.status_code == 200, r2.text
     v = r2.json()["version"]
 
+    # account_id is validated at ACCEPT (api_accept: "assign GL accounts to
+    # every line, then accept") — a missing account_id is caught here, before
+    # convert. (convert keeps its own guard as defence-in-depth.)
     r3 = await api_client.post(
         f"/api/v1/quotes/{quote_id}/accept", headers={"If-Match": str(v)}
     )
-    assert r3.status_code == 200, r3.text
-    v = r3.json()["version"]
-
-    # Convert should hard-fail with 422
-    r4 = await api_client.post(
-        f"/api/v1/quotes/{quote_id}/convert-to-invoice",
-        headers={"If-Match": str(v)},
-    )
-    assert r4.status_code == 422, r4.text
+    assert r3.status_code == 422, r3.text
 
     # Error body must mention the missing line number
-    detail = r4.json().get("detail", "")
+    detail = r3.json().get("detail", "")
     assert "2" in detail, f"Expected line number '2' in error detail, got: {detail}"
     assert "account_id" in detail.lower(), f"Expected 'account_id' in error detail, got: {detail}"
 

@@ -1345,3 +1345,33 @@ async def test_je_get_by_id_has_source_fields(
     # Fields must exist in the response (null is correct for a direct JE).
     assert "source_type" in body, "#27: source_type missing from JE response"
     assert "source_id" in body, "#27: source_id missing from JE response"
+
+
+async def test_je_reverse_with_explicit_reversal_date(
+    api_client: AsyncClient, account_ids: dict[str, str]
+) -> None:
+    """POST /{id}/reverse with a reversal_date body lands the mirror entry on
+    that date (e.g. a 30-Jun accrual reversed on 1-Jul), not the original's."""
+    r = await api_client.post(
+        "/api/v1/journal_entries", json=_entry_payload(account_ids)
+    )
+    assert r.status_code == 201, r.text
+    entry_id = r.json()["id"]
+    orig_date = r.json()["entry_date"]
+
+    r1 = await api_client.post(
+        f"/api/v1/journal_entries/{entry_id}/post",
+        headers={"If-Match": str(r.json()["version"])},
+    )
+    assert r1.status_code == 200, r1.text
+
+    r2 = await api_client.post(
+        f"/api/v1/journal_entries/{entry_id}/reverse",
+        headers={"If-Match": str(r1.json()["version"])},
+        json={"reversal_date": "2025-07-01", "override_reason": "year-end accrual reversal (test)"},
+    )
+    assert r2.status_code == 201, r2.text
+    reversal = r2.json()
+    assert reversal["entry_date"] == "2025-07-01"
+    assert reversal["entry_date"] != orig_date
+    assert reversal["reversal_of_id"] == entry_id
