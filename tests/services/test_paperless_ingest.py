@@ -149,3 +149,18 @@ async def test_ingest_failsafe_on_extraction_error() -> None:
         assert bill.status == BillStatus.DRAFT
         assert bill.total == 0
         assert "Extraction incomplete" in (bill.notes or "")
+
+
+def test_extract_document_id_from_doc_url() -> None:
+    """Paperless sends only {{ doc_url }} — pull the pk out of the URL."""
+    extract = paperless_ingest.extract_document_id
+    assert extract({"doc_url": "https://paperless.x/documents/137/"}) == 137
+    assert extract({"doc_url": "http://host:8000/documents/9"}) == 9
+    assert extract({"document_url": "/documents/42/details"}) == 42
+    # Explicit id keys still win and take precedence over a url.
+    assert extract({"document_id": 5, "doc_url": "/documents/137/"}) == 5
+    # Nested document dict still works.
+    assert extract({"document": {"pk": 88}}) == 88
+    # No id anywhere -> None (handler then skips ingest, still 200).
+    assert extract({"type": "document_added"}) is None
+    assert extract({"doc_url": "https://paperless.x/no-id-here/"}) is None

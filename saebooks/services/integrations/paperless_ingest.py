@@ -25,6 +25,7 @@ reviewer to copy from — they are explicitly NOT turned into GL lines.
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import date
 from typing import Any
@@ -67,7 +68,18 @@ def extract_document_id(payload: dict[str, Any]) -> int | None:
             return int(val)
     doc = payload.get("document")
     if isinstance(doc, dict):
-        return extract_document_id(doc)
+        nested = extract_document_id(doc)
+        if nested is not None:
+            return nested
+    # Paperless-ngx workflow webhooks expose no raw-pk placeholder; only the
+    # ``doc_url`` value (".../documents/<pk>/") carries the id. Pull it out so
+    # the operator can send ``{"doc_url": "{{ doc_url }}"}`` as the body.
+    for url_key in ("doc_url", "document_url", "url"):
+        url_val = payload.get(url_key)
+        if isinstance(url_val, str):
+            m = re.search(r"/documents/(\d+)", url_val)
+            if m:
+                return int(m.group(1))
     return None
 
 

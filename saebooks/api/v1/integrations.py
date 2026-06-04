@@ -358,16 +358,36 @@ async def paperless_webhook(
             detail="Webhook secret decryption unavailable — SAEBOOKS_FIELD_ENCRYPTION_KEY not set",
         ) from exc
 
-    # Validate HMAC — Paperless sends ``sha256=<hex>``.
-    expected_sig = "sha256=" + hmac.new(
+    # Validate the signature. Two accepted forms, both compared in constant
+    # time:
+    #   1. ``sha256=<hex>`` — HMAC-SHA256 of the raw body with the shared
+    #      secret. Used by HMAC-capable senders (a signing proxy, n8n, our own
+    #      tests). Tamper-evident per body — the strongest form.
+    #   2. the raw shared secret — a static bearer carried in the header.
+    #      Paperless-ngx (<=2.20) CANNOT HMAC the body it sends; its workflow
+    #      webhook action emits only *static* headers (see
+    #      documents/workflows/actions.py — headers are passed through
+    #      verbatim, no Jinja). So the native Paperless->books path configures
+    #      the secret as a plain ``X-Paperless-Signature: <secret>`` header.
+    #      This is a bearer over an internal-only LAN hop: Paperless and the
+    #      API share the docker host and the webhook is not exposed through the
+    #      public edge. Blast radius stays contained either way — ingest is
+    #      DRAFT-only, idempotent on PL-<docid>, and never touches the GL (see
+    #      services/integrations/paperless_ingest.ingest_document).
+    presented = x_paperless_signature.strip()
+    expected_hmac = "sha256=" + hmac.new(
         plaintext_secret.encode("utf-8"),
         raw_body,
         hashlib.sha256,
     ).hexdigest()
+    if presented.startswith("sha256="):
+        sig_ok = hmac.compare_digest(expected_hmac, presented)
+    else:
+        sig_ok = hmac.compare_digest(plaintext_secret, presented)
 
-    if not hmac.compare_digest(expected_sig, x_paperless_signature.strip()):
+    if not sig_ok:
         logger.warning(
-            "integrations: paperless webhook HMAC mismatch for tenant=%s",
+            "integrations: paperless webhook signature mismatch for tenant=%s",
             tenant_uuid,
         )
         raise HTTPException(
