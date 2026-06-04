@@ -178,7 +178,7 @@ async def get_quote_pdf(
     from sqlalchemy import select as sa_select
 
     from saebooks.models.contact import Contact
-    from saebooks.services.pdf import render_quote_pdf
+    from saebooks.services.latex_pdf import render_latex
 
     tenant_id = resolve_tenant_id(request)
     q = await svc.api_get(session, quote_id, tenant_id=tenant_id, company_id=company_id)
@@ -224,7 +224,7 @@ async def get_quote_pdf(
         ],
     }
 
-    pdf_bytes = render_quote_pdf(ctx)
+    pdf_bytes = await render_latex("quote", ctx)
     filename = f"SAE-2026-{ctx['number']}-{(ctx['title'] or 'quote').replace(' ', '-')[:40]}.pdf"
     return Response(
         content=pdf_bytes,
@@ -268,7 +268,7 @@ async def post_quote_send_email(
         CustomerEmailError,
         send_customer_email,
     )
-    from saebooks.services.pdf import render_quote_pdf
+    from saebooks.services.latex_pdf import render_latex
 
     tenant_id = resolve_tenant_id(request)
     payload = await request.json()
@@ -339,7 +339,7 @@ async def post_quote_send_email(
             for ln in q.lines
         ],
     }
-    pdf_bytes = render_quote_pdf(ctx)
+    pdf_bytes = await render_latex("quote", ctx)
     pdf_filename = f"SAE-2026-{ctx['number']}-{(ctx['title'] or 'quote').replace(' ', '-')[:40]}.pdf"
 
     try:

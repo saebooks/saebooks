@@ -41,7 +41,6 @@ async def api_client() -> AsyncClient:
 @pytest.fixture
 async def cn_id() -> str:
     """Create a minimal credit note in the test DB and return its UUID string."""
-    import json
     from httpx import ASGITransport, AsyncClient
 
     token = current_token()
@@ -104,6 +103,7 @@ async def test_credit_note_pdf_returns_pdf(
 ) -> None:
     """GET /{id}/pdf → 200 application/pdf with fake PDF bytes."""
     import os
+
     import saebooks.services.latex_pdf as _svc
 
     os.environ["LATEX_API_URL"] = _LATEX_API_BASE

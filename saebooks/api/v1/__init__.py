@@ -83,6 +83,7 @@ from saebooks.api.v1.reports import router as reports_router
 from saebooks.api.v1.search import router as search_router
 from saebooks.api.v1.signup import router as signup_router
 from saebooks.api.v1.snapshot import router as snapshot_router
+from saebooks.api.v1.statements import router as statements_router
 from saebooks.api.v1.stp import router as stp_router
 from saebooks.api.v1.super_funds import router as super_funds_router
 from saebooks.api.v1.super_lodgements import router as super_lodgements_router
@@ -210,5 +211,8 @@ router.include_router(tpar_router)
 # Payday Super Phase 1 — SAFF generation + lodgement tracking
 router.include_router(super_lodgements_router)
 router.include_router(tax_returns_router)
+
+# Gitea #28: supplier-statement reconciliation queue (Phase 1)
+router.include_router(statements_router)
 
 __all__ = ["router"]
