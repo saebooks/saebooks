@@ -263,13 +263,21 @@ async def ingest(
             detail=f"Ingest failed: {exc}",
         ) from exc
 
-    # Eager-load lines for the response (they may have been written in
-    # ingest_statement; refresh the stmt within the same session).
-    stmt_with_lines = await session.get(
-        SupplierStatement,
-        stmt.id,
-        options=[selectinload(SupplierStatement.lines)],
-    )
+    # Eager-load lines for the response. ingest_statement commits internally,
+    # so the stmt sits expired in the identity map; session.get() can hand back
+    # that stale instance WITHOUT re-running selectinload, and `lines` then
+    # lazy-loads during Pydantic serialization → MissingGreenlet (no async
+    # greenlet active). Force a fresh SELECT with populate_existing so scalars
+    # are refreshed and lines are genuinely eager-loaded before model_validate.
+    session.expire_all()
+    stmt_with_lines = (
+        await session.execute(
+            select(SupplierStatement)
+            .where(SupplierStatement.id == stmt.id)
+            .options(selectinload(SupplierStatement.lines))
+            .execution_options(populate_existing=True)
+        )
+    ).scalars().first()
     if stmt_with_lines is None:
         # Should never happen — we just committed it.
         raise HTTPException(status_code=500, detail="Statement not found after commit")

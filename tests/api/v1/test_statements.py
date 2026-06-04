@@ -870,3 +870,50 @@ async def test_read_only_token_rejected_on_confirm(
     """Read-scoped token must receive 403 on POST /confirm."""
     r = await p3_readonly_client.post(f"/api/v1/statements/{uuid.uuid4()}/confirm")
     assert r.status_code == 403, f"Expected 403, got {r.status_code}: {r.text}"
+
+
+@pytest.mark.asyncio
+async def test_ingest_serializes_after_real_session_commit(api_client: AsyncClient) -> None:
+    """Regression (#28 P4): the live ingest 500ed with MissingGreenlet because
+    ingest_statement commits internally and the handler then re-loaded the
+    (expired, identity-mapped) row via session.get(), whose selectinload was
+    not re-applied -> `lines` lazy-loaded during Pydantic serialization. This
+    mock mimics the REAL behaviour: it creates + commits the statement in the
+    HANDLER's session and returns the expired instance. The handler must still
+    serialize it (fresh SELECT + populate_existing), returning 201 with lines.
+    """
+    company_id = await _default_company_id()
+    stmt_id = uuid.uuid4()
+    line_id = uuid.uuid4()
+
+    async def _fake_ingest(session, *, tenant_id, company_id, paperless_document_id, settings):
+        stmt = SupplierStatement(
+            id=stmt_id, tenant_id=DEFAULT_TENANT_ID, company_id=company_id,
+            source_document_id=paperless_document_id,
+            supplier_name="Greenlet Test Pty Ltd", closing_balance=Decimal("100.00"),
+            currency="AUD", status=StatementStatus.EXTRACTED.value,
+        )
+        session.add(stmt)
+        await session.flush()
+        session.add(SupplierStatementLine(
+            id=line_id, tenant_id=DEFAULT_TENANT_ID, statement_id=stmt_id,
+            line_type="invoice", reference="GL-1", amount=Decimal("100.00"),
+            match_status=StatementMatchStatus.MISSING_IN_BOOKS.value,
+        ))
+        await session.commit()          # leaves stmt expired in the identity map
+        return stmt
+
+    try:
+        with patch("saebooks.api.v1.statements.ingest_statement", new=_fake_ingest):
+            r = await api_client.post(
+                "/api/v1/statements/ingest",
+                headers={"X-Company-Id": str(company_id)},
+                json={"paperless_document_id": 13287},
+            )
+        assert r.status_code == 201, r.text
+        body = r.json()
+        assert body["id"] == str(stmt_id)
+        assert len(body["lines"]) == 1
+        assert body["lines"][0]["reference"] == "GL-1"
+    finally:
+        await _delete_statement(stmt_id)
