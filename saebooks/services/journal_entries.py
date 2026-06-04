@@ -537,6 +537,7 @@ async def api_post(
     *,
     override_reason: str | None = None,
     actor_role: str | None = None,
+    actor_user_id: uuid.UUID | None = None,
 ) -> JournalEntry:
     """Transition DRAFT → POSTED with optimistic locking + change_log.
 
@@ -580,6 +581,7 @@ async def api_post(
             posted_by=actor,
             override_reason=override_reason,
             actor_role=actor_role,
+            actor_user_id=actor_user_id,
         )
     except journal_svc.PostingError as exc:
         raise JournalEntryError(str(exc)) from exc

@@ -36,6 +36,7 @@ from saebooks.models.invoice import Invoice, InvoiceLine, InvoiceStatus
 from saebooks.models.item import Item
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import bills as bills_svc
+from saebooks.services import audit_log as audit_log_svc
 from saebooks.services import change_log as change_log_svc
 from saebooks.services import items as items_svc
 from saebooks.services import journal as journal_svc
@@ -1295,6 +1296,7 @@ async def api_post_invoice(
     expected_version: int,
     *,
     tenant_id: uuid.UUID | None = None,
+    actor_user_id: uuid.UUID | None = None,
 ) -> Invoice:
     """Transition DRAFT → POSTED with JE generation, optimistic locking + change_log.
 
@@ -1344,6 +1346,16 @@ async def api_post_invoice(
     inv_loaded = await _get_with_lines(session, invoice_id)
     assert inv_loaded is not None
 
+    if actor_user_id is not None:
+        await audit_log_svc.append(
+            session,
+            tenant_id=inv_loaded.tenant_id,
+            actor_user_id=actor_user_id,
+            action=audit_log_svc.AuditAction.INVOICE_POST,
+            table_name="invoices",
+            row_id=str(inv_loaded.id),
+            row_snapshot=_serialise_invoice(inv_loaded),
+        )
     await change_log_svc.append(
         session,
         entity="invoice",
@@ -1364,6 +1376,7 @@ async def api_void_invoice(
     expected_version: int,
     *,
     tenant_id: uuid.UUID | None = None,
+    actor_user_id: uuid.UUID | None = None,
 ) -> Invoice:
     """Transition any non-VOIDED → VOIDED with JE reversal (if POSTED),
     optimistic locking + change_log.
@@ -1401,6 +1414,17 @@ async def api_void_invoice(
     inv_loaded = await _get_with_lines(session, invoice_id)
     assert inv_loaded is not None
 
+    if actor_user_id is not None:
+        await audit_log_svc.append(
+            session,
+            tenant_id=inv_loaded.tenant_id,
+            actor_user_id=actor_user_id,
+            action=audit_log_svc.AuditAction.INVOICE_VOID,
+            table_name="invoices",
+            row_id=str(inv_loaded.id),
+            row_snapshot=_serialise_invoice(inv_loaded),
+            reason=f"API void by {actor}",
+        )
     await change_log_svc.append(
         session,
         entity="invoice",

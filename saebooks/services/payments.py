@@ -814,6 +814,7 @@ __all__ = [
 # two surfaces can evolve independently.
 # ==========================================================================
 
+from saebooks.services import audit_log as audit_log_svc  # noqa: E402
 from saebooks.services import change_log as change_log_svc  # noqa: E402
 from sqlalchemy import func  # noqa: E402
 
@@ -1239,6 +1240,8 @@ async def api_void(
     payment_id: uuid.UUID,
     actor: str,
     expected_version: int,
+    *,
+    actor_user_id: uuid.UUID | None = None,
 ) -> Payment:
     """Soft-delete (archive/void) a payment with optimistic locking + change_log."""
     pay = await _get_with_allocations(session, payment_id)
@@ -1256,6 +1259,17 @@ async def api_void(
     pay_loaded = await _get_with_allocations(session, payment_id)
     assert pay_loaded is not None
 
+    if actor_user_id is not None:
+        await audit_log_svc.append(
+            session,
+            tenant_id=pay_loaded.tenant_id,
+            actor_user_id=actor_user_id,
+            action=audit_log_svc.AuditAction.PAYMENT_VOID,
+            table_name="payments",
+            row_id=str(pay_loaded.id),
+            row_snapshot=_serialise_payment(pay_loaded),
+            reason=f"API void by {actor}",
+        )
     await change_log_svc.append(
         session,
         entity="payment",
@@ -1276,6 +1290,7 @@ async def api_post_payment(
     expected_version: int,
     *,
     tenant_id: uuid.UUID | None = None,
+    actor_user_id: uuid.UUID | None = None,
 ) -> Payment:
     """Transition DRAFT → POSTED with optimistic locking + change_log.
 
@@ -1318,6 +1333,16 @@ async def api_post_payment(
     await session.flush()
     await session.refresh(pay_loaded)
 
+    if actor_user_id is not None:
+        await audit_log_svc.append(
+            session,
+            tenant_id=pay_loaded.tenant_id,
+            actor_user_id=actor_user_id,
+            action=audit_log_svc.AuditAction.PAYMENT_POST,
+            table_name="payments",
+            row_id=str(pay_loaded.id),
+            row_snapshot=_serialise_payment(pay_loaded),
+        )
     await change_log_svc.append(
         session,
         entity="payment",

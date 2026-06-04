@@ -225,3 +225,61 @@ async def get_lodgement():
     from saebooks.services.lodgement import get_lodgement_service
 
     return get_lodgement_service()
+
+
+# Synthetic actor for the static dev-bearer path (tests / scripts / CLI
+# direct API access). That path authenticates a process, not a person, so
+# there is no real ``users`` row to attribute. We return a stable, reserved
+# nil-UUID rather than ever leaking the JWT prefix into ``audit_log``.
+# audit_log.actor_user_id is NOT NULL, so a sentinel is required; the nil
+# UUID is unambiguous ("system / unattributed automation") and never
+# collides with a real user id.
+SYSTEM_ACTOR_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000000")
+
+
+async def get_active_user_id(request: Request) -> UUID:
+    """Resolve the acting user's UUID for audit attribution.
+
+    Works for BOTH authenticated modes that ``require_bearer`` supports:
+
+    * **JWT bearer** — ``require_bearer`` decoded the token, resolved the
+      ``sub`` claim to a live ``User`` row, and stamped
+      ``request.state.user`` (see ``auth._stamp_user_from_sub``). We return
+      ``request.state.user.id``.
+    * **API token** (``saebk_…``) — ``require_bearer`` looked the token up
+      and stamped ``request.state.user`` to the token's bound user
+      (``api_tokens.user_id``) plus ``request.state.jwt_claims['sub']``. We
+      return that same user id.
+
+    Resolution order — all UUID-typed, never the raw bearer / JWT prefix:
+
+    1. ``request.state.user.id`` if a real ``User`` was hydrated.
+    2. ``request.state.jwt_claims['sub']`` parsed as a UUID (covers any path
+       that stamped claims but not the ORM user).
+    3. The reserved ``SYSTEM_ACTOR_USER_ID`` nil UUID for the static
+       dev-bearer path (no user, dev/test only).
+
+    Guarantee: the return value is ALWAYS a ``uuid.UUID`` and NEVER the
+    ``api:<prefix>…`` string that the legacy ``actor`` field carried.
+    """
+    user = getattr(request.state, "user", None)
+    if user is not None:
+        uid = getattr(user, "id", None)
+        if isinstance(uid, uuid.UUID):
+            return uid
+        if uid is not None:
+            try:
+                return uuid.UUID(str(uid))
+            except (ValueError, TypeError):
+                pass
+
+    claims = getattr(request.state, "jwt_claims", None)
+    if claims:
+        sub = claims.get("sub")
+        if sub:
+            try:
+                return uuid.UUID(str(sub))
+            except (ValueError, TypeError):
+                pass
+
+    return SYSTEM_ACTOR_USER_ID
