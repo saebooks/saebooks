@@ -252,7 +252,12 @@ async def test_list_item_shape(api_client: AsyncClient) -> None:
     stmt_id = uuid.uuid4()
     await _seed_statement(stmt_id=stmt_id, company_id=company_id, source_document_id=999)
     try:
-        r = await api_client.get("/api/v1/statements")
+        # Pin the active company to the seeded one — SupplierStatement is
+        # CompanyScoped, and the full suite seeds multiple companies, so the
+        # request's fallback "first active company" may differ. (prod code OK)
+        r = await api_client.get(
+            "/api/v1/statements", headers={"X-Company-Id": str(company_id)}
+        )
         assert r.status_code == 200, r.text
         body = r.json()
         matching = [i for i in body["items"] if i["id"] == str(stmt_id)]
@@ -309,7 +314,10 @@ async def test_get_detail_returns_lines(api_client: AsyncClient) -> None:
         await session.commit()
 
     try:
-        r = await api_client.get(f"/api/v1/statements/{stmt_id}")
+        r = await api_client.get(
+            f"/api/v1/statements/{stmt_id}",
+            headers={"X-Company-Id": str(company_id)},
+        )
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["id"] == str(stmt_id)
