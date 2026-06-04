@@ -1,0 +1,361 @@
+{#
+  statement_pack.tex.j2 — SAE Books financial statement pack
+
+  Context keys (all data values MUST be latex_escape'd before interpolation):
+    company        dict  keys: legal_name, acn, abn, name
+    from_date      str   ISO date — P&L period start
+    to_date        str   ISO date — P&L period end
+    as_of_date     str   ISO date — Balance Sheet / Trial Balance date
+    prepared       str   ISO date — preparation date
+    pl_report      dict  PnLReport JSON (income, expenses, net_profit, ...)
+    bs_report      dict  BSReport JSON (assets, liabilities, equity, ...)
+    tb_report      dict  TrialBalanceReport JSON (accounts, totals, balanced)
+    comparative    bool  whether prior-year columns are included
+    comp_pl        dict  comparative P&L (present when comparative=True)
+    comp_bs        dict  comparative BS  (present when comparative=True)
+    prior_from     str   prior-year P&L from date (comparative only)
+    prior_to       str   prior-year P&L to date   (comparative only)
+    prior_as_of    str   prior-year BS as_of date (comparative only)
+
+  All string interpolations use |latex_escape.
+#}
+{% macro fmt_amount(v) -%}
+  {%- if v is not none and v != 0 -%}{{ "%.2f"|format(v|float) | latex_escape }}{%- else -%}---{%- endif -%}
+{%- endmacro %}
+{% macro fmt_amount_plain(v) -%}{{ "%.2f"|format(v|float) | latex_escape }}{%- endmacro %}
+{% include '_preamble.tex.j2' %}
+
+\begin{document}
+
+%% =====================================================================
+%% COVER PAGE
+%% =====================================================================
+\thispagestyle{empty}
+\vspace*{60mm}
+\begin{center}
+  {\LARGE\bfseries\color{saegreen} {{ (company.legal_name or company.name) | latex_escape }} }\\[4mm]
+  {% if company.acn -%}
+  {\large ACN {{ company.acn | latex_escape }}}\\[1mm]
+  {%- endif %}
+  {% if company.abn -%}
+  {\large ABN {{ company.abn | latex_escape }}}\\[1mm]
+  {%- endif %}
+  \vspace{10mm}
+  {\LARGE Special Purpose Financial Statements}\\[3mm]
+  {\large For the year ended {{ to_date | latex_escape }}}\\[8mm]
+  \color{midgrey}{\normalsize Prepared {{ prepared | latex_escape }}
+  \textbullet{} \textsc{Draft --- not certified}}
+\end{center}
+\newpage
+
+%% =====================================================================
+%% STATEMENT OF PROFIT OR LOSS
+%% =====================================================================
+\markboth{Statement of Profit or Loss}{}
+\section{Statement of Profit or Loss}
+\textit{\small For the period {{ from_date | latex_escape }} to {{ to_date | latex_escape }}}
+\vspace{4mm}
+
+{% if comparative and comp_pl %}
+{# --- Comparative P&L ------------------------------------------------ #}
+\begin{longtable}{p{7cm} r r r}
+  \toprule
+  \textbf{Account} & \textbf{Code} &
+  \textbf{ {{ from_date[:4] | latex_escape }}--{{ to_date[:4] | latex_escape }} \$} &
+  \textbf{Prior year \$} \\
+  \midrule
+  \endfirsthead
+  \multicolumn{4}{l}{\textit{(continued)}} \\
+  \toprule
+  \textbf{Account} & \textbf{Code} &
+  \textbf{ {{ from_date[:4] | latex_escape }}--{{ to_date[:4] | latex_escape }} \$} &
+  \textbf{Prior year \$} \\
+  \midrule
+  \endhead
+  \bottomrule
+  \endfoot
+  %% Income
+  \multicolumn{4}{l}{\textbf{\color{saegreen}Income}} \\[1mm]
+  {% set income_lines = comp_pl.income.get("INCOME", []) + comp_pl.income.get("OTHER_INCOME", []) %}
+  {% if income_lines %}
+    {% for line in income_lines %}
+  {{ line.account_name | latex_escape }} & {\small {{ line.code | latex_escape }}} &
+  {{ fmt_amount(line.current_amount) }} & {{ fmt_amount(line.prior_amount) }} \\
+    {% endfor %}
+  {% else %}
+  \multicolumn{4}{c}{\textit{\color{midgrey}No income for this period}} \\
+  {% endif %}
+  \midrule
+  \textbf{Total Income} & &
+  \textbf{ {{ fmt_amount_plain(comp_pl.income.total_income_current) }} } &
+  {{ fmt_amount_plain(comp_pl.income.total_income_prior) }} \\[4mm]
+  %% Expenses
+  \multicolumn{4}{l}{\textbf{\color{saegreen}Expenses}} \\[1mm]
+  {% set expense_lines = comp_pl.expenses.get("EXPENSE", []) + comp_pl.expenses.get("COST_OF_SALES", []) + comp_pl.expenses.get("OTHER_EXPENSE", []) %}
+  {% if expense_lines %}
+    {% for line in expense_lines %}
+  {{ line.account_name | latex_escape }} & {\small {{ line.code | latex_escape }}} &
+  {{ fmt_amount(line.current_amount) }} & {{ fmt_amount(line.prior_amount) }} \\
+    {% endfor %}
+  {% else %}
+  \multicolumn{4}{c}{\textit{\color{midgrey}No expenses for this period}} \\
+  {% endif %}
+  \midrule
+  \textbf{Total Expenses} & &
+  \textbf{ {{ fmt_amount_plain(comp_pl.expenses.total_expenses_current) }} } &
+  {{ fmt_amount_plain(comp_pl.expenses.total_expenses_prior) }} \\
+  \midrule\midrule
+  {% if comp_pl.net_profit_current >= 0 %}
+  \textbf{\color{saegreen}Net Profit} & &
+  \textbf{\color{saegreen} {{ fmt_amount_plain(comp_pl.net_profit_current) }} } &
+  {{ fmt_amount_plain(comp_pl.net_profit_prior) }} \\
+  {% else %}
+  \textbf{\color{red}Net Loss} & &
+  \textbf{\color{red} {{ fmt_amount_plain(comp_pl.net_profit_current) }} } &
+  {{ fmt_amount_plain(comp_pl.net_profit_prior) }} \\
+  {% endif %}
+  \bottomrule
+\end{longtable}
+
+{% else %}
+{# --- Non-comparative P&L -------------------------------------------- #}
+{% set income_lines = pl_report.income.get("INCOME", []) + pl_report.income.get("OTHER_INCOME", []) %}
+{% set expense_lines = pl_report.expenses.get("EXPENSE", []) + pl_report.expenses.get("COST_OF_SALES", []) + pl_report.expenses.get("OTHER_EXPENSE", []) %}
+\begin{longtable}{p{9cm} r r}
+  \toprule
+  \textbf{Account} & \textbf{Code} & \textbf{Amount \$} \\
+  \midrule
+  \endfirsthead
+  \multicolumn{3}{l}{\textit{(continued)}} \\
+  \toprule
+  \textbf{Account} & \textbf{Code} & \textbf{Amount \$} \\
+  \midrule
+  \endhead
+  \bottomrule
+  \endfoot
+  %% Income
+  \multicolumn{3}{l}{\textbf{\color{saegreen}Income}} \\[1mm]
+  {% if income_lines %}
+    {% for line in income_lines %}
+  {{ line.account_name | latex_escape }} & {\small {{ line.code | latex_escape }}} & {{ fmt_amount(line.amount) }} \\
+    {% endfor %}
+  {% else %}
+  \multicolumn{3}{c}{\textit{\color{midgrey}No income for this period}} \\
+  {% endif %}
+  \midrule
+  \textbf{Total Income} & & \textbf{ {{ fmt_amount_plain(pl_report.income.total_income) }} } \\[4mm]
+  %% Expenses
+  \multicolumn{3}{l}{\textbf{\color{saegreen}Expenses}} \\[1mm]
+  {% if expense_lines %}
+    {% for line in expense_lines %}
+  {{ line.account_name | latex_escape }} & {\small {{ line.code | latex_escape }}} & {{ fmt_amount(line.amount) }} \\
+    {% endfor %}
+  {% else %}
+  \multicolumn{3}{c}{\textit{\color{midgrey}No expenses for this period}} \\
+  {% endif %}
+  \midrule
+  \textbf{Total Expenses} & & \textbf{ {{ fmt_amount_plain(pl_report.expenses.total_expenses) }} } \\
+  \midrule\midrule
+  {% if pl_report.net_profit >= 0 %}
+  \textbf{\color{saegreen}Net Profit} & & \textbf{\color{saegreen} {{ fmt_amount_plain(pl_report.net_profit) }} } \\
+  {% else %}
+  \textbf{\color{red}Net Loss} & & \textbf{\color{red} {{ fmt_amount_plain(pl_report.net_profit) }} } \\
+  {% endif %}
+  \bottomrule
+\end{longtable}
+{% endif %}
+
+\newpage
+
+%% =====================================================================
+%% BALANCE SHEET
+%% =====================================================================
+\markboth{Statement of Financial Position}{}
+\section{Statement of Financial Position}
+\textit{\small As at {{ as_of_date | latex_escape }}%
+{% if comparative %} (Prior year: {{ prior_as_of | latex_escape }}){% endif %}}
+\vspace{4mm}
+
+{% if comparative and comp_bs %}
+{# --- Comparative Balance Sheet ------------------------------------- #}
+\begin{longtable}{p{7cm} r r r}
+  \toprule
+  \textbf{Account} & \textbf{Code} &
+  \textbf{ {{ as_of_date | latex_escape }} \$} &
+  \textbf{Prior year \$} \\
+  \midrule
+  \endfirsthead
+  \multicolumn{4}{l}{\textit{(continued)}} \\
+  \toprule
+  \textbf{Account} & \textbf{Code} &
+  \textbf{ {{ as_of_date | latex_escape }} \$} &
+  \textbf{Prior year \$} \\
+  \midrule
+  \endhead
+  \bottomrule
+  \endfoot
+  %% Assets
+  \multicolumn{4}{l}{\textbf{\color{saegreen}Assets}} \\[1mm]
+  {% set asset_lines = comp_bs.assets.get("ASSET", []) %}
+  {% if asset_lines %}
+    {% for line in asset_lines %}
+  {{ line.account_name | latex_escape }} & {\small {{ line.code | latex_escape }}} &
+  {{ fmt_amount(line.current_amount) }} & {{ fmt_amount(line.prior_amount) }} \\
+    {% endfor %}
+  {% else %}
+  \multicolumn{4}{c}{\textit{\color{midgrey}No asset accounts}} \\
+  {% endif %}
+  \midrule
+  \textbf{Total Assets} & &
+  \textbf{ {{ fmt_amount_plain(comp_bs.assets.total_assets_current) }} } &
+  {{ fmt_amount_plain(comp_bs.assets.total_assets_prior) }} \\[4mm]
+  %% Liabilities
+  \multicolumn{4}{l}{\textbf{\color{saegreen}Liabilities}} \\[1mm]
+  {% set liability_lines = comp_bs.liabilities.get("LIABILITY", []) %}
+  {% if liability_lines %}
+    {% for line in liability_lines %}
+  {{ line.account_name | latex_escape }} & {\small {{ line.code | latex_escape }}} &
+  {{ fmt_amount(line.current_amount) }} & {{ fmt_amount(line.prior_amount) }} \\
+    {% endfor %}
+  {% else %}
+  \multicolumn{4}{c}{\textit{\color{midgrey}No liability accounts}} \\
+  {% endif %}
+  \midrule
+  \textbf{Total Liabilities} & &
+  \textbf{ {{ fmt_amount_plain(comp_bs.liabilities.total_liabilities_current) }} } &
+  {{ fmt_amount_plain(comp_bs.liabilities.total_liabilities_prior) }} \\[4mm]
+  %% Equity
+  \multicolumn{4}{l}{\textbf{\color{saegreen}Equity}} \\[1mm]
+  {% set equity_lines = comp_bs.equity.get("EQUITY", []) %}
+  {% if equity_lines %}
+    {% for line in equity_lines %}
+  {{ line.account_name | latex_escape }} & {\small {{ line.code | latex_escape }}} &
+  {{ fmt_amount(line.current_amount) }} & {{ fmt_amount(line.prior_amount) }} \\
+    {% endfor %}
+  {% else %}
+  \multicolumn{4}{c}{\textit{\color{midgrey}No equity accounts}} \\
+  {% endif %}
+  \midrule
+  \textbf{Total Equity} & &
+  \textbf{ {{ fmt_amount_plain(comp_bs.equity.total_equity_current) }} } &
+  {{ fmt_amount_plain(comp_bs.equity.total_equity_prior) }} \\
+  \bottomrule
+\end{longtable}
+
+{% else %}
+{# --- Non-comparative Balance Sheet ---------------------------------- #}
+\begin{longtable}{p{9cm} r r}
+  \toprule
+  \textbf{Account} & \textbf{Code} & \textbf{Balance \$} \\
+  \midrule
+  \endfirsthead
+  \multicolumn{3}{l}{\textit{(continued)}} \\
+  \toprule
+  \textbf{Account} & \textbf{Code} & \textbf{Balance \$} \\
+  \midrule
+  \endhead
+  \bottomrule
+  \endfoot
+  %% Assets
+  \multicolumn{3}{l}{\textbf{\color{saegreen}Assets}} \\[1mm]
+  {% for line in bs_report.assets.get("ASSET", []) %}
+  {{ line.account_name | latex_escape }} & {\small {{ line.code | latex_escape }}} & {{ fmt_amount(line.balance) }} \\
+  {% else %}
+  \multicolumn{3}{c}{\textit{\color{midgrey}No asset accounts}} \\
+  {% endfor %}
+  \midrule
+  \textbf{Total Assets} & & \textbf{ {{ fmt_amount_plain(bs_report.assets.total_assets) }} } \\[4mm]
+  %% Liabilities
+  \multicolumn{3}{l}{\textbf{\color{saegreen}Liabilities}} \\[1mm]
+  {% for line in bs_report.liabilities.get("LIABILITY", []) %}
+  {{ line.account_name | latex_escape }} & {\small {{ line.code | latex_escape }}} & {{ fmt_amount(line.balance) }} \\
+  {% else %}
+  \multicolumn{3}{c}{\textit{\color{midgrey}No liability accounts}} \\
+  {% endfor %}
+  \midrule
+  \textbf{Total Liabilities} & & \textbf{ {{ fmt_amount_plain(bs_report.liabilities.total_liabilities) }} } \\[4mm]
+  %% Equity
+  \multicolumn{3}{l}{\textbf{\color{saegreen}Equity}} \\[1mm]
+  {% for line in bs_report.equity.get("EQUITY", []) %}
+  {{ line.account_name | latex_escape }} & {\small {{ line.code | latex_escape }}} & {{ fmt_amount(line.balance) }} \\
+  {% else %}
+  \multicolumn{3}{c}{\textit{\color{midgrey}No equity accounts}} \\
+  {% endfor %}
+  \midrule
+  \textbf{Total Equity} & & \textbf{ {{ fmt_amount_plain(bs_report.equity.total_equity) }} } \\
+  \bottomrule
+\end{longtable}
+{% endif %}
+
+\newpage
+
+%% =====================================================================
+%% TRIAL BALANCE
+%% =====================================================================
+\markboth{Trial Balance}{}
+\section{Trial Balance}
+\textit{\small As at {{ as_of_date | latex_escape }}}
+\vspace{4mm}
+
+{% if tb_report.balanced %}
+\textcolor{saegreen}{\textbf{$\checkmark$\ Trial balance is balanced.}}
+{% else %}
+\textcolor{red}{\textbf{Trial balance is NOT balanced.}}
+{% endif %}
+\vspace{4mm}
+
+\begin{longtable}{p{6.5cm} r r r}
+  \toprule
+  \textbf{Account} & \textbf{Code} & \textbf{Debit \$} & \textbf{Credit \$} \\
+  \midrule
+  \endfirsthead
+  \multicolumn{4}{l}{\textit{(continued)}} \\
+  \toprule
+  \textbf{Account} & \textbf{Code} & \textbf{Debit \$} & \textbf{Credit \$} \\
+  \midrule
+  \endhead
+  \bottomrule
+  \endfoot
+  {% if tb_report.accounts %}
+    {% for line in tb_report.accounts %}
+  {{ line.name | latex_escape }} & {\small {{ line.code | latex_escape }}} &
+  {{ fmt_amount(line.debit_total) }} & {{ fmt_amount(line.credit_total) }} \\
+    {% endfor %}
+  {% else %}
+  \multicolumn{4}{c}{\textit{\color{midgrey}No posted transactions for this period}} \\
+  {% endif %}
+  \midrule
+  \textbf{Totals} & &
+  \textbf{ {{ fmt_amount_plain(tb_report.total_debits) }} } &
+  \textbf{ {{ fmt_amount_plain(tb_report.total_credits) }} } \\
+  \bottomrule
+\end{longtable}
+
+\newpage
+
+%% =====================================================================
+%% TRUSTEE'S DECLARATION
+%% =====================================================================
+\markboth{Trustee's Declaration}{}
+\section{Trustee's Declaration}
+
+In the opinion of the trustee of
+\textbf{ {{ (company.legal_name or company.name) | latex_escape }} }:
+
+\begin{itemize}
+  \item the financial statements present fairly the financial position as at
+        {{ as_of_date | latex_escape }} and the result for the year then ended; and
+  \item there are reasonable grounds to believe the entity will be able to
+        pay its debts as and when they become due and payable.
+\end{itemize}
+
+Signed for and on behalf of the trustee:
+
+\vspace{20mm}
+
+\begin{tabular}{p{7cm} p{5cm}}
+  \hrulefill & \hrulefill \\[1mm]
+  Signature & Date \\
+\end{tabular}
+
+\end{document}
