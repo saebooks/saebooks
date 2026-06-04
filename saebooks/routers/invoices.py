@@ -40,7 +40,6 @@ from saebooks.services import active_company as active_svc
 from saebooks.services import invoices as svc
 from saebooks.services import mailer as mailer_svc
 from saebooks.services import numbering
-from saebooks.services import pdf as pdf_svc
 from saebooks.services.latex_pdf import render_latex
 from saebooks.web import templates
 
