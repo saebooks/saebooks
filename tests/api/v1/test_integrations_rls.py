@@ -28,6 +28,7 @@ import uuid
 from typing import Any
 
 import pytest
+import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -46,7 +47,11 @@ def _set_edition_enterprise(monkeypatch: pytest.MonkeyPatch) -> None:
     """Elevate edition so the FLAG_PAPERLESS_INTEGRATION gate doesn't 404
     the endpoint before the handler is reached. Mirrors the autouse
     fixture in test_integrations.py."""
-    monkeypatch.setattr(settings, "edition", "enterprise")
+    # Patch the LIVE config singleton, not this module import alias: an
+    # earlier importlib.reload(saebooks.config) rebinds the singleton and
+    # orphans the alias (conftest re-syncs features/resolver to live).
+    import saebooks.config as _cfg
+    monkeypatch.setattr(_cfg.settings, "edition", "enterprise")
 
 
 # Migration 0056 docstring guarantees this role name; the test stack's
@@ -56,6 +61,34 @@ def _set_edition_enterprise(monkeypatch: pytest.MonkeyPatch) -> None:
 # ``docker-compose.test.yml``).
 _APP_ROLE = "saebooks_app"
 _APP_PASSWORD = "saebooks_app_test_pw"
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _ensure_app_role_password():
+    """Self-manage the ``saebooks_app`` password so these tests don't depend on
+    the deploy/CI ``SAEBOOKS_APP_DB_PASSWORD`` convention being
+    ``saebooks_app_test_pw``. Mirrors the role-flip in
+    ``test_rls_multijurisdiction`` / ``test_rls_cli`` — the test sets the very
+    password it then connects with, so it passes under any harness.
+    """
+    owner = create_async_engine(
+        settings.database_url, poolclass=NullPool, future=True
+    )
+    try:
+        async with owner.begin() as conn:
+            exists = (
+                await conn.execute(
+                    text("SELECT 1 FROM pg_roles WHERE rolname = :r"),
+                    {"r": _APP_ROLE},
+                )
+            ).first()
+            if exists is not None:
+                await conn.execute(
+                    text(f"ALTER ROLE {_APP_ROLE} WITH PASSWORD '{_APP_PASSWORD}'")
+                )
+    finally:
+        await owner.dispose()
+    yield
 
 
 def _app_role_url() -> str:
