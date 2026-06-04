@@ -1,3 +1,5 @@
+import os
+
 from httpx import AsyncClient
 import pytest
 pytestmark = pytest.mark.postgres_only
@@ -9,7 +11,10 @@ async def test_accounts_list_renders(client: AsyncClient) -> None:
     body = r.text
     assert "Chart of accounts" in body
     assert "accounts" in body  # count shown but varies with DB state
-    assert "Sauer Pty Ltd ATF Saueesti Trust" in body
+    # Company name on the page is the seeded company (SEED_COMPANY_NAME env,
+    # default 'Default Company') — not a hard-coded brand.
+    expected_company = os.environ.get("SEED_COMPANY_NAME", "Default Company")
+    assert expected_company in body
     # One of the seeded accounts should be present by code
     assert "1-1110" in body  # Bank (hyphenated per migration 0010)
     assert "Assets" in body
