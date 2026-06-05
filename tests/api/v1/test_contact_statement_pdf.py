@@ -46,10 +46,21 @@ async def contact_id() -> str:
     async with AsyncSessionLocal() as session:
         company = (
             await session.execute(
-                select(Company).where(
+                select(Company)
+                .where(
                     Company.tenant_id == DEFAULT_TENANT_ID,
                     Company.archived_at.is_(None),
-                ).limit(1)
+                )
+                # Match the product's get_active_company_id fallback
+                # (saebooks/api/v1/deps.py), which resolves the OLDEST
+                # company via order_by(created_at). Without this, an
+                # unordered limit(1) could scope the contact to a
+                # different company than the endpoint resolves when the
+                # default tenant holds >1 company (seeded by earlier
+                # tests), producing a spurious 404. id is a stable
+                # tiebreak for the (test-only) created_at tie case.
+                .order_by(Company.created_at, Company.id)
+                .limit(1)
             )
         ).scalars().first()
         if company is None:
