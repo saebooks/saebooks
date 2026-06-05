@@ -28,6 +28,25 @@ from saebooks.models.recurring_invoice import (
     RecurringInvoice,
 )
 
+# Journal-entry statuses that contribute to GL balances in reports.
+#
+# A reversal ("void") posts a mirror entry AND flips the original to
+# REVERSED. If reports summed only POSTED, the REVERSED original would be
+# dropped while its POSTED reversal still counted -- so the reversal would
+# subtract a SECOND time (verified live 2026-06-06: voiding a $1,580 invoice
+# wrongly moved Trade Debtors 5790.40 -> 4210.40 and understated income).
+#
+# Including REVERSED makes the original and its POSTED reversal cancel
+# exactly. This is also correct ACROSS period boundaries: a reversal dated
+# in a later period is still filtered out of a balance taken before its date
+# (the entry_date <= to_date predicate), so the original correctly remains
+# live in the intervening period and only nets to zero once the reversal's
+# date is in scope. (Excluding both sides instead would erase the original
+# retroactively and misstate that intervening period.)
+#
+# DRAFT entries stay excluded -- they have never hit the ledger.
+REPORTABLE_STATUSES = (EntryStatus.POSTED, EntryStatus.REVERSED)
+
 # Account types that go on the balance sheet (permanent accounts)
 BALANCE_SHEET_TYPES = {
     AccountType.ASSET,
@@ -221,7 +240,7 @@ async def _account_balances(
     # Build filters
     conditions = [
         JournalEntry.company_id == company_id,
-        JournalEntry.status == EntryStatus.POSTED,
+        JournalEntry.status.in_(REPORTABLE_STATUSES),
     ]
     if tenant_id is not None:
         conditions.append(JournalEntry.tenant_id == tenant_id)
@@ -699,7 +718,7 @@ async def pl_by_segment(
 
     conditions = [
         JournalEntry.company_id == company_id,
-        JournalEntry.status == EntryStatus.POSTED,
+        JournalEntry.status.in_(REPORTABLE_STATUSES),
     ]
     if from_date:
         conditions.append(JournalEntry.entry_date >= from_date)
@@ -890,7 +909,7 @@ async def budget_vs_actual(
     # Actuals — aggregate POSTED journal lines per (account, month).
     conditions = [
         JournalEntry.company_id == company_id,
-        JournalEntry.status == EntryStatus.POSTED,
+        JournalEntry.status.in_(REPORTABLE_STATUSES),
         extract("year", JournalEntry.entry_date) == year,
     ]
     month_expr = cast(extract("month", JournalEntry.entry_date), Integer)
@@ -1088,7 +1107,7 @@ async def cashflow_forecast(
         .join(Account, JournalLine.account_id == Account.id)
         .where(
             JournalEntry.company_id == company_id,
-            JournalEntry.status == EntryStatus.POSTED,
+            JournalEntry.status.in_(REPORTABLE_STATUSES),
             JournalEntry.entry_date <= as_of,
             Account.account_type == AccountType.ASSET,
             Account.reconcile.is_(True),

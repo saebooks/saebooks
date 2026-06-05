@@ -423,7 +423,10 @@ async def profit_loss(
     Expense accounts: net = debit - credit (debits increase expense).
     Only accounts with a non-zero net amount appear in the result.
     """
-    statuses = [EntryStatus.POSTED]
+    # REVERSED included so a void (mirror reversal + REVERSED original)
+    # nets to zero rather than the POSTED reversal subtracting twice;
+    # see reports_svc.REPORTABLE_STATUSES. DRAFT only on opt-in.
+    statuses = list(reports_svc.REPORTABLE_STATUSES)
     if include_draft:
         statuses.append(EntryStatus.DRAFT)
 
@@ -570,7 +573,7 @@ async def balance_sheet(
             and_(
                 JournalEntry.company_id == company_id,
                 JournalEntry.tenant_id == tenant_id,
-                JournalEntry.status == EntryStatus.POSTED,
+                JournalEntry.status.in_(reports_svc.REPORTABLE_STATUSES),
                 JournalEntry.archived_at.is_(None),
                 JournalEntry.entry_date <= as_of_date,
             )
@@ -730,7 +733,7 @@ async def _bas_aggregate(
             and_(
                 JournalEntry.company_id == company_id,
                 JournalEntry.tenant_id == tenant_id,
-                JournalEntry.status == EntryStatus.POSTED,
+                JournalEntry.status.in_(reports_svc.REPORTABLE_STATUSES),
                 JournalEntry.archived_at.is_(None),
                 JournalEntry.entry_date >= from_date,
                 JournalEntry.entry_date <= to_date,
@@ -847,7 +850,7 @@ async def _bas_gst_amounts(
             and_(
                 JournalEntry.company_id == company_id,
                 JournalEntry.tenant_id == tenant_id,
-                JournalEntry.status == EntryStatus.POSTED,
+                JournalEntry.status.in_(reports_svc.REPORTABLE_STATUSES),
                 JournalEntry.archived_at.is_(None),
                 JournalEntry.entry_date >= from_date,
                 JournalEntry.entry_date <= to_date,
@@ -1031,7 +1034,7 @@ async def cashflow(
             and_(
                 JournalEntry.company_id == company_id,
                 JournalEntry.tenant_id == tenant_id,
-                JournalEntry.status == EntryStatus.POSTED,
+                JournalEntry.status.in_(reports_svc.REPORTABLE_STATUSES),
                 JournalEntry.archived_at.is_(None),
                 JournalEntry.entry_date >= from_date,
                 JournalEntry.entry_date <= to_date,
@@ -1053,7 +1056,7 @@ async def cashflow(
             and_(
                 JournalEntry.company_id == company_id,
                 JournalEntry.tenant_id == tenant_id,
-                JournalEntry.status == EntryStatus.POSTED,
+                JournalEntry.status.in_(reports_svc.REPORTABLE_STATUSES),
                 JournalEntry.archived_at.is_(None),
                 JournalEntry.entry_date < from_date,
                 Account.account_type == AccountType.ASSET,
@@ -1490,7 +1493,7 @@ async def trial_balance(
             and_(
                 JournalEntry.company_id == company_id,
                 JournalEntry.tenant_id == tenant_id,
-                JournalEntry.status == EntryStatus.POSTED,
+                JournalEntry.status.in_(reports_svc.REPORTABLE_STATUSES),
                 JournalEntry.archived_at.is_(None),
                 JournalEntry.entry_date <= as_of,
             )
@@ -1567,7 +1570,7 @@ async def budget_vs_actual(
     actual_conditions: list[Any] = [
         JournalEntry.company_id == company_id,
         JournalEntry.tenant_id == tenant_id,
-        JournalEntry.status == EntryStatus.POSTED,
+        JournalEntry.status.in_(reports_svc.REPORTABLE_STATUSES),
         JournalEntry.archived_at.is_(None),
         func.extract("year", JournalEntry.entry_date) == year,
     ]
@@ -1874,7 +1877,7 @@ async def ytd_turnover(
             and_(
                 JournalEntry.company_id == company_id,
                 JournalEntry.tenant_id == tenant_id,
-                JournalEntry.status == EntryStatus.POSTED,
+                JournalEntry.status.in_(reports_svc.REPORTABLE_STATUSES),
                 JournalEntry.archived_at.is_(None),
                 JournalEntry.entry_date >= fy_start,
                 JournalEntry.entry_date <= effective_end,
@@ -1993,7 +1996,7 @@ async def statement_pack_pdf(
             and_(
                 JournalEntry.company_id == company_id,
                 JournalEntry.tenant_id == tenant_id,
-                JournalEntry.status == EntryStatus.POSTED,
+                JournalEntry.status.in_(reports_svc.REPORTABLE_STATUSES),
                 JournalEntry.archived_at.is_(None),
                 JournalEntry.entry_date >= from_,
                 JournalEntry.entry_date <= to_,
@@ -2058,7 +2061,7 @@ async def statement_pack_pdf(
             and_(
                 JournalEntry.company_id == company_id,
                 JournalEntry.tenant_id == tenant_id,
-                JournalEntry.status == EntryStatus.POSTED,
+                JournalEntry.status.in_(reports_svc.REPORTABLE_STATUSES),
                 JournalEntry.archived_at.is_(None),
                 JournalEntry.entry_date <= as_of,
             )
@@ -2127,7 +2130,7 @@ async def statement_pack_pdf(
             and_(
                 JournalEntry.company_id == company_id,
                 JournalEntry.tenant_id == tenant_id,
-                JournalEntry.status == EntryStatus.POSTED,
+                JournalEntry.status.in_(reports_svc.REPORTABLE_STATUSES),
                 JournalEntry.archived_at.is_(None),
                 JournalEntry.entry_date <= as_of,
             )
@@ -2190,7 +2193,7 @@ async def statement_pack_pdf(
                 and_(
                     JournalEntry.company_id == company_id,
                     JournalEntry.tenant_id == tenant_id,
-                    JournalEntry.status == EntryStatus.POSTED,
+                    JournalEntry.status.in_(reports_svc.REPORTABLE_STATUSES),
                     JournalEntry.archived_at.is_(None),
                     JournalEntry.entry_date >= prior_from,
                     JournalEntry.entry_date <= prior_to,
@@ -2301,7 +2304,7 @@ async def statement_pack_pdf(
                 and_(
                     JournalEntry.company_id == company_id,
                     JournalEntry.tenant_id == tenant_id,
-                    JournalEntry.status == EntryStatus.POSTED,
+                    JournalEntry.status.in_(reports_svc.REPORTABLE_STATUSES),
                     JournalEntry.archived_at.is_(None),
                     JournalEntry.entry_date <= prior_as_of,
                 )
