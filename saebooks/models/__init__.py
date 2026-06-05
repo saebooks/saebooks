@@ -46,6 +46,13 @@ from saebooks.models.one_off_customer import OneOffCustomer
 from saebooks.models.one_off_vendor import OneOffVendor
 from saebooks.models.pay_run import PayRun, PayRunLine, PayRunStatus
 from saebooks.models.payg import PaygTaxScale, StslCoefficient
+from saebooks.models.principal import (
+    GrantStatus,
+    Principal,
+    PrincipalFido2Credential,
+    PrincipalKind,
+    PrincipalTenantGrant,
+)
 from saebooks.models.project import Project, ProjectStatus
 from saebooks.models.quote import Quote, QuoteLine, QuoteStatus
 from saebooks.models.settings import Setting
@@ -95,6 +102,7 @@ __all__ = [
     "DistributionStatus",
     "EntryStatus",
     "FixedAsset",
+    "GrantStatus",
     "IcEdge",
     "IcEdgeDirection",
     "IcLeg",
@@ -117,6 +125,10 @@ __all__ = [
     "PayRunStatus",
     "PaygTaxScale",
     "PeriodLock",
+    "Principal",
+    "PrincipalFido2Credential",
+    "PrincipalKind",
+    "PrincipalTenantGrant",
     "Project",
     "ProjectStatus",
     "Quote",
