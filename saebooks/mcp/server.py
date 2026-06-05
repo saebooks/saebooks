@@ -95,7 +95,33 @@ mcp = FastMCP(
         "Default currency AUD. Dates are ISO-8601 (YYYY-MM-DD). "
         "Mutating tools that change POSTED entities use If-Match: "
         "<version> for optimistic locking — fetch the entity first "
-        "to read its current version."
+        "to read its current version. "
+        "\n\n"
+        "GOLDEN RULE — NEVER author a manual journal entry as a shortcut. "
+        "The ledger is DERIVED from real business records. To record an "
+        "economic event, use the record-type tool that models it and let "
+        "the engine post the journal: "
+        "create_invoice (sales / money owed to you), "
+        "create_credit_note (refund / reduction of an invoice or bill), "
+        "create_bill (supplier purchases on terms), "
+        "create_expense (cash / card spend), "
+        "create_payment (money in or out, with allocations), "
+        "plus the item / depreciation / fixed-asset and bank-reconciliation "
+        "tools for their respective events. These produce a real record "
+        "with provenance (origin=INVOICE/BILL/… + source_type/source_id) and "
+        "a proper audit trail. "
+        "create_journal_entry is the EXCEPTION PATH — use it ONLY for a "
+        "genuine adjustment / correction that no record-type tool can "
+        "express (e.g. an accountant's year-end reclassification). A manual "
+        "JE stamps origin=MANUAL: it is a visible exception, weaker audit "
+        "practice, and must carry a written reason. If you find yourself "
+        "reaching for create_journal_entry to record a normal transaction, "
+        "STOP and use the correct record type instead — if no tool fits the "
+        "event, that is a missing record type to flag, not a manual JE to "
+        "write. To move money between two of your own accounts use the "
+        "dedicated transfer tool when available rather than a manual JE; "
+        "for a reciprocal posting between two companies use the intercompany "
+        "tool, never two hand-balanced manual JEs."
     ),
 )
 # Expose the application version via MCP initialize serverInfo.
@@ -594,6 +620,10 @@ async def create_invoice(
         notes: optional internal notes.
 
     The invoice is DRAFT — call ``post_invoice`` to finalise.
+
+    Use this (not a manual journal entry) to record a sale or money a
+    customer owes you. Posting derives the AR + revenue + GST journal for
+    you with origin=INVOICE provenance.
     """
     body: dict[str, Any] = {
         "contact_id": contact_id,
@@ -727,6 +757,10 @@ async def create_bill(
         lines: [{description, quantity, unit_price, account_id, tax_code_id, ...}].
         currency: 3-letter ISO; defaults to base currency.
         notes: internal notes.
+
+    Use this (not a manual journal entry) to record a supplier purchase on
+    terms. Posting derives the AP + expense/asset + GST journal with
+    origin=BILL provenance.
     """
     body: dict[str, Any] = {
         "contact_id": contact_id,
@@ -828,6 +862,10 @@ async def create_expense(
         contact_id: supplier UUID (optional for cash receipts).
         reference: receipt number / memo.
         notes: internal notes.
+
+    Use this (not a manual journal entry) to record cash or card spend.
+    Posting derives the bank/credit + expense + GST journal with
+    origin=EXPENSE provenance.
     """
     body: dict[str, Any] = {
         "issue_date": issue_date,
@@ -917,24 +955,57 @@ async def create_journal_entry(
     ctx: Context,
     entry_date: str,
     lines: list[dict[str, Any]],
+    reason: str,
     description: str = "",
     reference: str = "",
 ) -> dict[str, Any]:
-    """Create a DRAFT journal entry.
+    """EXCEPTION PATH — create a DRAFT manual journal entry.
+
+    Use this ONLY when NO record-type tool fits the economic event — i.e. a
+    genuine adjustment or correction (e.g. an accountant's year-end
+    reclassification, an opening-balance setup, a write-off with no invoice).
+    Prefer the proper record type for everything else:
+
+      - money owed to you / a sale            -> create_invoice
+      - a refund / reduction of an invoice    -> create_credit_note
+      - a supplier purchase on terms          -> create_bill
+      - cash or card spend                    -> create_expense
+      - money received or paid (+allocations) -> create_payment
+      - moving money between your own accounts -> the transfer tool (when wired)
+      - a reciprocal posting between two of your companies -> intercompany tool
+
+    Those tools create a real record with provenance (origin=INVOICE/BILL/…
+    + source_type/source_id) and a full audit trail. A manual JE is BAD
+    ACCOUNTING PRACTICE: it is stamped origin=MANUAL (a visible exception),
+    carries a weaker audit trail than a record-derived posting, and is the
+    shortcut this tool deliberately makes harder to reach. If no tool fits
+    the event, FLAG the missing record type rather than hand-writing a JE.
 
     Args:
         entry_date: ISO date.
         lines: [{account_id, debit, credit, description?, tax_code_id?, ...}].
             Sum of debits MUST equal sum of credits.
-        description: header description.
+        reason: REQUIRED — why a manual JE is justified here and why no
+            record-type tool fits. Persisted into the entry narration so the
+            manual exception is self-documenting in the ledger.
+        description: optional header narration (appended after the reason).
         reference: external reference.
     """
+    if not reason or not reason.strip():
+        raise ValueError(
+            "create_journal_entry requires a non-empty 'reason' explaining why "
+            "a manual journal entry is justified and why no record-type tool "
+            "(invoice/credit_note/bill/expense/payment/transfer/intercompany) "
+            "fits this event. Prefer the record type."
+        )
+    narration = f"[MANUAL JE] {reason.strip()}"
+    if description and description.strip():
+        narration = f"{narration} — {description.strip()}"
     body: dict[str, Any] = {
         "entry_date": entry_date,
         "lines": lines,
+        "narration": narration,
     }
-    if description:
-        body["description"] = description
     if reference:
         body["reference"] = reference
     return await _post(ctx, "/api/v1/journal_entries", body)
@@ -1030,6 +1101,10 @@ async def create_credit_note(
         issue_date: ISO date.
         lines: [{description, quantity, unit_price, account_id, tax_code_id}].
         invoice_id: link to original invoice this credits (optional).
+
+    Use this (not a manual journal entry) to record a refund or a
+    reduction of an invoice/bill. Posting derives the reversing AR/AP +
+    revenue + GST journal with origin=CREDIT_NOTE provenance.
     """
     body: dict[str, Any] = {
         "contact_id": contact_id, "issue_date": issue_date, "lines": lines,
@@ -1217,6 +1292,12 @@ async def create_payment(
             applies to outstanding invoices/bills. If empty, payment
             sits unallocated on the contact's account.
         reference: bank-statement reference.
+
+    Use this (not a manual journal entry) to record money in or out and to
+    apply it against invoices/bills. Posting derives the bank + AR/AP
+    journal with origin=PAYMENT provenance. To move money between two of
+    your OWN accounts, use the dedicated transfer tool (when wired) rather
+    than a payment or a manual JE.
     """
     body: dict[str, Any] = {
         "payment_date": payment_date,
