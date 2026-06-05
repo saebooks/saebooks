@@ -31,6 +31,45 @@ class EntryStatus(enum.StrEnum):
     REVERSED = "REVERSED"
 
 
+class JournalOrigin(enum.StrEnum):
+    """What created a journal entry — the JE-provenance keystone.
+
+    Stored as ``String(32)`` on ``JournalEntry.origin`` (mirrors the
+    ``EntryStatus``/``String(16)`` pattern — a Python StrEnum persisted as a
+    plain string, no DB enum type). Every posted entry self-declares its
+    origin so a hand-entered manual JE is a visible exception (``MANUAL``)
+    rather than indistinguishable from a tool-posted one.
+
+    Forward-only: pre-provenance rows carry ``UNKNOWN`` (the DB default);
+    there is NO historical backfill. ``MANUAL`` is the default at the posting
+    chokepoint (``post``/``post_in_txn``), so any caller that does not declare
+    a machine origin is flagged as a manual / arbitrary entry — the visible
+    exception this keystone exists to surface.
+
+    ``source_type`` + ``source_id`` on the entry carry the originating
+    record's type string and id where the origin has one (e.g. ``INVOICE`` →
+    ``source_type="invoice"``, ``source_id=<invoice.id>``).
+    """
+
+    MANUAL = "MANUAL"
+    UNKNOWN = "UNKNOWN"
+    INVOICE = "INVOICE"
+    CREDIT_NOTE = "CREDIT_NOTE"
+    BILL = "BILL"
+    PAYMENT = "PAYMENT"
+    EXPENSE = "EXPENSE"
+    PAYRUN = "PAYRUN"
+    DEPRECIATION = "DEPRECIATION"
+    FX_REVAL = "FX_REVAL"
+    DEFERRED_REVENUE = "DEFERRED_REVENUE"
+    BANK_REC = "BANK_REC"
+    YEAR_END_CLOSE = "YEAR_END_CLOSE"
+    TRUST_DISTRIBUTION = "TRUST_DISTRIBUTION"
+    CASHBOOK_BACKFILL = "CASHBOOK_BACKFILL"
+    FIXED_ASSET = "FIXED_ASSET"
+    REVERSAL = "REVERSAL"
+
+
 class JournalEntry(CompanyScoped, Base):
     __tablename__ = "journal_entries"
     __table_args__ = (
@@ -68,6 +107,18 @@ class JournalEntry(CompanyScoped, Base):
         UUID(as_uuid=True), ForeignKey("journal_entries.id", ondelete="SET NULL")
     )
     override_reason: Mapped[str | None] = mapped_column(Text)
+    # JE-provenance keystone (migration 0153). ``origin`` records what created
+    # the entry; ``source_type`` + ``source_id`` link to the originating
+    # record where one exists. Stored as plain strings (no DB enum) to match
+    # the ``status``/``EntryStatus`` pattern. NOT NULL default ``UNKNOWN`` so
+    # pre-provenance rows stay valid forward-only with no backfill; the
+    # posting chokepoint stamps the real origin (default ``MANUAL``) on every
+    # newly-posted entry.
+    origin: Mapped[JournalOrigin] = mapped_column(
+        String(32), nullable=False, default=JournalOrigin.UNKNOWN
+    )
+    source_type: Mapped[str | None] = mapped_column(String(64))
+    source_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     attachments: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
