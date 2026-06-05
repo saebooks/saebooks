@@ -395,6 +395,19 @@ async def create(
         _assert_lines_balanced(lines, reference or "(pending-ref)")
         await _validate_accounts_tenant(session, tenant_id, lines)
         await _validate_lines_company(session, company_id, lines)
+        # Belt-and-braces app-layer company guard (defence-in-depth on top of
+        # the structural composite FK added in 0152). _validate_lines_company
+        # already rejects foreign accounts; this batched check mirrors the
+        # intercompany engine's own assertion so both paths fail identically.
+        from saebooks.services.tenant import assert_company_owned
+
+        await assert_company_owned(
+            session,
+            Account,
+            [uuid.UUID(str(ln["account_id"])) for ln in (lines or [])],
+            company_id,
+            label="account",
+        )
 
     ref = reference or await next_ref(session)
 
