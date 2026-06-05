@@ -335,7 +335,10 @@ async def journal_delete(
     tenant_id = resolve_tenant_id(request)
     # Cross-tenant or non-existent: silently no-op so users
     # never learn whether the entry exists in another tenant.
-    with contextlib.suppress(ValueError):
+    # Phase 0 T3: delete() now raises PostingError for POSTED/REVERSED entries.
+    # Suppress it alongside ValueError so a web delete of a posted entry no-ops
+    # (reverse/void is the correct path) instead of surfacing an unhandled 500.
+    with contextlib.suppress(ValueError, PostingError):
         await svc.delete(
             session, entry_id, performed_by="web", tenant_id=tenant_id
         )
