@@ -18,7 +18,7 @@ from sqlalchemy.orm import selectinload
 from saebooks.models.account import Account
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact
-from saebooks.models.journal import PeriodLock
+from saebooks.models.journal import JournalOrigin, PeriodLock
 from saebooks.models.pay_run import PayRun, PayRunLine, PayRunStatus
 from saebooks.services import change_log as cl_svc
 from saebooks.services import journal as journal_svc
@@ -487,6 +487,9 @@ async def finalize(
             pay_run.journal_id,
             posted_by=actor,
             tenant_id=tenant_id,
+            origin=JournalOrigin.PAYRUN,
+            source_type="pay_run",
+            source_id=pay_run.id,
         )
     except journal_svc.PostingError as exc:
         raise PayRunError(f"Journal post failed: {exc}") from exc

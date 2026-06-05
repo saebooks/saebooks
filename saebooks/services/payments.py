@@ -37,6 +37,7 @@ from saebooks.models.bill import Bill, BillStatus
 from saebooks.models.contact import Contact
 from saebooks.models.credit_note import CreditNote, CreditNoteStatus
 from saebooks.models.invoice import Invoice, InvoiceStatus
+from saebooks.models.journal import JournalOrigin
 from saebooks.models.payment import (
     Payment,
     PaymentAllocation,
@@ -703,7 +704,13 @@ async def post_payment(
         lines=lines,
     )
     posted = await journal_svc.post(
-        session, entry.id, posted_by=posted_by, override_reason=override_reason
+        session,
+        entry.id,
+        posted_by=posted_by,
+        override_reason=override_reason,
+        origin=JournalOrigin.PAYMENT,
+        source_type="payment",
+        source_id=pay.id,
     )
 
     pay.status = PaymentStatus.POSTED

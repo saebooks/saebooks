@@ -31,6 +31,7 @@ from sqlalchemy.orm import selectinload
 from saebooks.models.account import Account, AccountType
 from saebooks.models.contact import Contact
 from saebooks.models.expense import Expense, ExpenseLine, ExpenseStatus
+from saebooks.models.journal import JournalOrigin
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import change_log as change_log_svc
 from saebooks.services import journal as journal_svc
@@ -490,7 +491,13 @@ async def post_expense(
         lines=journal_lines,
     )
     posted = await journal_svc.post(
-        session, entry.id, posted_by=posted_by, override_reason=override_reason
+        session,
+        entry.id,
+        posted_by=posted_by,
+        override_reason=override_reason,
+        origin=JournalOrigin.EXPENSE,
+        source_type="expense",
+        source_id=expense.id,
     )
 
     expense.status = ExpenseStatus.POSTED

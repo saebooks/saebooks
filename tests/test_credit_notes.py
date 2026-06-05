@@ -28,7 +28,12 @@ from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
 from saebooks.models.credit_note import CreditNote, CreditNoteStatus
 from saebooks.models.document_counter import DocumentCounter
-from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
+from saebooks.models.journal import (
+    EntryStatus,
+    JournalEntry,
+    JournalLine,
+    JournalOrigin,
+)
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import credit_notes as svc
 
@@ -210,6 +215,10 @@ async def test_post_credit_note_mints_number_and_reverse_sign_journal() -> None:
         entry = await session.get(JournalEntry, posted.journal_entry_id)
         assert entry is not None
         assert entry.status == EntryStatus.POSTED
+        # JE-provenance: a credit-note-posted JE self-declares origin + source.
+        assert entry.origin == JournalOrigin.CREDIT_NOTE
+        assert entry.source_type == "credit_note"
+        assert entry.source_id == posted.id
         lines = (
             await session.execute(
                 select(JournalLine)

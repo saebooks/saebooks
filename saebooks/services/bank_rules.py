@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.models.bank_rule import BankRule, MatchType
 from saebooks.models.bank_statement import BankStatementLine, StatementLineStatus
-from saebooks.models.journal import JournalEntry
+from saebooks.models.journal import JournalEntry, JournalOrigin
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import audit as audit_svc
 from saebooks.services import journal as journal_svc
@@ -339,7 +339,14 @@ async def apply_rule_to_line(
         description=f"[Rule: {rule.name}] {desc}",
         lines=lines,
     )
-    posted = await journal_svc.post(session, entry.id, posted_by=posted_by)
+    posted = await journal_svc.post(
+        session,
+        entry.id,
+        posted_by=posted_by,
+        origin=JournalOrigin.BANK_REC,
+        source_type="bank_statement_line",
+        source_id=line.id,
+    )
 
     # Re-fetch the line in this session and mark matched
     line = await session.get(BankStatementLine, line_id)

@@ -28,6 +28,7 @@ from saebooks.models.account import Account
 from saebooks.models.bill import Bill, BillLine, BillStatus
 from saebooks.models.contact import Contact
 from saebooks.models.item import Item
+from saebooks.models.journal import JournalOrigin
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import items as items_svc
 from saebooks.services import journal as journal_svc
@@ -513,7 +514,13 @@ async def post_bill(
         lines=journal_lines,
     )
     posted = await journal_svc.post(
-        session, entry.id, posted_by=posted_by, override_reason=override_reason
+        session,
+        entry.id,
+        posted_by=posted_by,
+        override_reason=override_reason,
+        origin=JournalOrigin.BILL,
+        source_type="bill",
+        source_id=bill.id,
     )
 
     # Inventory stock movement: for every line with item_id, bump

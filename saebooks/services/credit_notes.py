@@ -35,6 +35,7 @@ from sqlalchemy.orm import selectinload
 
 from saebooks.models.account import Account, AccountType
 from saebooks.models.credit_note import CreditNote, CreditNoteLine, CreditNoteStatus
+from saebooks.models.journal import JournalOrigin
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import journal as journal_svc
 from saebooks.services import numbering
@@ -386,7 +387,13 @@ async def post_credit_note(
         lines=lines,
     )
     posted = await journal_svc.post(
-        session, entry.id, posted_by=posted_by, override_reason=override_reason
+        session,
+        entry.id,
+        posted_by=posted_by,
+        override_reason=override_reason,
+        origin=JournalOrigin.CREDIT_NOTE,
+        source_type="credit_note",
+        source_id=cn.id,
     )
 
     cn.status = CreditNoteStatus.POSTED

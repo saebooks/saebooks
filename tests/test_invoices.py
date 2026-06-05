@@ -28,7 +28,7 @@ from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
 from saebooks.models.invoice import InvoiceStatus
-from saebooks.models.journal import EntryStatus, JournalEntry
+from saebooks.models.journal import EntryStatus, JournalEntry, JournalOrigin
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import invoices as svc
 
@@ -238,6 +238,10 @@ async def test_post_invoice_mints_number_and_journal() -> None:
         je = await session.get(JournalEntry, posted.journal_entry_id)
         assert je is not None
         assert je.status == EntryStatus.POSTED
+        # JE-provenance: an invoice-posted JE self-declares its origin + source.
+        assert je.origin == JournalOrigin.INVOICE
+        assert je.source_type == "invoice"
+        assert je.source_id == posted.id
         await session.refresh(je, ["lines"])
         total_dr = sum((ln.debit for ln in je.lines), Decimal("0"))
         total_cr = sum((ln.credit for ln in je.lines), Decimal("0"))

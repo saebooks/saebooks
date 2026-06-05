@@ -37,7 +37,7 @@ from sqlalchemy.orm import selectinload
 
 from saebooks.models.account import Account
 from saebooks.models.company import Company
-from saebooks.models.journal import EntryStatus, JournalEntry
+from saebooks.models.journal import EntryStatus, JournalEntry, JournalOrigin
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import journal as journal_svc
 from saebooks.services.cashbook_categories import (
@@ -538,6 +538,9 @@ async def record_cashbook_entry(
             draft.id,
             posted_by=actor,
             tenant_id=tenant_id,
+            # Cashbook entries ARE journal entries (metadata on attachments,
+            # no separate cashbook record), so source_type/id stay null.
+            origin=JournalOrigin.CASHBOOK_BACKFILL,
         )
     except Exception:
         await db.rollback()
