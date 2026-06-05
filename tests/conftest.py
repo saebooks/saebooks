@@ -368,3 +368,78 @@ def _restore_settings_edition() -> None:
     _feat_mod._default_settings = live
     _resolver_mod._settings = live
     _resolver_mod._reset_for_tests()
+
+
+# ---------------------------------------------------------------------------
+# Phase 0 — company-write-isolation shared fixture.
+# A throwaway company in the default tenant with two postable accounts.
+# Reused by Tasks 1, 2, 3 (post_in_txn / assert_company_owned / delete guard).
+# ---------------------------------------------------------------------------
+import uuid as _p0_uuid
+import pytest as _p0_pytest
+
+_P0_DEFAULT_TENANT_ID = _p0_uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+
+@_p0_pytest.fixture
+async def seeded_company():
+    """A throwaway company in the default tenant with two postable accounts.
+
+    Yields (company_id, tenant_id, [asset_account_id, expense_account_id]).
+    Created and torn down via the OWNER role (bypasses RLS) so the fixture
+    is independent of any company GUC binding.
+    """
+    from saebooks.db import AsyncSessionLocal
+    from saebooks.models.account import Account, AccountType
+    from saebooks.models.company import Company
+
+    cid = _p0_uuid.uuid4()
+    a_asset, a_exp = _p0_uuid.uuid4(), _p0_uuid.uuid4()
+    async with AsyncSessionLocal() as s:
+        s.add(
+            Company(
+                id=cid,
+                tenant_id=_P0_DEFAULT_TENANT_ID,
+                name=f"P0 Test {cid.hex[:8]}",
+                base_currency="AUD",
+                fin_year_start_month=7,
+                audit_mode="immutable",
+            )
+        )
+        # Flush the company before the accounts so the accounts'
+        # tenant<->company coherence trigger (0131) can see the parent row.
+        await s.flush()
+        s.add(
+            Account(
+                id=a_asset,
+                company_id=cid,
+                tenant_id=_P0_DEFAULT_TENANT_ID,
+                code="1-9001",
+                name="P0 Asset",
+                account_type=AccountType.ASSET,
+            )
+        )
+        s.add(
+            Account(
+                id=a_exp,
+                company_id=cid,
+                tenant_id=_P0_DEFAULT_TENANT_ID,
+                code="6-9001",
+                name="P0 Expense",
+                account_type=AccountType.EXPENSE,
+            )
+        )
+        await s.commit()
+    yield (cid, _P0_DEFAULT_TENANT_ID, [a_asset, a_exp])
+    # Teardown: journal_lines.account_id FK is ON DELETE RESTRICT, so the
+    # company->accounts cascade would be blocked while any line still points
+    # at one of these accounts. Delete the entries first (their lines cascade
+    # via journal_lines.entry_id ON DELETE CASCADE), then the company.
+    from sqlalchemy import delete as _p0_delete
+    from saebooks.models.journal import JournalEntry as _P0JE
+    async with AsyncSessionLocal() as s:
+        await s.execute(_p0_delete(_P0JE).where(_P0JE.company_id == cid))
+        co = await s.get(Company, cid)
+        if co is not None:
+            await s.delete(co)
+        await s.commit()

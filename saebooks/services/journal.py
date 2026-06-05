@@ -562,7 +562,7 @@ async def _apply_tax_treatment(
         ln.tax_treatment = treatment.to_jsonable()
 
 
-async def post(
+async def post_in_txn(
     session: AsyncSession,
     entry_id: uuid.UUID,
     *,
@@ -572,7 +572,19 @@ async def post(
     tenant_id: uuid.UUID | None = None,
     actor_user_id: uuid.UUID | None = None,
 ) -> JournalEntry:
-    """Transition DRAFT → POSTED.
+    """Transition DRAFT → POSTED WITHOUT committing — caller owns the txn.
+
+    Composable primitive the intercompany engine wraps so two entries (one
+    per company) can post in a single transaction. ``post()`` is the thin
+    commit-here wrapper that every existing single-entry caller uses, so
+    their behaviour is unchanged.
+
+    All posting guards run here exactly as before: balance validation, the
+    period-lock override gate, trust-commingling + PSI distribution guards,
+    GST auto-posting, per-line tax-treatment snapshots, and the C2
+    override-post audit-log row. The only difference vs the old ``post()``
+    body is the trailing ``await session.flush()`` in place of
+    ``await session.commit()`` — the wrapper commits.
 
     ``actor_role`` is the role string of the user driving the post — used
     only by the period-lock override gate (see ``_check_period_lock``).
@@ -642,6 +654,35 @@ async def post(
             reason=override_reason,
         )
 
+    await session.flush()
+    return entry
+
+
+async def post(
+    session: AsyncSession,
+    entry_id: uuid.UUID,
+    *,
+    posted_by: str | None = None,
+    override_reason: str | None = None,
+    actor_role: str | None = None,
+    tenant_id: uuid.UUID | None = None,
+    actor_user_id: uuid.UUID | None = None,
+) -> JournalEntry:
+    """Transition DRAFT → POSTED and commit.
+
+    Thin wrapper over :func:`post_in_txn` — behaviour is unchanged for every
+    existing single-entry caller (it flushes-then-commits, the same net effect
+    as the previous mutate-then-commit body).
+    """
+    entry = await post_in_txn(
+        session,
+        entry_id,
+        posted_by=posted_by,
+        override_reason=override_reason,
+        actor_role=actor_role,
+        tenant_id=tenant_id,
+        actor_user_id=actor_user_id,
+    )
     await session.commit()
     return entry
 
