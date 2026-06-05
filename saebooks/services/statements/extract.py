@@ -194,8 +194,8 @@ async def _call_llm_vision(
     Encodes ``image_bytes`` as base64 and sends a multimodal user message.
     Note: PDF documents (mime application/pdf) are not natively supported as
     image_url by most vision models — the call is still attempted and any
-    failure will propagate to the caller to be handled by the existing
-    fail-safe path.
+    failure raises RuntimeError, which the ingest layer catches to persist a
+    NEEDS_REVIEW row (see ingest.ingest_statement step 4) rather than 5xx-ing.
 
     Returns the assistant message content string.
     Raises RuntimeError on exhausted retries.
@@ -410,6 +410,7 @@ async def extract_statement_vision(
     mime_type: str,
     *,
     settings: Settings,
+    model_override: str | None = None,
     prompt_hint: str | None = None,
 ) -> ExtractedStatement:
     """Extract a supplier statement from image/binary content via a vision LLM.
@@ -418,12 +419,17 @@ async def extract_statement_vision(
     reliable (fewer than 40 non-whitespace characters). Encodes the binary
     as a base64 data URI and sends it to the configured vision model.
 
+    ``model_override`` lets the ingest layer re-run the vision extraction with
+    a stronger escalation model when the first vision pass fails the balance
+    gate — without re-downloading the binary from Paperless.
+
     Note on PDF inputs: most vision models do not accept application/pdf as
     an image_url data URI. When mime_type is 'application/pdf', the call is
     still attempted — the litellm gateway may handle the conversion, or the
-    error will propagate to the ingest layer's existing fail-safe path.
+    error propagates to the caller. The ingest layer catches RuntimeError /
+    JSONDecodeError and persists a NEEDS_REVIEW row rather than 5xx-ing.
     """
-    model = settings.statement_llm_vision_model
+    model = model_override or settings.statement_llm_vision_model
     base_url = settings.statement_llm_base
     api_key = settings.statement_llm_api_key
 
@@ -439,4 +445,5 @@ async def extract_statement_vision(
     )
 
     data = _parse_response(raw_response)
-    return _build_extracted_statement(data, model_used=model, escalated=False)
+    escalated = model_override is not None
+    return _build_extracted_statement(data, model_used=model, escalated=escalated)

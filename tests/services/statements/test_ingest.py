@@ -506,3 +506,199 @@ async def test_ingest_paid_invoice_nets_to_closing_no_false_review():
     assert stmt.status != StatementStatus.NEEDS_REVIEW.value, stmt.extraction_meta
     assert len(calls) == 1, f"gate falsely tripped → escalated; calls={calls}"
     assert stmt.extraction_meta.get("escalated") in (False, None)
+
+
+# ---------------------------------------------------------------------------
+# #28 defect 1 — status gate must check balance_delta (books-vs-supplier gap)
+# ---------------------------------------------------------------------------
+
+
+class _FakePaperlessNoOCR:
+    """Paperless client returning empty OCR + image bytes (forces vision)."""
+    def __init__(self, *_, **__): pass
+    async def __aenter__(self): return self
+    async def __aexit__(self, *_): pass
+
+    async def get_document(self, document_id: int) -> dict:
+        return {"id": document_id, "title": f"Statement {document_id}.pdf", "content": ""}
+
+    async def download_content(self, document_id: int) -> tuple[bytes, str | None]:
+        return b"fake-image-bytes", "image/jpeg"
+
+
+async def _make_account(session, company_id: uuid.UUID):
+    from saebooks.models.account import Account
+    return (await session.execute(
+        select(Account).where(Account.company_id == company_id).limit(1)
+    )).scalars().first()
+
+
+@pytest.mark.asyncio
+async def test_ingest_partially_paid_bill_not_reconciled():
+    """#28 defect 1: a POSTED bill total=1100 amount_paid=1000 ref-matches a
+    statement line of 1100 → MATCHED, 0 exceptions, internal arithmetic ties
+    (balance_discrepancy=0). But our_ap = 1100-1000 = 100 while the supplier
+    closing balance is 1100, so balance_delta = 1000. The status gate MUST
+    surface this as NEEDS_REVIEW (with a balance_delta_gap note), NOT
+    RECONCILED — the old gate ignored balance_delta and wrongly reconciled it.
+    """
+    company_id = await _seed_company_id()
+    settings = _fake_settings()
+    doc_id = 9201
+
+    async with AsyncSessionLocal() as session:
+        session.info["tenant_id"] = _TENANT
+        session.info["company_id"] = company_id
+        contact = Contact(
+            tenant_id=_TENANT, company_id=company_id,
+            name="Partial Pay Supplier Pty Ltd", contact_type=ContactType.SUPPLIER,
+        )
+        session.add(contact)
+        await session.flush()
+        acct = await _make_account(session, company_id)
+        if acct is not None:
+            session.add(Bill(
+                tenant_id=_TENANT, company_id=company_id, contact_id=contact.id,
+                supplier_reference="INV-PP-1", issue_date=date(2026, 5, 10),
+                due_date=date(2026, 6, 10), status=BillStatus.POSTED,
+                subtotal=Decimal("1000.00"), tax_total=Decimal("100.00"),
+                total=Decimal("1100.00"), amount_paid=Decimal("1000.00"),
+            ))
+        await session.commit()
+
+    with (
+        patch("saebooks.services.statements.ingest.PaperlessClient", _FakePaperlessClient),
+        patch.object(extract_mod, "_call_llm", new=AsyncMock(return_value=_llm_response(
+            supplier_name="Partial Pay Supplier Pty Ltd",
+            closing_balance=1100.00,
+            lines=[{"date": "2026-05-10", "type": "IN", "reference": "INV-PP-1",
+                    "description": "Bearings", "amount": 1100.00}],
+        ))),
+    ):
+        async with AsyncSessionLocal() as session:
+            session.info["tenant_id"] = _TENANT
+            stmt = await ingest_statement(
+                session, tenant_id=_TENANT, company_id=company_id,
+                paperless_document_id=doc_id, settings=settings,
+            )
+            await session.commit()
+
+    assert stmt.status == StatementStatus.NEEDS_REVIEW.value, stmt.extraction_meta
+    assert stmt.status != StatementStatus.RECONCILED.value
+    assert stmt.balance_delta == Decimal("1000.00")
+    assert stmt.extraction_meta.get("balance_delta_gap") is not None
+
+
+# ---------------------------------------------------------------------------
+# #28 defect 6 — extraction failure persists a reviewable row, not a 5xx
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_ingest_extract_failure_persists_needs_review_row():
+    """#28 defect 6: when the first extraction raises (LLM exhausts retries /
+    vision rejects the PDF / unparseable JSON), ingest must persist a
+    NEEDS_REVIEW header with extract_error in extraction_meta and RETURN it —
+    not propagate the exception (which would 502 the API / retry-storm the
+    webhook)."""
+    company_id = await _seed_company_id()
+    settings = _fake_settings()
+    doc_id = 9202
+
+    with (
+        patch("saebooks.services.statements.ingest.PaperlessClient", _FakePaperlessClient),
+        patch.object(extract_mod, "_call_llm",
+                     new=AsyncMock(side_effect=RuntimeError("LLM call failed after 3 attempts"))),
+    ):
+        async with AsyncSessionLocal() as session:
+            session.info["tenant_id"] = _TENANT
+            stmt = await ingest_statement(
+                session, tenant_id=_TENANT, company_id=company_id,
+                paperless_document_id=doc_id, settings=settings,
+            )
+            await session.commit()
+            stmt_id = stmt.id
+
+    assert stmt.status == StatementStatus.NEEDS_REVIEW.value
+    assert "LLM call failed" in stmt.extraction_meta.get("extract_error", "")
+
+    # Persisted and reviewable (a real row exists).
+    async with AsyncSessionLocal() as session:
+        session.info["tenant_id"] = _TENANT
+        loaded = await session.get(SupplierStatement, stmt_id)
+        assert loaded is not None
+        assert loaded.status == StatementStatus.NEEDS_REVIEW.value
+
+
+# ---------------------------------------------------------------------------
+# #28 defect 5 — vision escalation must not be overwritten by a text re-parse
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_ingest_vision_gate_trip_not_overwritten_by_text_reparse():
+    """#28 defect 5: when the first extraction came from vision (empty OCR) and
+    trips the balance gate, the escalation must NOT re-run the TEXT extractor
+    on the empty OCR string (which would parse nothing and overwrite the good
+    vision result). The populated vision supplier_name/lines must survive.
+
+    We assert: the text extractor (_call_llm) is never called, the supplier
+    name from vision is preserved, and lines were persisted.
+    """
+    company_id = await _seed_company_id()
+    settings = _fake_settings()
+    doc_id = 9203
+
+    # Vision returns a populated parse whose lines (1000) don't tie to closing
+    # (1100) → balance gate trips. Escalation re-runs vision (model_override).
+    vision_primary = json.dumps({
+        "supplier_name": "Vision Supplier Pty Ltd", "supplier_abn": None,
+        "customer_ref": None, "statement_date": "2026-05-31", "terms": None,
+        "closing_balance": 1100.00, "opening_balance": 0.00,
+        "lines": [{"date": "2026-05-10", "type": "IN", "reference": "VIS-1",
+                   "description": None, "amount": 1000.00}],
+    })
+    vision_escalated = json.dumps({
+        "supplier_name": "Vision Supplier Pty Ltd", "supplier_abn": None,
+        "customer_ref": None, "statement_date": "2026-05-31", "terms": None,
+        "closing_balance": 1100.00, "opening_balance": 0.00,
+        "lines": [{"date": "2026-05-10", "type": "IN", "reference": "VIS-1",
+                   "description": None, "amount": 1000.00}],
+    })
+
+    vision_calls = []
+
+    async def _mock_vision(*args, **kwargs):
+        vision_calls.append(kwargs.get("model", ""))
+        return vision_escalated if len(vision_calls) > 1 else vision_primary
+
+    text_llm = AsyncMock(return_value=_llm_response())  # must NEVER be called
+
+    with (
+        patch("saebooks.services.statements.ingest.PaperlessClient", _FakePaperlessNoOCR),
+        patch.object(extract_mod, "_call_llm_vision", new=_mock_vision),
+        patch.object(extract_mod, "_call_llm", new=text_llm),
+    ):
+        async with AsyncSessionLocal() as session:
+            session.info["tenant_id"] = _TENANT
+            stmt = await ingest_statement(
+                session, tenant_id=_TENANT, company_id=company_id,
+                paperless_document_id=doc_id, settings=settings,
+            )
+            await session.commit()
+            stmt_id = stmt.id
+
+    # The text extractor must not have been used at all (no empty-OCR re-parse).
+    text_llm.assert_not_called()
+    # Vision result preserved (not clobbered by an empty text parse).
+    assert stmt.supplier_name == "Vision Supplier Pty Ltd"
+    assert stmt.extraction_meta.get("vision") is True
+
+    async with AsyncSessionLocal() as session:
+        session.info["tenant_id"] = _TENANT
+        lines = (await session.execute(
+            select(SupplierStatementLine).where(
+                SupplierStatementLine.statement_id == stmt_id
+            )
+        )).scalars().all()
+        assert len(lines) >= 1, "vision lines were lost (overwritten by text re-parse)"

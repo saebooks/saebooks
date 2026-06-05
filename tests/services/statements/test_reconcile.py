@@ -59,6 +59,10 @@ def _make_stmt(
     stmt.company_id = _COMPANY
     stmt.statement_date = statement_date
     stmt.closing_balance = Decimal(closing_balance)
+    # Header-level refs default to None (real rows are nullable); tests that
+    # exercise reserved-ref behaviour set these explicitly.
+    stmt.customer_ref = None
+    stmt.supplier_abn = None
     # Use a real list so tests can inspect and pass it to reconcile_lines
     stmt._lines: list = []
     stmt.lines = stmt._lines
@@ -164,6 +168,72 @@ def test_settled_not_in_books():
     assert pay_line.match_status == StatementMatchStatus.PAYMENT_INFO.value
 
 
+def test_invoice_ref_nets_zero_via_adjustment_is_missing_not_settled():
+    """#28 defect 3: an invoice whose reference's BLENDED net ≈0 (because an
+    unrelated ADJUSTMENT line shares the ref) must NOT be classed SETTLED.
+
+    Old code summed ALL line types per ref → +1100 invoice and -1100
+    adjustment netted to 0 → SETTLED_NOT_IN_BOOKS, silently suppressing a real
+    MISSING_IN_BOOKS. New code only treats a ref as settled when it has a
+    genuine positive invoice + offsetting PAYMENT/CREDIT pair, not an
+    adjustment. With no matching payment/credit it falls through to
+    MISSING_IN_BOOKS.
+    """
+    stmt = _make_stmt(closing_balance="0.00")
+    inv_line = _add_line(stmt, amount="1100.00", reference="INV-COINCIDENCE")
+    # An ADJUSTMENT (not a payment/credit) that happens to share the ref.
+    _add_line(
+        stmt,
+        amount="-1100.00",
+        reference="INV-COINCIDENCE",
+        line_type=StatementLineType.ADJUSTMENT.value,
+    )
+
+    reconcile_lines(stmt, [], statement_lines=stmt.lines)
+
+    assert inv_line.match_status == StatementMatchStatus.MISSING_IN_BOOKS.value
+
+
+def test_invoice_ref_equal_to_customer_ref_not_settled():
+    """#28 defect 3: a per-line ref that coincides with the statement-level
+    customer account number must not be treated as a settled invoice even if
+    it nets to ~0; customer_ref is a header value, not a closed-out invoice."""
+    stmt = _make_stmt(closing_balance="0.00")
+    stmt.customer_ref = "ACCT-77"
+    stmt.supplier_abn = None
+    inv_line = _add_line(stmt, amount="1100.00", reference="ACCT-77")
+    # A real payment that nets it to zero — but the ref is the account number.
+    _add_line(
+        stmt,
+        amount="-1100.00",
+        reference="ACCT-77",
+        line_type=StatementLineType.PAYMENT.value,
+    )
+
+    reconcile_lines(stmt, [], statement_lines=stmt.lines)
+
+    assert inv_line.match_status == StatementMatchStatus.MISSING_IN_BOOKS.value
+
+
+def test_genuine_invoice_payment_pair_still_settled():
+    """Control for defect 3: a real positive-invoice + offsetting-payment pair
+    on a unique per-line ref is still classed SETTLED_NOT_IN_BOOKS."""
+    stmt = _make_stmt(closing_balance="0.00")
+    stmt.customer_ref = None
+    stmt.supplier_abn = None
+    inv_line = _add_line(stmt, amount="880.00", reference="INV-REALPAIR")
+    _add_line(
+        stmt,
+        amount="-880.00",
+        reference="INV-REALPAIR",
+        line_type=StatementLineType.PAYMENT.value,
+    )
+
+    reconcile_lines(stmt, [], statement_lines=stmt.lines)
+
+    assert inv_line.match_status == StatementMatchStatus.SETTLED_NOT_IN_BOOKS.value
+
+
 def test_matched_by_amount_and_date_fallback():
     """Invoice matched by amount+date when reference is different."""
     stmt = _make_stmt(closing_balance="1100.00")
@@ -187,9 +257,16 @@ def test_fallback_not_matched_when_date_too_far():
     assert line.match_status == StatementMatchStatus.MISSING_IN_BOOKS.value
 
 
-def test_our_ap_as_at_only_posted_bills():
-    """AP-as-at sums only POSTED bills, excluding DRAFT and VOIDED."""
-    stmt = _make_stmt(closing_balance="1100.00")
+def test_our_ap_as_at_includes_posted_and_draft_excludes_voided():
+    """AP-as-at sums POSTED *and* DRAFT bills (both recognised liabilities and
+    both candidates for matching), excluding only VOIDED.
+
+    #28 defect 2: DRAFT was excluded from our_ap but INCLUDED in the
+    matched/NOT_ON_STATEMENT population, so a matched DRAFT bill leaked its
+    full total into balance_delta as a phantom gap. The AP population and the
+    matched population must be the SAME set.
+    """
+    stmt = _make_stmt(closing_balance="1600.00")
 
     posted_bill = _make_bill(total="1100.00", amount_paid="0.00", status=BillStatus.POSTED, supplier_reference="INV-P")
     draft_bill = _make_bill(total="500.00", amount_paid="0.00", status=BillStatus.DRAFT, supplier_reference="INV-D")
@@ -199,8 +276,36 @@ def test_our_ap_as_at_only_posted_bills():
 
     summary = reconcile_lines(stmt, [posted_bill, draft_bill, voided_bill], statement_lines=stmt.lines)
 
-    # Only posted_bill counts: 1100 - 0 = 1100
-    assert summary.our_ap_as_at == Decimal("1100.00")
+    # POSTED 1100 + DRAFT 500 = 1600; VOIDED 300 excluded.
+    assert summary.our_ap_as_at == Decimal("1600.00")
+
+
+def test_draft_match_does_not_leak_full_total_into_balance_delta():
+    """#28 defect 2: a single DRAFT bill that ref-matches a statement line must
+    NOT leave balance_delta carrying its full total as a phantom gap.
+
+    Before the fix: DRAFT counted in the matched set but not our_ap, so
+    balance_delta = closing(500) - our_ap(0) = 500 (the bill's whole total).
+    After: DRAFT is in our_ap too, so the matched DRAFT nets out.
+    """
+    stmt = _make_stmt(closing_balance="500.00")
+    line = _add_line(stmt, amount="500.00", reference="INV-DRAFT")
+    draft_bill = _make_bill(
+        total="500.00",
+        amount_paid="0.00",
+        status=BillStatus.DRAFT,
+        supplier_reference="INV-DRAFT",
+    )
+
+    summary = reconcile_lines(stmt, [draft_bill], statement_lines=stmt.lines)
+
+    # The DRAFT line matched...
+    assert line.match_status == StatementMatchStatus.MATCHED.value
+    # ...and its note is qualified as DRAFT (not an empty note).
+    assert "DRAFT" in line.note
+    # ...and our_ap includes it, so the books gap is zero — not 500.
+    assert summary.our_ap_as_at == Decimal("500.00")
+    assert summary.balance_delta == Decimal("0.00")
 
 
 def test_our_ap_as_at_deducts_amount_paid():

@@ -454,7 +454,13 @@ async def paperless_webhook(
             }
         )
 
-    dtype = (payload.get("document_type") or "").strip().lower()
+    # Fail-safe: document_type may be a non-string (int/dict/list) when
+    # Paperless or a workflow sends a raw type id or expanded object. Calling
+    # .strip() on a non-str raised AttributeError → 500 → Paperless retry-storm
+    # (#28 defect 4). Coerce anything that is not a str to "" so the route
+    # falls through to doctype_not_routed (skipped, 200).
+    dtype_raw = payload.get("document_type")
+    dtype = (dtype_raw if isinstance(dtype_raw, str) else "").strip().lower()
 
     ingest: dict
 

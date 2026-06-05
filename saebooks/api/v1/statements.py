@@ -294,7 +294,10 @@ async def ingest(
     out_json = _json.loads(out.model_dump_json())
 
     if key is not None:
-        await store_response(session, key, 201, _json.dumps(out_json))
+        # response_body is BYTEA (LargeBinary); store_response declares bytes
+        # and the other callers pass .encode(). Passing a str here failed the
+        # BYTEA write (#28 defect 8). Encode to UTF-8 JSON bytes.
+        await store_response(session, key, 201, _json.dumps(out_json).encode())
         await session.commit()
 
     logger.info(

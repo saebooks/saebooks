@@ -925,6 +925,67 @@ async def test_paperless_webhook_missing_document_type_skipped(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "doctype_value",
+    [3, {"name": "Statement of Account"}, ["Statement of Account"]],
+    ids=["int", "dict", "list"],
+)
+async def test_paperless_webhook_non_string_document_type_skipped(
+    client: AsyncClient,
+    doctype_value: Any,
+) -> None:
+    """#28 defect 4: a non-string document_type (int / dict / list — e.g.
+    Paperless sends a raw type id or an expanded object) must NOT crash
+    .strip() into a 500 (which triggers a Paperless retry-storm). It must be
+    fail-safe: 200, action skipped (doctype_not_routed), and NEITHER
+    ingest_document nor ingest_statement is called."""
+    tenant_id = uuid.uuid4()
+    secret = "test-secret-nonstr"
+    payload = json.dumps({
+        "id": 5,
+        "doc_url": "https://paperless/documents/5/",
+        "document_type": doctype_value,
+    }).encode()
+    sig = _sign_paperless(payload, secret)
+
+    fake_execute = _make_webhook_mocks(secret, tenant_id)
+
+    with (
+        patch("saebooks.api.v1.integrations.AsyncSessionLocal") as mock_session_cm,
+        patch("saebooks.api.v1.integrations.decrypt_field", return_value=secret),
+        patch(
+            "saebooks.api.v1.integrations.ingest_document",
+            new_callable=AsyncMock,
+        ) as mock_ingest_doc,
+        patch(
+            "saebooks.api.v1.integrations.ingest_statement",
+            new_callable=AsyncMock,
+        ) as mock_ingest_stmt,
+    ):
+        mock_session = AsyncMock()
+        mock_session.execute = fake_execute
+        mock_session_cm.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_cm.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        resp = await client.post(
+            "/api/v1/integrations/paperless/webhook",
+            content=payload,
+            headers={
+                "X-Tenant-Id": str(tenant_id),
+                "X-Paperless-Signature": sig,
+            },
+        )
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["received"] is True
+    assert data["ingest"]["action"] == "skipped"
+    assert data["ingest"]["reason"] == "doctype_not_routed"
+    mock_ingest_doc.assert_not_called()
+    mock_ingest_stmt.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_paperless_webhook_ingest_exception_returns_200_error(
     client: AsyncClient,
 ) -> None:

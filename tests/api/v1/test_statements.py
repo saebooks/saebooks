@@ -917,3 +917,225 @@ async def test_ingest_serializes_after_real_session_commit(api_client: AsyncClie
         assert body["lines"][0]["reference"] == "GL-1"
     finally:
         await _delete_statement(stmt_id)
+
+
+# ===========================================================================
+# #28 defect 7 — real end-to-end ingest API test (no ingest_statement mock)
+# #28 defect 8 — idempotency store_response str-vs-BYTEA
+#
+# These drive POST /api/v1/statements/ingest through the REAL ingest pipeline,
+# patching only the boundary: PaperlessClient (a fake) + extract's _call_llm
+# (an AsyncMock). This exercises the post-reconcile re-SELECT against the real
+# DB state — the part a mocked ingest_statement can never cover.
+# ===========================================================================
+
+
+import json as _json_e2e
+
+from saebooks.config import Settings as _SettingsE2E
+from saebooks.models.bill import Bill, BillStatus
+from saebooks.models.contact import Contact, ContactType
+from saebooks.services.statements import extract as _extract_mod_e2e
+
+
+class _FakePaperlessE2E:
+    """Stand-in PaperlessClient returning enough OCR to skip the vision path."""
+    def __init__(self, *_, **__): pass
+    async def __aenter__(self): return self
+    async def __aexit__(self, *_): pass
+
+    async def get_document(self, document_id: int) -> dict:
+        return {
+            "id": document_id,
+            "title": f"Statement {document_id}.pdf",
+            "content": (
+                "E2E Recon Supplier Pty Ltd\nABN: 11 222 333 444\n"
+                "Statement Date: 31/05/2026\nBalance Due: 999.00\n"
+            ),
+        }
+
+
+def _e2e_settings() -> _SettingsE2E:
+    return _SettingsE2E(
+        DATABASE_URL="postgresql+asyncpg://saebooks_test:saebooks_test_pw@db:5432/saebooks_test",
+        SAEBOOKS_APP_DB_PASSWORD="saebooks_app_test_pw",
+        PAPERLESS_API_TOKEN="fake-token",
+        PAPERLESS_URL="http://paperless:8000",
+        PAPERLESS_API_URL="http://paperless:8000",
+        STATEMENT_LLM_BASE="http://litellm:4000/v1",
+        STATEMENT_LLM_MODEL="claude-sonnet-4-6",
+        STATEMENT_LLM_MODEL_ESCALATION="claude-opus-4-7",
+        STATEMENT_LLM_API_KEY="test-key",
+        SAEBOOKS_SQL_RO_PASSWORD="saebooks_sql_ro_test_pw",
+    )
+
+
+def _e2e_llm_response() -> str:
+    """A statement that yields a MISSING_IN_BOOKS line (INV-OTHER, not in our
+    books). Combined with a seeded NOT-on-statement bill it produces a
+    NOT_ON_STATEMENT synthetic line too — populating recon_counts."""
+    return _json_e2e.dumps({
+        "supplier_name": "E2E Recon Supplier Pty Ltd",
+        "supplier_abn": "11 222 333 444",
+        "customer_ref": "SAE-E2E",
+        "statement_date": "2026-05-31",
+        "terms": "30 Days",
+        "closing_balance": 999.00,
+        "opening_balance": 0.00,
+        "lines": [
+            {"date": "2026-05-10", "type": "IN", "reference": "INV-OTHER",
+             "description": "Not in our books", "amount": 999.00},
+        ],
+    })
+
+
+async def _seed_e2e_orphan_bill(company_id: uuid.UUID) -> tuple[uuid.UUID, uuid.UUID]:
+    """Seed a supplier contact + a POSTED bill (ref INV-ORPHAN) that is NOT on
+    the statement, so reconcile emits a NOT_ON_STATEMENT synthetic line.
+    Returns (contact_id, bill_id) for cleanup."""
+    from saebooks.models.account import Account
+    async with AsyncSessionLocal() as session:
+        session.info["tenant_id"] = str(DEFAULT_TENANT_ID)
+        session.info["company_id"] = company_id
+        contact = Contact(
+            tenant_id=DEFAULT_TENANT_ID, company_id=company_id,
+            name="E2E Recon Supplier Pty Ltd", contact_type=ContactType.SUPPLIER,
+        )
+        session.add(contact)
+        await session.flush()
+        acct = (await session.execute(
+            sa_select(Account).where(Account.company_id == company_id).limit(1)
+        )).scalars().first()
+        bill = Bill(
+            tenant_id=DEFAULT_TENANT_ID, company_id=company_id, contact_id=contact.id,
+            supplier_reference="INV-ORPHAN", issue_date=date(2026, 5, 9),
+            due_date=date(2026, 6, 9), status=BillStatus.POSTED,
+            subtotal=Decimal("500.00"), tax_total=Decimal("0.00"),
+            total=Decimal("500.00"), amount_paid=Decimal("0.00"),
+        )
+        if acct is not None:
+            session.add(bill)
+            await session.flush()
+        await session.commit()
+        return contact.id, bill.id
+
+
+async def _cleanup_e2e(contact_id: uuid.UUID, bill_id: uuid.UUID, doc_id: int) -> None:
+    async with AsyncSessionLocal() as session:
+        await session.execute(text(
+            "DELETE FROM supplier_statement_lines WHERE statement_id IN "
+            "(SELECT id FROM supplier_statements WHERE source_document_id = :d)"
+        ).bindparams(d=doc_id))
+        await session.execute(text(
+            "DELETE FROM supplier_statements WHERE source_document_id = :d"
+        ).bindparams(d=doc_id))
+        await session.execute(text("DELETE FROM bills WHERE id = :id").bindparams(id=bill_id))
+        await session.execute(text("DELETE FROM contacts WHERE id = :id").bindparams(id=contact_id))
+        await session.commit()
+
+
+@pytest.mark.postgres_only
+async def test_ingest_e2e_real_pipeline_returns_lines(api_client: AsyncClient) -> None:
+    """#28 defect 7: drive the REAL ingest pipeline (no ingest_statement mock);
+    patch only PaperlessClient + extract._call_llm. Assert 201, lines present,
+    and recon_counts populated — exercising the post-reconcile re-SELECT."""
+    company_id = await _default_company_id()
+    doc_id = 24301
+    contact_id, bill_id = await _seed_e2e_orphan_bill(company_id)
+
+    try:
+        with (
+            patch("saebooks.services.statements.ingest.PaperlessClient", _FakePaperlessE2E),
+            patch.object(_extract_mod_e2e, "_call_llm",
+                         new=AsyncMock(return_value=_e2e_llm_response())),
+        ):
+            r = await api_client.post(
+                "/api/v1/statements/ingest",
+                headers={"X-Company-Id": str(company_id)},
+                json={"paperless_document_id": doc_id},
+            )
+        assert r.status_code == 201, r.text
+        body = r.json()
+        assert body["source_document_id"] == doc_id
+        assert isinstance(body["lines"], list)
+        assert len(body["lines"]) >= 1
+        # The NOT_ON_STATEMENT synthetic for the orphan bill must be present.
+        statuses = {ln["match_status"] for ln in body["lines"]}
+        assert StatementMatchStatus.NOT_ON_STATEMENT.value in statuses, statuses
+        # recon_counts populated in extraction_meta.
+        assert body["extraction_meta"].get("recon_counts"), body["extraction_meta"]
+    finally:
+        await _cleanup_e2e(contact_id, bill_id, doc_id)
+
+
+@pytest.mark.postgres_only
+async def test_ingest_idempotency_replay_same_body(api_client: AsyncClient) -> None:
+    """#28 defect 8: same X-Idempotency-Key + same body twice → the 2nd is a
+    201 replay of the identical detail. This round-trips response_body through
+    the BYTEA column, which fails if store_response is handed a str instead of
+    bytes."""
+    company_id = await _default_company_id()
+    doc_id = 24302
+    contact_id, bill_id = await _seed_e2e_orphan_bill(company_id)
+    key = str(uuid.uuid4())
+
+    try:
+        with (
+            patch("saebooks.services.statements.ingest.PaperlessClient", _FakePaperlessE2E),
+            patch.object(_extract_mod_e2e, "_call_llm",
+                         new=AsyncMock(return_value=_e2e_llm_response())),
+        ):
+            r1 = await api_client.post(
+                "/api/v1/statements/ingest",
+                headers={"X-Company-Id": str(company_id), "X-Idempotency-Key": key},
+                json={"paperless_document_id": doc_id},
+            )
+            assert r1.status_code == 201, r1.text
+            first = r1.json()
+
+            r2 = await api_client.post(
+                "/api/v1/statements/ingest",
+                headers={"X-Company-Id": str(company_id), "X-Idempotency-Key": key},
+                json={"paperless_document_id": doc_id},
+            )
+        assert r2.status_code == 201, r2.text
+        replay = r2.json()
+        # Identical detail on replay (proves the BYTEA round-trip succeeded).
+        assert replay["id"] == first["id"]
+        assert replay["source_document_id"] == first["source_document_id"]
+        assert replay == first
+    finally:
+        await _cleanup_e2e(contact_id, bill_id, doc_id)
+
+
+@pytest.mark.postgres_only
+async def test_ingest_idempotency_conflict_different_body(api_client: AsyncClient) -> None:
+    """#28 defect 8: same X-Idempotency-Key + a DIFFERENT body → 422 conflict."""
+    company_id = await _default_company_id()
+    doc_id = 24303
+    contact_id, bill_id = await _seed_e2e_orphan_bill(company_id)
+    key = str(uuid.uuid4())
+
+    try:
+        with (
+            patch("saebooks.services.statements.ingest.PaperlessClient", _FakePaperlessE2E),
+            patch.object(_extract_mod_e2e, "_call_llm",
+                         new=AsyncMock(return_value=_e2e_llm_response())),
+        ):
+            r1 = await api_client.post(
+                "/api/v1/statements/ingest",
+                headers={"X-Company-Id": str(company_id), "X-Idempotency-Key": key},
+                json={"paperless_document_id": doc_id},
+            )
+            assert r1.status_code == 201, r1.text
+
+            r2 = await api_client.post(
+                "/api/v1/statements/ingest",
+                headers={"X-Company-Id": str(company_id), "X-Idempotency-Key": key},
+                json={"paperless_document_id": doc_id + 1},  # different body
+            )
+        assert r2.status_code == 422, r2.text
+        assert r2.json()["code"] == "idempotency_key_conflict"
+    finally:
+        await _cleanup_e2e(contact_id, bill_id, doc_id)
+        await _cleanup_e2e(contact_id, bill_id, doc_id + 1)
