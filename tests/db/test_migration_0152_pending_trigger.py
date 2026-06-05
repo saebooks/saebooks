@@ -88,9 +88,17 @@ def _run_alembic_upgrade(database_url: str, target: str) -> None:
 
     Runs synchronously; callers invoke it via ``asyncio.to_thread`` because
     env.py calls ``asyncio.run`` internally (cannot nest in the pytest loop).
+
+    The ``Config`` is built WITHOUT pointing at ``alembic.ini``: env.py runs
+    ``logging.config.fileConfig`` only when ``config_file_name`` is set, and
+    fileConfig defaults to ``disable_existing_loggers=True``, which would mute
+    the ``saebooks.db`` logger and break unrelated ``caplog``-based tests that
+    run later in the same process (cross-test logging pollution). We only need
+    ``script_location`` + ``sqlalchemy.url``, so we pass them directly and
+    leave the process logging configuration untouched.
     """
     here = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-    cfg = Config(os.path.join(here, "alembic.ini"))
+    cfg = Config()  # no ini file -> env.py skips fileConfig (see docstring)
     cfg.set_main_option("script_location", os.path.join(here, "alembic"))
     cfg.set_main_option("sqlalchemy.url", database_url)
 
