@@ -113,6 +113,27 @@ _FAKE_COMPILE_RESPONSE = {"status": "ok", "pdf_url": _FAKE_PDF_URL, "id": "abc12
 _LATEX_API_BASE = "http://latex-api:8000"
 
 
+@pytest.fixture(autouse=True)
+def _restore_latex_env():
+    """Snapshot and restore the module-global Jinja2 ``_env``.
+
+    ``_setup_test_env`` swaps ``saebooks.services.latex_pdf._env`` for a
+    DictLoader-backed environment.  Without restoration that DictLoader
+    leaks into the rest of the test session, so any later test that calls
+    ``render_latex("document", ...)`` against the real FileSystemLoader
+    instead hits the leaked DictLoader and raises ``TemplateNotFound``.
+    This autouse fixture resets the global after every test in this
+    module, regardless of pass/fail.
+    """
+    import saebooks.services.latex_pdf as _svc
+
+    saved = _svc._env
+    try:
+        yield
+    finally:
+        _svc._env = saved
+
+
 def _setup_test_env(extra_templates: dict[str, str] | None = None) -> None:
     """Replace the global Jinja2 env loader with a DictLoader for testing.
 
