@@ -68,6 +68,7 @@ class JournalOrigin(enum.StrEnum):
     CASHBOOK_BACKFILL = "CASHBOOK_BACKFILL"
     FIXED_ASSET = "FIXED_ASSET"
     REVERSAL = "REVERSAL"
+    INTERCOMPANY = "INTERCOMPANY"
 
 
 class JournalEntry(CompanyScoped, Base):

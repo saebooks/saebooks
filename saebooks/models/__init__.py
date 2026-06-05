@@ -29,6 +29,14 @@ from saebooks.models.distribution import (
     TrustDistribution,
 )
 from saebooks.models.fixed_asset import FixedAsset
+from saebooks.models.ic import (
+    IcEdge,
+    IcEdgeDirection,
+    IcLeg,
+    IcLegSide,
+    IcTxn,
+    IcTxnStatus,
+)
 from saebooks.models.idempotency_key import IdempotencyKey, IdempotencyRecord
 from saebooks.models.item import CostMethod, Item
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine, PeriodLock
@@ -86,6 +94,12 @@ __all__ = [
     "DistributionStatus",
     "EntryStatus",
     "FixedAsset",
+    "IcEdge",
+    "IcEdgeDirection",
+    "IcLeg",
+    "IcLegSide",
+    "IcTxn",
+    "IcTxnStatus",
     "IdempotencyKey",
     "IdempotencyRecord",
     "Item",
