@@ -51,6 +51,7 @@ from decimal import Decimal
 import pytest
 import sqlalchemy as sa
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -61,7 +62,26 @@ from saebooks.config import settings
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgres_only]
 
 PRE_FIX_REVISION = "0151_stmt_templates"
-HEAD_REVISION = "0153_je_provenance"
+
+
+def _alembic_head() -> str:
+    """The current single alembic head, derived from the script directory.
+
+    Derived (not hard-coded) so this regression test tracks the real
+    migration head and never needs a manual bump when a new migration lands
+    on top — a hard-coded head silently broke this test when
+    0154_intercompany_phase1 advanced the chain past 0153.
+    """
+    here = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    cfg = Config()
+    cfg.set_main_option("script_location", os.path.join(here, "alembic"))
+    script = ScriptDirectory.from_config(cfg)
+    heads = script.get_heads()
+    assert len(heads) == 1, f"expected a single alembic head, got {heads}"
+    return heads[0]
+
+
+HEAD_REVISION = _alembic_head()
 
 
 def _admin_url(base_url: str, dbname: str) -> str:
