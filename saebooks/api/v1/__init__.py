@@ -92,6 +92,7 @@ from saebooks.api.v1.tax_codes import router as tax_codes_router
 from saebooks.api.v1.tax_returns import router as tax_returns_router
 from saebooks.api.v1.time_entries import router as time_entries_router
 from saebooks.api.v1.tpar import router as tpar_router
+from saebooks.api.v1.transfers import router as transfers_router
 from saebooks.api.v1.users import permissions_router
 from saebooks.api.v1.users import router as users_router
 from saebooks.api.v1.webauthn import router as webauthn_router
@@ -160,6 +161,10 @@ router.include_router(email_log_router)
 # alongside the other webhook receivers.
 router.include_router(webhooks_resend_router)
 router.include_router(payments_router)
+# DB-rebuild handover #2: first-class Transfer (account-to-account money
+# movement) record type — bank->credit-card paydown, director-loan
+# repayment, bank/loan transfers. See saebooks/services/transfers.py.
+router.include_router(transfers_router)
 router.include_router(credit_notes_router)
 router.include_router(projects_router)
 router.include_router(fixed_assets_router)
