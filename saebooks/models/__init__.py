@@ -62,6 +62,7 @@ from saebooks.models.tax_code import TaxCode
 from saebooks.models.tax_period import TaxPeriod, TaxPeriodStatus, TaxPeriodType
 from saebooks.models.tax_return import TaxReturn, TaxReturnStatus
 from saebooks.models.tenant import Tenant
+from saebooks.models.transfer import Transfer, TransferStatus
 from saebooks.models.user import User, UserRole
 
 __all__ = [
@@ -138,6 +139,8 @@ __all__ = [
     "TaxReturn",
     "TaxReturnStatus",
     "Tenant",
+    "Transfer",
+    "TransferStatus",
     "TrustDistribution",
     "User",
     "UserRole",
