@@ -17,7 +17,8 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
-from httpx import AsyncClient
+import respx
+from httpx import AsyncClient, Response
 from sqlalchemy import select
 
 from saebooks.db import AsyncSessionLocal
@@ -187,7 +188,25 @@ async def test_invoice_post_transitions_to_posted(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_invoice_pdf_renders(client: AsyncClient) -> None:
+async def test_invoice_pdf_renders(
+    client: AsyncClient, respx_mock: respx.MockRouter
+) -> None:
+    """``GET /invoices/{id}.pdf`` renders via the latex-api microservice.
+
+    The route calls ``render_latex("document", ctx)`` which (1) renders the
+    real ``document.tex.j2`` Jinja2 template against the invoice context and
+    (2) POSTs the LaTeX source to the ``latex-api`` service, then GETs the
+    compiled PDF.  latex-api is not reachable from the test stack, so we mock
+    it with respx and assert the route streams the compiled bytes back with
+    ``application/pdf``.
+
+    ``_svc._env`` is reset to ``None`` so a fresh FileSystemLoader environment
+    loads the real on-disk template — this also makes the test immune to a
+    DictLoader that ``tests/services/test_latex_pdf.py`` may have left behind
+    on the module-global ``_env``.
+    """
+    import saebooks.services.latex_pdf as _svc
+
     cid, contact, acct, gst = await _ctx()
     today = date(2026, 4, 20)
     async with AsyncSessionLocal() as session:
@@ -211,11 +230,37 @@ async def test_invoice_pdf_renders(client: AsyncClient) -> None:
     async with AsyncSessionLocal() as session:
         await svc.post_invoice(session, inv.id, posted_by="test")
 
+    # Force a fresh FileSystemLoader env (real document.tex.j2 from disk),
+    # immune to any leaked DictLoader from the latex_pdf unit tests.
+    _svc._env = None
+
+    fake_pdf = b"%PDF-1.5 fake-invoice-pdf"
+    fake_pdf_url = "/files/inv-test.pdf"
+    latex_api_base = "http://latex-api:8000"  # settings.latex_api_url default
+
+    respx_mock.post(f"{latex_api_base}/compile").mock(
+        return_value=Response(
+            200, json={"status": "ok", "pdf_url": fake_pdf_url, "id": "inv1"}
+        )
+    )
+    respx_mock.get(f"{latex_api_base}{fake_pdf_url}").mock(
+        return_value=Response(200, content=fake_pdf)
+    )
+
     r = await client.get(f"/invoices/{inv.id}.pdf")
-    assert r.status_code == 200
+    assert r.status_code == 200, r.text
     assert r.headers["content-type"] == "application/pdf"
-    # ReportLab emits PDF magic bytes
+    # latex-api returned the compiled PDF; the route streams it through verbatim.
+    assert r.content == fake_pdf
     assert r.content.startswith(b"%PDF")
+
+    # The LaTeX source POSTed to latex-api must contain the rendered invoice
+    # data — proves the real document.tex.j2 template was rendered, not bypassed.
+    # calls[0] is the POST /compile (calls.last would be the GET pdf fetch).
+    compile_call = respx_mock.calls[0]
+    assert compile_call.request.method == "POST"
+    posted = compile_call.request.content.decode()
+    assert "123.45" in posted
 
 
 @pytest.mark.asyncio
