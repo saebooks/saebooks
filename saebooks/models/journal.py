@@ -94,6 +94,19 @@ class JournalLine(Base):
     entry_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("journal_entries.id", ondelete="CASCADE"), nullable=False
     )
+    # Denormalised from the parent entry so the DB can enforce a composite
+    # (account_id, company_id) FK against accounts(id, company_id) and a
+    # parent-coherence trigger. Auto-populated by the BEFORE INSERT/UPDATE
+    # trigger in migration 0152 when the caller omits it, so it stays
+    # Optional in Python while the DB column is NOT NULL. The FK to companies
+    # is the single-column membership check; the composite account FK is a
+    # table-level DB constraint only (not declared as an ORM relationship to
+    # avoid join ambiguity with the existing `account` relationship).
+    company_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=True,
+    )
     line_no: Mapped[int] = mapped_column(Integer, nullable=False)
     account_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("accounts.id", ondelete="RESTRICT"), nullable=False
