@@ -787,8 +787,16 @@ async def delete(
     *,
     performed_by: str | None = None,
     tenant_id: uuid.UUID | None = None,
+    company_id: uuid.UUID | None = None,
 ) -> None:
-    """Delete a journal entry and its lines. Any status — MYOB-style.
+    """Delete a DRAFT journal entry and its lines.
+
+    Phase 0 hardening: a POSTED or REVERSED entry must be REVERSED, never
+    hard-deleted (intercompany-linked entries must survive so the paired
+    leg can never be orphaned). When ``company_id`` is supplied, the entry
+    must belong to it — a cross-company delete is refused. Both guards raise
+    :class:`PostingError`. Passing ``company_id=None`` preserves the legacy
+    callers' behaviour for DRAFT entries.
 
     Audit M5 guarantee: BEFORE the SQLAlchemy cascade nukes the line
     rows, snapshot each one to audit_snapshots so the GL detail
@@ -796,6 +804,15 @@ async def delete(
     captured and the line-level meaning is lost.
     """
     entry = await get(session, entry_id, tenant_id=tenant_id)
+    if company_id is not None and entry.company_id != company_id:
+        raise PostingError(
+            f"Entry {entry.ref} does not belong to this company"
+        )
+    if entry.status in (EntryStatus.POSTED, EntryStatus.REVERSED):
+        raise PostingError(
+            f"Entry {entry.ref} is {entry.status}; reverse it instead of "
+            "deleting (intercompany-linked entries must never be hard-deleted)"
+        )
     await audit_svc.snapshot_row(
         session, entry,
         action="delete",
