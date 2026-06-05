@@ -63,6 +63,17 @@ def upgrade() -> None:
             "FROM journal_entries je WHERE je.id = jl.entry_id"
         )
     )
+    # The mass backfill UPDATE above fires the DEFERRABLE INITIALLY DEFERRED
+    # constraint trigger ``trg_je_balance_jl`` once per touched row, queuing a
+    # pending trigger event for every existing journal_lines row. PostgreSQL
+    # refuses ``ALTER TABLE ... SET NOT NULL`` while a table has pending trigger
+    # events in the same transaction (ObjectInUseError: cannot ALTER TABLE
+    # "journal_lines" because it has pending trigger events). Force the deferred
+    # checks to fire and drain NOW, before the ALTER. This is safe: the backfill
+    # only sets company_id (never debit/credit or line membership), so the
+    # balance/has-lines assertion sees the same balanced data it had at 0151.
+    # On a fresh/empty DB this is a no-op (no rows -> no queued events).
+    op.execute(sa.text("SET CONSTRAINTS ALL IMMEDIATE"))
     op.alter_column("journal_lines", "company_id", nullable=False)
     op.create_foreign_key(
         "fk_journal_lines_company",
