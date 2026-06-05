@@ -56,7 +56,8 @@ from collections.abc import Callable, Iterator
 from contextvars import ContextVar, Token
 from typing import Any
 
-from sqlalchemy import ColumnElement, event
+from sqlalchemy import ColumnElement, event, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, with_loader_criteria
 
 from saebooks.models._scope import CompanyScoped
@@ -206,3 +207,41 @@ def install() -> None:
     event.listen(Session, "do_orm_execute", _scope_guard)
     install._installed = True  # type: ignore[attr-defined]
     log.debug("tenant scope guard installed on Session")
+
+
+class CrossCompanyError(ValueError):
+    """Raised when a write references an FK row owned by another company.
+
+    Defence-in-depth on top of the structural DB guards (composite FK +
+    parent-coherence trigger). The message quotes only the offending id +
+    model name — never which company actually owns the row, so it cannot
+    leak a sibling company's existence.
+    """
+
+
+async def assert_company_owned(
+    session: AsyncSession,
+    model: type,
+    ids: list[uuid.UUID | None] | set[uuid.UUID | None],
+    company_id: uuid.UUID,
+    *,
+    label: str | None = None,
+) -> None:
+    """Raise :class:`CrossCompanyError` if any non-None id is foreign to ``company_id``.
+
+    A batched existence check: every supplied id must resolve to a row of
+    ``model`` whose ``company_id`` equals the expected ``company_id``. ``None``
+    ids (optional FKs) and an empty input are no-ops.
+    """
+    seen = {i for i in ids if i is not None}
+    if not seen:
+        return
+    result = await session.execute(
+        select(model.id).where(model.id.in_(seen), model.company_id == company_id)
+    )
+    found = {row[0] for row in result.all()}
+    missing = seen - found
+    if missing:
+        first = sorted(missing, key=str)[0]
+        name = label or model.__name__
+        raise CrossCompanyError(f"{name} {first} not found")
