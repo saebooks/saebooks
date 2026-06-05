@@ -8,11 +8,10 @@ Red before 0152 (the inserts succeed / the column is absent); green after:
 * a line that omits company_id is auto-pinned to its parent entry's company.
 """
 import uuid
-from datetime import date
-from decimal import Decimal
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
@@ -39,6 +38,7 @@ async def two_companies():
         await s.commit()
     yield {"a": a, "b": b, "acct_a": aa, "acct_b": bb}
     from sqlalchemy import delete as _del
+
     from saebooks.models.journal import JournalEntry as _JE
     async with AsyncSessionLocal() as s:
         await s.execute(_del(_JE).where(_JE.company_id.in_([a, b])))
@@ -58,7 +58,7 @@ async def test_composite_fk_blocks_foreign_account_line(two_companies):
             "entry_date, status, version, created_at, updated_at) "
             "VALUES (:id, :c, :t, 'JE-X', '2026-05-01', 'DRAFT', 1, now(), now())"
         ).bindparams(id=eid, c=d["a"], t=_T))
-        with pytest.raises(Exception):
+        with pytest.raises(DBAPIError):
             # company A line referencing company B's account -> composite FK reject
             await s.execute(text(
                 "INSERT INTO journal_lines (id, entry_id, company_id, line_no, "
@@ -71,7 +71,7 @@ async def test_composite_fk_blocks_foreign_account_line(two_companies):
 async def test_je_coherence_trigger_blocks_tenant_mismatch(two_companies):
     d = two_companies
     async with AsyncSessionLocal() as s:
-        with pytest.raises(Exception):
+        with pytest.raises(DBAPIError):
             await s.execute(text(
                 "INSERT INTO journal_entries (id, company_id, tenant_id, ref, "
                 "entry_date, status, version, created_at, updated_at) "

@@ -18,8 +18,9 @@ Revises:     0151_stmt_templates
 from __future__ import annotations
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 revision: str = "0152_journal_company_structural"
 down_revision: str | None = "0151_stmt_templates"

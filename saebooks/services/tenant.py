@@ -222,7 +222,7 @@ class CrossCompanyError(ValueError):
 async def assert_company_owned(
     session: AsyncSession,
     model: type,
-    ids: "list[uuid.UUID | None] | set[uuid.UUID | None]",
+    ids: list[uuid.UUID | None] | set[uuid.UUID | None],
     company_id: uuid.UUID,
     *,
     label: str | None = None,

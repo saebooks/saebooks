@@ -18,7 +18,7 @@ async def test_owned_passes(seeded_company):
 
 
 async def test_foreign_raises(seeded_company):
-    cid, _tid, accts = seeded_company
+    _cid, _tid, accts = seeded_company
     other = uuid.uuid4()
     async with AsyncSessionLocal() as s:
         with pytest.raises(CrossCompanyError):

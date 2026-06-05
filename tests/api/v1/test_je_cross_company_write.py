@@ -39,6 +39,7 @@ async def two_cos():
         await s.commit()
     yield {"a": a, "b": b, "aa": aa, "ab": ab, "bb": bb}
     from sqlalchemy import delete as _del
+
     from saebooks.models.journal import JournalEntry as _JE
     async with AsyncSessionLocal() as s:
         await s.execute(_del(_JE).where(_JE.company_id.in_([a, b])))

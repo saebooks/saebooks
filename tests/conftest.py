@@ -376,6 +376,7 @@ def _restore_settings_edition() -> None:
 # Reused by Tasks 1, 2, 3 (post_in_txn / assert_company_owned / delete guard).
 # ---------------------------------------------------------------------------
 import uuid as _p0_uuid
+
 import pytest as _p0_pytest
 
 _P0_DEFAULT_TENANT_ID = _p0_uuid.UUID("00000000-0000-0000-0000-000000000001")
@@ -436,6 +437,7 @@ async def seeded_company():
     # at one of these accounts. Delete the entries first (their lines cascade
     # via journal_lines.entry_id ON DELETE CASCADE), then the company.
     from sqlalchemy import delete as _p0_delete
+
     from saebooks.models.journal import JournalEntry as _P0JE
     async with AsyncSessionLocal() as s:
         await s.execute(_p0_delete(_P0JE).where(_P0JE.company_id == cid))
