@@ -343,7 +343,8 @@ async def record_cashbook_entry(
         expense, money out. Enforced > 0.
     direction:
         ``income`` or ``expense``. ``transfer`` is a separate service
-        surface — see ``record_cashbook_transfer`` (not yet built).
+        surface — see ``services.transfers.create_and_post_transfer``
+        (the first-class Transfer record type, handover #2).
     category_code:
         One of the codes in
         ``services.cashbook_categories.DEFAULT_CATEGORIES``, after
