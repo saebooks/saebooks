@@ -2,10 +2,20 @@ SAE Books — known test-suite failures (CI triage tracker)
 =========================================================
 
 The CI "tests" job (.github/workflows/test.yml) runs the FULL pytest suite
-via the isolated docker-compose stack (scripts/run-tests.sh). As of the
-introduction of the CI gate the suite is NOT fully green, so that job is
-marked INFORMATIONAL (continue-on-error: true) — it reports red/green on
-every push and PR but does NOT block merges.
+via the isolated docker-compose stack (scripts/run-tests.sh).
+
+STATUS (2026-06-05): the suite is GREEN and this job is now BLOCKING
+(continue-on-error removed). Verified by the full suite plus 3 consecutive
+fresh-DB reruns of the previously-flaky journal/projects/tpar/void clusters,
+all exit 0 — the historic "journal cluster 32<->44 wobble" no longer
+reproduces. The postgres first-init TCP race that could throw a false red is
+closed at the source (db healthcheck probes -h 127.0.0.1) and the CI step
+retries once as belt-and-suspenders. If a real red appears, fix it or list it
+here with a deselect/xfail; only re-add continue-on-error to un-block in an
+emergency.
+
+Historic note (pre-2026-06-05): the job was INFORMATIONAL because the suite
+was not yet green —
 
 The BLOCKING gate is lint (ruff) + typecheck (mypy --strict on the core
 domain-model/config layer) + migrations (alembic upgrade head on a fresh

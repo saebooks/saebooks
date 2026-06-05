@@ -21,7 +21,14 @@ services:
       # migrations reference by name. Runs once on first DB init.
       - ./docker/test-initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U saebooks_test -d saebooks_test"]
+      # Probe via TCP loopback (-h 127.0.0.1), NOT the unix socket. During
+      # postgres first-init the entrypoint runs a temporary socket-only
+      # server (listen_addresses='') to apply init scripts, then restarts
+      # with TCP. A socket pg_isready can report healthy during that window,
+      # so the api container would start and alembic would hit ConnectionRefused
+      # on db:5432. Forcing TCP keeps the check unhealthy until the real
+      # listener is up, closing the first-init race.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U saebooks_test -d saebooks_test"]
       interval: 3s
       timeout: 3s
       retries: 30

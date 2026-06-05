@@ -15,12 +15,13 @@
 #   * migrations  — alembic upgrade head on a fresh Postgres 16, proving the
 #                   whole 0001..head chain applies from empty.
 #
-# INFORMATIONAL job (reported, never blocks — clearly labelled):
 #   * tests       — full pytest suite via the isolated docker-compose stack.
-#                   The suite is NOT fully green yet (known baseline reds +
-#                   harness artefacts); making it green is a separate triage
-#                   tracked in tests/KNOWN_FAILURES.txt. continue-on-error
-#                   keeps the signal visible without faking a green gate.
+#                   BLOCKING as of 2026-06-05: the suite is GREEN (full suite
+#                   plus 3 fresh-DB reruns of the previously-flaky clusters all
+#                   exit 0). The two long-standing harness deselects stay
+#                   excluded (see tests/KNOWN_FAILURES.txt). The db healthcheck
+#                   probes TCP (-h 127.0.0.1) to close the postgres first-init
+#                   race; the run step retries once for residual infra blips.
 
 name: CI gate
 
@@ -129,18 +130,27 @@ jobs:
         run: uv run alembic upgrade head
 
   tests:
-    name: tests (pytest, full suite) — INFORMATIONAL
+    name: tests (pytest, full suite) — BLOCKING
     runs-on: ubuntu-latest
-    # The suite is not fully green yet (see tests/KNOWN_FAILURES.txt). This
-    # job reports the result on every push/PR but does NOT block merges
-    # until the suite is triaged green. Lint / typecheck / migrations above
-    # are the blocking gate.
-    continue-on-error: true
+    # The full pytest suite runs in the isolated docker-compose stack and is
+    # now GREEN (verified 2026-06-05: the full suite + 3 fresh-DB reruns of the
+    # previously-flaky journal/projects/tpar/void clusters all exit 0). This job
+    # is BLOCKING — a red here stops the merge, same as lint/typecheck/migrations.
+    # The two long-standing harness deselects (adapter_registry, m0_synthetic_nz)
+    # stay excluded in docker-compose.test.yml; see tests/KNOWN_FAILURES.txt.
+    # To revert to non-blocking, re-add `continue-on-error: true` below.
     steps:
       - uses: actions/checkout@v4
-      - name: Run the isolated test stack
-        # scripts/run-tests.sh builds Dockerfile.test (which generates the
-        # gRPC stubs + installs dev deps) and runs alembic upgrade head then
-        # pytest against an ephemeral postgres:16-alpine, tearing everything
-        # down afterwards. Actions runners ship docker + compose v2.
-        run: ./scripts/run-tests.sh
+      - name: Run the isolated test stack (retry once on infra flake)
+        # scripts/run-tests.sh builds Dockerfile.test (gRPC stubs + dev deps),
+        # runs alembic upgrade head, then pytest against an ephemeral
+        # postgres:16-alpine, tearing everything down afterwards. The db
+        # healthcheck now probes -h 127.0.0.1 to close the postgres first-init
+        # TCP race; the single retry here is belt-and-suspenders for any
+        # residual infra blip. A genuine test failure fails BOTH attempts and
+        # blocks the merge — the retry cannot mask a real red.
+        run: |
+          ./scripts/run-tests.sh || {
+            echo "::warning::isolated test stack failed once — retrying once (covers postgres first-init race / infra blip)";
+            ./scripts/run-tests.sh;
+          }
