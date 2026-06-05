@@ -27,6 +27,7 @@ from saebooks.models.distribution import (
     DistributionStatus,
     TrustDistribution,
 )
+from saebooks.models.journal import JournalEntry, JournalOrigin
 from saebooks.services import distributions as svc
 
 pytestmark = pytest.mark.postgres_only
@@ -231,6 +232,14 @@ async def test_post_journal_entry() -> None:
 
     assert dist.status == DistributionStatus.POSTED
     assert dist.journal_entry_id is not None
+
+    # JE-provenance: a trust-distribution JE self-declares origin + source.
+    async with AsyncSessionLocal() as session:
+        je = await session.get(JournalEntry, dist.journal_entry_id)
+        assert je is not None
+        assert je.origin == JournalOrigin.TRUST_DISTRIBUTION
+        assert je.source_type == "trust_distribution"
+        assert je.source_id == dist_id
 
     # Cleanup
     async with AsyncSessionLocal() as session:

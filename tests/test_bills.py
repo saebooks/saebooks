@@ -30,7 +30,12 @@ from saebooks.models.bill import Bill, BillStatus
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
 from saebooks.models.document_counter import DocumentCounter
-from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
+from saebooks.models.journal import (
+    EntryStatus,
+    JournalEntry,
+    JournalLine,
+    JournalOrigin,
+)
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import bills as svc
 
@@ -303,6 +308,10 @@ async def test_post_bill_mints_number_and_journal() -> None:
         je = await session.get(JournalEntry, posted.journal_entry_id)
         assert je is not None
         assert je.status == EntryStatus.POSTED
+        # JE-provenance: a bill-posted JE self-declares its origin + source.
+        assert je.origin == JournalOrigin.BILL
+        assert je.source_type == "bill"
+        assert je.source_id == posted.id
         await session.refresh(je, ["lines"])
         total_dr = sum((ln.debit for ln in je.lines), Decimal("0"))
         total_cr = sum((ln.credit for ln in je.lines), Decimal("0"))

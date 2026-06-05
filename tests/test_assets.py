@@ -28,7 +28,7 @@ from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.models.fixed_asset import FixedAsset
-from saebooks.models.journal import EntryStatus, JournalEntry
+from saebooks.models.journal import EntryStatus, JournalEntry, JournalOrigin
 from saebooks.services import assets as svc
 
 pytestmark = pytest.mark.postgres_only
@@ -269,6 +269,10 @@ async def test_post_depreciation_creates_balanced_journal() -> None:
         ).scalars().all()
         assert entries, "depreciation journal should have posted"
         entry = entries[0]
+        # JE-provenance: depreciation JE self-declares origin + source asset.
+        assert entry.origin == JournalOrigin.DEPRECIATION
+        assert entry.source_type == "fixed_asset"
+        assert entry.source_id == asset.id
         # Reload lines
         await session.refresh(entry, ["lines"])
         debits = [ln for ln in entry.lines if ln.debit > 0]
@@ -309,6 +313,10 @@ async def test_dispose_with_gain() -> None:
         entry = await session.get(JournalEntry, refreshed.disposal_journal_id)
         assert entry is not None
         assert entry.status == EntryStatus.POSTED
+        # JE-provenance: disposal JE self-declares origin + source asset.
+        assert entry.origin == JournalOrigin.FIXED_ASSET
+        assert entry.source_type == "fixed_asset"
+        assert entry.source_id == asset.id
         await session.refresh(entry, ["lines"])
         total_debit = sum(ln.debit for ln in entry.lines)
         total_credit = sum(ln.credit for ln in entry.lines)

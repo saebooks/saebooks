@@ -33,6 +33,7 @@ from sqlalchemy.orm import selectinload
 
 from saebooks.models.account import Account
 from saebooks.models.invoice import Invoice, InvoiceLine, InvoiceStatus
+from saebooks.models.journal import JournalOrigin
 from saebooks.services import journal as journal_svc
 from saebooks.services import settings as settings_svc
 
@@ -250,6 +251,9 @@ async def recognize_deferred_revenue(
         draft.id,
         posted_by=posted_by,
         override_reason=override_reason or f"Deferred revenue recognition {pf.isoformat()}",
+        # Recognition spans many deferred-revenue lines in one period roll —
+        # no single originating record, so source_type/id stay null.
+        origin=JournalOrigin.DEFERRED_REVENUE,
     )
     await session.commit()
 

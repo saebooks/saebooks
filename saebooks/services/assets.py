@@ -55,6 +55,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from saebooks.models.account import Account
 from saebooks.models.depreciation_model import DepreciationModel
 from saebooks.models.fixed_asset import FixedAsset
+from saebooks.models.journal import JournalOrigin
 from saebooks.services import journal as journal_svc
 
 # Days-per-month used for day-count depreciation proration.
@@ -519,7 +520,14 @@ async def post_depreciation(
             },
         ],
     )
-    await journal_svc.post(session, entry.id, posted_by=posted_by)
+    await journal_svc.post(
+        session,
+        entry.id,
+        posted_by=posted_by,
+        origin=JournalOrigin.DEPRECIATION,
+        source_type="fixed_asset",
+        source_id=asset.id,
+    )
 
     asset.last_depreciation_posted_through = through
     await session.commit()
@@ -658,7 +666,14 @@ async def dispose_asset(
         description=f"Disposal: {asset.code} {asset.name}",
         lines=lines,
     )
-    posted = await journal_svc.post(session, entry.id, posted_by=posted_by)
+    posted = await journal_svc.post(
+        session,
+        entry.id,
+        posted_by=posted_by,
+        origin=JournalOrigin.FIXED_ASSET,
+        source_type="fixed_asset",
+        source_id=asset.id,
+    )
 
     # Step 4: stamp asset with disposal metadata.
     asset.status = "disposed"
@@ -760,7 +775,14 @@ async def convert_to_inventory(
         description=f"FA→Inventory conversion: {asset.code} {asset.name}",
         lines=lines,
     )
-    posted = await journal_svc.post(session, entry.id, posted_by=posted_by)
+    posted = await journal_svc.post(
+        session,
+        entry.id,
+        posted_by=posted_by,
+        origin=JournalOrigin.FIXED_ASSET,
+        source_type="fixed_asset",
+        source_id=asset.id,
+    )
 
     # Step 4: stamp asset as disposed (proceeds = NBV → zero gain/loss).
     asset.status = "disposed"

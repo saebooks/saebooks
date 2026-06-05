@@ -32,7 +32,12 @@ from saebooks.models.bsl_match import (
     TARGET_PAYMENT,
     BslMatch,
 )
-from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
+from saebooks.models.journal import (
+    EntryStatus,
+    JournalEntry,
+    JournalLine,
+    JournalOrigin,
+)
 from saebooks.models.payment import Payment
 
 _VALID_TARGETS = {TARGET_PAYMENT, TARGET_JOURNAL_ENTRY}
@@ -482,6 +487,9 @@ async def split_match_line(
         entry.id,
         posted_by=posted_by,
         tenant_id=tenant_id,
+        origin=JournalOrigin.BANK_REC,
+        source_type="bank_statement_line",
+        source_id=line_id,
     )
 
     await add_match(

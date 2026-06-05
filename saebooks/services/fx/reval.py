@@ -87,7 +87,7 @@ from sqlalchemy.orm import selectinload
 from saebooks.models.account import Account
 from saebooks.models.bill import Bill, BillStatus
 from saebooks.models.invoice import Invoice, InvoiceStatus
-from saebooks.models.journal import JournalEntry
+from saebooks.models.journal import JournalEntry, JournalOrigin
 from saebooks.services import journal as journal_svc
 from saebooks.services.fx.rates import get_rate
 
@@ -469,7 +469,10 @@ async def _post_reval_pair(
     # existing balance check covers us.
     await session.commit()
     adjustment = await journal_svc.post(
-        session, adjustment.id, posted_by=posted_by
+        session, adjustment.id, posted_by=posted_by,
+        # CurrencyReval is a computed period revaluation, not a stored
+        # record with an id, so source_type/id stay null.
+        origin=JournalOrigin.FX_REVAL,
     )
 
     # Reversing journal — dated through_date + 1, opposite signs.
@@ -493,7 +496,13 @@ async def _post_reval_pair(
     }
     await session.commit()
     reversal = await journal_svc.post(
-        session, reversal.id, posted_by=posted_by
+        session, reversal.id, posted_by=posted_by,
+        # The next-day auto-reversal of the FX reval adjustment is part of
+        # the same FX_REVAL mechanism (not a user-driven journal.reverse);
+        # link it to the adjustment JE it unwinds.
+        origin=JournalOrigin.FX_REVAL,
+        source_type="journal_entry",
+        source_id=adjustment.id,
     )
 
     return adjustment.id, reversal.id

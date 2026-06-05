@@ -18,7 +18,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from saebooks.models.account import Account, AccountType
-from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine, PeriodLock
+from saebooks.models.journal import (
+    EntryStatus,
+    JournalEntry,
+    JournalLine,
+    JournalOrigin,
+    PeriodLock,
+)
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import audit as audit_svc
 from saebooks.services import audit_log as audit_log_svc
@@ -571,6 +577,9 @@ async def post_in_txn(
     actor_role: str | None = None,
     tenant_id: uuid.UUID | None = None,
     actor_user_id: uuid.UUID | None = None,
+    origin: JournalOrigin = JournalOrigin.MANUAL,
+    source_type: str | None = None,
+    source_id: uuid.UUID | None = None,
 ) -> JournalEntry:
     """Transition DRAFT → POSTED WITHOUT committing — caller owns the txn.
 
@@ -591,6 +600,16 @@ async def post_in_txn(
     Callers that don't pass it cannot override a locked period. The
     role is also recorded on ``entry.override_reason`` for audit when an
     override is accepted.
+
+    ``origin`` / ``source_type`` / ``source_id`` are the JE-provenance
+    keystone (migration 0153). ``origin`` defaults to
+    ``JournalOrigin.MANUAL`` — any caller that does not declare a machine
+    origin is flagged as a manual/arbitrary entry, the visible exception.
+    Auto-posting services pass their real origin plus the originating
+    record's ``source_type`` (e.g. ``"invoice"``) and ``source_id`` so each
+    posted entry self-declares what created it. Stamped only on a DRAFT →
+    POSTED transition; re-posting is impossible (guarded above), so a
+    posted entry's provenance is write-once.
     """
     entry = await get(session, entry_id, tenant_id=tenant_id)
     if entry.status == EntryStatus.POSTED:
@@ -630,6 +649,13 @@ async def post_in_txn(
     entry.status = EntryStatus.POSTED
     entry.posted_at = datetime.now(UTC)
     entry.posted_by = posted_by
+    # JE-provenance keystone: stamp what created this entry. Default
+    # origin=MANUAL (set in the signature) so a bare manual/API post is the
+    # visible exception; auto-posting services pass their real origin + the
+    # originating record's source_type/source_id.
+    entry.origin = origin
+    entry.source_type = source_type
+    entry.source_id = source_id
     if override_reason:
         entry.override_reason = override_reason
 
@@ -667,12 +693,17 @@ async def post(
     actor_role: str | None = None,
     tenant_id: uuid.UUID | None = None,
     actor_user_id: uuid.UUID | None = None,
+    origin: JournalOrigin = JournalOrigin.MANUAL,
+    source_type: str | None = None,
+    source_id: uuid.UUID | None = None,
 ) -> JournalEntry:
     """Transition DRAFT → POSTED and commit.
 
     Thin wrapper over :func:`post_in_txn` — behaviour is unchanged for every
     existing single-entry caller (it flushes-then-commits, the same net effect
-    as the previous mutate-then-commit body).
+    as the previous mutate-then-commit body). ``origin`` / ``source_type`` /
+    ``source_id`` are the JE-provenance keystone passed straight through (see
+    :func:`post_in_txn`); default ``origin=MANUAL``.
     """
     entry = await post_in_txn(
         session,
@@ -682,6 +713,9 @@ async def post(
         actor_role=actor_role,
         tenant_id=tenant_id,
         actor_user_id=actor_user_id,
+        origin=origin,
+        source_type=source_type,
+        source_id=source_id,
     )
     await session.commit()
     return entry
@@ -765,13 +799,17 @@ async def reverse(
     await session.commit()
 
     # Auto-post the reversal — pass actor_role through so the period-lock
-    # override gate fires consistently for the reversal post.
+    # override gate fires consistently for the reversal post. Provenance:
+    # origin=REVERSAL, source = the original journal entry being reversed.
     reversal = await post(
         session,
         reversal.id,
         posted_by=posted_by,
         override_reason=override_reason,
         actor_role=actor_role,
+        origin=JournalOrigin.REVERSAL,
+        source_type="journal_entry",
+        source_id=original.id,
     )
 
     # Mark original as reversed

@@ -485,6 +485,7 @@ async def convert_to_inventory(
     Returns (asset, item_id, item_sku, nbv, journal_id).
     """
     from saebooks.models.item import CostMethod, Item, ItemType
+    from saebooks.models.journal import JournalOrigin
     from saebooks.services import assets as assets_svc
     from saebooks.services import journal as journal_svc
 
@@ -541,7 +542,14 @@ async def convert_to_inventory(
         description=f"Convert to inventory: {asset.code} {asset.name}",
         lines=lines,
     )
-    posted_entry = await journal_svc.post(session, entry.id, posted_by=actor)
+    posted_entry = await journal_svc.post(
+        session,
+        entry.id,
+        posted_by=actor,
+        origin=JournalOrigin.FIXED_ASSET,
+        source_type="fixed_asset",
+        source_id=asset.id,
+    )
 
     # Step 5: create inventory item.
     resolved_sku = (sku or asset.code).strip()

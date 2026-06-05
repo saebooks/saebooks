@@ -25,6 +25,7 @@ from saebooks.models.distribution import (
     DistributionStatus,
     TrustDistribution,
 )
+from saebooks.models.journal import JournalOrigin
 from saebooks.services import journal as journal_svc
 
 _PERCENTAGE_TOLERANCE = Decimal("0.01")
@@ -207,7 +208,14 @@ async def post_journal_entry(
         description=description,
         lines=lines,
     )
-    posted = await journal_svc.post(session, entry.id, posted_by=posted_by)
+    posted = await journal_svc.post(
+        session,
+        entry.id,
+        posted_by=posted_by,
+        origin=JournalOrigin.TRUST_DISTRIBUTION,
+        source_type="trust_distribution",
+        source_id=dist.id,
+    )
 
     dist.journal_entry_id = posted.id
     dist.status = DistributionStatus.POSTED

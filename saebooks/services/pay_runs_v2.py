@@ -69,6 +69,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.models.account import Account
 from saebooks.models.employee import Employee
+from saebooks.models.journal import JournalOrigin
 from saebooks.models.pay_run import PayRun, PayRunLine, PayRunStatus
 from saebooks.services import change_log as cl_svc
 from saebooks.services import journal as journal_svc
@@ -623,6 +624,9 @@ async def finalize_with_je(
     try:
         await journal_svc.post(
             session, entry.id, posted_by=actor, tenant_id=tenant_id,
+            origin=JournalOrigin.PAYRUN,
+            source_type="pay_run",
+            source_id=pay_run.id,
         )
     except journal_svc.PostingError as exc:
         raise PayRunV2Error(f"Journal post failed: {exc}") from exc

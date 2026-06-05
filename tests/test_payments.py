@@ -26,7 +26,7 @@ from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
 from saebooks.models.document_counter import DocumentCounter
 from saebooks.models.invoice import Invoice, InvoiceStatus
-from saebooks.models.journal import JournalLine
+from saebooks.models.journal import JournalEntry, JournalLine, JournalOrigin
 from saebooks.models.payment import (
     Payment,
     PaymentAllocation,
@@ -236,6 +236,14 @@ async def test_post_payment_mints_number_and_journal() -> None:
     assert posted.number is not None
     assert posted.number.startswith("PAY-")
     assert posted.journal_entry_id is not None
+
+    # JE-provenance: a payment-posted JE self-declares its origin + source.
+    async with AsyncSessionLocal() as session:
+        je = await session.get(JournalEntry, posted.journal_entry_id)
+        assert je is not None
+        assert je.origin == JournalOrigin.PAYMENT
+        assert je.source_type == "payment"
+        assert je.source_id == posted.id
 
 
 @pytest.mark.asyncio

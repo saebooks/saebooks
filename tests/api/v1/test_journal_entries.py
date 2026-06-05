@@ -30,6 +30,7 @@ from saebooks.main import app
 from saebooks.models.account import Account, AccountType
 from saebooks.models.change_log import ChangeLog
 from saebooks.models.company import Company
+from saebooks.models.journal import JournalEntry, JournalOrigin
 from saebooks.models.tenant import Tenant
 
 pytestmark = pytest.mark.postgres_only
@@ -655,6 +656,35 @@ async def test_je_post_transitions_to_posted(
     assert posted["posted_at"] is not None
 
 
+async def test_je_manual_api_post_flags_manual_origin(
+    api_client: AsyncClient, account_ids: dict[str, str]
+) -> None:
+    """The arbitrary-JE API path stamps origin=MANUAL — the visible exception.
+
+    A hand-entered JE posted through /journal_entries/{id}/post declares no
+    machine origin, so the chokepoint default (MANUAL) must persist with no
+    source linkage. Read the row from the DB (the serializer is not in this
+    keystone's scope).
+    """
+    r = await api_client.post("/api/v1/journal_entries", json=_entry_payload(account_ids))
+    assert r.status_code == 201, r.text
+    entry_id = r.json()["id"]
+    version = r.json()["version"]
+
+    r2 = await api_client.post(
+        f"/api/v1/journal_entries/{entry_id}/post",
+        headers={"If-Match": str(version)},
+    )
+    assert r2.status_code == 200, r2.text
+
+    async with AsyncSessionLocal() as session:
+        je = await session.get(JournalEntry, uuid.UUID(entry_id))
+        assert je is not None
+        assert je.origin == JournalOrigin.MANUAL
+        assert je.source_type is None
+        assert je.source_id is None
+
+
 async def test_je_post_already_posted_422(
     api_client: AsyncClient, account_ids: dict[str, str]
 ) -> None:
@@ -730,6 +760,15 @@ async def test_je_reverse_creates_reversal(
     assert reversal["id"] != entry_id
     assert reversal["status"] == "POSTED"
     assert reversal["reversal_of_id"] == entry_id
+
+    # JE-provenance: the reversal self-declares origin=REVERSAL linked to the
+    # original entry (DB read — serializer is out of this keystone's scope).
+    async with AsyncSessionLocal() as session:
+        rev_je = await session.get(JournalEntry, uuid.UUID(reversal["id"]))
+        assert rev_je is not None
+        assert rev_je.origin == JournalOrigin.REVERSAL
+        assert rev_je.source_type == "journal_entry"
+        assert rev_je.source_id == uuid.UUID(entry_id)
 
     # Debit/credit lines must be swapped
     original_lines = sorted(r1.json()["lines"], key=lambda l: l["line_no"])

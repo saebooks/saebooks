@@ -32,6 +32,7 @@ from saebooks.models.account import Account
 from saebooks.models.contact import Contact
 from saebooks.models.invoice import Invoice, InvoiceLine, InvoiceStatus
 from saebooks.models.item import Item
+from saebooks.models.journal import JournalOrigin
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import audit_log as audit_log_svc
 from saebooks.services import bills as bills_svc
@@ -761,7 +762,13 @@ async def post_invoice(
         lines=journal_lines,
     )
     posted = await journal_svc.post(
-        session, entry.id, posted_by=posted_by, override_reason=override_reason
+        session,
+        entry.id,
+        posted_by=posted_by,
+        override_reason=override_reason,
+        origin=JournalOrigin.INVOICE,
+        source_type="invoice",
+        source_id=inv.id,
     )
 
     inv.status = InvoiceStatus.POSTED

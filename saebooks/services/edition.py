@@ -95,6 +95,7 @@ async def backfill_invoice_journals(
 
     Caller is responsible for committing the session after this returns.
     """
+    from saebooks.models.journal import JournalOrigin
     from saebooks.services import journal as journal_svc
 
     invoices = await list_open_invoices_for_backfill(session, company_id)
@@ -162,6 +163,9 @@ async def backfill_invoice_journals(
             entry.id,
             posted_by=actor,
             override_reason="cashbook_to_full_backfill",
+            origin=JournalOrigin.CASHBOOK_BACKFILL,
+            source_type="invoice",
+            source_id=inv.id,
         )
         inv.journal_entry_id = posted.id
         if inv.posted_at is None:

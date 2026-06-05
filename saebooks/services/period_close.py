@@ -38,7 +38,7 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.models.account import AccountType
-from saebooks.models.journal import JournalEntry
+from saebooks.models.journal import JournalEntry, JournalOrigin
 from saebooks.services import journal as journal_svc
 from saebooks.services.reports import PNL_TYPES, _account_balances
 
@@ -233,6 +233,9 @@ async def close_year(
         posted_by=posted_by,
         override_reason=override_reason,
         actor_role=actor_role,
+        # Year-end close rolls up many P&L accounts to retained earnings —
+        # no single originating record, so source_type/id stay null.
+        origin=JournalOrigin.YEAR_END_CLOSE,
     )
 
     if lock_period:
