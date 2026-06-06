@@ -601,6 +601,7 @@ async def list_active(
     contact_id: uuid.UUID | None = None,
     payment_account_id: uuid.UUID | None = None,
     status: ExpenseStatus | None = None,
+    flagged: bool | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
     limit: int = 50,
@@ -616,6 +617,8 @@ async def list_active(
         base_where.append(Expense.payment_account_id == payment_account_id)
     if status is not None:
         base_where.append(Expense.status == status)
+    if flagged is not None:
+        base_where.append(Expense.flagged_for_review.is_(flagged))
     if date_from is not None:
         base_where.append(Expense.expense_date >= date_from)
     if date_to is not None:

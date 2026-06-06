@@ -45,9 +45,11 @@ from saebooks.api.v1.schemas import (
     JournalEntryPostBody,
     JournalEntryReverseBody,
     JournalEntryUpdate,
+    ReviewFlagBody,
 )
 from saebooks.models.journal import EntryStatus
 from saebooks.services import journal_entries as svc
+from saebooks.services import review_flags as review_flags_svc
 from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 
@@ -139,6 +141,7 @@ async def list_journal_entries(
     posted_by: str | None = Query(default=None, description="Case-insensitive substring on posted_by"),
     account_id: UUID | None = Query(default=None, description="Only entries with a line on this account"),
     account_code: str | None = Query(default=None, description="Convenience: resolves to account_id by Account.code"),
+    flagged: bool | None = Query(default=None, description="Filter by flagged_for_review"),
     sort: str = Query(default="date", description="Sort column: date | ref | total_debit | status"),
     dir: str = Query(default="desc", description="Sort direction: asc | desc"),
     page: int = Query(default=1, ge=1),
@@ -176,6 +179,7 @@ async def list_journal_entries(
         posted_by=posted_by,
         account_id=account_id,
         account_code=account_code,
+        flagged=flagged,
         sort_field=sort,
         sort_dir=dir_lower,
         limit=page_size,
@@ -187,6 +191,38 @@ async def list_journal_entries(
         limit=page_size,
         offset=offset,
     )
+
+
+# ---------------------------------------------------------------------------
+# POST /{id}/review-flag — Gap 3 (set/clear flag for review)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{entry_id}/review-flag", response_model=JournalEntryOut)
+async def set_journal_entry_review_flag(
+    entry_id: UUID,
+    payload: ReviewFlagBody,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> JournalEntryOut:
+    tenant_id = resolve_tenant_id(request)
+    actor = getattr(request.state, "actor", None) or "api"
+    try:
+        await review_flags_svc.set_review_flag(
+            session,
+            "journal_entry",
+            entry_id,
+            tenant_id=tenant_id,
+            company_id=company_id,
+            actor=str(actor),
+            flagged=payload.flagged,
+            review_note=payload.review_note,
+        )
+    except review_flags_svc.ReviewFlagError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    entry = await svc.get(session, entry_id, tenant_id=tenant_id, company_id=company_id)
+    return JournalEntryOut.model_validate(entry)
 
 
 # ---------------------------------------------------------------------------

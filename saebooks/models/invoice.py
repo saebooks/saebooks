@@ -26,6 +26,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import (
+    Boolean,
     Date,
     DateTime,
     Enum,
@@ -36,6 +37,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -156,6 +158,11 @@ class Invoice(CompanyScoped, Base):
     # ``tenant_id`` defaults to the single default tenant so the legacy
     # service layer (create_draft / post_invoice) still works without change.
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # Gap 3 (migration 0157) — review flag + optional note for books review.
+    flagged_for_review: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    review_note: Mapped[str | None] = mapped_column(Text)
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("tenants.id", ondelete="RESTRICT"),

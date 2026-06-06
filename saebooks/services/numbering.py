@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from saebooks.models.document_counter import DocumentCounter
 
 KNOWN_KINDS = frozenset(
-    {"invoice", "bill", "credit_note", "payment", "quote", "statement", "fixed_asset", "purchase_order", "expense", "employee"}
+    {"invoice", "bill", "credit_note", "payment", "quote", "statement", "fixed_asset", "purchase_order", "expense", "employee", "supplier_credit_note", "receipt"}
 )
 
 # Default prefix / pad per kind. Override the prefix via ``next_number``
@@ -44,6 +44,8 @@ _DEFAULTS: dict[str, tuple[str, int]] = {
     "purchase_order": ("PO-", 6),
     "expense": ("EX-", 6),
     "employee": ("EMP-", 6),
+    "supplier_credit_note": ("SCN-", 6),
+    "receipt": ("RCPT-", 6),
 }
 
 

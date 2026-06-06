@@ -32,6 +32,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     Enum,
     ForeignKey,
@@ -41,6 +42,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -124,6 +126,11 @@ class Expense(CompanyScoped, Base):
     posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     posted_by: Mapped[str | None] = mapped_column(String)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # Gap 3 (migration 0157) — review flag + optional note for books review.
+    flagged_for_review: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    review_note: Mapped[str | None] = mapped_column(Text)
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("tenants.id", ondelete="RESTRICT"),

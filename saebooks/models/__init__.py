@@ -55,8 +55,14 @@ from saebooks.models.principal import (
 )
 from saebooks.models.project import Project, ProjectStatus
 from saebooks.models.quote import Quote, QuoteLine, QuoteStatus
+from saebooks.models.receipt import Receipt, ReceiptLine, ReceiptStatus
 from saebooks.models.settings import Setting
 from saebooks.models.sql_query import SqlQuery
+from saebooks.models.supplier_credit_note import (
+    SupplierCreditNote,
+    SupplierCreditNoteLine,
+    SupplierCreditNoteStatus,
+)
 from saebooks.models.supplier_statement import (
     StatementLineType,
     StatementMatchStatus,
@@ -134,6 +140,9 @@ __all__ = [
     "Quote",
     "QuoteLine",
     "QuoteStatus",
+    "Receipt",
+    "ReceiptLine",
+    "ReceiptStatus",
     "Setting",
     "SqlQuery",
     "StatementLineStatus",
@@ -141,6 +150,9 @@ __all__ = [
     "StatementMatchStatus",
     "StatementStatus",
     "StslCoefficient",
+    "SupplierCreditNote",
+    "SupplierCreditNoteLine",
+    "SupplierCreditNoteStatus",
     "SupplierStatement",
     "SupplierStatementLine",
     "SupplierStatementTemplate",

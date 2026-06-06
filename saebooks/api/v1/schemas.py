@@ -639,6 +639,9 @@ class JournalEntryOut(BaseModel):
     # reverse FK on invoices/bills/credit_notes/expenses/payments.
     source_type: str | None = None
     source_id: uuid.UUID | None = None
+    # Gap 3 (0157) — review flag + optional note.
+    flagged_for_review: bool = False
+    review_note: str | None = None
     version: int
     created_at: datetime
     updated_at: datetime
@@ -675,6 +678,19 @@ class JournalEntryHeaderOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     archived_at: datetime | None = None
+
+
+class ReviewFlagBody(BaseModel):
+    """Gap 3 (0157) — set/clear the review flag on a transaction/invoice/expense.
+
+    ``flagged`` toggles ``flagged_for_review``; ``review_note`` is an optional
+    follow-up note (preserved when re-flagging without a note, cleared when
+    ``flagged=false``). Flagging is metadata only — it never posts a JE and
+    never bumps the entity version, so no ``If-Match`` is required.
+    """
+
+    flagged: bool
+    review_note: str | None = None
 
 
 class JournalEntryListOut(BaseModel):
@@ -864,6 +880,9 @@ class InvoiceOut(BaseModel):
     void_journal_entry_id: uuid.UUID | None = None
     posted_at: datetime | None = None
     posted_by: str | None = None
+    # Gap 3 (0157) — review flag + optional note.
+    flagged_for_review: bool = False
+    review_note: str | None = None
     version: int
     created_at: datetime
     updated_at: datetime
@@ -3212,6 +3231,9 @@ class ExpenseOut(BaseModel):
     void_journal_entry_id: uuid.UUID | None = None
     posted_at: datetime | None = None
     posted_by: str | None = None
+    # Gap 3 (0157) — review flag + optional note.
+    flagged_for_review: bool = False
+    review_note: str | None = None
     version: int
     created_at: datetime
     updated_at: datetime

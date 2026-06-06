@@ -180,6 +180,7 @@ async def list_active(
     posted_by: str | None = None,
     account_id: uuid.UUID | None = None,
     account_code: str | None = None,
+    flagged: bool | None = None,
     sort_field: str = "date",
     sort_dir: str = "desc",
     limit: int = 50,
@@ -211,6 +212,8 @@ async def list_active(
         base_where.append(JournalEntry.description.ilike(f"%{description}%"))
     if posted_by:
         base_where.append(JournalEntry.posted_by.ilike(f"%{posted_by}%"))
+    if flagged is not None:
+        base_where.append(JournalEntry.flagged_for_review.is_(flagged))
 
     if account_code and account_id is None:
         # Resolve code → id. RLS gates the lookup to current tenant.
