@@ -249,14 +249,32 @@ signature. That stub must not be used as a template; the principal path verifies
 A principal session is a JWT with `psub` (principal id) + `typ="principal"` — a *different
 shape* from a user JWT (`sub` + `tenant_id`). `decode_principal_token` rejects anything
 whose `typ` is not `"principal"`, so a normal user JWT can never authenticate a principal
-endpoint (it has a valid signature but no `typ`). Conversely a principal token presented to
-a user endpoint carries no `sub`, so `require_bearer` hydrates no user and the role gate
-denies it — a principal token confers **zero** user authority. (Tests:
-`test_user_jwt_is_not_a_principal_token`, `test_user_jwt_cannot_call_principal_endpoint`,
-`test_principal_token_cannot_call_user_endpoint`.)
+endpoint (it has a valid signature but no `typ`). (Tests:
+`test_user_jwt_is_not_a_principal_token`, `test_user_jwt_cannot_call_principal_endpoint`.)
 
 The existing single-tenant user login/enforcement path is **byte-for-byte unchanged**: the
 principal path is a parallel router with its own bearer dependency and its own token type.
+
+> **Correction — the user router accepts a principal token (signature only); the GRANT is
+> what stops it.** An earlier draft of this section claimed a principal token "confers zero
+> user authority" on the user router because it carries no `sub`. That was only true for
+> **admin-gated** endpoints (`/users`, hard-delete, grant-create): those need a hydrated
+> `request.state.user`/role, which a `sub`-less principal token never provides, so the admin
+> gate denies them. But the **non-admin data endpoints** (`/companies`, `/contacts`,
+> `/invoices`, `/bills`, `/payments`, `/reports`, …) need only a *bound tenant*, not a user
+> identity. A principal token is a validly-signed JWT (same secret), so `decode_access_token`
+> accepts it on the user router too, and — before the fix in §11.1 — `require_bearer` stamped
+> its `tenant_id` claim and `get_session` bound `app.current_tenant` to it with **no grant
+> re-check**. Adversarial review confirmed two live exploits:
+>
+> * **A1** — a bound principal token on `GET /api/v1/companies` returned 200 with that
+>   tenant's data, no grant re-check.
+> * **A2 (headline)** — after the grant was **revoked**, replaying the same bound token on
+>   the user router still returned 200 for the token's whole 1h TTL: revocation was not
+>   immediate where the data actually lives.
+>
+> The fix (§11.1) enforces the grant on the **shared** auth path, so it now applies to every
+> router, re-checked per request.
 
 ## 11. Act-as — the binding goes through the same FORCE-RLS as a native user
 
@@ -283,6 +301,54 @@ grant for tenant C can never reach `app.current_tenant = C` through any sanction
 RLS returns zero rows for C exactly as for a stranger. (Tests:
 `test_act_as_non_granted_tenant_denied`, `test_bound_session_isolation_under_force_rls`,
 `test_revoked_grant_blocks_act_as`, `test_revoked_grant_blocks_bound_session_reuse`.)
+
+### 11.1 The grant gate is enforced on the SHARED auth path (closes A1/A2)
+
+`get_principal_tenant_session` re-verifies the grant only for the `/api/v1/principal/*`
+router. That is **not enough**, because a bound principal token is a validly-signed JWT and
+the **user** router (`/companies`, `/contacts`, `/invoices`, …) accepts the same token via
+`require_bearer` (see the correction in §10). To close A1/A2 the grant is now enforced on the
+**shared** dependency, so it covers **every** router and is re-checked **per request**:
+
+`saebooks/api/v1/auth.py::require_bearer` — in the JWT branch, immediately after
+`decode_access_token` succeeds and **before** `request.state.jwt_claims` is stamped — calls
+`_enforce_principal_grant(request, claims)`:
+
+1. **Detect a principal-type token.** Fires only when `typ == "principal"` **or** a `psub`
+   claim is present. A normal user token (`sub` + `tenant_id`, no `typ`/`psub`) never enters
+   this branch — its path is **byte-for-byte unchanged**.
+2. **Unbound principal token (no `tenant_id`) → 403.** A login token has no business on a
+   user data router; it may only drive `/principal/tenants` + `/principal/act-as`.
+3. **Bound principal token → re-verify the live grant.** Calls `resolve_grant_role`
+   (`principal_grant_role`, SECURITY DEFINER, migration 0156) on a fresh `AsyncSessionLocal()`
+   — the **same** predicate `/act-as` and `get_principal_tenant_session` use, and one that is
+   parameterised by `(principal, tenant)` and **independent of `app.current_tenant`**, so it
+   is safe to call before any tenant GUC is bound. No **active** grant → **403, and no
+   binding** (the raise happens before the claims are stamped, so `resolve_tenant_id` /
+   `get_session` never bind `app.current_tenant`). Fails **closed**: any lookup error denies.
+
+Because the check runs on the router-level `require_bearer` dependency, it executes **every
+request**. So a **revoked grant takes effect immediately on the user router too** (A2 closed),
+and a token bound to a tenant the principal has no grant for is rejected with zero rows (A1
+closed). The bound token alone is never sufficient — the live grant is required every request.
+
+No new `BYPASSRLS` path is introduced and the §12 admin-gate + WITH-CHECK self-grant
+semantics are untouched: a principal token still hydrates **no** `request.state.user`/role
+(we deliberately do not stamp them), so admin-gated endpoints keep denying it exactly as
+before. The `X-Active-Tenant` switcher in `resolve_tenant_id` is also unreachable for a
+principal token (it requires an ADMIN `request.state.role`, which a principal token never
+sets), so a principal token can only ever bind the single tenant carried in its signed claim
+— the one the grant gate just verified.
+
+Tests (`test_principal_user_router_grant_gate.py`):
+`test_bound_principal_token_with_grant_reaches_user_router` (acting-as works on the user
+router), `test_a1_ungranted_tenant_bound_token_denied_on_user_router` +
+`test_a1_ungranted_tenant_zero_rows_under_force_rls` (A1: 403 + zero rows),
+`test_a2_revoked_grant_blocks_bound_token_on_user_router` +
+`test_a2_revoked_grant_blocks_write_on_user_router` (A2: immediate deny on read **and**
+write after revoke), `test_unbound_principal_token_denied_on_user_router`,
+`test_normal_user_token_unaffected` (user-token path unchanged). All seven fail against the
+pre-fix code and pass after.
 
 ## 12. Grant API — a tenant can only grant access to ITSELF
 
@@ -338,9 +404,10 @@ renumber at merge if a lower number lands first.
    user's first key. A bootstrap CLI is future work; do not ship a self-service
    "enrol-without-a-key" path.
 4. **Revocation is per-request, not session-killing.** A bound token re-checks the grant on
-   every request, so revocation takes effect on the next request — but a request already
-   in flight completes. Acceptable (matches GUC transaction scope); note if instant kill is
-   ever required.
+   every request — now on the **shared** auth path (§11.1), so this holds on the user router
+   too, not just `/principal/*`. Revocation takes effect on the next request — but a request
+   already in flight completes. Acceptable (matches GUC transaction scope); note if instant
+   kill is ever required.
 5. **Token TTL.** Principal tokens are 1h (vs 8h user tokens). Tune as needed; shorter is
    safer for a cross-tenant identity.
 6. **No rate limiting on login.** The login endpoint is unauthenticated by design (it IS
