@@ -75,6 +75,8 @@ class JournalOrigin(enum.StrEnum):
     # Money-in / negative-expense record types (migration 0157).
     SUPPLIER_CREDIT_NOTE = "SUPPLIER_CREDIT_NOTE"
     RECEIPT = "RECEIPT"
+    # Account-to-account classification move (migration 0158).
+    RECLASSIFICATION = "RECLASSIFICATION"
 
 
 class JournalEntry(CompanyScoped, Base):

@@ -56,6 +56,10 @@ from saebooks.models.principal import (
 from saebooks.models.project import Project, ProjectStatus
 from saebooks.models.quote import Quote, QuoteLine, QuoteStatus
 from saebooks.models.receipt import Receipt, ReceiptLine, ReceiptStatus
+from saebooks.models.reclassification import (
+    Reclassification,
+    ReclassificationStatus,
+)
 from saebooks.models.settings import Setting
 from saebooks.models.sql_query import SqlQuery
 from saebooks.models.supplier_credit_note import (
@@ -143,6 +147,8 @@ __all__ = [
     "Receipt",
     "ReceiptLine",
     "ReceiptStatus",
+    "Reclassification",
+    "ReclassificationStatus",
     "Setting",
     "SqlQuery",
     "StatementLineStatus",
