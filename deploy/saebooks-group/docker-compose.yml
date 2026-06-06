@@ -1,0 +1,73 @@
+# saebooks-group — intercompany relay BROKER stack (money-free).
+#
+# ⚠ REVIEW BRANCH — DO NOT `docker compose up` until Richard signs off the
+# go-live (plan D1/D4/D6). Standing up this stack is a shared-infra change; the
+# broker holds NO money, but bringing it online is part of the cross-tenant
+# WRITE path that needs explicit review.
+#
+# Topology (plan §2): one relay (FastAPI) + one db (saebooks_group). Reachable
+# only on the internal docker network shared with the tenant api stacks — NO
+# public edge (no Cloudflare, no OPNsense Caddy). Cross-WAN relay (Estonia
+# filiaal) would later ride Tailscale, not this stack's exposure.
+name: saebooks-group
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: saebooks_group
+      POSTGRES_PASSWORD: ${GROUP_DB_PASSWORD}
+      POSTGRES_DB: saebooks_group
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U saebooks_group -d saebooks_group"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    networks:
+      - default
+
+  relay:
+    image: saebooks-group-relay:latest  # build+tag latest+up --no-build at go-live
+    build:
+      context: /home/sauer/projects/saebooks
+      dockerfile: Dockerfile.broker
+    restart: unless-stopped
+    # Bind to the bosun host so the tenant api stacks can reach it by host:port
+    # OR (preferred) reach it by container DNS on the shared internal network.
+    # NOTE: no public/edge port — internal LAN only.
+    ports:
+      - 10.0.1.1:18450:8000
+    environment:
+      SAEBOOKS_GROUP_DATABASE_URL: postgresql+asyncpg://saebooks_group:${GROUP_DB_PASSWORD}@db:5432/saebooks_group
+      SAEBOOKS_GROUP_BIND_HOST: 0.0.0.0
+      SAEBOOKS_GROUP_BIND_PORT: 8000
+      # Phase 3b: forwarding OFF (/ic/relay returns 501). 3c go-live flips this
+      # True to forward live — a named decision, not a default.
+      SAEBOOKS_GROUP_RELAY_FORWARDING_ENABLED: "false"
+      # crypto.encrypt_field is never used by the broker, but config import is
+      # tolerant of an empty key; set a throwaway only if a future feature needs it.
+      SAEBOOKS_FIELD_ENCRYPTION_KEY: ""
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - default
+      # Join the same internal network the tenant api stacks use so the broker
+      # can forward to <tenant>-api:8000/ic/accept by container DNS. The actual
+      # external network name is wired at go-live (matches the tenant stacks'
+      # shared bridge). Left here as the documented seam.
+      - ic_relay
+
+networks:
+  default: null
+  # Shared internal network for broker<->tenant-api hops. external:true so it is
+  # created once (at go-live) and joined by both the broker and the tenant
+  # stacks. NOT created by this review branch.
+  ic_relay:
+    external: true
+
+volumes:
+  db_data: null

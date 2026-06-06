@@ -58,6 +58,8 @@ RUN pip install --upgrade pip setuptools wheel \
     && pip install ".[dev]"
 
 COPY saebooks/ ./saebooks/
+# Broker package (money-free relay) — needed by tests/test_broker_money_free.py.
+COPY saebooks_group/ ./saebooks_group/
 COPY alembic.ini ./
 COPY alembic/ ./alembic/
 
@@ -104,6 +106,8 @@ COPY --from=builder /opt/venv /opt/venv
 
 # Application source
 COPY --chown=saebooks:saebooks saebooks/ ./saebooks/
+# Broker package (money-free relay) — importable for the CI money-free assertion.
+COPY --chown=saebooks:saebooks saebooks_group/ ./saebooks_group/
 COPY --from=builder --chown=saebooks:saebooks /build/saebooks/grpc_gen/ ./saebooks/grpc_gen/
 COPY --chown=saebooks:saebooks pyproject.toml ./
 COPY --chown=saebooks:saebooks alembic.ini ./

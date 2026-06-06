@@ -1,0 +1,61 @@
+# saebooks-group — intercompany relay BROKER (money-free) thin image.
+#
+# Deliberately NOT the heavy saebooks API image: the broker needs no gRPC,
+# connecpy, or any GL/posting code. It runs only saebooks_group.app, reusing the
+# crypto-pure saebooks.services.ic_relay.signing for Ed25519 verify. It holds NO
+# money (no GL tables, no posting imports — see tests/test_broker_money_free.py).
+#
+# REVIEW BRANCH: built but DO NOT `docker compose up` until Richard signs off.
+ARG PYTHON_VERSION=3.12
+FROM python:${PYTHON_VERSION}-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# libpq for asyncpg at runtime; gcc for any source builds.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libpq-dev gcc curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Thin, explicit dependency set — NOT the full pyproject. Pins track
+# pyproject.toml so the broker's crypto/json behaviour matches the tenants.
+RUN pip install \
+        "fastapi>=0.115" \
+        "uvicorn[standard]>=0.32" \
+        "sqlalchemy[asyncio]>=2.0.36" \
+        "asyncpg>=0.30" \
+        "alembic>=1.14" \
+        "pydantic>=2.9" \
+        "pydantic-settings>=2.6" \
+        "httpx>=0.27" \
+        "cryptography>=43.0" \
+        "bcrypt>=4.2"
+
+# Copy ONLY what the broker needs: its own package + the crypto-pure ic_relay
+# helpers (signing/keys/protocol) + config/crypto they import. NO journal,
+# NO intercompany, NO models GL — the money-free invariant is structural.
+COPY saebooks/__init__.py /app/saebooks/__init__.py
+COPY saebooks/config.py /app/saebooks/config.py
+COPY saebooks/services/__init__.py /app/saebooks/services/__init__.py
+COPY saebooks/services/crypto.py /app/saebooks/services/crypto.py
+# Copy ONLY the crypto-pure ic_relay modules the broker imports — NOT the
+# dispatcher / enable / recon (those import GL models and are never used by
+# the broker). The thin __init__ avoids dragging the dispatcher in.
+COPY saebooks/services/ic_relay/__init__.py /app/saebooks/services/ic_relay/__init__.py
+COPY saebooks/services/ic_relay/signing.py /app/saebooks/services/ic_relay/signing.py
+COPY saebooks/services/ic_relay/keys.py /app/saebooks/services/ic_relay/keys.py
+COPY saebooks/services/ic_relay/protocol.py /app/saebooks/services/ic_relay/protocol.py
+COPY saebooks_group/ /app/saebooks_group/
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=10s --timeout=3s --retries=5 \
+    CMD curl -fsS http://127.0.0.1:8000/healthz || exit 1
+
+# Apply the broker's own alembic chain, then serve. (entrypoint kept inline so
+# the thin image needs no extra script.)
+CMD ["sh", "-c", "alembic -c saebooks_group/alembic.ini upgrade head && uvicorn saebooks_group.app:app --host 0.0.0.0 --port 8000"]

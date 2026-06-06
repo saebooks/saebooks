@@ -31,25 +31,52 @@ No migration: ``ic_txn`` / ``ic_edges`` / ``ic_legs`` already exist (migration
 """
 from __future__ import annotations
 
+import logging
+import uuid
 from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_active_company_id, get_session
-from saebooks.models.ic import IcLeg, IcTxn
+from saebooks.config import settings
+from saebooks.db import AsyncSessionLocal
+from saebooks.models.ic import (
+    IcEdge,
+    IcEdgeDirection,
+    IcEdgeTopology,
+    IcInbox,
+    IcInboxStatus,
+    IcLeg,
+    IcTxn,
+)
 from saebooks.services import intercompany as svc
+from saebooks.services.ic_relay import keys as relay_keys
+from saebooks.services.ic_relay import protocol as relay_protocol
 from saebooks.services.ic_relay import recon as recon_svc
+from saebooks.services.ic_relay import signing as relay_signing
+
+logger = logging.getLogger("saebooks.api.v1.intercompany")
 
 router = APIRouter(
     prefix="/intercompany",
     tags=["intercompany"],
     dependencies=[Depends(require_bearer)],
+)
+
+# Public sub-router for the inbound relay webhook — authenticates via its own
+# per-edge token + Ed25519 signature (no JWT), exactly like the paperless
+# webhook. Mounted alongside `router` in saebooks/api/v1/__init__.py.
+public_router = APIRouter(
+    prefix="/intercompany",
+    tags=["intercompany"],
 )
 
 
@@ -388,3 +415,235 @@ async def reverse_intercompany(
             {"code": "intercompany_not_reversible", "detail": msg},
         ) from exc
     return await _serialize(session, ic_txn.id, tenant_id=tenant_id)
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/intercompany/accept  (PUBLIC inbound relay webhook — Phase 3c)
+# ---------------------------------------------------------------------------
+# The receiver half of the cross-DB relay. Authenticated by a per-edge bearer
+# token + Ed25519 signature (NO JWT) — the paperless-webhook trust posture on an
+# internal-only LAN hop. Gated by SAEBOOKS_IC_REMOTE_RELAY_ENABLED (default OFF):
+# with the flag off this returns 503 and posts nothing.
+#
+# Order of checks (all fail-closed, opaque — never leak which check failed):
+#   1. flag on?                              -> 503 if off
+#   2. X-Tenant-Id valid uuid?               -> 400
+#   3. bind app.current_tenant (FORCE-RLS)
+#   4. dst_tenant_id in body == this tenant? -> 400 (forged routing)
+#   5. load COUNTERPARTY edge under RLS      -> 404 (unknown edge)
+#   6. per-edge token bcrypt-verify          -> 401
+#   7. Ed25519 signature verify vs edge pubkey -> 400 (tamper / wrong sender)
+#   8. freshness (issued_at within window)   -> 400 (stale / replay surface)
+#   9. idempotency: ic_inbox UNIQUE(ic_txn_id) -> return prior ack, post nothing
+#  10. replay: ic_inbox UNIQUE(nonce)        -> reject, post nothing
+#  11. post the reciprocal leg + ic_inbox in ONE local txn -> 200 POSTED
+
+
+class _RelayAccept(BaseModel):
+    """Inbound relay envelope: the canonical payload + its base64 signature."""
+
+    payload: dict
+    signature: str  # base64 of the detached Ed25519 signature
+
+
+@public_router.post(
+    "/accept",
+    summary="Inbound intercompany REMOTE relay (per-edge token + Ed25519)",
+)
+async def accept_relay(
+    body: _RelayAccept,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-Id"),
+    authorization: str | None = Header(default=None, alias="Authorization"),
+) -> JSONResponse:
+    """Accept a relayed intercompany event and post the reciprocal leg.
+
+    Returns 200 ``{"ic_txn_id": ..., "status": "POSTED"}`` on a fresh post or on
+    an idempotent re-delivery (the prior ack). 503 when the relay flag is off;
+    400/401/404 on the fail-closed checks above. NEVER posts to any tenant but
+    the bound (receiver) one, and only to the receiver's OWN edge-declared
+    accounts — no account id from the wire is ever trusted.
+    """
+    # 1. Flag gate — default OFF.
+    if not settings.ic_remote_relay_enabled:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            {"code": "relay_disabled", "detail": "remote relay is disabled"},
+        )
+
+    # 2. Tenant routing header.
+    if not x_tenant_id:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            {"code": "missing_tenant", "detail": "X-Tenant-Id header required"},
+        )
+    try:
+        tenant_uuid = uuid.UUID(x_tenant_id)
+    except ValueError:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            {"code": "bad_tenant", "detail": "X-Tenant-Id must be a UUID"},
+        ) from None
+
+    payload = body.payload
+    # Pull + validate the typed fields we need from the (untrusted) body. Any
+    # malformed field is a flat 400 — the signature still has to cover the whole
+    # canonical body, so a tampered field would also fail verify below.
+    try:
+        uuid.UUID(str(payload["edge_id"]))  # validate the ORIGINATOR's edge id (not used to route)
+        body_src = uuid.UUID(str(payload["src_tenant_id"]))
+        body_dst = uuid.UUID(str(payload["dst_tenant_id"]))
+        ic_txn_id = uuid.UUID(str(payload["ic_txn_id"]))
+        nonce = uuid.UUID(str(payload["nonce"]))
+        amount = Decimal(str(payload["amount"]))
+        entry_date = date.fromisoformat(str(payload["entry_date"]))
+        description = payload.get("description") or None
+        issued_at = relay_protocol.parse_issued_at(str(payload["issued_at"]))
+    except (KeyError, ValueError, TypeError, relay_protocol.RelayPayloadError):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            {"code": "bad_payload", "detail": "malformed relay payload"},
+        ) from None
+
+    # 4. Forged-routing guard: the body's dst must equal the header tenant.
+    if body_dst != tenant_uuid:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            {"code": "routing_mismatch", "detail": "dst_tenant_id mismatch"},
+        )
+
+    # Decode the bearer token (the per-edge scoped token, "icrl_…").
+    token = ""
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization[len("bearer "):].strip()
+
+    # 3. Bind the tenant GUC and load the edge under FORCE-RLS, then verify token
+    #    + signature, then post — all under the bound app-role session so RLS is
+    #    enforced for every query (no cross-tenant data path). session.info keeps
+    #    the GUC alive across the post's internal commit.
+    async with AsyncSessionLocal() as session:
+        session.info["tenant_id"] = str(tenant_uuid)
+        async with session.begin():
+            await session.execute(
+                text(f"SET LOCAL app.current_tenant = '{tenant_uuid}'")
+            )
+            # The wire edge_id is the ORIGINATOR's (lives in the partner DB). The
+            # receiver resolves ITS OWN edge by (this tenant, partner=src_tenant,
+            # COUNTERPARTY) — the partner can never name one of our edge ids.
+            edge = (
+                await session.execute(
+                    select(IcEdge).where(
+                        IcEdge.tenant_id == tenant_uuid,
+                        IcEdge.partner_tenant_id == body_src,
+                        IcEdge.direction == IcEdgeDirection.COUNTERPARTY,
+                        IcEdge.topology == IcEdgeTopology.REMOTE,
+                    )
+                )
+            ).scalar_one_or_none()
+
+        # 5. Unknown / wrong-direction edge.
+        if edge is None or edge.relay_token_hash is None or edge.relay_pubkey is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                {"code": "unknown_edge", "detail": "no such relay edge"},
+            )
+
+        local_edge_id = edge.id  # the receiver's own edge id (for the service post)
+
+        # 6. Per-edge token (belt-and-braces over the signature). Fail closed.
+        if not token or not relay_keys.verify_edge_token(token, edge.relay_token_hash):
+            raise HTTPException(
+                status.HTTP_401_UNAUTHORIZED,
+                {"code": "bad_token", "detail": "invalid relay token"},
+            )
+
+        # 7. Ed25519 signature over the EXACT canonical bytes of the body.
+        try:
+            signature = bytes_from_b64(body.signature)
+        except ValueError:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                {"code": "bad_signature", "detail": "signature verification failed"},
+            ) from None
+        canonical = relay_signing.canonical_payload(payload)
+        if not relay_signing.verify(canonical, signature, bytes(edge.relay_pubkey)):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                {"code": "bad_signature", "detail": "signature verification failed"},
+            )
+
+        # 8. Freshness — bounds the replay surface before the nonce dedupe.
+        if not relay_protocol.is_fresh(
+            issued_at, window_seconds=settings.ic_relay_freshness_seconds
+        ):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                {"code": "stale", "detail": "message outside freshness window"},
+            )
+
+        # 9. Idempotency pre-check: a re-delivery returns the prior ack, posts
+        #    nothing. The UNIQUE constraints (ic_txn_id, nonce) are the last-line
+        #    race guard caught below.
+        async with session.begin():
+            await session.execute(
+                text(f"SET LOCAL app.current_tenant = '{tenant_uuid}'")
+            )
+            prior = (
+                await session.execute(
+                    select(IcInbox).where(
+                        IcInbox.tenant_id == tenant_uuid,
+                        IcInbox.ic_txn_id == ic_txn_id,
+                    )
+                )
+            ).scalar_one_or_none()
+        if prior is not None:
+            return JSONResponse(
+                {"ic_txn_id": str(ic_txn_id), "status": str(prior.status)}
+            )
+
+    # 11. Post the reciprocal leg + ic_inbox in ONE local txn (the service owns
+    #     its own commit). A duplicate that races past the pre-check trips the
+    #     UNIQUE constraint -> IntegrityError -> return the idempotent ack.
+    async with AsyncSessionLocal() as session:
+        session.info["tenant_id"] = str(tenant_uuid)
+        # Bind the GUC for the service's first BEGIN (after_begin re-applies it).
+        async with session.begin():
+            await session.execute(
+                text(f"SET LOCAL app.current_tenant = '{tenant_uuid}'")
+            )
+        try:
+            local_txn = await svc.accept_remote_counterparty(
+                session,
+                tenant_id=tenant_uuid,
+                edge_id=local_edge_id,
+                ic_txn_id=ic_txn_id,
+                nonce=nonce,
+                amount=amount,
+                entry_date=entry_date,
+                description=description,
+                payload_json=payload,
+                signature=signature,
+                posted_by="ic-relay",
+            )
+        except IntegrityError:
+            await session.rollback()
+            return JSONResponse(
+                {"ic_txn_id": str(ic_txn_id), "status": str(IcInboxStatus.POSTED)}
+            )
+        except svc.IntercompanyError as exc:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                {"code": "post_failed", "detail": str(exc)},
+            ) from exc
+
+    logger.info(
+        "ic-relay accepted ic_txn_id=%s for tenant=%s (local_txn=%s)",
+        ic_txn_id, tenant_uuid, local_txn.id,
+    )
+    return JSONResponse({"ic_txn_id": str(ic_txn_id), "status": "POSTED"})
+
+
+def bytes_from_b64(value: str) -> bytes:
+    """Decode a base64 signature string, raising ValueError on garbage."""
+    from base64 import b64decode
+
+    return b64decode(value.encode("ascii"), validate=True)

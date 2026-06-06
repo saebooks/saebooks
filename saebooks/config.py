@@ -111,6 +111,43 @@ class Settings(BaseSettings):
     field_encryption_key: str = Field(default="", alias="SAEBOOKS_FIELD_ENCRYPTION_KEY")
 
     # ---------------------------------------------------------------- #
+    # Intercompany REMOTE relay (Phase 3c) — DEFAULT-OFF safety flag    #
+    # ---------------------------------------------------------------- #
+    # The single most important reversibility lever for the cross-DB
+    # intercompany relay (plan D4). When False (the default and the only
+    # value until Richard signs off a per-stack go-live):
+    #   * the REMOTE branch of services/intercompany.post_local_pair
+    #     raises a clear "remote relay disabled" error (no outbox row,
+    #     no local leg) -- REMOTE edges are inert;
+    #   * the outbox dispatcher task does NOT start in lifespan;
+    #   * the receiver POST /api/v1/intercompany/accept returns 503.
+    # Nothing relays a cross-tenant write until this is flipped True on a
+    # named stack. LOCAL (same-tenant) intercompany is unaffected either way.
+    ic_remote_relay_enabled: bool = Field(
+        default=False, alias="SAEBOOKS_IC_REMOTE_RELAY_ENABLED"
+    )
+    # The ONE outbound URL each tenant api learns: the saebooks-group broker
+    # relay service (e.g. http://saebooks-group-relay:8000 on a shared docker
+    # network). A tenant never learns partner /ic/accept URLs directly -- the
+    # broker holds the pair registry and forwards. Empty until 3c go-live.
+    ic_broker_url: str = Field(default="", alias="SAEBOOKS_IC_BROKER_URL")
+    # Freshness window (seconds) for an inbound relay message: a message whose
+    # issued_at is older than this is rejected at /ic/accept before the nonce
+    # dedupe, bounding the replay surface. Default 24h.
+    ic_relay_freshness_seconds: int = Field(
+        default=86400, alias="SAEBOOKS_IC_RELAY_FRESHNESS_SECONDS"
+    )
+    # Dispatcher backoff / give-up policy. After max_attempts the outbox row
+    # goes DEAD and surfaces in the recon view for human action -- it is NEVER
+    # auto-reversed (plan D5).
+    ic_relay_max_attempts: int = Field(
+        default=8, alias="SAEBOOKS_IC_RELAY_MAX_ATTEMPTS"
+    )
+    ic_relay_poll_seconds: float = Field(
+        default=5.0, alias="SAEBOOKS_IC_RELAY_POLL_SECONDS"
+    )
+
+    # ---------------------------------------------------------------- #
     # ABR lookup (Australian Business Register — v1.1 feature)         #
     # ---------------------------------------------------------------- #
     # The ABR SearchByABN JSON API needs a "GUID" (API key) issued by

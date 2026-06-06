@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import logging
 import os
 from collections.abc import AsyncIterator
@@ -83,6 +85,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     grpc_port = int(os.getenv("SAEBOOKS_GRPC_PORT", "50051"))
     grpc_server = await grpc_serve(grpc_port)
 
+    # Intercompany REMOTE-relay outbox dispatcher (Phase 3c). Started ONLY when
+    # SAEBOOKS_IC_REMOTE_RELAY_ENABLED is True (default OFF) — with the flag off
+    # the task is never created and the outbox stays inert. The task drains the
+    # outbox, relays signed payloads to the broker, and backs off / DEADs on
+    # failure (never auto-reverses the local leg). It is cancelled on shutdown.
+    _ic_relay_stop: asyncio.Event | None = None
+    _ic_relay_task: asyncio.Task[None] | None = None
+    if settings.ic_remote_relay_enabled:
+        from saebooks.services.ic_relay.dispatcher import dispatcher_loop
+
+        _ic_relay_stop = asyncio.Event()
+        _ic_relay_task = asyncio.create_task(
+            dispatcher_loop(settings=settings, stop=_ic_relay_stop)
+        )
+        logger.info("IC remote-relay dispatcher task started")
+
     # MCP streamable-HTTP session manager — must run inside an async
     # context so its anyio task group is initialised. Without this the
     # mounted /mcp endpoint 500s with "Task group is not initialized."
@@ -98,6 +116,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             yield
     else:
         yield
+    if _ic_relay_stop is not None and _ic_relay_task is not None:
+        _ic_relay_stop.set()
+        _ic_relay_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await _ic_relay_task  # best-effort stop
     await grpc_server.stop(grace=5)
 
 
