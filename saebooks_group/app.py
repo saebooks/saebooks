@@ -33,6 +33,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 
+from saebooks.services.ic_relay import protocol as relay_protocol
 from saebooks.services.ic_relay import signing as relay_signing
 from saebooks_group.config import settings
 from saebooks_group.db import SessionLocal
@@ -213,8 +214,19 @@ async def relay(
         edge_id = uuid.UUID(str(payload["edge_id"]))
         nonce = uuid.UUID(str(payload["nonce"]))
         ic_txn_id = uuid.UUID(str(payload["ic_txn_id"]))
-    except (KeyError, ValueError, TypeError):
+        issued_at = relay_protocol.parse_issued_at(str(payload["issued_at"]))
+    except (KeyError, ValueError, TypeError, relay_protocol.RelayPayloadError):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "malformed payload") from None
+
+    # Freshness — reject a stale / far-future envelope at the FIRST hop, before
+    # the (edge_id, nonce) dedupe, so a captured message cannot be re-injected
+    # through the broker outside a tight window (mirrors /ic/accept).
+    if not relay_protocol.is_fresh(
+        issued_at, window_seconds=settings.relay_freshness_seconds
+    ):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "message outside freshness window"
+        )
 
     token = ""
     if authorization and authorization.lower().startswith("bearer "):
@@ -253,7 +265,18 @@ async def relay(
             )
         ).scalar_one_or_none()
         if dup is not None:
-            return JSONResponse({"ic_txn_id": str(ic_txn_id), "status": str(dup.status)})
+            # REJECTED-REPLAY: the broker has already seen this (edge_id, nonce).
+            # It must NOT look like a genuine first delivery — flag it so the
+            # originator dispatcher does NOT mark the outbox row delivered/ACKED
+            # off a replay (the false-positive-ack defect). Nothing is forwarded.
+            return JSONResponse(
+                {
+                    "ic_txn_id": str(ic_txn_id),
+                    "status": str(dup.status),
+                    "duplicate": True,
+                    "delivered": False,
+                }
+            )
 
         log_row = RelayLog(
             ic_txn_id=ic_txn_id,
@@ -313,7 +336,16 @@ async def relay(
         raise HTTPException(
             status.HTTP_502_BAD_GATEWAY, last_error or "forward failed"
         )
-    return JSONResponse({"ic_txn_id": str(ic_txn_id), "status": "DELIVERED"})
+    # ACCEPTED-NEW: a genuine first delivery the partner accepted. The dispatcher
+    # may ACK the outbox row only on this (delivered=True, duplicate=False).
+    return JSONResponse(
+        {
+            "ic_txn_id": str(ic_txn_id),
+            "status": "DELIVERED",
+            "duplicate": False,
+            "delivered": True,
+        }
+    )
 
 
 # --------------------------------------------------------------------------- #

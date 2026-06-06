@@ -596,8 +596,16 @@ async def accept_relay(
                 )
             ).scalar_one_or_none()
         if prior is not None:
+            # Idempotent RE-DELIVERY: we already have this ic_txn_id. Return the
+            # prior ack but flag it ``duplicate`` so the caller (broker /
+            # dispatcher) can tell a re-delivery from a genuine first POST and
+            # never count a replay as a fresh delivery. Nothing is posted.
             return JSONResponse(
-                {"ic_txn_id": str(ic_txn_id), "status": str(prior.status)}
+                {
+                    "ic_txn_id": str(ic_txn_id),
+                    "status": str(prior.status),
+                    "duplicate": True,
+                }
             )
 
     # 11. Post the reciprocal leg + ic_inbox in ONE local txn (the service owns
@@ -625,9 +633,18 @@ async def accept_relay(
                 posted_by="ic-relay",
             )
         except IntegrityError:
+            # A duplicate that raced past the pre-check trips a UNIQUE constraint
+            # (ic_txn_id idempotency OR nonce replay). Return the idempotent ack
+            # flagged ``duplicate`` — a replayed nonce must NOT look like a fresh
+            # delivery, and (with the UNIQUE(tenant_id, nonce) guard) nothing was
+            # posted a second time.
             await session.rollback()
             return JSONResponse(
-                {"ic_txn_id": str(ic_txn_id), "status": str(IcInboxStatus.POSTED)}
+                {
+                    "ic_txn_id": str(ic_txn_id),
+                    "status": str(IcInboxStatus.POSTED),
+                    "duplicate": True,
+                }
             )
         except svc.IntercompanyError as exc:
             raise HTTPException(
@@ -639,7 +656,9 @@ async def accept_relay(
         "ic-relay accepted ic_txn_id=%s for tenant=%s (local_txn=%s)",
         ic_txn_id, tenant_uuid, local_txn.id,
     )
-    return JSONResponse({"ic_txn_id": str(ic_txn_id), "status": "POSTED"})
+    return JSONResponse(
+        {"ic_txn_id": str(ic_txn_id), "status": "POSTED", "duplicate": False}
+    )
 
 
 def bytes_from_b64(value: str) -> bytes:

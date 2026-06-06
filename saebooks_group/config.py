@@ -27,6 +27,15 @@ class BrokerSettings(BaseSettings):
     relay_forwarding_enabled: bool = Field(
         default=False, alias="SAEBOOKS_GROUP_RELAY_FORWARDING_ENABLED"
     )
+    # Freshness window (seconds) the broker enforces on an inbound relay BEFORE it
+    # forwards, mirroring the receiver /ic/accept guard. A message whose issued_at
+    # is older than this (or as far in the future) is rejected at the first hop,
+    # so a captured envelope cannot be re-injected through the broker outside a
+    # tight window. Default 10 min; keep it equal to the tenant
+    # SAEBOOKS_IC_RELAY_FRESHNESS_SECONDS so both hops agree.
+    relay_freshness_seconds: int = Field(
+        default=600, alias="SAEBOOKS_GROUP_RELAY_FRESHNESS_SECONDS"
+    )
 
 
 settings = BrokerSettings()

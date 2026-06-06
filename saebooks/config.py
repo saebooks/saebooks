@@ -132,10 +132,15 @@ class Settings(BaseSettings):
     # broker holds the pair registry and forwards. Empty until 3c go-live.
     ic_broker_url: str = Field(default="", alias="SAEBOOKS_IC_BROKER_URL")
     # Freshness window (seconds) for an inbound relay message: a message whose
-    # issued_at is older than this is rejected at /ic/accept before the nonce
-    # dedupe, bounding the replay surface. Default 24h.
+    # issued_at is older than this (or as far in the future) is rejected at
+    # /ic/accept AND at the broker /ic/relay BEFORE the nonce dedupe, bounding
+    # the replay surface. Default 10 min (600s) — tight on purpose: the relay is
+    # a same-LAN hop between cooperating stacks, so a legitimate message is
+    # seconds old; a wide 24h window left a day-long window in which a captured
+    # message could be re-injected before its nonce was first seen. Configurable
+    # for clock-skew-heavy deployments (5-15 min is the sane band).
     ic_relay_freshness_seconds: int = Field(
-        default=86400, alias="SAEBOOKS_IC_RELAY_FRESHNESS_SECONDS"
+        default=600, alias="SAEBOOKS_IC_RELAY_FRESHNESS_SECONDS"
     )
     # Dispatcher backoff / give-up policy. After max_attempts the outbox row
     # goes DEAD and surfaces in the recon view for human action -- it is NEVER

@@ -271,6 +271,10 @@ async def test_idempotent_redelivery_posts_nothing_twice(
         r1 = await ac.post("/api/v1/intercompany/accept", json=env, headers=headers)
         r2 = await ac.post("/api/v1/intercompany/accept", json=env, headers=headers)
     assert r1.status_code == 200 and r2.status_code == 200
+    # The genuine first POST is NOT a duplicate; the re-delivery IS flagged one,
+    # so a broker/dispatcher can never count the replay as a fresh delivery.
+    assert r1.json().get("duplicate") is False, "first delivery must not be flagged duplicate"
+    assert r2.json().get("duplicate") is True, "re-delivery must be flagged duplicate"
     # Exactly ONE inbox row + ONE reciprocal leg despite two deliveries.
     async with AsyncSessionLocal() as s:
         n_inbox = (await s.execute(text(
@@ -334,8 +338,21 @@ async def test_replayed_nonce_rejected(
         n_legs = (await s.execute(text(
             "SELECT count(*) FROM ic_legs WHERE tenant_id = :t"),
             {"t": d["dst_tenant"]})).scalar_one()
+        n_inbox = (await s.execute(text(
+            "SELECT count(*) FROM ic_inbox WHERE tenant_id = :t"),
+            {"t": d["dst_tenant"]})).scalar_one()
     assert n_legs == 1, f"nonce replay produced {n_legs} legs (must stay 1)"
+    assert n_inbox == 1, f"nonce replay produced {n_inbox} inbox rows (must stay 1)"
+    # The replay response must be DISTINGUISHABLE from a genuine first POST: it is
+    # either a flat reject (400) OR a 200 explicitly flagged ``duplicate`` — never
+    # a bare 200 that a broker/dispatcher could count as a fresh delivery (the
+    # false-positive-delivery-ack defect). A bare unflagged 200 here fails.
     assert r2.status_code in (400, 200), r2.text
+    if r2.status_code == 200:
+        assert r2.json().get("duplicate") is True, (
+            "a replayed-nonce delivery returned a bare 200 with no duplicate flag "
+            "— indistinguishable from a genuine first POST"
+        )
 
 
 async def _edge_privkey(tenant_id: uuid.UUID, edge_id: uuid.UUID) -> str:
@@ -472,3 +489,80 @@ async def test_accept_only_writes_receiver_tenant(
             {"t": d["src_tenant"]})).scalar_one()
     assert src_inbox == 0, "accept leaked an inbox row into the SRC tenant"
     assert src_legs == 1, "SRC tenant should still have only its originator leg"
+
+
+# ----------------------------------------------------------------------------- #
+# Hardening regression (adversarial review): the freshness window is SHORT and
+# enforced at the boundary. The old 24h default left a day-long window for a
+# captured message to be re-injected before its nonce was first seen. The window
+# is now ~10 min (configurable); a message just past it is rejected, and a fresh
+# one is accepted with the SAME tight setting.
+# ----------------------------------------------------------------------------- #
+async def test_freshness_window_is_short_not_a_day(
+    relay_on: None, remote_pair: dict[str, Any]
+) -> None:
+    # The configured window must be tight (<= 15 min) — the hardening lever.
+    assert settings.ic_relay_freshness_seconds <= 900, (
+        f"freshness window {settings.ic_relay_freshness_seconds}s is too wide — "
+        f"tighten to a short 5-15 min window (was 24h)"
+    )
+
+
+async def test_message_just_past_window_rejected(
+    relay_on: None, remote_pair: dict[str, Any]
+) -> None:
+    """A message issued just PAST the freshness window is rejected (post nothing)."""
+    d = remote_pair
+    priv = relay_keys.unwrap_private_key(await _edge_privkey(d["src_tenant"], d["src_edge"]))
+    window = settings.ic_relay_freshness_seconds
+    payload = relay_protocol.build_payload(
+        ic_txn_id=uuid.uuid4(), edge_id=d["src_edge"],
+        src_tenant_id=d["src_tenant"], dst_tenant_id=d["dst_tenant"],
+        amount=Decimal("100.00"), entry_date=date(2026, 6, 6), description="edge-stale",
+        nonce=uuid.uuid4(),
+        # Just past the window (window + 30s) — proves the boundary, not just a
+        # day-old message. With the old 24h default this would have been FRESH.
+        issued_at=datetime.now(UTC) - timedelta(seconds=window + 30),
+    )
+    sig = relay_signing.sign(relay_signing.canonical_payload(payload), priv)
+    env = {"payload": payload, "signature": b64encode(sig).decode("ascii")}
+    from saebooks.main import app
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/v1/intercompany/accept", json=env,
+            headers={"X-Tenant-Id": str(d["dst_tenant"]),
+                     "Authorization": f"Bearer {d['dst_token']}"},
+        )
+    assert resp.status_code == 400 and "stale" in resp.text.lower(), resp.text
+    async with AsyncSessionLocal() as s:
+        n = (await s.execute(text(
+            "SELECT count(*) FROM ic_inbox WHERE tenant_id = :t"),
+            {"t": d["dst_tenant"]})).scalar_one()
+    assert n == 0, "a just-past-window message must post nothing"
+
+
+async def test_message_within_window_accepted(
+    relay_on: None, remote_pair: dict[str, Any]
+) -> None:
+    """A fresh message (well within the tight window) is still accepted — the tighten
+    must not break the happy path."""
+    d = remote_pair
+    priv = relay_keys.unwrap_private_key(await _edge_privkey(d["src_tenant"], d["src_edge"]))
+    payload = relay_protocol.build_payload(
+        ic_txn_id=uuid.uuid4(), edge_id=d["src_edge"],
+        src_tenant_id=d["src_tenant"], dst_tenant_id=d["dst_tenant"],
+        amount=Decimal("100.00"), entry_date=date(2026, 6, 6), description="fresh",
+        nonce=uuid.uuid4(),
+        issued_at=datetime.now(UTC) - timedelta(seconds=5),
+    )
+    sig = relay_signing.sign(relay_signing.canonical_payload(payload), priv)
+    env = {"payload": payload, "signature": b64encode(sig).decode("ascii")}
+    from saebooks.main import app
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/v1/intercompany/accept", json=env,
+            headers={"X-Tenant-Id": str(d["dst_tenant"]),
+                     "Authorization": f"Bearer {d['dst_token']}"},
+        )
+    assert resp.status_code == 200, resp.text
+    assert resp.json().get("duplicate") is False

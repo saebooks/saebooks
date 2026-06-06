@@ -205,3 +205,76 @@ async def test_flag_off_drains_nothing(outbox_row: dict[str, Any]) -> None:
     async with AsyncSessionLocal() as s:
         ob = (await s.execute(select(IcOutbox).where(IcOutbox.id == d["outbox_id"]))).scalar_one()
     assert ob.status == IcOutboxStatus.PENDING  # untouched
+
+
+# ----------------------------------------------------------------------------- #
+# Hardening regression (adversarial review): a replayed-nonce ack from the broker
+# must NOT mark the outbox row delivered/ACKED. The broker distinguishes
+# ACCEPTED-NEW (delivered=True) from REJECTED-REPLAY (duplicate=True); a 200 that
+# is a replay was NOT forwarded to the partner, so treating it as ACKED would be
+# a false-positive delivery (a silent half-pair that looks healthy). The row must
+# instead surface for human action (FAILED -> DEAD), never ACKED.
+# ----------------------------------------------------------------------------- #
+class _ReplayAckClient:
+    """Broker client that returns the REJECTED-REPLAY ack shape (200 + duplicate)."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def relay(self, *, payload: dict, signature_b64: str, token: str) -> dict:
+        self.calls += 1
+        return {"status": "RECEIVED", "duplicate": True, "delivered": False}
+
+
+class _ReplayAckBrokerFactory:
+    def __init__(self, *, token: str | None = "icrl_x") -> None:
+        self._client = _ReplayAckClient()
+        self._token = token
+
+    def client(self) -> Any:
+        return self._client
+
+    def resolve_token(self, edge_id: uuid.UUID) -> str | None:
+        return self._token
+
+
+async def test_replay_ack_does_not_mark_delivered(outbox_row: dict[str, Any]) -> None:
+    """A replayed-nonce ack (duplicate=True) must NOT flip the row ACKED."""
+    d = outbox_row
+    app_factory, login_factory = _factories(d["tenant_id"])
+    bf = _ReplayAckBrokerFactory()
+    sent = await disp.run_dispatcher_once(
+        settings=_test_settings(), broker_factory=bf,
+        app_session_factory=app_factory, login_session_factory=login_factory,
+    )
+    # NOT counted as a delivery.
+    assert sent == 0, "a replay ack must not count as a delivery"
+    async with AsyncSessionLocal() as s:
+        ob = (await s.execute(select(IcOutbox).where(IcOutbox.id == d["outbox_id"]))).scalar_one()
+    assert ob.status != IcOutboxStatus.ACKED, (
+        "FALSE-POSITIVE DELIVERY ACK: a replayed-nonce broker response marked the "
+        "outbox row ACKED — a replay was treated as a genuine first delivery"
+    )
+    assert ob.status in (IcOutboxStatus.FAILED, IcOutboxStatus.DEAD)
+    assert ob.last_error and "replay" in ob.last_error.lower()
+
+
+async def test_replay_ack_eventually_deads_for_human(outbox_row: dict[str, Any]) -> None:
+    """A persistent replay ack drives the row to DEAD (surfaces in recon), never ACKED."""
+    d = outbox_row
+    app_factory, login_factory = _factories(d["tenant_id"])
+    settings = _test_settings(ic_relay_max_attempts=3)
+    bf = _ReplayAckBrokerFactory()
+    for _ in range(4):
+        async with AsyncSessionLocal() as s:
+            await s.execute(text(
+                "UPDATE ic_outbox SET next_attempt_at = NULL WHERE id = :i"),
+                {"i": d["outbox_id"]})
+            await s.commit()
+        await disp.run_dispatcher_once(
+            settings=settings, broker_factory=bf,
+            app_session_factory=app_factory, login_session_factory=login_factory,
+        )
+    async with AsyncSessionLocal() as s:
+        ob = (await s.execute(select(IcOutbox).where(IcOutbox.id == d["outbox_id"]))).scalar_one()
+    assert ob.status == IcOutboxStatus.DEAD, f"expected DEAD after max replay acks, got {ob.status}"

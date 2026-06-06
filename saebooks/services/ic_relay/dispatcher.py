@@ -136,7 +136,7 @@ async def _drain_tenant(
         client: BrokerClient = broker_factory.client()
         sig_b64 = b64encode(bytes(row.signature)).decode("ascii")
         try:
-            await client.relay(
+            ack = await client.relay(
                 payload=dict(row.payload_json),
                 signature_b64=sig_b64,
                 token=token,
@@ -162,12 +162,41 @@ async def _drain_tenant(
                 row.next_attempt_at = _next_backoff(row.attempts)
             continue
 
-        # 2xx — the broker accepted and (in 3c) forwarded to the partner.
-        row.status = IcOutboxStatus.ACKED
-        row.attempts += 1
-        row.last_error = None
-        row.next_attempt_at = None
-        sent += 1
+        # A 2xx from the broker is NOT automatically a delivery. The broker
+        # distinguishes ACCEPTED-NEW (delivered=True) from REJECTED-REPLAY
+        # (duplicate=True) — a replayed (edge_id, nonce) returns 200 but was
+        # NOT forwarded to the partner. We must ACK ONLY a genuine first
+        # delivery; a duplicate/replay ack must never mark the outbox row
+        # delivered (the false-positive-delivery-ack defect). Treat a replay
+        # like any non-delivery: back off / DEAD so it surfaces in the recon
+        # view for human action, NEVER silently "ACKED".
+        ack = ack if isinstance(ack, dict) else {}
+        is_duplicate = bool(ack.get("duplicate"))
+        # Back-compat: an ack that does not carry the explicit "delivered" flag
+        # (older broker / injected test fake) is treated as a genuine delivery
+        # UNLESS it is flagged a duplicate. A broker that sets the flag is
+        # authoritative either way.
+        is_delivered = ack.get("delivered", True) and not is_duplicate
+        if is_delivered:
+            row.status = IcOutboxStatus.ACKED
+            row.attempts += 1
+            row.last_error = None
+            row.next_attempt_at = None
+            sent += 1
+        else:
+            # Replay / not-delivered ack: do NOT mark delivered. Surface it.
+            row.attempts += 1
+            row.last_error = (
+                "broker reported replay/duplicate — not forwarded to partner; "
+                "NOT acked (needs human action)"
+                if is_duplicate
+                else "broker returned a non-delivery ack — NOT acked"
+            )
+            if row.attempts >= settings.ic_relay_max_attempts:
+                row.status = IcOutboxStatus.DEAD
+            else:
+                row.status = IcOutboxStatus.FAILED
+                row.next_attempt_at = _next_backoff(row.attempts)
 
     await app_session.commit()
     return sent
