@@ -178,6 +178,19 @@ class Settings(BaseSettings):
     paperless_url: str = Field(default="", alias="PAPERLESS_URL")
     paperless_api_url: str = Field(default="", alias="PAPERLESS_API_URL")
     paperless_api_token: str = Field(default="", alias="PAPERLESS_API_TOKEN")
+    # Auto-bill kill switch. When False (DEFAULT) the inbound Paperless
+    # webhook will NOT create DRAFT supplier bills for _BILL_TYPES
+    # documents — it logs and returns 200 (same as an unrouted doctype).
+    # Disabled by default because unattended auto-draft bills (one per
+    # Paperless doc, incl. own outbound invoices/statements) created
+    # “AUTO-INGESTED FROM PAPERLESS” junk that had to be purged from
+    # sauer_books (DB-rebuild handover Gap 4). Email→Paperless archiving
+    # is unaffected (separate IMAP path). Statement reconciliation also
+    # unaffected (routes via _STATEMENT_TYPES, not this gate). Set
+    # PAPERLESS_AUTO_BILL_ENABLED=true to deliberately re-enable.
+    paperless_auto_bill_enabled: bool = Field(
+        default=False, alias="PAPERLESS_AUTO_BILL_ENABLED"
+    )
 
     # LEI / GLEIF — same shape as ABR. Enterprise-only feature gate
     # (see FLAG_LEI_LOOKUP). No API key needed — GLEIF is public.

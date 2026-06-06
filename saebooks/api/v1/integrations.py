@@ -523,8 +523,25 @@ async def paperless_webhook(
             )
             ingest = {"action": "statement", "status": "error", "detail": str(exc)}
 
+    elif dtype in _BILL_TYPES and not settings.paperless_auto_bill_enabled:
+        # --- Auto-bill kill switch (default OFF) ---
+        # Bill-type docs are recognised but NOT turned into DRAFT bills:
+        # unattended auto-draft creation (one per Paperless doc, incl. own
+        # outbound invoices/statements) produced "AUTO-INGESTED FROM
+        # PAPERLESS" junk that had to be purged (DB-rebuild handover Gap 4).
+        # Email->Paperless archiving and statement reconciliation are
+        # unaffected. Re-enable deliberately via PAPERLESS_AUTO_BILL_ENABLED.
+        logger.info(
+            "integrations: paperless webhook — auto-bill disabled, skipping "
+            "bill doctype=%r tenant=%s doc=%s",
+            dtype,
+            tenant_uuid,
+            doc_id,
+        )
+        ingest = {"action": "bill", "status": "skipped", "reason": "auto_bill_disabled"}
+
     elif dtype in _BILL_TYPES:
-        # --- Draft bill path (existing behaviour) ---
+        # --- Draft bill path (gated ON via PAPERLESS_AUTO_BILL_ENABLED) ---
         # ingest_document resolves company internally from the session; it does
         # not rely on set_current_company / the CompanyScoped contextvar for
         # correctness — its Bill/Contact SELECTs carry explicit company_id WHERE
