@@ -44,6 +44,7 @@ from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_active_company_id, get_session
 from saebooks.models.ic import IcLeg, IcTxn
 from saebooks.services import intercompany as svc
+from saebooks.services.ic_relay import recon as recon_svc
 
 router = APIRouter(
     prefix="/intercompany",
@@ -118,6 +119,45 @@ class IntercompanyListItem(BaseModel):
 
 class IntercompanyListOut(BaseModel):
     items: list[IntercompanyListItem]
+
+
+class ReconLegOut(BaseModel):
+    """One posted leg in the reconciliation view."""
+
+    id: UUID
+    company_id: UUID
+    journal_entry_id: UUID
+    side: str
+
+
+class ReconRowOut(BaseModel):
+    """One intercompany txn in the read-only reconciliation view.
+
+    ``matched`` is True when both legs (ORIGINATOR + COUNTERPARTY) are present —
+    a complete, eliminated pair. ``outbox_status`` / ``inbox_status`` carry the
+    in-flight relay state when present (None for a pure LOCAL pair).
+    """
+
+    ic_txn_id: UUID
+    company_id: UUID
+    status: str
+    description: str | None
+    matched: bool
+    legs: list[ReconLegOut]
+    outbox_status: str | None
+    inbox_status: str | None
+
+
+class IntercompanyReconOut(BaseModel):
+    """Read-only intercompany reconciliation/position for the active company.
+
+    ``unmatched_count`` is the number of txns missing a leg — the operator's
+    "needs attention" tally (a stuck half-pair from a relay delivery failure
+    surfaces here; the engine never auto-reverses).
+    """
+
+    items: list[ReconRowOut]
+    unmatched_count: int
 
 
 async def _legs_for(session: AsyncSession, ic_txn_id: UUID) -> list[IcLeg]:
@@ -234,6 +274,55 @@ async def list_intercompany(
     return IntercompanyListOut(
         items=[IntercompanyListItem.model_validate(t) for t in rows]
     )
+
+
+# ---------------------------------------------------------------------------
+# GET /intercompany/reconciliation  (read-only — Phase 3d)
+# ---------------------------------------------------------------------------
+# Registered BEFORE GET /{ic_txn_id} so the literal "/reconciliation" path is
+# not captured by the UUID path-param matcher.
+
+
+@router.get("/reconciliation", response_model=IntercompanyReconOut)
+async def reconcile_intercompany(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> IntercompanyReconOut:
+    """Read-only intercompany position for the active company.
+
+    Lists every IC txn the active company participates in, each with its legs, a
+    ``matched`` flag, and any in-flight relay state. SELECT-only — posts nothing,
+    mutates nothing. Tenant- and company-scoped (runs under the caller's own
+    FORCE-RLS; no cross-tenant data path).
+    """
+    tenant_id = resolve_tenant_id(request)
+    rows = await recon_svc.intercompany_position(
+        session, tenant_id=tenant_id, company_id=company_id
+    )
+    items = [
+        ReconRowOut(
+            ic_txn_id=r.ic_txn_id,
+            company_id=r.company_id,
+            status=r.status,
+            description=r.description,
+            matched=r.matched,
+            legs=[
+                ReconLegOut(
+                    id=leg.id,
+                    company_id=leg.company_id,
+                    journal_entry_id=leg.journal_entry_id,
+                    side=leg.side,
+                )
+                for leg in r.legs
+            ],
+            outbox_status=r.outbox_status,
+            inbox_status=r.inbox_status,
+        )
+        for r in rows
+    ]
+    unmatched = sum(1 for r in items if not r.matched)
+    return IntercompanyReconOut(items=items, unmatched_count=unmatched)
 
 
 # ---------------------------------------------------------------------------

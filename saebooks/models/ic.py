@@ -24,15 +24,18 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     TIMESTAMP,
     ForeignKey,
     ForeignKeyConstraint,
+    Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from saebooks.db import Base
@@ -75,9 +78,68 @@ class IcLegSide(enum.StrEnum):
     COUNTERPARTY = "COUNTERPARTY"
 
 
+class IcEdgeTopology(enum.StrEnum):
+    """Whether an edge is same-DB (``LOCAL``) or cross-DB (``REMOTE``).
+
+    Phase 1 edges are all ``LOCAL`` (the migration-0159 column default). A
+    ``REMOTE`` edge relays across two tenant DBs via the broker. Stored as a
+    plain ``String(16)``.
+    """
+
+    LOCAL = "LOCAL"
+    REMOTE = "REMOTE"
+
+
+class IcEdgeRelayStatus(enum.StrEnum):
+    """Lifecycle of a REMOTE edge's relay capability.
+
+    A REMOTE edge cannot relay live until ``ACTIVE``, which only the
+    accountant-principal authoriser flow (Phase 3c) can set. Stored as a plain
+    ``String(16)``.
+    """
+
+    INACTIVE = "INACTIVE"
+    PENDING_PARTNER = "PENDING_PARTNER"
+    ACTIVE = "ACTIVE"
+    REVOKED = "REVOKED"
+
+
+class IcOutboxStatus(enum.StrEnum):
+    """Dispatcher state machine for an outbound relay message.
+
+    ``PENDING`` (awaiting first send) -> ``SENT`` (broker 2xx) -> ``ACKED``
+    (partner accepted); ``FAILED`` (retryable, backoff scheduled) -> ``DEAD``
+    (max attempts exhausted; surfaced as an unmatched leg for human action,
+    never auto-reversed). Stored as a plain ``String(16)``.
+    """
+
+    PENDING = "PENDING"
+    SENT = "SENT"
+    ACKED = "ACKED"
+    FAILED = "FAILED"
+    DEAD = "DEAD"
+
+
+class IcInboxStatus(enum.StrEnum):
+    """Lifecycle of a received relay message.
+
+    ``RECEIVED`` (signature + freshness + idempotency passed) -> ``POSTED``
+    (reciprocal leg posted) or ``REJECTED`` (verification failed; nothing
+    posted, kept for audit). Stored as a plain ``String(16)``.
+    """
+
+    RECEIVED = "RECEIVED"
+    POSTED = "POSTED"
+    REJECTED = "REJECTED"
+
+
 _STATUS_LEN = 16
 _DIRECTION_LEN = 16
 _SIDE_LEN = 16
+_TOPOLOGY_LEN = 16
+_RELAY_STATUS_LEN = 16
+_OUTBOX_STATUS_LEN = 16
+_INBOX_STATUS_LEN = 16
 
 
 class IcTxn(CompanyScoped, Base):
@@ -172,10 +234,13 @@ class IcEdge(CompanyScoped, Base):
         ForeignKey("companies.id", ondelete="CASCADE"),
         nullable=False,
     )
-    partner_company_id: Mapped[uuid.UUID] = mapped_column(
+    # Phase 3a (REMOTE): relaxed to nullable — a REMOTE edge's partner lives
+    # in a different tenant DB and has no LOCAL companies row. LOCAL edges still
+    # carry it (the service/app layer requires it for the LOCAL path).
+    partner_company_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("companies.id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=True,
     )
     # Composite-FK'd to accounts(id, company_id) at the table level (above);
     # not declared as a single-column FK here to keep the composite constraint
@@ -187,6 +252,44 @@ class IcEdge(CompanyScoped, Base):
     direction: Mapped[IcEdgeDirection] = mapped_column(
         String(_DIRECTION_LEN),
         nullable=False,
+    )
+    # ---- Phase 3a REMOTE columns (migration 0159). All nullable/defaulted so
+    # existing LOCAL edges are untouched; inert until the relay phases wire them.
+    # LOCAL | REMOTE — a REMOTE edge relays across two tenant DBs via the broker.
+    topology: Mapped[IcEdgeTopology] = mapped_column(
+        String(_TOPOLOGY_LEN),
+        nullable=False,
+        default=IcEdgeTopology.LOCAL,
+        server_default=IcEdgeTopology.LOCAL.value,
+    )
+    # The partner's tenant id in the partner DB (opaque to us).
+    partner_tenant_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
+    # Informational; the real route is via the broker.
+    partner_endpoint: Mapped[str | None] = mapped_column(Text)
+    # The PARTNER's Ed25519 public key — we verify their inbound legs with this.
+    relay_pubkey: Mapped[bytes | None] = mapped_column(LargeBinary)
+    # THIS tenant's Ed25519 private key for this edge, Fernet-encrypted
+    # (crypto.encrypt_field) — never cleartext, never leaves the tenant.
+    relay_privkey_ciphertext: Mapped[bytes | None] = mapped_column(LargeBinary)
+    # Per-edge scoped bearer (api_token pattern) — prefix lookup + bcrypt hash.
+    relay_token_prefix: Mapped[str | None] = mapped_column(String(16))
+    relay_token_hash: Mapped[str | None] = mapped_column(Text)
+    # INACTIVE | PENDING_PARTNER | ACTIVE | REVOKED. A REMOTE edge cannot relay
+    # live until ACTIVE (set only by the accountant-principal authoriser flow).
+    relay_status: Mapped[IcEdgeRelayStatus] = mapped_column(
+        String(_RELAY_STATUS_LEN),
+        nullable=False,
+        default=IcEdgeRelayStatus.INACTIVE,
+        server_default=IcEdgeRelayStatus.INACTIVE.value,
+    )
+    # Who turned this edge on (the principal who held grants on both tenants).
+    authorised_by_principal_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("principals.id", ondelete="SET NULL"),
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True),
@@ -261,3 +364,182 @@ class IcLeg(CompanyScoped, Base):
         server_default=func.now(),
         nullable=False,
     )
+
+
+class IcOutbox(CompanyScoped, Base):
+    """One ORIGINATED REMOTE event awaiting relay (migration 0159, Phase 3a).
+
+    Written in the SAME local txn as the originator leg (a later phase): the
+    local books are never blocked on partner reachability. ``PENDING``/``FAILED``
+    rows are the dispatcher's work queue. INERT for now — nothing reads or writes
+    this table until the live-relay phase.
+
+    RLS (Class A — direct ``tenant_id``): migration 0159 applies ENABLE + FORCE
+    ROW LEVEL SECURITY + the standard ``tenant_isolation`` policy + the 0131
+    coherence trigger. The ORM does not add an RLS directive (the migration is
+    authoritative DDL). Also ``CompanyScoped`` (app-layer company filter).
+    """
+
+    __tablename__ = "ic_outbox"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "idempotency_key",
+            name="uq_ic_outbox_tenant_idempotency_key",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=func.gen_random_uuid(),
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # The shared event id, chosen by the originator and carried in the payload.
+    ic_txn_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("ic_txn.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # Which REMOTE edge this rides (RESTRICT — never orphan an outbox row).
+    edge_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("ic_edges.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    # = ic_txn_id (one outbox row per shared event); UNIQUE per tenant.
+    idempotency_key: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+    )
+    # Anti-replay material, fresh per message.
+    nonce: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    # The canonical relay body (see services/ic_relay/signing.canonical_payload).
+    payload_json: Mapped[dict[str, object]] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+    )
+    # Ed25519 detached signature over the canonical bytes.
+    signature: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    status: Mapped[IcOutboxStatus] = mapped_column(
+        String(_OUTBOX_STATUS_LEN),
+        nullable=False,
+        default=IcOutboxStatus.PENDING,
+        server_default=IcOutboxStatus.PENDING.value,
+    )
+    attempts: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    next_attempt_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True)
+    )
+    last_error: Mapped[str | None] = mapped_column(Text)
+    issued_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+class IcInbox(CompanyScoped, Base):
+    """One RECEIVED REMOTE event (migration 0159, Phase 3a).
+
+    ``UNIQUE(tenant_id, ic_txn_id)`` is the idempotency guard (a re-delivered
+    message hits the unique violation -> receiver returns the prior ack and
+    posts nothing); ``UNIQUE(tenant_id, nonce)`` is the replay guard. INERT for
+    now — nothing reads or writes this table until the live-relay phase.
+
+    ``ic_txn_id`` is the ORIGINATOR-chosen external id carried in the payload; it
+    is deliberately NOT an FK (the receiver mints its own ``ic_txn`` row when it
+    posts the reciprocal leg). RLS + coherence trigger as ``IcOutbox``.
+    """
+
+    __tablename__ = "ic_inbox"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "ic_txn_id",
+            name="uq_ic_inbox_tenant_ic_txn_id",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "nonce",
+            name="uq_ic_inbox_tenant_nonce",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=func.gen_random_uuid(),
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # The originator-chosen shared id. NOT an FK (the local ic_txn is minted by
+    # the receiver). UNIQUE(tenant_id, ic_txn_id) is the idempotency guard.
+    ic_txn_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    edge_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("ic_edges.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    # UNIQUE(tenant_id, nonce) = replay guard.
+    nonce: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    payload_json: Mapped[dict[str, object]] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+    )
+    signature: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    # The reciprocal leg once posted (RESTRICT — never deleted out from under
+    # the inbox audit row).
+    journal_entry_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("journal_entries.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    status: Mapped[IcInboxStatus] = mapped_column(
+        String(_INBOX_STATUS_LEN),
+        nullable=False,
+        default=IcInboxStatus.RECEIVED,
+        server_default=IcInboxStatus.RECEIVED.value,
+    )
+    reject_reason: Mapped[str | None] = mapped_column(Text)
+    received_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    posted_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
