@@ -50,8 +50,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0159_principal_webauthn_lookup"
-down_revision: str | None = "0158_reclassifications"
+revision: str = "0160_principal_webauthn_lookup"
+down_revision: str | None = "0159_ic_remote_relay"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
