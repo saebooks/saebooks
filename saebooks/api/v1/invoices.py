@@ -42,10 +42,12 @@ from saebooks.api.v1.schemas import (
     InvoiceListOut,
     InvoiceOut,
     InvoiceUpdate,
+    ReviewFlagBody,
 )
 from saebooks.config import settings
 from saebooks.models.invoice import InvoiceStatus
 from saebooks.services import invoices as svc
+from saebooks.services import review_flags as review_flags_svc
 from saebooks.services.features import FLAG_STRIPE_INTEGRATION, require_feature
 from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
@@ -95,6 +97,7 @@ async def list_invoices(
     request: Request,
     contact_id: UUID | None = Query(default=None),
     status: str | None = Query(default=None),
+    flagged: bool | None = Query(default=None, description="Filter by flagged_for_review"),
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
     page: int = Query(default=1, ge=1),
@@ -117,6 +120,7 @@ async def list_invoices(
         tenant_id,
         contact_id=contact_id,
         status=status_enum,
+        flagged=flagged,
         date_from=date_from,
         date_to=date_to,
         limit=page_size,
@@ -146,6 +150,40 @@ async def get_invoice(
     inv = await svc.api_get(session, invoice_id, tenant_id=tenant_id, company_id=company_id)
     if inv is None:
         raise HTTPException(404, "Invoice not found")
+    return InvoiceOut.model_validate(inv)
+
+
+# ---------------------------------------------------------------------------
+# POST /{id}/review-flag — Gap 3 (set/clear flag for review)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{invoice_id}/review-flag", response_model=InvoiceOut)
+async def set_invoice_review_flag(
+    invoice_id: UUID,
+    payload: ReviewFlagBody,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> InvoiceOut:
+    tenant_id = resolve_tenant_id(request)
+    actor = getattr(request.state, "actor", None) or "api"
+    try:
+        await review_flags_svc.set_review_flag(
+            session,
+            "invoice",
+            invoice_id,
+            tenant_id=tenant_id,
+            company_id=company_id,
+            actor=str(actor),
+            flagged=payload.flagged,
+            review_note=payload.review_note,
+        )
+    except review_flags_svc.ReviewFlagError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    inv = await svc.api_get(
+        session, invoice_id, tenant_id=tenant_id, company_id=company_id
+    )
     return InvoiceOut.model_validate(inv)
 
 

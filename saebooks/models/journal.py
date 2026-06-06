@@ -8,6 +8,7 @@ if TYPE_CHECKING:
     from saebooks.models.account import Account
 
 from sqlalchemy import (
+    Boolean,
     Date,
     DateTime,
     ForeignKey,
@@ -17,6 +18,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -70,6 +72,9 @@ class JournalOrigin(enum.StrEnum):
     REVERSAL = "REVERSAL"
     INTERCOMPANY = "INTERCOMPANY"
     TRANSFER = "TRANSFER"
+    # Money-in / negative-expense record types (migration 0157).
+    SUPPLIER_CREDIT_NOTE = "SUPPLIER_CREDIT_NOTE"
+    RECEIPT = "RECEIPT"
 
 
 class JournalEntry(CompanyScoped, Base):
@@ -122,6 +127,13 @@ class JournalEntry(CompanyScoped, Base):
     source_type: Mapped[str | None] = mapped_column(String(64))
     source_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     attachments: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # Gap 3 (migration 0157) — review flag + optional note. Lets a reviewer
+    # mark a transaction/JE for follow-up during a books review without
+    # changing its posting state.
+    flagged_for_review: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    review_note: Mapped[str | None] = mapped_column(Text)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

@@ -54,6 +54,11 @@ class AuditAction(StrEnum):
     PAYMENT_POST = "payment.post"
     PAYMENT_VOID = "payment.void"
     CREDIT_NOTE_POST = "credit_note.post"
+    # Money-in record types (0157).
+    SUPPLIER_CREDIT_NOTE_POST = "supplier_credit_note.post"
+    SUPPLIER_CREDIT_NOTE_VOID = "supplier_credit_note.void"
+    RECEIPT_POST = "receipt.post"
+    RECEIPT_VOID = "receipt.void"
 
     # Journal entry posted into a locked period via an authorised override.
     JOURNAL_OVERRIDE_POST = "journal.override_post"

@@ -941,6 +941,7 @@ async def list_active(
     *,
     contact_id: uuid.UUID | None = None,
     status: InvoiceStatus | None = None,
+    flagged: bool | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
     limit: int = 50,
@@ -955,6 +956,8 @@ async def list_active(
         base_where.append(Invoice.contact_id == contact_id)
     if status is not None:
         base_where.append(Invoice.status == status)
+    if flagged is not None:
+        base_where.append(Invoice.flagged_for_review.is_(flagged))
     if date_from is not None:
         base_where.append(Invoice.issue_date >= date_from)
     if date_to is not None:

@@ -77,6 +77,7 @@ from saebooks.api.v1.projects import router as projects_router
 from saebooks.api.v1.proration import router as proration_router
 from saebooks.api.v1.purchase_orders import router as purchase_orders_router
 from saebooks.api.v1.quotes import router as quotes_router
+from saebooks.api.v1.receipts import router as receipts_router
 from saebooks.api.v1.reconciliation import router as reconciliation_router
 from saebooks.api.v1.recurring_invoices import router as recurring_invoices_router
 from saebooks.api.v1.reports import router as reports_router
@@ -88,6 +89,9 @@ from saebooks.api.v1.statements import router as statements_router
 from saebooks.api.v1.stp import router as stp_router
 from saebooks.api.v1.super_funds import router as super_funds_router
 from saebooks.api.v1.super_lodgements import router as super_lodgements_router
+from saebooks.api.v1.supplier_credit_notes import (
+    router as supplier_credit_notes_router,
+)
 from saebooks.api.v1.tax_codes import router as tax_codes_router
 from saebooks.api.v1.tax_returns import router as tax_returns_router
 from saebooks.api.v1.time_entries import router as time_entries_router
@@ -166,6 +170,10 @@ router.include_router(payments_router)
 # repayment, bank/loan transfers. See saebooks/services/transfers.py.
 router.include_router(transfers_router)
 router.include_router(credit_notes_router)
+# 0157 money-in record types: supplier (purchase) credit note + generic
+# money-in receipt. See saebooks/services/supplier_credit_notes.py + receipts.py.
+router.include_router(supplier_credit_notes_router)
+router.include_router(receipts_router)
 router.include_router(projects_router)
 router.include_router(fixed_assets_router)
 router.include_router(depreciation_models_router)
