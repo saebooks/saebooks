@@ -85,6 +85,8 @@ async def _raw_insert_entry(
     status: str,
     origin: str,
     override_reason: str | None = None,
+    source_type: str | None = None,
+    source_id: uuid.UUID | None = None,
 ) -> uuid.UUID:
     """Raw-INSERT a journal_entries header (no service layer), guard LIVE.
 
@@ -93,21 +95,41 @@ async def _raw_insert_entry(
     """
     je_id = uuid.uuid4()
     ref = f"GRD-{je_id.hex[:8]}"
+    # 0162 FIX 2: a POSTED/REVERSED record-type origin must carry source_*.
+    # Auto-anchor a synthetic source when a require-source origin is posted
+    # without one, so 0161 setup inserts stay valid under the new guard.
+    _REQUIRE_SRC = {
+        "INVOICE", "BILL", "PAYMENT", "EXPENSE", "CREDIT_NOTE",
+        "SUPPLIER_CREDIT_NOTE", "RECEIPT", "TRANSFER", "RECLASSIFICATION",
+        "INTERCOMPANY", "DEPRECIATION", "FIXED_ASSET", "BANK_REC",
+        "PAYRUN", "TRUST_DISTRIBUTION", "REVERSAL",
+    }
+    if (
+        status in _POSTED_LIKE
+        and origin in _REQUIRE_SRC
+        and source_type is None
+        and source_id is None
+    ):
+        source_type = origin.lower()
+        source_id = uuid.uuid4()
     async with guarded_session() as s:
         await s.execute(
             text(
                 """
                 INSERT INTO journal_entries
                     (id, company_id, tenant_id, ref, entry_date,
-                     description, status, origin, override_reason, version)
+                     description, status, origin, override_reason,
+                     source_type, source_id, version)
                 VALUES
                     (:id, :cid, :tid, :ref, '2026-05-01',
-                     'guard test', :status, :origin, :reason, 1)
+                     'guard test', :status, :origin, :reason,
+                     :st, :sid, 1)
                 """
             ),
             {
                 "id": je_id, "cid": cid, "tid": tid, "ref": ref,
                 "status": status, "origin": origin, "reason": override_reason,
+                "st": source_type, "sid": source_id,
             },
         )
         if status in _POSTED_LIKE:
@@ -150,18 +172,37 @@ async def test_raw_insert_reversed_unknown_is_rejected(seeded_company):
         await _raw_insert_entry(cid, tid, accts, status="REVERSED", origin="UNKNOWN")
 
 
-@pytest.mark.parametrize(
-    "origin",
-    [
-        "INVOICE", "BILL", "PAYMENT", "EXPENSE", "CREDIT_NOTE",
-        "SUPPLIER_CREDIT_NOTE", "RECEIPT", "TRANSFER", "RECLASSIFICATION",
-        "INTERCOMPANY", "DEPRECIATION", "FIXED_ASSET", "FX_REVAL",
-        "DEFERRED_REVENUE", "BANK_REC", "YEAR_END_CLOSE", "TRUST_DISTRIBUTION",
-        "CASHBOOK_BACKFILL", "REVERSAL", "PAYRUN",
-    ],
-)
+# Migration 0162 (FIX 2) requires a real source_type+source_id on a
+# POSTED/REVERSED row whose origin is a record-type origin; the system /
+# roll-up origins (UNKNOWN, MANUAL, CASHBOOK_BACKFILL, DEFERRED_REVENUE,
+# YEAR_END_CLOSE, FX_REVAL) are EXEMPT and post without a source. Split the
+# parametrize so each side passes the correct source shape under 0161+0162.
+_REQUIRE_SOURCE_ORIGINS = [
+    "INVOICE", "BILL", "PAYMENT", "EXPENSE", "CREDIT_NOTE",
+    "SUPPLIER_CREDIT_NOTE", "RECEIPT", "TRANSFER", "RECLASSIFICATION",
+    "INTERCOMPANY", "DEPRECIATION", "FIXED_ASSET", "BANK_REC",
+    "PAYRUN", "TRUST_DISTRIBUTION", "REVERSAL",
+]
+_EXEMPT_NO_SOURCE_ORIGINS = [
+    "FX_REVAL", "DEFERRED_REVENUE", "YEAR_END_CLOSE", "CASHBOOK_BACKFILL",
+]
+
+
+@pytest.mark.parametrize("origin", _REQUIRE_SOURCE_ORIGINS)
 async def test_record_type_origin_post_is_allowed(seeded_company, origin):
-    """Every real record-type origin posts cleanly (no allow-list drift)."""
+    """Every real record-type origin posts cleanly WHEN it carries source
+    (no allow-list drift). 0162 FIX 2 additionally requires source_*."""
+    cid, tid, accts = seeded_company
+    je_id = await _raw_insert_entry(
+        cid, tid, accts, status="POSTED", origin=origin,
+        source_type=origin.lower(), source_id=uuid.uuid4(),
+    )
+    await _force_delete(je_id)
+
+
+@pytest.mark.parametrize("origin", _EXEMPT_NO_SOURCE_ORIGINS)
+async def test_exempt_origin_post_without_source_is_allowed(seeded_company, origin):
+    """System / roll-up origins post WITHOUT a source (EXEMPT under 0162)."""
     cid, tid, accts = seeded_company
     je_id = await _raw_insert_entry(cid, tid, accts, status="POSTED", origin=origin)
     await _force_delete(je_id)
@@ -199,7 +240,8 @@ async def test_update_draft_to_posted_with_real_origin_is_allowed(seeded_company
     async with guarded_session() as s:
         await _add_balanced_lines(s, je_id, accts)  # 0101 needs lines once POSTED
         await s.execute(
-            text("UPDATE journal_entries SET status='POSTED', origin='INVOICE' WHERE id=:id"),
+            text("UPDATE journal_entries SET status='POSTED', origin='INVOICE', "
+             "source_type='invoice', source_id=gen_random_uuid() WHERE id=:id"),
             {"id": je_id},
         )
         await s.commit()
