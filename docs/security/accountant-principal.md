@@ -186,3 +186,168 @@ half is implemented and tested now; only the ceremony wiring is deferred. (Tests
 `alembic downgrade 0154_intercompany_phase1` drops the functions, trigger, policies, and
 the three tables in FK-safe order. No data outside these tables is touched. The branch is
 not deployed, so rollback is "do not merge."
+
+---
+
+# Part II — Login, act-as, and grant API (`feat/accountant-login`)
+
+**Status: REVIEW BRANCH ONLY (`feat/accountant-login`, off `origin/main`). DRAFT PR, NOT
+merged, NOT deployed.** Part I (above) modelled the schema + service + DB layer (migration
+`0156` on main). Part II adds the three things that make the principal *usable*: the live
+WebAuthn login ceremony, the "act as tenant" switch endpoint, and the tenant-side grant
+management API. It is the highest-risk surface in the system — review it as such.
+
+New code in this branch:
+
+| File | What |
+|---|---|
+| `alembic/versions/0159_principal_webauthn_lookup.py` | SECURITY DEFINER `principal_webauthn_lookup_credential(bytea)` — resolve a credential by id at login (renumber at merge). |
+| `saebooks/services/principal_session.py` | Mint/decode the principal JWT (`psub` + `typ="principal"`), unbound (login) + tenant-bound (act-as). |
+| `saebooks/services/principal_webauthn.py` | Live FIDO2 register + authenticate ceremony, reusing the `webauthn` library (NOT the legacy `fido2_service`). The principal-id derivation lives here. |
+| `saebooks/api/v1/principal_auth.py` | Router: login + register + list-tenants + act-as + bound-read; `require_principal_bearer` dep. |
+| `saebooks/api/v1/principal_grants.py` | Router: tenant-side grant create/revoke/list under the granting tenant's user session. |
+
+## 10. The login binding — `principal_id` is server-derived, full stop
+
+This is the single most important invariant of the whole feature (foreshadowed in Part I
+§8.1): **the authenticated principal id comes ONLY from the verified FIDO2 assertion — the
+resolved credential's owner — and NEVER from a client-supplied parameter.**
+
+The login ceremony (`principal_webauthn.complete_authentication`, called by
+`POST /api/v1/principal/auth/webauthn/authenticate/finish`):
+
+1. **begin** returns `PublicKeyCredentialRequestOptions` with an *empty* `allowCredentials`
+   (discoverable login). The client supplies NO principal identifier at begin-time.
+2. **finish** receives the assertion. We parse the credential `id` and the challenge.
+3. The challenge is matched to OUR begin-call's stored challenge (anti-replay of the
+   options; process-local store, 5-min TTL, separate from the user store).
+4. The credential is resolved by its `id` via the SECURITY DEFINER
+   `principal_webauthn_lookup_credential` (migration 0159) — no tenant/session context
+   needed because `credential_id` is a 256-bit unguessable blob.
+5. The assertion **signature is verified against the stored `public_key`** of that
+   credential. A row match alone proves nothing; the signature is the proof of possession.
+6. The anti-replay `sign_count` is bumped; the principal is confirmed active and
+   FIDO2-satisfied.
+7. **Only then** `principal_id` = the resolved row's `principal_id`. The endpoint mints an
+   *unbound* principal token carrying that id.
+
+There is no request field for a principal id at login. The `AuthenticateFinishRequest`
+schema has exactly one field, `credential`; any extra field a client sends is ignored. A
+client cannot claim "I am principal X" — it can only present a key, and the key tells us
+who it is. (Tests: `test_login_derives_principal_id_from_credential_not_client` sends an
+attacker `principal_id` alongside the *victim's* credential and asserts the minted session
+is the **victim's**; `test_login_unknown_credential_rejected`, `test_login_bad_signature_rejected`.)
+
+This deliberately follows `saebooks/api/v1/webauthn.py::authenticate_finish` (the proven
+user passkey path) and deliberately does **not** follow
+`saebooks/services/fido2_service.py`, whose `complete_authentication` is a legacy,
+simplified stub that trusts a `user_id` carried in challenge state and never verifies the
+signature. That stub must not be used as a template; the principal path verifies for real.
+
+### Token shape — the user and principal surfaces are disjoint
+
+A principal session is a JWT with `psub` (principal id) + `typ="principal"` — a *different
+shape* from a user JWT (`sub` + `tenant_id`). `decode_principal_token` rejects anything
+whose `typ` is not `"principal"`, so a normal user JWT can never authenticate a principal
+endpoint (it has a valid signature but no `typ`). Conversely a principal token presented to
+a user endpoint carries no `sub`, so `require_bearer` hydrates no user and the role gate
+denies it — a principal token confers **zero** user authority. (Tests:
+`test_user_jwt_is_not_a_principal_token`, `test_user_jwt_cannot_call_principal_endpoint`,
+`test_principal_token_cannot_call_user_endpoint`.)
+
+The existing single-tenant user login/enforcement path is **byte-for-byte unchanged**: the
+principal path is a parallel router with its own bearer dependency and its own token type.
+
+## 11. Act-as — the binding goes through the same FORCE-RLS as a native user
+
+An *unbound* login token may only call `/principal/tenants` (list its own grants) and
+`/principal/act-as`. `POST /principal/act-as` takes the principal id from the
+**authenticated session** (not the request) and a target `tenant_id` from the body:
+
+* it calls `resolve_grant_role` (the SECURITY DEFINER predicate) under the app role; if no
+  *active* grant exists it returns `None` and the endpoint **403s — no token, no binding**;
+* on success it mints a *tenant-bound* principal token (adds `tenant_id` + `role`).
+
+A bound token's tenant queries flow through `get_principal_tenant_session`, which:
+
+1. **re-verifies the active grant on every request** (so revocation takes effect on the
+   next request, not just the next login), then
+2. binds `app.current_tenant` via the **same** `session.info['tenant_id']` +
+   `after_begin` listener mechanism a native user's `deps.get_session` uses.
+
+So every read/write a bound principal performs runs under the **identical** FORCE-RLS
+`tenant_isolation` policy as a native user of that tenant. There is **no BYPASSRLS data
+path** — the only SECURITY DEFINER calls are the credential lookup (auth bootstrap, by an
+unguessable id) and the grant resolvers (server-supplied principal id). A principal with no
+grant for tenant C can never reach `app.current_tenant = C` through any sanctioned path, so
+RLS returns zero rows for C exactly as for a stranger. (Tests:
+`test_act_as_non_granted_tenant_denied`, `test_bound_session_isolation_under_force_rls`,
+`test_revoked_grant_blocks_act_as`, `test_revoked_grant_blocks_bound_session_reuse`.)
+
+## 12. Grant API — a tenant can only grant access to ITSELF
+
+Grant management (`/api/v1/principal-grants`, admin-only) runs under the **granting
+tenant's own user session** — ordinary `require_bearer` -> `get_session` -> `app.current_tenant`
+bound from the user's JWT. That is deliberate: the **database**, not the application,
+enforces ownership.
+
+* **create** (`POST`): the grant's `tenant_id` is taken from the authenticated session
+  (`resolve_tenant_id`), never from the body — the body has no `tenant_id` field at all.
+  Even if it did, the `tenant_isolation` `WITH CHECK` rejects any INSERT whose `tenant_id`
+  != `app.current_tenant`. **A tenant cannot forge a grant binding a principal to another
+  tenant.** Role is validated app-side and the 0156 coherence trigger fails closed on an
+  unknown role. (Tests: `test_tenant_admin_grants_own_tenant_then_principal_can_act_as`,
+  `test_grant_tenant_id_is_session_derived_not_body`, `test_invalid_role_rejected`; the
+  WITH-CHECK forge-prevention is proven in `test_principal_cross_tenant.py::test_tenant_cannot_forge_grant_for_foreign_tenant`.)
+* **revoke** (`DELETE /{id}`): a soft-delete (`status='revoked'`) so the audit trail
+  survives, scoped by `... WHERE id=:id AND status='active'`. Under the tenant's GUC, RLS
+  confines the UPDATE to the tenant's own rows, so a foreign grant id matches zero rows ->
+  404. Revoke removes access immediately for new act-as binds. (Tests:
+  `test_revoke_removes_act_as`, `test_tenant_cannot_revoke_another_tenants_grant`.)
+* **list** (`GET`): RLS-filtered to the tenant's own grants. (Test:
+  `test_list_shows_only_own_tenant_grants`.)
+* **authz**: grant management requires role >= ADMIN (reuses `_require_admin`). (Test:
+  `test_non_admin_cannot_create_grant`.)
+
+> Test-harness note: the isolation proofs that depend on FORCE-RLS run against the
+> `saebooks_app` (NOBYPASSRLS) engine, because the test API process connects as the owner
+> role (`DATABASE_URL=saebooks_test`) where FORCE-RLS does not isolate — the same pattern as
+> `test_cross_tenant_isolation.py` / `test_principal_cross_tenant.py`. The HTTP tests prove
+> the gating + wiring; the app-role tests prove the isolation guarantee.
+
+## 13. Migration 0159
+
+Adds only the `principal_webauthn_lookup_credential(bytea)` SECURITY DEFINER function
+(`STABLE`, `search_path = pg_catalog, public`, `EXECUTE` to `saebooks_app` only). No table
+is created or altered, so the new-table RLS checklist does not apply. Reversible:
+`alembic downgrade 0158_reclassifications` drops the function. The number is provisional —
+renumber at merge if a lower number lands first.
+
+## 14. Open risks for Richard to review (login/grant additions)
+
+1. **The login derivation is the crown jewel.** Re-read §10. The whole feature's safety is
+   that `complete_authentication` returns an id taken from the resolved+verified credential.
+   Any future refactor that lets a request field influence the principal id is a
+   tenant-boundary break. The endpoint schema has no such field today.
+2. **Challenge store is process-local.** Single-replica only (same limitation as the user
+   WebAuthn flow). A multi-replica deployment needs Redis-backed challenges or a principal
+   logging in against replica A but finishing on replica B will fail. Documented seam.
+3. **First-key enrolment is out-of-band.** `register/*` requires an already-authenticated
+   principal session — but a principal has no key until one is enrolled (chicken/egg). The
+   first credential must be seeded by an operator (direct insert / CLI), exactly like a
+   user's first key. A bootstrap CLI is future work; do not ship a self-service
+   "enrol-without-a-key" path.
+4. **Revocation is per-request, not session-killing.** A bound token re-checks the grant on
+   every request, so revocation takes effect on the next request — but a request already
+   in flight completes. Acceptable (matches GUC transaction scope); note if instant kill is
+   ever required.
+5. **Token TTL.** Principal tokens are 1h (vs 8h user tokens). Tune as needed; shorter is
+   safer for a cross-tenant identity.
+6. **No rate limiting on login.** The login endpoint is unauthenticated by design (it IS
+   the auth). Credential ids are unguessable and the signature must verify, so brute force
+   is infeasible, but a deployment should still put the usual edge rate-limit in front of
+   `/principal/auth/webauthn/authenticate/*`.
+7. **Audit attribution.** A bound principal acting in a tenant currently attributes writes
+   via the existing audit hooks using the session's identity; wiring `psub` explicitly into
+   `audit_log` for principal-originated writes is a recommended follow-up so a tenant can
+   see "accountant X did this" vs a native user.

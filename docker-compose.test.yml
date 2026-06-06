@@ -69,6 +69,10 @@ services:
       # docker/test-initdb/01-test-roles.sql script seeds the role with
       # this same value so the test compose stays self-consistent.
       SAEBOOKS_APP_DB_PASSWORD: "saebooks_app_test_pw"
+      # feat/accountant-login: principal WebAuthn ceremony needs an RP id +
+      # origin configured or the login endpoints 503. Test-only values.
+      SAEBOOKS_WEBAUTHN_RP_ID: "books.test"
+      SAEBOOKS_WEBAUTHN_ORIGIN: "https://books.test"
     # entrypoint.sh with args execs them directly (no uvicorn).
     # We run alembic upgrade head first, then pytest.
     # bash -c is passed as the single arg so entrypoint execs it.
