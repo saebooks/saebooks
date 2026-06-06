@@ -137,6 +137,127 @@ async def _stamp_user_from_sub(request: Request, claims: dict[str, object]) -> N
     request.state.role = user.role
 
 
+async def _enforce_principal_grant(
+    request: Request, claims: dict[str, object]
+) -> None:
+    """Re-verify a principal-type bearer's grant on the SHARED auth path.
+
+    Cross-tenant accountant ("principal") sessions are minted by
+    ``/api/v1/principal/act-as`` as JWTs signed with the SAME secret as user
+    JWTs, but carrying ``typ="principal"`` + ``psub`` (principal id) instead of
+    ``sub`` (user id). ``decode_access_token`` validates the signature/expiry of
+    *any* such token — it does not key on ``typ`` — so a principal token reaches
+    ``require_bearer`` and would otherwise have its ``tenant_id`` claim stamped
+    onto ``request.state.jwt_claims`` and bound to ``app.current_tenant`` by
+    ``get_session`` with NO grant re-check. That made the entire user API
+    (companies, contacts, invoices, …) reachable by a bound principal token, and
+    left a revoked grant exploitable for the token's whole 1h TTL on the user
+    router (the headline A2 hole).
+
+    This function closes that hole by enforcing the grant on the shared path,
+    PER REQUEST, BEFORE any tenant is bound:
+
+    * Detects a principal-type token (``typ == "principal"`` OR a ``psub`` claim
+      is present). Normal user tokens (``sub`` + ``tenant_id``, no ``typ``/
+      ``psub``) never enter this branch — their behaviour is byte-for-byte
+      unchanged.
+    * An UNBOUND principal token (no ``tenant_id``) has no business on a user
+      data router → 403. (It can still drive ``/principal/tenants`` +
+      ``/principal/act-as`` via the principal router, which uses its own bearer
+      dependency.)
+    * A bound principal token is verified via ``resolve_grant_role`` — the SAME
+      SECURITY DEFINER predicate ``/act-as`` and ``get_principal_tenant_session``
+      use. No ACTIVE grant for (psub, tenant_id) → 403, and NO binding (we raise
+      before ``require_bearer`` stamps the claims). Because this runs on every
+      request, a revoked grant takes effect IMMEDIATELY on the user router too.
+
+    There is no BYPASSRLS path: ``resolve_grant_role`` is parameterised by
+    (principal, tenant) and is independent of ``app.current_tenant``, so we can
+    call it on a fresh session before any tenant GUC is set — exactly as the
+    principal router does. Fail closed: any error resolving the grant denies.
+    """
+    from saebooks.services.principal_session import PRINCIPAL_TOKEN_TYPE
+
+    is_principal = (
+        claims.get("typ") == PRINCIPAL_TOKEN_TYPE or claims.get("psub") is not None
+    )
+    if not is_principal:
+        return  # normal user token — leave the existing path untouched.
+
+    psub = claims.get("psub")
+    if not psub:
+        # typ=principal but no psub is a malformed principal token.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="principal token missing psub",
+        )
+    try:
+        principal_id = uuid.UUID(str(psub))
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="principal token psub is not a valid UUID",
+        ) from exc
+
+    tenant_claim = claims.get("tenant_id")
+    if not tenant_claim:
+        # Unbound principal login token — not valid on a user data router.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "unbound principal session; call /api/v1/principal/act-as "
+                "before using the user API"
+            ),
+        )
+    try:
+        tenant_id = uuid.UUID(str(tenant_claim))
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="principal token tenant_id is not a valid UUID",
+        ) from exc
+
+    # Re-verify the live grant under the app role, before binding anything.
+    # resolve_grant_role -> principal_grant_role (SECURITY DEFINER) does NOT
+    # depend on app.current_tenant; identical call to the principal router.
+    from saebooks.db import AsyncSessionLocal
+    from saebooks.services.principal import resolve_grant_role
+
+    try:
+        async with AsyncSessionLocal() as session:
+            role = await resolve_grant_role(session, principal_id, tenant_id)
+    except HTTPException:
+        raise
+    except Exception as exc:  # fail closed — never proceed on a lookup error.
+        logger.warning(
+            "principal grant check failed for psub=%s tenant=%s: %s",
+            principal_id,
+            tenant_id,
+            exc,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="could not verify principal grant",
+        ) from exc
+
+    if role is None:
+        logger.info(
+            "principal grant denied on user path: psub=%s tenant=%s",
+            principal_id,
+            tenant_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="no active grant for the requested tenant",
+        )
+
+    # Verified. Stamp the principal context for downstream audit attribution.
+    # We do NOT hydrate request.state.user/role — a principal token confers no
+    # user identity, so admin gates keep denying it exactly as before.
+    request.state.principal_role = role
+    request.state.principal_id = principal_id
+
+
 def _is_dev_env() -> bool:
     """True when the process is in a dev/test environment.
 
@@ -259,6 +380,15 @@ async def require_bearer(
     from saebooks.services.jwt_tokens import JWTError, decode_access_token
     try:
         claims = decode_access_token(presented)
+        # PRINCIPAL-TYPE TOKEN GATE (shared path). A principal session token is
+        # a validly-signed JWT (same secret), so it decodes here too. Before we
+        # stamp any claims or let get_session bind app.current_tenant, re-verify
+        # the principal's ACTIVE grant for the token's tenant — per request, so
+        # a revoked grant is enforced IMMEDIATELY on the user router as well
+        # (closes A1/A2). Raises 403 with NO binding when the grant is absent.
+        # No-op for normal user tokens (sub + tenant_id, no typ/psub), so the
+        # existing user-auth path is byte-for-byte unchanged.
+        await _enforce_principal_grant(request, claims)
         # Stamp the claims onto request.state so the session dep and
         # downstream handlers can see the tenant. Old code decoded and
         # discarded the claims — this was bug #3 in the leak diagnosis.

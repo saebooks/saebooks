@@ -74,6 +74,9 @@ from saebooks.api.v1.one_off_vendors import router as one_off_vendors_router
 from saebooks.api.v1.pay_run import router as pay_run_router
 from saebooks.api.v1.payments import router as payments_router
 from saebooks.api.v1.period_close import router as period_close_router
+from saebooks.api.v1.principal_auth import auth_router as principal_auth_router
+from saebooks.api.v1.principal_auth import router as principal_router
+from saebooks.api.v1.principal_grants import router as principal_grants_router
 from saebooks.api.v1.projects import router as projects_router
 from saebooks.api.v1.proration import router as proration_router
 from saebooks.api.v1.purchase_orders import router as purchase_orders_router
@@ -114,6 +117,10 @@ router.include_router(health_router)
 # any router with a router-level bearer dependency so /auth/login etc.
 # are never gated by require_bearer.
 router.include_router(login_router)
+# Principal (accountant / bank) LOGIN — unauthenticated WebAuthn entry
+# points; mount before any router-level bearer dependency, exactly like
+# login_router. See saebooks/api/v1/principal_auth.py.
+router.include_router(principal_auth_router)
 # Public signup / verify / reset / magic-link — also unauthenticated.
 # Mounted right after login so /auth/signup, /auth/verify-email etc.
 # share the same gate-free prefix.
@@ -234,6 +241,11 @@ router.include_router(cashbook_router)
 # the dependency on Authentik / CF Access for FIDO2-bound login. Default
 # on; per-instance config via SAEBOOKS_WEBAUTHN_RP_ID / _ORIGIN env vars.
 router.include_router(webauthn_router)
+# Authenticated principal endpoints (register key / list tenants /
+# act-as / bound reads) + tenant-side grant management. REVIEW BRANCH
+# feat/accountant-login — cross-tenant surface, not deployed.
+router.include_router(principal_router)
+router.include_router(principal_grants_router)
 router.include_router(tpar_router)
 # Payday Super Phase 1 — SAFF generation + lodgement tracking
 router.include_router(super_lodgements_router)
