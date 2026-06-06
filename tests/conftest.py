@@ -11,6 +11,8 @@ import os
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import event as _sa_event
+from sqlalchemy.orm import Session as _sa_sync_session
 
 # Enable middleware's test-only Remote-User trusted-header path before
 # importing the app (env reads run on each request, so order doesn't
@@ -76,6 +78,43 @@ def _bootstrap_sqlite_schema() -> None:
 
 
 from saebooks.main import app
+
+
+# ---------------------------------------------------------------------------
+# Migration 0161 (je_engine_guard) — test-suite escape hatch.
+#
+# The 0161 BEFORE trigger on ``journal_entries`` refuses raw-SQL / direct-ORM
+# bypass of the engine: a row that lands POSTED/REVERSED with origin=UNKNOWN
+# or a reason-less MANUAL, a raw DELETE / financial-identity edit of a posted
+# row. The sanctioned bypass is ``SET app.db_rebuild=on`` — a *declared*
+# rebuild (Richard / rebuild passes).
+#
+# Many tests legitimately build POSTED journal entries as fixture data
+# straight through the ORM (``origin`` then defaults to UNKNOWN), and many
+# teardowns bulk-delete posted entries. Both are declared test-data
+# operations, so the DEFAULT for a test session is "rebuild on". A session
+# that wants the guard LIVE (the 0161 guard tests) opts back IN by setting
+# ``session.info["je_guard"] = True`` before its first statement.
+#
+# This does NOT weaken the guard's proof: the engine's real posting path
+# (DRAFT insert origin=UNKNOWN -> post() UPDATE to POSTED with a real origin)
+# PASSES the guard whether or not the hatch is open, and the guard's reject
+# behaviour is pinned by tests/db/test_je_engine_guard.py, which run with the
+# guard LIVE (je_guard=True).
+#
+# Mirrors the per-transaction ``SET LOCAL`` re-issue pattern in
+# ``saebooks.api.v1.deps`` (asyncpg + NullPool drops the connection on every
+# commit, so the GUC must be re-applied at the start of every transaction).
+# ---------------------------------------------------------------------------
+@_sa_event.listens_for(_sa_sync_session, "after_begin")
+def _declare_db_rebuild_for_tests(session, transaction, connection):  # type: ignore[no-untyped-def]
+    """SET app.db_rebuild=on for every test transaction unless the session
+    opts into 0161 guard enforcement via ``info['je_guard']``."""
+    if session.info.get("je_guard"):
+        return
+    if connection.dialect.name != "postgresql":
+        return  # SQLite Cashbook backend has no such GUC and no trigger
+    connection.exec_driver_sql("SET LOCAL app.db_rebuild = 'on'")
 
 
 @pytest.fixture(scope="session", autouse=True)
