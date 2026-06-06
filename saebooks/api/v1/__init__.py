@@ -59,6 +59,7 @@ from saebooks.api.v1.integrations import (
 from saebooks.api.v1.integrations import (
     router as integrations_router,
 )
+from saebooks.api.v1.intercompany import router as intercompany_router
 from saebooks.api.v1.invoices import router as invoices_router
 from saebooks.api.v1.items import router as items_router
 from saebooks.api.v1.journal_entries import router as journal_entries_router
@@ -170,6 +171,11 @@ router.include_router(payments_router)
 # movement) record type — bank->credit-card paydown, director-loan
 # repayment, bank/loan transfers. See saebooks/services/transfers.py.
 router.include_router(transfers_router)
+# Intercompany Phase 1 (LOCAL / same-tenant) record type — reciprocal
+# two-company posting (origin=INTERCOMPANY). REST surface over the
+# existing services/intercompany.py post_local_pair/reverse_local_pair.
+# No migration: ic_txn / ic_edges / ic_legs already exist (0154).
+router.include_router(intercompany_router)
 # Gap 2 (0158): first-class Reclassification — account-to-account
 # classification move of an already-posted amount (e.g. ~983 posted
 # expenses into child accounts) via a balanced engine-generated reclass

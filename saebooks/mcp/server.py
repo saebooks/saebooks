@@ -118,10 +118,11 @@ mcp = FastMCP(
         "reaching for create_journal_entry to record a normal transaction, "
         "STOP and use the correct record type instead — if no tool fits the "
         "event, that is a missing record type to flag, not a manual JE to "
-        "write. To move money between two of your own accounts use the "
-        "dedicated transfer tool when available rather than a manual JE; "
-        "for a reciprocal posting between two companies use the intercompany "
-        "tool, never two hand-balanced manual JEs."
+        "write. To move money between two of your own accounts use "
+        "create_transfer (origin=TRANSFER), not a manual JE; for a "
+        "reciprocal posting between two of your companies use "
+        "intercompany_post (origin=INTERCOMPANY), never two hand-balanced "
+        "manual JEs."
     ),
 )
 # Expose the application version via MCP initialize serverInfo.
@@ -971,8 +972,8 @@ async def create_journal_entry(
       - a supplier purchase on terms          -> create_bill
       - cash or card spend                    -> create_expense
       - money received or paid (+allocations) -> create_payment
-      - moving money between your own accounts -> the transfer tool (when wired)
-      - a reciprocal posting between two of your companies -> intercompany tool
+      - moving money between your own accounts -> create_transfer
+      - a reciprocal posting between two of your companies -> intercompany_post
 
     Those tools create a real record with provenance (origin=INVOICE/BILL/…
     + source_type/source_id) and a full audit trail. A manual JE is BAD
@@ -1062,6 +1063,198 @@ async def delete_journal_entry(ctx: Context, entry_id: str, version: int) -> dic
     but obliterates audit trail.
     """
     return await _delete(ctx, f"/api/v1/journal_entries/{entry_id}", if_match=version)
+
+
+# ===========================================================================
+# Transfers — account-to-account money movement (origin=TRANSFER)
+# ===========================================================================
+
+
+@_gated_tool(safety="safe")
+async def list_transfers(
+    ctx: Context,
+    account_id: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    page: int = 1,
+    page_size: int = 50,
+) -> dict[str, Any]:
+    """List transfers for the active company, newest first.
+
+    Args:
+        account_id: filter to transfers touching this account (either side).
+        date_from, date_to: ISO date bounds on the transfer date.
+    """
+    return await _get(
+        ctx, "/api/v1/transfers",
+        account_id=account_id, date_from=date_from, date_to=date_to,
+        page=page, page_size=page_size,
+    )
+
+
+@_gated_tool(safety="safe")
+async def get_transfer(ctx: Context, transfer_id: str) -> dict[str, Any]:
+    """Fetch a single transfer."""
+    return await _get(ctx, f"/api/v1/transfers/{transfer_id}")
+
+
+@_gated_tool(safety="mutation")
+async def create_transfer(
+    ctx: Context,
+    from_account_id: str,
+    to_account_id: str,
+    amount: float,
+    transfer_date: str,
+    description: str = "",
+    reference: str = "",
+) -> dict[str, Any]:
+    """Move money between two of your OWN accounts.
+
+    Use this (not a manual journal entry) to move money between two of your own
+    accounts — bank->bank, credit-card paydown, director-loan repayment,
+    bank/loan transfer. Money LEAVES ``from_account_id`` and ARRIVES at
+    ``to_account_id``; both must be balance-sheet accounts (asset / liability /
+    equity) of the active company. No GST. Posting derives ONE balanced
+    balance-sheet journal (Dr to / Cr from) with origin=TRANSFER provenance and
+    creates+posts the transfer in one step.
+
+    Args:
+        from_account_id: UUID of the account money leaves (e.g. the bank).
+        to_account_id: UUID of the account money arrives at (e.g. the card
+            liability or the director-loan account).
+        amount: positive number.
+        transfer_date: ISO date.
+        description: memo carried onto the journal lines.
+        reference: external reference (e.g. bank-statement ref).
+    """
+    body: dict[str, Any] = {
+        "from_account_id": from_account_id,
+        "to_account_id": to_account_id,
+        "amount": amount,
+        "transfer_date": transfer_date,
+    }
+    if description:
+        body["description"] = description
+    if reference:
+        body["reference"] = reference
+    return await _post(ctx, "/api/v1/transfers", body)
+
+
+@_gated_tool(safety="void")
+async def reverse_transfer(
+    ctx: Context, transfer_id: str, reversal_date: str = ""
+) -> dict[str, Any]:
+    """Reverse a POSTED transfer.
+
+    Posts the swapped mirror journal and flips the transfer to REVERSED. This
+    is the correct way to undo a transfer without breaking audit.
+
+    Args:
+        transfer_id: the transfer to reverse.
+        reversal_date: ISO date for the reversal (defaults to the engine's
+            choice when omitted).
+    """
+    body: dict[str, Any] = {}
+    if reversal_date:
+        body["reversal_date"] = reversal_date
+    return await _post(ctx, f"/api/v1/transfers/{transfer_id}/reverse", body)
+
+
+# ===========================================================================
+# Intercompany — reciprocal posting between two of your companies
+# (origin=INTERCOMPANY)
+# ===========================================================================
+
+
+@_gated_tool(safety="safe")
+async def list_intercompany(
+    ctx: Context, page: int = 1, page_size: int = 50
+) -> dict[str, Any]:
+    """List intercompany transactions touching the active company."""
+    return await _get(
+        ctx, "/api/v1/intercompany", page=page, page_size=page_size
+    )
+
+
+@_gated_tool(safety="safe")
+async def get_intercompany(ctx: Context, ic_txn_id: str) -> dict[str, Any]:
+    """Fetch a single intercompany transaction with its two legs."""
+    return await _get(ctx, f"/api/v1/intercompany/{ic_txn_id}")
+
+
+@_gated_tool(safety="mutation")
+async def intercompany_post(
+    ctx: Context,
+    originator_company_id: str,
+    counterparty_company_id: str,
+    amount: float,
+    entry_date: str,
+    originator_contra_account_id: str,
+    counterparty_contra_account_id: str,
+    description: str = "",
+) -> dict[str, Any]:
+    """Post a reciprocal pair between two of YOUR companies.
+
+    Use this (not two hand-balanced manual JEs) for a reciprocal posting
+    between two companies you own that share one tenant — e.g. one company
+    funding another, an intercompany loan or settlement. The engine posts a
+    LINKED pair of journals (one per company) inside one transaction with
+    origin=INTERCOMPANY provenance: if either leg fails, neither posts (no
+    half-pair). The "Due to/from" control account on each side comes from the
+    pre-declared intercompany edge, NOT from you.
+
+    Sign convention (fixed): the originator's control account is DEBITED (a
+    receivable / "due from") and its contra credited; the counterparty's
+    control account is CREDITED (an obligation / "due to") and its contra
+    debited. To post the opposite economic direction, swap which company is the
+    originator.
+
+    Args:
+        originator_company_id: UUID of the company that originates the event
+            (the one with the receivable / "due from").
+        counterparty_company_id: UUID of the partner company (the obligation /
+            "due to" side). Both companies must be in your tenant and a
+            reciprocal intercompany edge pair must already exist.
+        amount: positive number.
+        entry_date: ISO date for both legs.
+        originator_contra_account_id: the originator's contra account (e.g. its
+            bank) — must belong to the originator company.
+        counterparty_contra_account_id: the counterparty's contra account (e.g.
+            its bank) — must belong to the counterparty company.
+        description: memo carried onto both legs and the shared txn.
+    """
+    body: dict[str, Any] = {
+        "originator_company_id": originator_company_id,
+        "counterparty_company_id": counterparty_company_id,
+        "amount": amount,
+        "entry_date": entry_date,
+        "originator_contra_account_id": originator_contra_account_id,
+        "counterparty_contra_account_id": counterparty_contra_account_id,
+    }
+    if description:
+        body["description"] = description
+    return await _post(ctx, "/api/v1/intercompany", body)
+
+
+@_gated_tool(safety="void")
+async def reverse_intercompany(
+    ctx: Context, ic_txn_id: str, reversal_date: str = ""
+) -> dict[str, Any]:
+    """Reverse an intercompany transaction by reversing BOTH legs.
+
+    Posts the swapped mirror of each leg, links them to the same intercompany
+    txn, and flips it to REVERSED. The correct way to unwind an intercompany
+    posting without breaking audit.
+
+    Args:
+        ic_txn_id: the intercompany transaction to reverse.
+        reversal_date: ISO date for the reversals (defaults to the engine's
+            choice when omitted).
+    """
+    body: dict[str, Any] = {}
+    if reversal_date:
+        body["reversal_date"] = reversal_date
+    return await _post(ctx, f"/api/v1/intercompany/{ic_txn_id}/reverse", body)
 
 
 # ===========================================================================
@@ -1296,8 +1489,8 @@ async def create_payment(
     Use this (not a manual journal entry) to record money in or out and to
     apply it against invoices/bills. Posting derives the bank + AR/AP
     journal with origin=PAYMENT provenance. To move money between two of
-    your OWN accounts, use the dedicated transfer tool (when wired) rather
-    than a payment or a manual JE.
+    your OWN accounts, use create_transfer rather than a payment or a
+    manual JE.
     """
     body: dict[str, Any] = {
         "payment_date": payment_date,
