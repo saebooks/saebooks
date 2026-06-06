@@ -774,10 +774,73 @@ async def test_paperless_webhook_statement_type_calls_ingest_statement(
 
 
 @pytest.mark.asyncio
-async def test_paperless_webhook_bill_type_calls_ingest_document(
+async def test_paperless_webhook_bill_type_skipped_by_default(
     client: AsyncClient,
 ) -> None:
-    """document_type 'Supplier Invoice' → ingest_document called, action==bill."""
+    """Auto-bill kill switch (DEFAULT OFF): a 'Supplier Invoice' bill-type
+    doc is recognised but NOT turned into a draft bill — ingest_document is
+    NOT called and the action is skipped(auto_bill_disabled). This is the
+    DB-rebuild handover Gap 4 fix: no more 'AUTO-INGESTED FROM PAPERLESS'
+    junk drafts unless explicitly re-enabled via PAPERLESS_AUTO_BILL_ENABLED.
+    """
+    tenant_id = uuid.uuid4()
+    secret = "test-secret-bill"
+    payload = json.dumps({
+        "doc_url": "https://paperless/documents/88/",
+        "document_type": "Supplier Invoice",
+    }).encode()
+    sig = _sign_paperless(payload, secret)
+
+    fake_execute = _make_webhook_mocks(secret, tenant_id)
+
+    with (
+        patch("saebooks.api.v1.integrations.AsyncSessionLocal") as mock_session_cm,
+        patch("saebooks.api.v1.integrations.decrypt_field", return_value=secret),
+        patch(
+            "saebooks.api.v1.integrations.ingest_document",
+            new_callable=AsyncMock,
+        ) as mock_ingest_doc,
+        patch(
+            "saebooks.api.v1.integrations.ingest_statement",
+            new_callable=AsyncMock,
+        ) as mock_ingest_stmt,
+    ):
+        mock_session = AsyncMock()
+        mock_session.execute = fake_execute
+        mock_session_cm.return_value.__aenter__ = AsyncMock(side_effect=[
+            mock_session,  # secret lookup (no second session: ingest skipped)
+        ])
+        mock_session_cm.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        resp = await client.post(
+            "/api/v1/integrations/paperless/webhook",
+            content=payload,
+            headers={
+                "X-Tenant-Id": str(tenant_id),
+                "X-Paperless-Signature": sig,
+            },
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["received"] is True
+    assert data["ingest"]["action"] == "bill"
+    assert data["ingest"]["status"] == "skipped"
+    assert data["ingest"]["reason"] == "auto_bill_disabled"
+    mock_ingest_doc.assert_not_called()
+    mock_ingest_stmt.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_paperless_webhook_bill_type_calls_ingest_document_when_enabled(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With PAPERLESS_AUTO_BILL_ENABLED on, a 'Supplier Invoice' bill-type
+    doc DOES call ingest_document (original behaviour, now opt-in)."""
+    from saebooks.config import settings as _s
+    monkeypatch.setattr(_s, "paperless_auto_bill_enabled", True)
+
     tenant_id = uuid.uuid4()
     secret = "test-secret-bill"
     payload = json.dumps({
@@ -988,8 +1051,15 @@ async def test_paperless_webhook_non_string_document_type_skipped(
 @pytest.mark.asyncio
 async def test_paperless_webhook_ingest_exception_returns_200_error(
     client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An ingest path raising an exception → 200 with status==error (fail-safe)."""
+    """An ingest path raising an exception → 200 with status==error (fail-safe).
+
+    Exercises the bill path, so the auto-bill kill switch is enabled here;
+    the fail-safe (swallow + 200) behaviour is unchanged by the gate.
+    """
+    from saebooks.config import settings as _s
+    monkeypatch.setattr(_s, "paperless_auto_bill_enabled", True)
     tenant_id = uuid.uuid4()
     secret = "test-secret-exc"
     payload = json.dumps({
