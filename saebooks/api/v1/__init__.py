@@ -78,6 +78,7 @@ from saebooks.api.v1.proration import router as proration_router
 from saebooks.api.v1.purchase_orders import router as purchase_orders_router
 from saebooks.api.v1.quotes import router as quotes_router
 from saebooks.api.v1.receipts import router as receipts_router
+from saebooks.api.v1.reclassifications import router as reclassifications_router
 from saebooks.api.v1.reconciliation import router as reconciliation_router
 from saebooks.api.v1.recurring_invoices import router as recurring_invoices_router
 from saebooks.api.v1.reports import router as reports_router
@@ -169,6 +170,12 @@ router.include_router(payments_router)
 # movement) record type — bank->credit-card paydown, director-loan
 # repayment, bank/loan transfers. See saebooks/services/transfers.py.
 router.include_router(transfers_router)
+# Gap 2 (0158): first-class Reclassification — account-to-account
+# classification move of an already-posted amount (e.g. ~983 posted
+# expenses into child accounts) via a balanced engine-generated reclass
+# JE, WITHOUT mutating the original entry. See
+# saebooks/services/reclassifications.py.
+router.include_router(reclassifications_router)
 router.include_router(credit_notes_router)
 # 0157 money-in record types: supplier (purchase) credit note + generic
 # money-in receipt. See saebooks/services/supplier_credit_notes.py + receipts.py.
