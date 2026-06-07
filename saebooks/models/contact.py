@@ -21,6 +21,29 @@ class ContactType(enum.StrEnum):
     # explicit is_tpar_supplier flag (see services/tpar.py), not by this
     # type — though the contact form should default that flag on for CONTRACTOR.
     CONTRACTOR = "CONTRACTOR"
+    # SUB_CONTRACTOR — a BUSINESS engaged to perform part of one of our jobs
+    # (e.g. a trade firm we sub-let a section of a contract to), as distinct
+    # from CONTRACTOR (individual labour-hire). Two consequences, both
+    # Richard's informed call:
+    #   1. COST OF SALES, not overhead. Their spend is a direct job cost, so
+    #      it should default to a cost-of-sales account (sauer: 5-1000
+    #      "Materials Supplied (Cost of Sales)"; recommend a sibling 5-2000
+    #      "Subcontractor Costs"), NOT a generic EXPENSE account. NOTE: the
+    #      engine does not yet auto-seed a bill/expense line account from
+    #      contact.default_account_id (only stored, never read on new
+    #      bills/expenses), so for now the COGS account is chosen per-bill —
+    #      see PR / default_account_gap follow-up.
+    #   2. NOT TPAR-reportable here, on the ATO "labour incidental to the
+    #      supply of materials" exemption. This is NOT because it is a company:
+    #      company sub-contractors that supply *services* ARE generally
+    #      TPAR-reportable. The exemption applied here is materials-incidental
+    #      (the labour is incidental to materials supplied), per Richard's
+    #      informed assessment of these payees. Mechanically this is enforced
+    #      by defaulting is_tpar_supplier=False; TPAR inclusion is driven
+    #      solely by that flag (services/tpar.py), never by contact_type.
+    # Payable like a SUPPLIER/CONTRACTOR (bills/expenses/pay-runs do not gate
+    # payees by contact_type).
+    SUB_CONTRACTOR = "SUB_CONTRACTOR"
     BOTH = "BOTH"
     BENEFICIARY = "BENEFICIARY"
 

@@ -1,20 +1,31 @@
-"""0163_contractor_contact_type — add CONTRACTOR to contact_type_enum.
+"""0163_contractor_contact_type — add CONTRACTOR + SUB_CONTRACTOR to contact_type_enum.
 
 Why this migration exists
 -------------------------
 Richard reviewed his books and asked for contractors and suppliers to be
 two distinct contact kinds: "who we buy goods/materials from" (SUPPLIER)
-vs "who we pay to do work" (CONTRACTOR / sub-contractor / labour hire).
-This adds a new value, CONTRACTOR, to the existing Postgres enum type
-contact_type_enum (currently CUSTOMER / SUPPLIER / BOTH / BENEFICIARY).
+vs "who we pay to do work". This adds TWO new values to the existing
+Postgres enum type contact_type_enum (previously CUSTOMER / SUPPLIER /
+BOTH / BENEFICIARY):
 
-CONTRACTOR is payable exactly like a SUPPLIER — the engine's bills /
-expenses / payments / pay-run / ABA paths do NOT gate eligible payees by
-contact_type (verified), so a CONTRACTOR contact can be billed/paid
-with no further engine change. TPAR inclusion remains driven by the
-explicit contacts.is_tpar_supplier flag (services/tpar.py), NOT by
-this type; see the PR / tpar_decision for the recommended app-side default
-(default is_tpar_supplier=True when contact_type=CONTRACTOR).
+  * CONTRACTOR     — an INDIVIDUAL labour-hire payee. Spend is an overhead
+                     EXPENSE. TPAR-reportable: the app defaults
+                     is_tpar_supplier=True for CONTRACTOR.
+  * SUB_CONTRACTOR — a BUSINESS engaged to perform part of one of our jobs.
+                     Spend is COST OF SALES (a direct job cost), so it
+                     should default to a cost-of-sales account. NOT
+                     TPAR-reportable here, on the ATO "labour incidental to
+                     the supply of materials" exemption (Richard's informed
+                     call — NOT because it is a company; company
+                     sub-contractors supplying services ARE generally
+                     TPAR-reportable). Enforced by defaulting
+                     is_tpar_supplier=False.
+
+Both are payable exactly like a SUPPLIER — the engine's bills / expenses /
+payments / pay-run / ABA paths do NOT gate eligible payees by contact_type
+(verified), so either contact can be billed/paid with no further engine
+change. TPAR inclusion remains driven SOLELY by the explicit
+contacts.is_tpar_supplier flag (services/tpar.py), NEVER by contact_type.
 
 PostgreSQL quirk
 ----------------
@@ -22,7 +33,8 @@ ALTER TYPE ... ADD VALUE cannot run inside a transaction block that
 later USES the new value, and Alembic wraps each migration in a
 transaction. We therefore run it inside op.get_context().autocommit_block()
 so it commits OUTSIDE the migration's transaction (PG 12+). IF NOT EXISTS
-makes it idempotent (safe to re-run; no error if CONTRACTOR already present).
+makes each ADD VALUE idempotent (safe to re-run; no error if the value is
+already present). Both values are added in the same autocommit_block.
 
 ⚠ PARALLEL-MIGRATION FLAG — READ BEFORE MERGE
 ---------------------------------------------
@@ -59,6 +71,9 @@ def upgrade() -> None:
         op.execute(
             "ALTER TYPE contact_type_enum ADD VALUE IF NOT EXISTS 'CONTRACTOR'"
         )
+        op.execute(
+            "ALTER TYPE contact_type_enum ADD VALUE IF NOT EXISTS 'SUB_CONTRACTOR'"
+        )
 
 
 def downgrade() -> None:
@@ -66,5 +81,6 @@ def downgrade() -> None:
     # enum values are forward-only. Existing rows are untouched on downgrade;
     # 'CONTRACTOR' simply remains an (unused) member of contact_type_enum.
     # If you truly needed it gone you would have to recreate the type and
-    # rewrite the column — out of scope for a reversible downgrade.
+    # rewrite the column — out of scope for a reversible downgrade. Both
+    # CONTRACTOR and SUB_CONTRACTOR simply remain (unused) members.
     pass

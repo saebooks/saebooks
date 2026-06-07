@@ -142,7 +142,7 @@ async def contacts_list(
 ) -> HTMLResponse:
     company = await _first_company()
     contact_type = None
-    if type and type in ("CUSTOMER", "SUPPLIER", "CONTRACTOR", "BOTH", "BENEFICIARY"):
+    if type and type in ("CUSTOMER", "SUPPLIER", "CONTRACTOR", "SUB_CONTRACTOR", "BOTH", "BENEFICIARY"):
         contact_type = ContactType(type)
 
     one_off_filter: bool | None

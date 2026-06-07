@@ -180,6 +180,7 @@ async def commit_bill_csv(
                         (
                             ContactType.SUPPLIER,
                             ContactType.CONTRACTOR,
+                            ContactType.SUB_CONTRACTOR,
                             ContactType.BOTH,
                         )
                     ),

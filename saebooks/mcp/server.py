@@ -459,7 +459,7 @@ async def list_contacts(
 
     Args:
         search: free-text match against name/email.
-        contact_type: CUSTOMER | SUPPLIER | CONTRACTOR | BOTH | BENEFICIARY.
+        contact_type: CUSTOMER | SUPPLIER | CONTRACTOR | SUB_CONTRACTOR | BOTH | BENEFICIARY.
         limit: page size (max 200).
         page: 1-indexed page number.
     """
@@ -493,9 +493,14 @@ async def create_contact(
 
     Args:
         name: required, e.g. "Acme Pty Ltd".
-        contact_type: CUSTOMER (default), SUPPLIER, CONTRACTOR, BOTH, BENEFICIARY.
-            CONTRACTOR = sub-contractor / labour-hire payee (payable like a
-            supplier). For TPAR, also set is_tpar_supplier on the contact.
+        contact_type: CUSTOMER (default), SUPPLIER, CONTRACTOR,
+            SUB_CONTRACTOR, BOTH, BENEFICIARY.
+            CONTRACTOR = INDIVIDUAL labour-hire payee (overhead expense;
+            generally TPAR-reportable — set is_tpar_supplier=True).
+            SUB_CONTRACTOR = a BUSINESS engaged to do part of a job (spend is
+            COST OF SALES; NOT TPAR here on the "labour incidental to
+            materials" exemption — leave is_tpar_supplier=False). Both are
+            payable like a supplier.
         email: optional.
         phone: optional.
         abn: optional 11-digit ABN (Australian Business Number).
