@@ -459,7 +459,7 @@ async def list_contacts(
 
     Args:
         search: free-text match against name/email.
-        contact_type: CUSTOMER | SUPPLIER | BOTH | BENEFICIARY.
+        contact_type: CUSTOMER | SUPPLIER | CONTRACTOR | SUB_CONTRACTOR | BOTH | BENEFICIARY.
         limit: page size (max 200).
         page: 1-indexed page number.
     """
@@ -493,7 +493,15 @@ async def create_contact(
 
     Args:
         name: required, e.g. "Acme Pty Ltd".
-        contact_type: CUSTOMER (default), SUPPLIER, BOTH, BENEFICIARY.
+        contact_type: CUSTOMER (default), SUPPLIER, CONTRACTOR,
+            SUB_CONTRACTOR, BOTH, BENEFICIARY.
+            CONTRACTOR = higher-tier entity delivering a whole section of a
+              job (spend is COST OF SALES, recommend 5-2000 Contractor
+              Costs; NOT TPAR-reportable — ATO materials-incidental
+              exemption, Richard’s informed call; is_tpar_supplier=False).
+            SUB_CONTRACTOR = middle-tier labour-services payee under a
+              contractor (spend is EXPENSE; TPAR-reportable — set
+              is_tpar_supplier=True). Both are payable like a SUPPLIER.
         email: optional.
         phone: optional.
         abn: optional 11-digit ABN (Australian Business Number).

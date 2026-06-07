@@ -229,7 +229,13 @@ async def ingest_document(
                 c
                 for c in matches
                 if (c.name or "").strip().lower() == vendor.lower()
-                and c.contact_type in (ContactType.SUPPLIER, ContactType.BOTH)
+                and c.contact_type
+                in (
+                    ContactType.SUPPLIER,
+                    ContactType.CONTRACTOR,
+                    ContactType.SUB_CONTRACTOR,
+                    ContactType.BOTH,
+                )
             ]
             if len(exact) == 1:
                 contact = exact[0]

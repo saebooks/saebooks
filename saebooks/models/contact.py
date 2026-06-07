@@ -14,6 +14,34 @@ from saebooks.models._scope import CompanyScoped
 class ContactType(enum.StrEnum):
     CUSTOMER = "CUSTOMER"
     SUPPLIER = "SUPPLIER"
+    # CONTRACTOR — higher-tier payee: a business or entity engaged to perform
+    # a whole section of a job.  Their spend is a DIRECT JOB COST and should be
+    # posted to a COST_OF_SALES account (recommend 5-2000 Contractor Costs,
+    # sibling to 5-1000 Materials Supplied).  NOTE: the engine does not yet
+    # auto-seed a bill/expense line account from contact.default_account_id
+    # (only stored, never read on new bills/expenses), so for now the COGS
+    # account is chosen per-bill — see PR / default_account_gap follow-up.
+    #
+    # TPAR: NOT reportable, on the ATO "labour incidental to the supply of
+    # materials" exemption.  NOTE — this exemption applies because Richard's
+    # contractors supply materials + incidental labour; it is NOT because the
+    # payee is a company (company contractors supplying pure services ARE
+    # generally TPAR-reportable).  Default is_tpar_supplier=False.
+    #
+    # Payable like a SUPPLIER (bills/expenses/pay-runs do not gate payees by
+    # contact_type); TPAR inclusion is always driven by is_tpar_supplier flag.
+    CONTRACTOR = "CONTRACTOR"
+    # SUB_CONTRACTOR — middle-tier payee (hierarchy: contractor → sub-contractor
+    # → worker): provides LABOUR SERVICES under a head-contractor.  Their spend
+    # is OVERHEAD and should be posted to an EXPENSE account.
+    #
+    # TPAR: reportable — the contact form / API should default is_tpar_supplier
+    # to True when contact_type=SUB_CONTRACTOR (app-layer concern; the engine
+    # flag is the source of truth and is not hard-coded by type here).
+    #
+    # Payable like a SUPPLIER (bills/expenses/pay-runs do not gate payees by
+    # contact_type).
+    SUB_CONTRACTOR = "SUB_CONTRACTOR"
     BOTH = "BOTH"
     BENEFICIARY = "BENEFICIARY"
 
