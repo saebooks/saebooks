@@ -476,7 +476,7 @@ CREATE TABLE contacts (
 	company_id CHAR(32) NOT NULL, 
 	tenant_id CHAR(32) NOT NULL, 
 	name VARCHAR NOT NULL, 
-	contact_type VARCHAR(11) NOT NULL, 
+	contact_type VARCHAR(14) NOT NULL, 
 	email VARCHAR, 
 	phone VARCHAR(32), 
 	abn VARCHAR(14), 
