@@ -15,8 +15,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import grpc
 import pytest
 from grpc import aio
-from saebooks.grpc_gen import saebooks_pb2, saebooks_pb2_grpc
 
+from saebooks.grpc_gen import saebooks_pb2, saebooks_pb2_grpc
 from saebooks.grpc_server import SAEBooksServicer
 
 # ---------------------------------------------------------------------------
