@@ -39,6 +39,7 @@ class ContactBase(BaseModel):
     bank_account_title: str | None = None
     currency_code: str | None = Field(default=None, max_length=3, description="ISO 4217 billing currency")
     is_one_off: bool = False
+    is_tpar_supplier: bool = Field(default=False, description="Flag as a sub-contractor included in TPAR reporting")
 
 
 class ContactCreate(ContactBase):
@@ -70,6 +71,7 @@ class ContactUpdate(BaseModel):
     default_tax_code: str | None = None
     currency_code: str | None = Field(default=None, max_length=3)
     is_one_off: bool | None = None
+    is_tpar_supplier: bool | None = None
 
 
 class ContactOut(ContactBase):
