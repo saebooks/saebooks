@@ -177,7 +177,11 @@ async def commit_bill_csv(
                     Contact.company_id == company_id,
                     func.lower(Contact.name) == row.supplier.lower(),
                     Contact.contact_type.in_(
-                        (ContactType.SUPPLIER, ContactType.BOTH)
+                        (
+                            ContactType.SUPPLIER,
+                            ContactType.CONTRACTOR,
+                            ContactType.BOTH,
+                        )
                     ),
                     Contact.archived_at.is_(None),
                 ).limit(1)

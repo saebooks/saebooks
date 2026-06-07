@@ -14,6 +14,13 @@ from saebooks.models._scope import CompanyScoped
 class ContactType(enum.StrEnum):
     CUSTOMER = "CUSTOMER"
     SUPPLIER = "SUPPLIER"
+    # CONTRACTOR — a sub-contractor / labour-hire payee, distinct from a goods
+    # SUPPLIER so the books can separate "who we buy materials from" from "who
+    # we pay to do work". Payable like a SUPPLIER (bills/expenses/pay-runs do
+    # not gate payees by contact_type); TPAR inclusion is still driven by the
+    # explicit is_tpar_supplier flag (see services/tpar.py), not by this
+    # type — though the contact form should default that flag on for CONTRACTOR.
+    CONTRACTOR = "CONTRACTOR"
     BOTH = "BOTH"
     BENEFICIARY = "BENEFICIARY"
 

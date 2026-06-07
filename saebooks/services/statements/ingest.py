@@ -571,11 +571,13 @@ async def _resolve_contact(
     company_id: uuid.UUID,
     supplier_name: str,
 ) -> Contact | None:
-    """Exact case-insensitive name match against supplier/both contacts."""
+    """Exact case-insensitive name match against supplier/contractor/both contacts."""
     result = await session.execute(
         select(Contact).where(
             Contact.company_id == company_id,
-            Contact.contact_type.in_([ContactType.SUPPLIER, ContactType.BOTH]),
+            Contact.contact_type.in_(
+                [ContactType.SUPPLIER, ContactType.CONTRACTOR, ContactType.BOTH]
+            ),
             Contact.name.ilike(supplier_name),
         )
     )

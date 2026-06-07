@@ -459,7 +459,7 @@ async def list_contacts(
 
     Args:
         search: free-text match against name/email.
-        contact_type: CUSTOMER | SUPPLIER | BOTH | BENEFICIARY.
+        contact_type: CUSTOMER | SUPPLIER | CONTRACTOR | BOTH | BENEFICIARY.
         limit: page size (max 200).
         page: 1-indexed page number.
     """
@@ -493,7 +493,9 @@ async def create_contact(
 
     Args:
         name: required, e.g. "Acme Pty Ltd".
-        contact_type: CUSTOMER (default), SUPPLIER, BOTH, BENEFICIARY.
+        contact_type: CUSTOMER (default), SUPPLIER, CONTRACTOR, BOTH, BENEFICIARY.
+            CONTRACTOR = sub-contractor / labour-hire payee (payable like a
+            supplier). For TPAR, also set is_tpar_supplier on the contact.
         email: optional.
         phone: optional.
         abn: optional 11-digit ABN (Australian Business Number).
