@@ -17,7 +17,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from saebooks.models.contact import Contact, ContactType
+from saebooks.models.contact import Contact, ContactType, PaymentTermsBasis
 from saebooks.services import audit as audit_svc
 from saebooks.services import change_log as change_log_svc
 
@@ -77,6 +77,8 @@ _CONTACT_COLUMNS: tuple[str, ...] = (
     "updated_at",
     "archived_at",
     "is_tpar_supplier",
+    "payment_terms_basis",
+    "payment_terms_days",
     "version",
 )
 
@@ -201,6 +203,8 @@ async def create(
     default_income_classification: str | None = None,
     is_tpar_supplier: bool = False,
     is_one_off: bool = False,
+    payment_terms_basis: PaymentTermsBasis | None = None,
+    payment_terms_days: int | None = None,
 ) -> Contact:
     """Create a new contact. Validate ABN format if provided (11 digits)."""
     if abn is not None:
@@ -229,6 +233,8 @@ async def create(
         default_income_classification=default_income_classification,
         is_tpar_supplier=is_tpar_supplier,
         is_one_off=is_one_off,
+        payment_terms_basis=payment_terms_basis,
+        payment_terms_days=payment_terms_days,
         version=1,
     )
     session.add(contact)
@@ -288,7 +294,8 @@ async def update(
         "country", "notes", "default_account_id", "default_tax_code",
         "currency_code",
         "tfn", "share_percentage", "default_income_classification",
-        "is_tpar_supplier", "is_one_off", }
+        "is_tpar_supplier", "is_one_off",
+        "payment_terms_basis", "payment_terms_days", }
 
     before = audit_svc.capture(contact)
     for key, value in kwargs.items():

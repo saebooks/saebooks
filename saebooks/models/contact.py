@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Numeric, String, Text, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -44,6 +44,20 @@ class ContactType(enum.StrEnum):
     SUB_CONTRACTOR = "SUB_CONTRACTOR"
     BOTH = "BOTH"
     BENEFICIARY = "BENEFICIARY"
+
+
+class PaymentTermsBasis(enum.StrEnum):
+    """How a contact's default payment due-date is computed from an issue date.
+
+    * DAYS — net N days from the invoice/issue date (e.g. "Net 30" = issue + 30).
+    * EOM  — N days after the END of the issue month (Australian "30-day EOM":
+             an invoice dated anywhere in May, EOM30, is due 31 May + 30 = 30 Jun).
+    NULL on a contact means "no default terms" — the due date must be entered
+    explicitly and is not derived.
+    """
+
+    DAYS = "DAYS"
+    EOM = "EOM"
 
 
 class Contact(CompanyScoped, Base):
@@ -119,6 +133,15 @@ class Contact(CompanyScoped, Base):
     # One-off / walk-in flag — keeps transient parties out of the main list
     # (filterable on the contacts page; toggled via bulk-tag-one-off).
     is_one_off: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Default payment terms — used to DERIVE a bill/invoice due_date from the
+    # issue_date when one isn't supplied. basis=EOM gives Australian "30-day EOM".
+    # Both NULL = no default terms (due date must be entered explicitly).
+    payment_terms_basis: Mapped[PaymentTermsBasis | None] = mapped_column(
+        Enum(PaymentTermsBasis, name="payment_terms_basis_enum"), nullable=True
+    )
+    payment_terms_days: Mapped[int | None] = mapped_column(
+        Integer, comment="Days component of the default terms (basis DAYS or EOM)"
+    )
     # Monotonic version counter for optimistic locking via the API's
     # ``If-Match: <version>`` header. Bumped on every write that goes
     # through ``saebooks.api.v1``; legacy Jinja writes also route

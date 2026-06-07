@@ -33,6 +33,7 @@ from saebooks.models.tax_code import TaxCode
 from saebooks.services import items as items_svc
 from saebooks.services import journal as journal_svc
 from saebooks.services import numbering
+from saebooks.services import terms as terms_svc
 
 _TWOPLACES = Decimal("0.01")
 _FOURPLACES = Decimal("0.0001")
@@ -880,7 +881,7 @@ async def api_create(
     *,
     contact_id: uuid.UUID,
     issue_date: date,
-    due_date: date,
+    due_date: date | None = None,
     lines: list[dict] | None = None,
     reference: str | None = None,
     notes: str | None = None,
@@ -888,6 +889,11 @@ async def api_create(
     fx_rate: Decimal | None = None,
 ) -> Bill:
     """Create a bill draft with version=1 and a change_log row.
+
+    ``due_date`` may be omitted: when ``None`` it is derived from the supplier
+    contact's default payment terms (``payment_terms_basis``/``_days``) via
+    ``services/terms.compute_due_date`` — e.g. "30-day EOM". If the contact has
+    no terms, it falls back to ``issue_date``.
 
     CIVL-1 P0 fix: ``contact_id`` and every line's ``account_id`` /
     ``tax_code_id`` are validated against ``tenant_id`` before any
@@ -904,6 +910,17 @@ async def api_create(
             f"Bill date {issue_date} falls inside locked period "
             f"(ends {locked_through}); contact your controller to adjust period lock"
         )
+
+    # Derive due_date from the supplier's default payment terms when not given
+    # (e.g. "30-day EOM"); fall back to issue_date if the contact has no terms.
+    if due_date is None:
+        contact = await session.get(Contact, contact_id)
+        derived = terms_svc.compute_due_date(
+            issue_date,
+            contact.payment_terms_basis if contact else None,
+            contact.payment_terms_days if contact else None,
+        )
+        due_date = derived if derived is not None else issue_date
 
     bill = Bill(
         company_id=company_id,
