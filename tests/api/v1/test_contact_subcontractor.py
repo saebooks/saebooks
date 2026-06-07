@@ -1,24 +1,22 @@
 """SUB_CONTRACTOR contact-type tests (feat/contractor-contact-type, extends PR #31).
 
-Richard clarified a THIRD payee kind on top of SUPPLIER and CONTRACTOR:
-SUB_CONTRACTOR is a BUSINESS engaged to perform part of one of our jobs.
-Two consequences are exercised here:
+SUB_CONTRACTOR is the MIDDLE-TIER labour-services payee (hierarchy:
+contractor -> sub-contractor -> worker): someone who provides labour under
+a head-contractor. Spend is OVERHEAD EXPENSE. TPAR-reportable (the app
+should default is_tpar_supplier=True for SUB_CONTRACTOR; the engine flag is
+the source of truth — no type->TPAR coupling in engine code).
+
+These tests prove the ContactType.SUB_CONTRACTOR value:
 
 * it is creatable via the JSON API and via the service layer,
 * it is filterable on the list endpoint (?type=SUB_CONTRACTOR),
 * it is usable as a bill payee (NOT excluded from payable flows),
-* it defaults is_tpar_supplier=False (the ATO "labour incidental to the
-  supply of materials" exemption — Richard's informed call) and is therefore
-  ABSENT from the TPAR report, while a separately TPAR-flagged payee with the
-  same kind of spend IS present (proving inclusion is driven by the flag,
-  not by contact_type),
+* the engine model default leaves is_tpar_supplier=False for all types
+  (the "default on" for SUB_CONTRACTOR is an app-layer concern, not engine);
+  a payee explicitly flagged is_tpar_supplier=True IS present in the TPAR
+  report (proving inclusion is driven by the flag, not by contact_type),
 * the enum value is present in the live Postgres contact_type_enum
   (i.e. migration 0163 added BOTH CONTRACTOR and SUB_CONTRACTOR).
-
-COGS routing (sub-contractor spend -> cost-of-sales) is asserted only at the
-"the bill is allowed and posts" level here; auto-defaulting the line account
-from contact.default_account_id is an unwired engine gap (see PR body /
-default_account_gap) and is intentionally NOT tested as working.
 """
 from __future__ import annotations
 
@@ -161,7 +159,8 @@ async def test_create_sub_contractor_via_service() -> None:
             contact_type=ContactType.SUB_CONTRACTOR,
         )
     assert contact.contact_type == ContactType.SUB_CONTRACTOR
-    # Service default leaves is_tpar_supplier False (materials-incidental).
+    # Engine model default is False for all types; the app-layer "default
+    # on for SUB_CONTRACTOR" is not wired in the engine (flag is the authority).
     assert contact.is_tpar_supplier is False
 
 
@@ -183,7 +182,7 @@ async def test_sub_contractor_usable_as_bill_payee(api_client: AsyncClient) -> N
         "contact_id": sub_id,
         "issue_date": "2026-04-01",
         "due_date": "2026-05-01",
-        "notes": "Sub-let section of job (cost of sales)",
+        "notes": "Sub-contractor labour services (expense)",
         "lines": [
             {
                 "description": "Subcontracted works",
@@ -206,11 +205,13 @@ async def test_sub_contractor_usable_as_bill_payee(api_client: AsyncClient) -> N
 # ---------------------------------------------------------------------------
 
 
-async def test_sub_contractor_absent_from_tpar_but_flag_still_works() -> None:
-    """A default SUB_CONTRACTOR (is_tpar_supplier=False) is ABSENT from the
-    TPAR report even with a POSTED bill; a payee explicitly flagged
-    is_tpar_supplier=True with the same kind of spend IS present. Proves
-    inclusion is driven by the flag, not by contact_type."""
+async def test_sub_contractor_tpar_driven_by_flag_not_type() -> None:
+    """The engine default is is_tpar_supplier=False for ALL types (the
+    "default on for SUB_CONTRACTOR" is an app-layer responsibility).
+    Therefore a SUB_CONTRACTOR created without an explicit flag is ABSENT
+    from the TPAR report; one explicitly flagged is_tpar_supplier=True IS
+    present.  Proves TPAR inclusion is always driven by the flag, not by
+    contact_type alone."""
     account = await _first_expense_account()
 
     async with AsyncSessionLocal() as session:

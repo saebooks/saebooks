@@ -2,24 +2,26 @@
 
 Why this migration exists
 -------------------------
-Richard reviewed his books and asked for contractors and suppliers to be
-two distinct contact kinds: "who we buy goods/materials from" (SUPPLIER)
-vs "who we pay to do work". This adds TWO new values to the existing
-Postgres enum type contact_type_enum (previously CUSTOMER / SUPPLIER /
-BOTH / BENEFICIARY):
+Richard reviewed his books and asked for three distinct tiers of payee:
+SUPPLIER (goods/materials), CONTRACTOR (higher-tier entity delivering a
+whole section of work — spend is COST OF SALES), and SUB_CONTRACTOR
+(middle-tier labour-services payee under a contractor — spend is EXPENSE).
+This adds TWO new values to the existing Postgres enum type
+contact_type_enum (previously CUSTOMER / SUPPLIER / BOTH / BENEFICIARY):
 
-  * CONTRACTOR     — an INDIVIDUAL labour-hire payee. Spend is an overhead
-                     EXPENSE. TPAR-reportable: the app defaults
-                     is_tpar_supplier=True for CONTRACTOR.
-  * SUB_CONTRACTOR — a BUSINESS engaged to perform part of one of our jobs.
-                     Spend is COST OF SALES (a direct job cost), so it
-                     should default to a cost-of-sales account. NOT
-                     TPAR-reportable here, on the ATO "labour incidental to
-                     the supply of materials" exemption (Richard's informed
-                     call — NOT because it is a company; company
-                     sub-contractors supplying services ARE generally
-                     TPAR-reportable). Enforced by defaulting
-                     is_tpar_supplier=False.
+  * CONTRACTOR     — higher-tier entity engaged to deliver a whole section
+                     of a job. Spend is COST OF SALES (recommend 5-2000
+                     Contractor Costs, sibling to 5-1000 Materials Supplied).
+                     NOT TPAR-reportable: ATO "labour incidental to the
+                     supply of materials" exemption. NOTE — the exemption
+                     applies because Richard's contractors supply materials +
+                     incidental labour; it is NOT because the payee is a
+                     company. Default is_tpar_supplier=False.
+  * SUB_CONTRACTOR — middle-tier labour-services payee under a contractor.
+                     Spend is OVERHEAD EXPENSE. TPAR-reportable: the app
+                     should default is_tpar_supplier=True for SUB_CONTRACTOR
+                     (engine flag is the source of truth; no type→TPAR
+                     coupling in engine code).
 
 Both are payable exactly like a SUPPLIER — the engine's bills / expenses /
 payments / pay-run / ABA paths do NOT gate eligible payees by contact_type

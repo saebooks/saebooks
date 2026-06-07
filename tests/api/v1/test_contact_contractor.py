@@ -1,7 +1,11 @@
 """CONTRACTOR contact-type tests (feat/contractor-contact-type).
 
-Richard asked for contractors and suppliers to be two distinct contact
-types. These tests prove the new ContactType.CONTRACTOR value:
+CONTRACTOR is the higher-tier payee: a business/entity engaged to deliver
+a whole section of a job. Spend is COST OF SALES. NOT TPAR-reportable
+(ATO "labour incidental to the supply of materials" exemption —
+Richard's informed call; NOT because the payee is a company).
+
+These tests prove the ContactType.CONTRACTOR value:
 
 * is creatable via the JSON API and via the service layer,
 * is filterable on the list endpoint (?type=CONTRACTOR),
@@ -50,7 +54,7 @@ def _rand_name(prefix: str = "Contractor") -> str:
 
 
 def test_contractor_in_enum() -> None:
-    """The Python enum exposes CONTRACTOR between SUPPLIER and BOTH."""
+    """The Python enum exposes CONTRACTOR (COGS/no-TPAR) between SUPPLIER and BOTH."""
     assert ContactType.CONTRACTOR.value == "CONTRACTOR"
     members = list(ContactType)
     assert members.index(ContactType.CONTRACTOR) > members.index(ContactType.SUPPLIER)
@@ -58,7 +62,7 @@ def test_contractor_in_enum() -> None:
 
 
 async def test_contractor_value_present_in_pg_type() -> None:
-    """Migration 0163 added CONTRACTOR to the Postgres enum type."""
+    """Migration 0163 added CONTRACTOR (and SUB_CONTRACTOR) to the Postgres enum type."""
     from sqlalchemy import text
 
     async with AsyncSessionLocal() as session:
@@ -175,7 +179,7 @@ async def test_contractor_usable_as_bill_payee(api_client: AsyncClient) -> None:
         "contact_id": contractor_id,
         "issue_date": "2026-04-01",
         "due_date": "2026-05-01",
-        "notes": "Sub-contract labour",
+        "notes": "Contractor section works (cost of sales)",
         "lines": [
             {
                 "description": "Site labour",

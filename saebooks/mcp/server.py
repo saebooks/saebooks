@@ -495,12 +495,13 @@ async def create_contact(
         name: required, e.g. "Acme Pty Ltd".
         contact_type: CUSTOMER (default), SUPPLIER, CONTRACTOR,
             SUB_CONTRACTOR, BOTH, BENEFICIARY.
-            CONTRACTOR = INDIVIDUAL labour-hire payee (overhead expense;
-            generally TPAR-reportable — set is_tpar_supplier=True).
-            SUB_CONTRACTOR = a BUSINESS engaged to do part of a job (spend is
-            COST OF SALES; NOT TPAR here on the "labour incidental to
-            materials" exemption — leave is_tpar_supplier=False). Both are
-            payable like a supplier.
+            CONTRACTOR = higher-tier entity delivering a whole section of a
+              job (spend is COST OF SALES, recommend 5-2000 Contractor
+              Costs; NOT TPAR-reportable — ATO materials-incidental
+              exemption, Richard’s informed call; is_tpar_supplier=False).
+            SUB_CONTRACTOR = middle-tier labour-services payee under a
+              contractor (spend is EXPENSE; TPAR-reportable — set
+              is_tpar_supplier=True). Both are payable like a SUPPLIER.
         email: optional.
         phone: optional.
         abn: optional 11-digit ABN (Australian Business Number).
