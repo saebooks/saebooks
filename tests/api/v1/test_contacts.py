@@ -449,3 +449,64 @@ async def test_jinja_bulk_tag_one_off_endpoint(api_client: AsyncClient, client: 
     # The other contact is untouched
     r = await api_client.get(f"/api/v1/contacts/{ids[1]}")
     assert r.json()["is_one_off"] is True
+
+
+async def test_is_tpar_supplier_roundtrip(api_client: AsyncClient) -> None:
+    """is_tpar_supplier stored + returned on create, toggled via PATCH (CIVL-5).
+
+    The model column + service threading already existed; this covers the
+    v1 REST contract surface (ContactBase/ContactCreate/ContactUpdate/ContactOut).
+    """
+    # CREATE with is_tpar_supplier=true persists + is returned true
+    r = await api_client.post(
+        "/api/v1/contacts",
+        json={
+            "name": _rand_name("TparSub"),
+            "contact_type": "SUB_CONTRACTOR",
+            "is_tpar_supplier": True,
+        },
+    )
+    assert r.status_code == 201, r.text
+    data = r.json()
+    assert data["is_tpar_supplier"] is True
+    cid = data["id"]
+
+    # GET returns it true
+    r = await api_client.get(f"/api/v1/contacts/{cid}")
+    assert r.status_code == 200, r.text
+    assert r.json()["is_tpar_supplier"] is True
+
+    # PATCH toggles it off (and bumps version)
+    r = await api_client.patch(
+        f"/api/v1/contacts/{cid}",
+        json={"is_tpar_supplier": False},
+        headers={"If-Match": "1"},
+    )
+    assert r.status_code == 200, r.text
+    patched = r.json()
+    assert patched["is_tpar_supplier"] is False
+    assert patched["version"] == 2
+
+    # GET reflects the toggle
+    r = await api_client.get(f"/api/v1/contacts/{cid}")
+    assert r.status_code == 200
+    assert r.json()["is_tpar_supplier"] is False
+
+    # PATCH toggles it back on
+    r = await api_client.patch(
+        f"/api/v1/contacts/{cid}",
+        json={"is_tpar_supplier": True},
+        headers={"If-Match": "2"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["is_tpar_supplier"] is True
+
+
+async def test_is_tpar_supplier_defaults_false(api_client: AsyncClient) -> None:
+    """Omitting is_tpar_supplier on create defaults it to false on the wire."""
+    r = await api_client.post(
+        "/api/v1/contacts",
+        json={"name": _rand_name("TparDefault"), "contact_type": "SUPPLIER"},
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["is_tpar_supplier"] is False
