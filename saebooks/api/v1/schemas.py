@@ -13,7 +13,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from saebooks.models.account import AccountType
-from saebooks.models.contact import ContactType
+from saebooks.models.contact import ContactType, PaymentTermsBasis
 from saebooks.models.recurring_invoice import RecurrenceFrequency, RecurrenceStatus
 
 
@@ -40,6 +40,13 @@ class ContactBase(BaseModel):
     currency_code: str | None = Field(default=None, max_length=3, description="ISO 4217 billing currency")
     is_one_off: bool = False
     is_tpar_supplier: bool = Field(default=False, description="Flag as a sub-contractor included in TPAR reporting")
+    payment_terms_basis: PaymentTermsBasis | None = Field(
+        default=None,
+        description="Default terms basis: DAYS (net N from invoice date) or EOM (N days after end of invoice month). NULL = no default.",
+    )
+    payment_terms_days: int | None = Field(
+        default=None, ge=0, le=365, description="Days component of the default payment terms"
+    )
 
 
 class ContactCreate(ContactBase):
@@ -72,6 +79,8 @@ class ContactUpdate(BaseModel):
     currency_code: str | None = Field(default=None, max_length=3)
     is_one_off: bool | None = None
     is_tpar_supplier: bool | None = None
+    payment_terms_basis: PaymentTermsBasis | None = None
+    payment_terms_days: int | None = Field(default=None, ge=0, le=365)
 
 
 class ContactOut(ContactBase):
@@ -953,7 +962,9 @@ class BillBase(BaseModel):
 
     contact_id: uuid.UUID | None = None
     issue_date: date
-    due_date: date
+    # Optional: when omitted the engine derives it from the supplier contact's
+    # default payment terms (e.g. 30-day EOM); falls back to issue_date.
+    due_date: date | None = None
     notes: str | None = None
     supplier_reference: str | None = None
     currency: str = Field(default="AUD", min_length=3, max_length=3)
