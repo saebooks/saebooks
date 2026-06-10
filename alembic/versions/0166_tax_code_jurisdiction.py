@@ -1,4 +1,4 @@
-"""0165_tax_code_jurisdiction — add jurisdiction tag to tax_codes + seed
+"""0166_tax_code_jurisdiction — add jurisdiction tag to tax_codes + seed
 the curated international reference tax-code set.
 
 Why this migration exists
@@ -47,8 +47,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "0165_tax_code_jurisdiction"
-down_revision: str | None = "0164_je_guard_fixes"
+revision: str = "0166_tax_code_jurisdiction"
+down_revision: str | None = "0165_contact_payment_terms"
 branch_labels: str | None = None
 depends_on: str | None = None
 
