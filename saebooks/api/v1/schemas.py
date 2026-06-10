@@ -344,6 +344,7 @@ class TaxCodeOut(TaxCodeBase):
     id: uuid.UUID
     company_id: uuid.UUID
     tenant_id: uuid.UUID
+    jurisdiction: str = "AU"
     version: int
     created_at: datetime
     archived_at: datetime | None = None

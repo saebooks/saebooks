@@ -78,11 +78,20 @@ def _dump(tax_code: TaxCode) -> dict[str, Any]:
 @router.get("", response_model=TaxCodeListOut)
 async def list_tax_codes(
     tax_system: str | None = Query(default=None),
+    jurisdiction: str | None = Query(
+        default="AU",
+        description=(
+            "Filter by jurisdiction. Defaults to 'AU' so the international "
+            "reference codes stay hidden; pass an empty string to return all."
+        ),
+    ),
     limit: int = Query(default=200, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
     company_id: UUID = Depends(get_active_company_id),
 ) -> TaxCodeListOut:
+    # An empty-string jurisdiction means "all jurisdictions".
+    juris = jurisdiction or None
     count_stmt = (
         select(func.count())
         .select_from(TaxCode)
@@ -90,6 +99,8 @@ async def list_tax_codes(
     )
     if tax_system is not None:
         count_stmt = count_stmt.where(TaxCode.tax_system == tax_system)
+    if juris is not None:
+        count_stmt = count_stmt.where(TaxCode.jurisdiction == juris)
     total = (await session.execute(count_stmt)).scalar_one()
 
     stmt = (
@@ -101,6 +112,8 @@ async def list_tax_codes(
     )
     if tax_system is not None:
         stmt = stmt.where(TaxCode.tax_system == tax_system)
+    if juris is not None:
+        stmt = stmt.where(TaxCode.jurisdiction == juris)
     items = list((await session.execute(stmt)).scalars().all())
     return TaxCodeListOut(
         items=[TaxCodeOut.model_validate(tc) for tc in items],

@@ -23,13 +23,17 @@ warnings.warn(
 )
 
 from saebooks.services.tax_engine.au import (  # noqa: E402
+    TaxConfigError,
     auto_post_gst_lines,
     is_auto_post_enabled,
     settle_bas,
+    validate_gst_account_settings,
 )
 
 __all__ = [
+    "TaxConfigError",
     "auto_post_gst_lines",
     "is_auto_post_enabled",
     "settle_bas",
+    "validate_gst_account_settings",
 ]

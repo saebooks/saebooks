@@ -29,6 +29,12 @@ class TaxCode(CompanyScoped, Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     rate: Mapped[Decimal] = mapped_column(Numeric(6, 3), nullable=False, default=Decimal("0"))
     tax_system: Mapped[str] = mapped_column(String(16), nullable=False, default="GST")
+    # Jurisdiction tag (0165). Existing AU rows default to 'AU'. Lets the
+    # engine hold per-jurisdiction code sets (AU GST, NZ GST, UK VAT...)
+    # without code collisions — the active-row unique index is
+    # (company_id, jurisdiction, code). The app surfaces only the home
+    # jurisdiction (AU) so international reference codes stay hidden.
+    jurisdiction: Mapped[str] = mapped_column(String(8), nullable=False, default="AU")
     reporting_type: Mapped[str] = mapped_column(String(32), nullable=False, default="taxable")
     description: Mapped[str | None] = mapped_column(String)
     # Optimistic-locking version — bumped on every write through the API.

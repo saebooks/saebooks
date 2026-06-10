@@ -265,24 +265,29 @@ async def _resolve_category_tax_code(
     """
     if category.tax_code is None:
         return None
-    # 1. Exact code match.
+    # 1. Exact code match. Filter to the home jurisdiction (AU) so the
+    #    international reference codes seeded by ensure_international_seed
+    #    (which reuse code strings like 'GST'/'ZERO') can't be picked up
+    #    here non-deterministically.
     row = (
         await session.execute(
             select(TaxCode).where(
                 TaxCode.company_id == company_id,
                 TaxCode.code == category.tax_code,
+                TaxCode.jurisdiction == "AU",
                 TaxCode.archived_at.is_(None),
             )
         )
     ).scalars().first()
     if row is not None:
         return row.id
-    # 2. Reporting-type fallback.
+    # 2. Reporting-type fallback (home jurisdiction only).
     row = (
         await session.execute(
             select(TaxCode)
             .where(
                 TaxCode.company_id == company_id,
+                TaxCode.jurisdiction == "AU",
                 TaxCode.reporting_type == category.reporting_type,
                 TaxCode.archived_at.is_(None),
             )
