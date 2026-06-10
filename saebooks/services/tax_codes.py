@@ -32,6 +32,7 @@ _TAX_CODE_COLUMNS: tuple[str, ...] = (
     "name",
     "rate",
     "tax_system",
+    "jurisdiction",
     "reporting_type",
     "description",
     "version",
@@ -126,8 +127,151 @@ async def ensure_au_seed(session: AsyncSession, company_id: uuid.UUID) -> int:
     for row in AU_SEED:
         if row["code"] in have:
             continue
-        session.add(TaxCode(company_id=company_id, tax_system="GST", **row))
+        session.add(
+            TaxCode(
+                company_id=company_id,
+                tax_system="GST",
+                jurisdiction="AU",
+                **row,
+            )
+        )
         inserted += 1
+    await session.commit()
+    return inserted
+
+
+# ---------------------------------------------------------------------------
+# International reference tax-code set (0165).
+#
+# A CURATED standard set — NOT every country. Each entry is jurisdiction-
+# tagged so it never collides with the AU codes and never surfaces in the
+# AU app (the list endpoints default to the home jurisdiction). The engine
+# can resolve these once the per-jurisdiction tax engines (NZ/UK/EE) and a
+# company.jurisdiction selector land; until then they are reference data,
+# baked in so they are "off the list".
+#
+# tax_system values: GST (AU/NZ), VAT (UK/EU), SALES_TAX (US), GENERIC.
+# reporting_type reuses the AU vocabulary where it maps cleanly
+# (taxable / gst_free / input_taxed / export / out_of_scope) and adds
+# "reverse_charge" + "reduced_rate" for VAT shapes.
+# ---------------------------------------------------------------------------
+
+INTERNATIONAL_SEED: list[dict[str, object]] = [
+    # --- New Zealand GST ---
+    {"jurisdiction": "NZ", "tax_system": "GST", "code": "NZ_GST", "name": "NZ GST 15%",
+     "rate": Decimal("15.000"), "reporting_type": "taxable",
+     "description": "New Zealand standard-rate GST (15%)."},
+    {"jurisdiction": "NZ", "tax_system": "GST", "code": "NZ_ZERO", "name": "NZ GST Zero-Rated",
+     "rate": Decimal("0.000"), "reporting_type": "export",
+     "description": "New Zealand zero-rated supplies (exports, going concern)."},
+    {"jurisdiction": "NZ", "tax_system": "GST", "code": "NZ_EXEMPT", "name": "NZ GST Exempt",
+     "rate": Decimal("0.000"), "reporting_type": "input_taxed",
+     "description": "New Zealand exempt supplies (financial services, residential rent)."},
+    # --- United Kingdom VAT ---
+    {"jurisdiction": "UK", "tax_system": "VAT", "code": "UK_STD", "name": "UK VAT Standard 20%",
+     "rate": Decimal("20.000"), "reporting_type": "taxable",
+     "description": "United Kingdom standard-rate VAT (20%)."},
+    {"jurisdiction": "UK", "tax_system": "VAT", "code": "UK_RED", "name": "UK VAT Reduced 5%",
+     "rate": Decimal("5.000"), "reporting_type": "reduced_rate",
+     "description": "United Kingdom reduced-rate VAT (5%) — domestic fuel, child seats."},
+    {"jurisdiction": "UK", "tax_system": "VAT", "code": "UK_ZERO", "name": "UK VAT Zero-Rated",
+     "rate": Decimal("0.000"), "reporting_type": "export",
+     "description": "United Kingdom zero-rated supplies (most food, books, exports)."},
+    {"jurisdiction": "UK", "tax_system": "VAT", "code": "UK_EXEMPT", "name": "UK VAT Exempt",
+     "rate": Decimal("0.000"), "reporting_type": "input_taxed",
+     "description": "United Kingdom exempt supplies (insurance, finance, education)."},
+    {"jurisdiction": "UK", "tax_system": "VAT", "code": "UK_RC", "name": "UK VAT Reverse Charge",
+     "rate": Decimal("20.000"), "reporting_type": "reverse_charge",
+     "description": "United Kingdom domestic/EU reverse-charge VAT — recipient accounts for VAT."},
+    # --- European Union (generic — member states vary) ---
+    {"jurisdiction": "EU", "tax_system": "VAT", "code": "EU_STD", "name": "EU VAT Standard",
+     "rate": Decimal("21.000"), "reporting_type": "taxable",
+     "description": "EU standard-rate VAT (generic 21% placeholder — set per member state)."},
+    {"jurisdiction": "EU", "tax_system": "VAT", "code": "EU_RED", "name": "EU VAT Reduced",
+     "rate": Decimal("10.000"), "reporting_type": "reduced_rate",
+     "description": "EU reduced-rate VAT (generic 10% placeholder — set per member state)."},
+    {"jurisdiction": "EU", "tax_system": "VAT", "code": "EU_ZERO", "name": "EU VAT Zero-Rated",
+     "rate": Decimal("0.000"), "reporting_type": "export",
+     "description": "EU zero-rated / intra-community supplies."},
+    {"jurisdiction": "EU", "tax_system": "VAT", "code": "EU_RC", "name": "EU VAT Reverse Charge",
+     "rate": Decimal("0.000"), "reporting_type": "reverse_charge",
+     "description": "EU reverse-charge VAT (intra-community B2B) — recipient accounts for VAT."},
+    # --- United States sales tax (rate varies by state/locality) ---
+    {"jurisdiction": "US", "tax_system": "SALES_TAX", "code": "US_TAX", "name": "US Sales Tax (varies)",
+     "rate": Decimal("0.000"), "reporting_type": "taxable",
+     "description": "United States sales tax — rate varies by state/locality; set per nexus."},
+    {"jurisdiction": "US", "tax_system": "SALES_TAX", "code": "US_NOTAX", "name": "US No Tax",
+     "rate": Decimal("0.000"), "reporting_type": "out_of_scope",
+     "description": "United States — no sales tax (exempt sale or no nexus)."},
+    # --- Generic cross-jurisdiction reference codes ---
+    {"jurisdiction": "GEN", "tax_system": "GENERIC", "code": "GEN_ZERO", "name": "Zero-Rated",
+     "rate": Decimal("0.000"), "reporting_type": "export",
+     "description": "Generic zero-rated supply."},
+    {"jurisdiction": "GEN", "tax_system": "GENERIC", "code": "GEN_EXEMPT", "name": "Exempt",
+     "rate": Decimal("0.000"), "reporting_type": "input_taxed",
+     "description": "Generic exempt / input-taxed supply."},
+    {"jurisdiction": "GEN", "tax_system": "GENERIC", "code": "GEN_OOS", "name": "Out of Scope",
+     "rate": Decimal("0.000"), "reporting_type": "out_of_scope",
+     "description": "Generic out-of-scope (not reportable for indirect tax)."},
+    {"jurisdiction": "GEN", "tax_system": "GENERIC", "code": "GEN_RC", "name": "Reverse Charge",
+     "rate": Decimal("0.000"), "reporting_type": "reverse_charge",
+     "description": "Generic reverse-charge — recipient accounts for the tax."},
+]
+
+# Imported-services reverse-charge + GST-on-imports for the AU/BAS set. These
+# are AU-jurisdiction codes that complement AU_SEED (kept separate so the
+# original AU starter set the app shows stays the lean 7-code list, while the
+# full BAS completeness codes are seeded for engine/BAS use).
+AU_EXTENDED_SEED: list[dict[str, object]] = [
+    {"jurisdiction": "AU", "tax_system": "GST", "code": "RCP", "name": "Reverse Charge — Imported Services",
+     "rate": Decimal("10.000"), "reporting_type": "reverse_charge",
+     "description": "GST reverse charge on imported services (Div 84) — recipient self-assesses GST."},
+    {"jurisdiction": "AU", "tax_system": "GST", "code": "IMP", "name": "GST on Imports",
+     "rate": Decimal("10.000"), "reporting_type": "taxable",
+     "description": "GST on taxable importations of goods (BAS label 7A / deferred GST)."},
+]
+
+
+async def _ensure_codes(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    rows: list[dict[str, object]],
+) -> int:
+    """Idempotent insert of tax-code rows keyed on (jurisdiction, code).
+
+    Skips any (jurisdiction, code) pair that already exists active for this
+    company. Returns the number of rows inserted.
+    """
+    existing = await session.execute(
+        select(TaxCode.jurisdiction, TaxCode.code).where(
+            TaxCode.company_id == company_id, TaxCode.archived_at.is_(None)
+        )
+    )
+    have = {(j, c) for (j, c) in existing.all()}
+    inserted = 0
+    for row in rows:
+        key = (row["jurisdiction"], row["code"])
+        if key in have:
+            continue
+        session.add(TaxCode(company_id=company_id, **row))
+        have.add(key)
+        inserted += 1
+    return inserted
+
+
+async def ensure_international_seed(
+    session: AsyncSession, company_id: uuid.UUID
+) -> int:
+    """Idempotent: ensure the curated international + AU-extended reference
+    tax-code set exists for this company.
+
+    Safe to run repeatedly — keys on (company_id, jurisdiction, code) among
+    active rows. Existing AU starter codes (AU_SEED) are untouched. These
+    rows are jurisdiction-tagged and do NOT surface in the AU app (the list
+    endpoints default to the home jurisdiction).
+    """
+    inserted = await _ensure_codes(session, company_id, AU_EXTENDED_SEED)
+    inserted += await _ensure_codes(session, company_id, INTERNATIONAL_SEED)
     await session.commit()
     return inserted
 
@@ -137,13 +281,23 @@ async def list_active(
     company_id: uuid.UUID,
     *,
     tenant_id: uuid.UUID | None = None,
+    jurisdiction: str | None = "AU",
 ) -> list[TaxCode]:
+    """Active tax codes for a company.
+
+    ``jurisdiction`` defaults to 'AU' (the home jurisdiction) so the app
+    only ever shows AU codes — the international reference set seeded by
+    ``ensure_international_seed`` stays hidden from the UI. Pass
+    ``jurisdiction=None`` to return every jurisdiction (engine/admin use).
+    """
     stmt = (
         select(TaxCode)
         .where(TaxCode.company_id == company_id, TaxCode.archived_at.is_(None))
     )
     if tenant_id is not None:
         stmt = stmt.where(TaxCode.tenant_id == tenant_id)
+    if jurisdiction is not None:
+        stmt = stmt.where(TaxCode.jurisdiction == jurisdiction)
     stmt = stmt.order_by(TaxCode.code)
     result = await session.execute(stmt)
     return list(result.scalars().all())

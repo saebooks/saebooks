@@ -234,10 +234,13 @@ async def _resolve_tax_code(
 ) -> TaxCode | None:
     if not code:
         return None
+    # Home jurisdiction (AU) only — the international reference codes
+    # reuse code strings, so an unqualified code match would be ambiguous.
     result = await session.execute(
         select(TaxCode).where(
             TaxCode.company_id == company_id,
             TaxCode.code == code,
+            TaxCode.jurisdiction == "AU",
             TaxCode.archived_at.is_(None),
         )
     )

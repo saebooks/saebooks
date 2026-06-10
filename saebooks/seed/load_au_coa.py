@@ -18,6 +18,9 @@ from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.services.companies import ensure_seed_company
 from saebooks.services.tax_codes import ensure_au_seed as ensure_tax_codes
+from saebooks.services.tax_codes import (
+    ensure_international_seed as ensure_intl_tax_codes,
+)
 
 logger = logging.getLogger("saebooks.seed.au_coa")
 
@@ -302,6 +305,8 @@ async def main() -> None:
         company = await ensure_seed_company(session)
         tax_inserted = await ensure_tax_codes(session, company.id)
         logger.info("Tax codes: %d inserted", tax_inserted)
+        intl_inserted = await ensure_intl_tax_codes(session, company.id)
+        logger.info("International tax codes: %d inserted", intl_inserted)
         inserted, skipped = await _load_accounts(session, company)
         logger.info(
             "Accounts for %s: %d inserted, %d already present", company.name, inserted, skipped

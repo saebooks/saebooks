@@ -26,9 +26,26 @@ from saebooks.models.tax_code import TaxCode
 from saebooks.services import settings as settings_svc
 from saebooks.services.tax_engine.types import (
     PostingContext,
+    PostingError,
     TaxTreatment,
     ValidationError,
 )
+
+
+class TaxConfigError(PostingError):
+    """GST/tax configuration is invalid and posting cannot proceed.
+
+    Raised when a journal entry carries a taxable line (a line with a
+    non-zero ``gst_amount``) but the GST account code configured in
+    settings does not resolve to a real, non-archived account in the
+    company chart. A taxable line with nowhere to post its GST is a
+    configuration error — NOT a no-op. Silently dropping the GST line
+    produces an unbalanced journal entry that then fails with a
+    misleading 'unbalanced' error (the 2026-06-10 sauer bug). Surfacing
+    a clear config error here points the operator straight at the bad
+    setting instead.
+    """
+
 
 # ---------------------------------------------------------------------------
 # Account-type → tax-direction tables (shared between auto-post and
@@ -136,9 +153,12 @@ async def auto_post_gst_lines(
         session, entry.company_id, "gst_paid_account_code"
     )
 
-    if not collected_acct or not paid_acct:
-        return []
-
+    # Classify the line account types up-front so we can tell whether any
+    # taxable line actually NEEDS a GST account before deciding that an
+    # unresolved code is fatal. An entry with no taxable line at all (e.g.
+    # a balance-sheet transfer) must remain a clean no-op even if the GST
+    # settings are blank — only a taxable line with nowhere to post GST is
+    # a configuration error.
     acct_ids = {line.account_id for line in entry.lines}
     acct_types: dict[uuid.UUID, AccountType] = {}
     if acct_ids:
@@ -148,19 +168,66 @@ async def auto_post_gst_lines(
         for row in result.all():
             acct_types[row[0]] = row[1]
 
+    needs_output = False  # a taxable income/sales line needs GST Collected
+    needs_input = False   # a taxable expense/asset line needs GST Paid
+    for line in entry.lines:
+        gst = line.gst_amount
+        if not gst or gst == Decimal("0"):
+            continue
+        acct_type = acct_types.get(line.account_id)
+        if acct_type in _OUTPUT_TYPES:
+            needs_output = True
+        elif acct_type in _INPUT_TYPES:
+            needs_input = True
+
+    # A taxable line whose GST account code does not resolve is a config
+    # error — raise loudly instead of silently emitting no GST line and
+    # producing an unbalanced JE (root cause of the 2026-06-10 sauer bug:
+    # gst_paid_account_code was '2-1330', which did not exist in that
+    # tenant's chart, so this returned [] and the JE failed as 'unbalanced').
+    if needs_output and collected_acct is None:
+        raw = await settings_svc.get(session, "gst_collected_account_code", "")
+        raise TaxConfigError(
+            f"gst_collected_account_code {str(raw)!r} does not resolve to an "
+            f"account in the chart — a taxable sales line cannot post its GST. "
+            f"Set gst_collected_account_code to a real GST Collected account code."
+        )
+    if needs_input and paid_acct is None:
+        raw = await settings_svc.get(session, "gst_paid_account_code", "")
+        raise TaxConfigError(
+            f"gst_paid_account_code {str(raw)!r} does not resolve to an "
+            f"account in the chart — a taxable purchase line cannot post its "
+            f"GST. Set gst_paid_account_code to a real GST Paid account code."
+        )
+
+    # No taxable line needs a GST account — nothing to auto-post.
+    if not collected_acct and not paid_acct:
+        return []
+
     new_lines: list[JournalLine] = []
     max_line_no = max((line.line_no for line in entry.lines), default=0)
+    # IDs of the GST accounts themselves (skip GST-on-GST). Either may be
+    # None here when only one direction is configured + only that
+    # direction is taxable; the per-line branch below only dereferences
+    # the account it actually needs for that line.
+    gst_account_ids = {
+        a.id for a in (collected_acct, paid_acct) if a is not None
+    }
 
     for line in entry.lines:
         gst = line.gst_amount
         if not gst or gst == Decimal("0"):
             continue
-        if line.account_id in (collected_acct.id, paid_acct.id):
+        if line.account_id in gst_account_ids:
             continue
         acct_type = acct_types.get(line.account_id)
         if acct_type is None:
             continue
 
+        if acct_type in _OUTPUT_TYPES and collected_acct is None:
+            continue
+        if acct_type in _INPUT_TYPES and paid_acct is None:
+            continue
         max_line_no += 1
         if acct_type in _OUTPUT_TYPES:
             gst_line = JournalLine(
@@ -188,6 +255,59 @@ async def auto_post_gst_lines(
         new_lines.append(gst_line)
 
     return new_lines
+
+
+# ---------------------------------------------------------------------------
+# GST settings validation — callable on settings save so a bad GST account
+# code is caught at configuration time, not at the first taxable post.
+# ---------------------------------------------------------------------------
+
+# The GST account-code settings the AU engine resolves at post time.
+# ``gst_clearing_account_code`` is only used by the BAS settlement helper
+# (``settle_bas``); the other two drive ``auto_post_gst_lines``.
+GST_ACCOUNT_SETTING_KEYS: tuple[str, ...] = (
+    "gst_collected_account_code",
+    "gst_paid_account_code",
+    "gst_clearing_account_code",
+)
+
+
+async def validate_gst_account_settings(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    *,
+    keys: tuple[str, ...] = GST_ACCOUNT_SETTING_KEYS,
+    require_set: bool = False,
+) -> dict[str, str]:
+    """Check that each configured GST account code resolves to a real account.
+
+    Returns a mapping ``{setting_key: problem_message}`` for every key whose
+    value is set but does NOT resolve to a non-archived account in the
+    company chart. An empty dict means every configured GST account code is
+    valid.
+
+    A blank/unset value is tolerated by default (a company may legitimately
+    not have wired up, say, the clearing account yet) — pass
+    ``require_set=True`` to also flag blanks. This helper is the
+    configuration-time counterpart to the post-time guard in
+    ``auto_post_gst_lines``: call it on settings save to reject a bad code
+    (e.g. the '2-1330' that did not exist in the sauer chart) up-front
+    instead of letting it sit dormant until the first taxable expense.
+    """
+    problems: dict[str, str] = {}
+    for key in keys:
+        raw = await settings_svc.get(session, key, "")
+        if not raw:
+            if require_set:
+                problems[key] = f"{key} is not set"
+            continue
+        acct = await _get_gst_account(session, company_id, key)
+        if acct is None:
+            problems[key] = (
+                f"{key} {str(raw)!r} does not resolve to an account in the "
+                f"chart"
+            )
+    return problems
 
 
 async def settle_bas(

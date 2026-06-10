@@ -31,11 +31,12 @@ from saebooks.services import audit_log as audit_log_svc
 from saebooks.services import gst as gst_svc
 from saebooks.services import settings as settings_svc
 from saebooks.services.tax_engine import get_engine
-from saebooks.services.tax_engine.types import PostingContext
+from saebooks.services.tax_engine.types import PostingContext, PostingError
 
-
-class PostingError(Exception):
-    pass
+# PostingError is defined in the leaf ``tax_engine.types`` module so the
+# tax engine can subclass it (TaxConfigError) without a circular import.
+# Re-exported here unchanged so every ``journal_svc.PostingError`` caller
+# and ``except journal_svc.PostingError`` handler keeps working.
 
 
 # F-04: roles allowed to override a closed period-lock. Bookkeepers and

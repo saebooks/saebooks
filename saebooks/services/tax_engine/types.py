@@ -17,6 +17,20 @@ from typing import Any
 from saebooks.models.account import AccountType
 
 
+class PostingError(Exception):
+    """A journal entry cannot be posted.
+
+    Defined here in the leaf ``types`` module (not in
+    ``services.journal``) so both ``services.journal`` and the
+    per-jurisdiction tax engines can subclass it without a circular
+    import (journal imports the tax engine at module load, so the tax
+    engine cannot import journal at module load). ``services.journal``
+    re-exports it as ``journal.PostingError`` for backwards
+    compatibility, so every existing ``except journal_svc.PostingError``
+    handler is unchanged.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class PostingContext:
     """Inputs the tax engine needs to determine treatment for one line.

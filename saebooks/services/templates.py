@@ -47,8 +47,12 @@ async def _apply_au_default(session: AsyncSession, company: Company) -> None:
         _seed_period_locks,
     )
     from saebooks.services.tax_codes import ensure_au_seed as ensure_tax_codes
+    from saebooks.services.tax_codes import (
+        ensure_international_seed as ensure_intl_tax_codes,
+    )
 
     await ensure_tax_codes(session, company.id)
+    await ensure_intl_tax_codes(session, company.id)
     await _load_accounts(session, company)
     await _seed_period_locks(session, company)
 
