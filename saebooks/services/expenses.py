@@ -750,10 +750,24 @@ async def api_update(
     if expense.version != expected_version:
         raise VersionConflict(expense)
     if not force and expense.status != ExpenseStatus.DRAFT:
-        raise ExpenseError(
-            f"Cannot edit expense {expense.id} in state {expense.status.value}; "
-            "void the existing expense and raise a new one instead."
+        # Non-financial metadata (notes, reference) may be corrected on
+        # POSTED / VOIDED expenses — it never feeds totals, GST or the
+        # posted journal entry. Everything financial stays DRAFT-only
+        # (or behind the FLAG_EDIT_FROZEN_STATE force gate): void the
+        # expense and raise a new one. Version bump + change_log as usual.
+        financial_change = (
+            payment_account_id is not None
+            or contact_id is not None
+            or expense_date is not None
+            or currency is not None
+            or fx_rate is not None
+            or lines is not None
         )
+        if financial_change:
+            raise ExpenseError(
+                f"Cannot edit expense {expense.id} in state {expense.status.value}; "
+                "void the existing expense and raise a new one instead."
+            )
 
     if payment_account_id is not None:
         await _validate_payment_account(session, payment_account_id, expense.tenant_id)
