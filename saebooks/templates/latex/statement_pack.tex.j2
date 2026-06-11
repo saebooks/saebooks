@@ -31,8 +31,12 @@
 %% COVER PAGE
 %% =====================================================================
 \thispagestyle{empty}
-\vspace*{60mm}
+\vspace*{50mm}
 \begin{center}
+  {% if logo_path -%}
+  %% Letterhead logo (LATEX_LOGO_PATH via render_latex; text-only when unset)
+  \includegraphics[height=20mm]{{ "{" }}{{ logo_path }}{{ "}" }}\\[8mm]
+  {%- endif %}
   {\LARGE\bfseries\color{saegreen} {{ (company.legal_name or company.name) | latex_escape }} }\\[4mm]
   {% if company.acn -%}
   {\large ACN {{ company.acn | latex_escape }}}\\[1mm]
