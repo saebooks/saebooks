@@ -35,6 +35,7 @@ async def expense_deps() -> dict[str, str]:
             await session.execute(
                 select(Account).where(
                     Account.archived_at.is_(None),
+                    Account.is_header.is_(False),
                     Account.account_type == AccountType.ASSET,
                     Account.tenant_id == DEFAULT_TENANT_ID,
                 ).limit(1)
@@ -44,6 +45,7 @@ async def expense_deps() -> dict[str, str]:
             await session.execute(
                 select(Account).where(
                     Account.archived_at.is_(None),
+                    Account.is_header.is_(False),
                     Account.account_type == AccountType.EXPENSE,
                     Account.tenant_id == DEFAULT_TENANT_ID,
                 ).limit(1)
