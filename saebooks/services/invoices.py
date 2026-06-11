@@ -1216,10 +1216,23 @@ async def api_update(
     if inv.version != expected_version:
         raise VersionConflict(inv)
     if inv.status != InvoiceStatus.DRAFT:
-        raise InvoiceError(
-            f"invoice_not_draft: cannot edit invoice {inv.id} in state "
-            f"{inv.status.value}; void the existing invoice and raise a new one instead."
+        # Non-financial metadata (notes, payment_terms) may be corrected on
+        # POSTED / VOIDED / WRITTEN_OFF invoices — it never feeds totals,
+        # GST, aging or the posted journal entry. Anything financial stays
+        # DRAFT-only: void the invoice and raise a new one. The change is
+        # still version-bumped and change_log'd like every other edit.
+        financial_change = (
+            contact_id is not None
+            or issue_date is not None
+            or due_date is not None
+            or settlement_date is not None
+            or lines is not None
         )
+        if financial_change:
+            raise InvoiceError(
+                f"invoice_not_draft: cannot edit invoice {inv.id} in state "
+                f"{inv.status.value}; void the existing invoice and raise a new one instead."
+            )
 
     if contact_id is not None:
         await _validate_contact_company_and_tenant(session, contact_id, inv.company_id, inv.tenant_id)

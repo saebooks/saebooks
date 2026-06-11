@@ -444,7 +444,11 @@ async def test_invoices_change_log_full_sequence(
 async def test_patch_posted_invoice_returns_422(
     api_client: AsyncClient, invoice_deps: dict[str, str]
 ) -> None:
-    """PATCH on a POSTED invoice must return 422 with invoice_not_draft in body."""
+    """Financial PATCH on a POSTED invoice must 422 with invoice_not_draft.
+
+    Notes/payment_terms-only edits are allowed on non-DRAFT invoices since
+    feat/notes-edit-posted-invoice — covered in test_invoice_notes_on_posted.py.
+    """
     # Create
     r = await api_client.post("/api/v1/invoices", json=_invoice_payload(invoice_deps))
     assert r.status_code == 201, r.text
@@ -463,7 +467,7 @@ async def test_patch_posted_invoice_returns_422(
     # PATCH a POSTED invoice -- must be rejected
     r3 = await api_client.patch(
         f"/api/v1/invoices/{invoice_id}",
-        json={"notes": "illegal mutation"},
+        json={"issue_date": "2025-01-01"},
         headers={"If-Match": str(posted_v)},
     )
     assert r3.status_code == 422, r3.text
