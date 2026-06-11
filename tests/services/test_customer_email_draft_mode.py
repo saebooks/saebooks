@@ -36,14 +36,35 @@ _TOKEN_URL = (
 _CREATE_URL = f"https://graph.microsoft.com/v1.0/users/{_MAILBOX}/messages"
 
 
+def _settings_objects() -> list:
+    """Every module-level ``settings`` reference the code under test reads.
+
+    Other tests in the full suite re-instantiate/rebind
+    ``saebooks.config.settings``, so the object this test module captured
+    at collection time, the one customer_email bound at import time, and
+    the one outlook_drafts binds at (lazy) import time may differ. Patch
+    them all — identity-deduped — or the patch silently misses in CI.
+    """
+    import saebooks.config as cfg
+    import saebooks.services.customer_email as ce
+    import saebooks.services.outlook_drafts as od
+
+    return list({id(o): o for o in (settings, cfg.settings, ce.settings, od.settings)}.values())
+
+
+def _patch_all(monkeypatch: pytest.MonkeyPatch, key: str, value) -> None:
+    for obj in _settings_objects():
+        monkeypatch.setattr(obj, key, value)
+
+
 @pytest.fixture
 def draft_mode(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-    monkeypatch.setattr(settings, "customer_email_draft_mode", True)
-    monkeypatch.setattr(settings, "graph_tenant_id", _GRAPH_TENANT)
-    monkeypatch.setattr(settings, "graph_client_id", "client-id")
-    monkeypatch.setattr(settings, "graph_client_secret", "client-secret")
-    monkeypatch.setattr(settings, "graph_draft_mailbox", _MAILBOX)
-    monkeypatch.setattr(settings, "mail_outbox_dir", str(tmp_path))
+    _patch_all(monkeypatch, "customer_email_draft_mode", True)
+    _patch_all(monkeypatch, "graph_tenant_id", _GRAPH_TENANT)
+    _patch_all(monkeypatch, "graph_client_id", "client-id")
+    _patch_all(monkeypatch, "graph_client_secret", "client-secret")
+    _patch_all(monkeypatch, "graph_draft_mailbox", _MAILBOX)
+    _patch_all(monkeypatch, "mail_outbox_dir", str(tmp_path))
     # Reset the module-level Graph token cache between tests.
     import saebooks.services.outlook_drafts as od
 
@@ -133,7 +154,7 @@ async def test_draft_mode_fails_closed_without_graph_config(
     monkeypatch: pytest.MonkeyPatch,
     respx_mock: respx.MockRouter,
 ) -> None:
-    monkeypatch.setattr(settings, "graph_client_secret", "")
+    _patch_all(monkeypatch, "graph_client_secret", "")
 
     result, row = await _call_send()
 
