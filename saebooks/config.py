@@ -161,6 +161,25 @@ class Settings(BaseSettings):
     resend_webhook_secret: str = Field(default="", alias="RESEND_WEBHOOK_SECRET")
 
     # ---------------------------------------------------------------- #
+    # Customer-facing email — DRAFT MODE (Outlook drafts via Graph)    #
+    # ---------------------------------------------------------------- #
+    # When true, ``send_customer_email`` never attempts a real send —
+    # the two-key kill switch above is not even consulted. Instead the
+    # composed email + attachments are created as a DRAFT message in
+    # ``graph_draft_mailbox`` via Microsoft Graph (client_credentials),
+    # for the operator to review and send by hand from Outlook. This is
+    # the interim outbound workflow until real sending is authorised.
+    # Requires the three GRAPH_* credentials + GRAPH_DRAFT_MAILBOX;
+    # missing config fails closed (SendResult mode='failed', logged).
+    customer_email_draft_mode: bool = Field(
+        default=False, alias="SAEBOOKS_EMAIL_DRAFT_MODE"
+    )
+    graph_tenant_id: str = Field(default="", alias="GRAPH_TENANT_ID")
+    graph_client_id: str = Field(default="", alias="GRAPH_CLIENT_ID")
+    graph_client_secret: str = Field(default="", alias="GRAPH_CLIENT_SECRET")
+    graph_draft_mailbox: str = Field(default="", alias="GRAPH_DRAFT_MAILBOX")
+
+    # ---------------------------------------------------------------- #
     # Observability (Batch Z)                                          #
     # ---------------------------------------------------------------- #
     sentry_dsn: str = Field(default="", alias="SENTRY_DSN")
@@ -411,6 +430,12 @@ class Settings(BaseSettings):
     latex_api_url: str = Field(
         default="http://latex-api:8000", alias="LATEX_API_URL"
     )
+    # Optional absolute path — as seen from INSIDE the latex-api
+    # container — to a letterhead logo image (PNG). When set, the LaTeX
+    # templates render the image letterhead; when empty they fall back
+    # to the text letterhead. ``render_latex`` injects this into every
+    # ctx as ``logo_path`` (caller-supplied logo_path wins).
+    latex_logo_path: str = Field(default="", alias="LATEX_LOGO_PATH")
 
 
     # ---------------------------------------------------------------- #

@@ -553,3 +553,79 @@ async def archive_purchase_order(
         raise _map_value_error(exc) from exc
 
     return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
+# PDF — branded purchase-order document, mirrors invoices' /pdf route.
+# Always regenerated from current PO state; never stored.
+# ---------------------------------------------------------------------------
+
+
+def _build_po_pdf_ctx(po: Any, supplier: Any) -> dict[str, Any]:
+    """Construct the render-purchase_order ctx from a PO + its supplier."""
+    delivery_lines = [
+        ln.strip()
+        for ln in (po.delivery_address or "").replace("\r\n", "\n").split("\n")
+        if ln.strip()
+    ]
+    return {
+        "number":        po.number or str(po.id)[:8],
+        "issue_date":    po.issue_date.isoformat() if po.issue_date else "",
+        "expected_date": po.expected_date.isoformat() if po.expected_date else "",
+        "currency":      po.currency,
+        "subtotal":      str(po.subtotal),
+        "tax_total":     str(po.tax_total),
+        "total":         str(po.total),
+        "notes":         po.notes or "",
+        "supplier": {
+            "name":    supplier.name if supplier else "",
+            "contact": "",
+            "email":   (supplier.email or "") if supplier else "",
+            "phone":   (supplier.phone or "") if supplier else "",
+        },
+        "delivery_lines": delivery_lines,
+        "lines": [
+            {
+                "line_no":       ln.line_no,
+                "description":   ln.description,
+                "quantity":      str(ln.quantity),
+                "unit_price":    str(ln.unit_price),
+                "line_subtotal": str(ln.line_subtotal),
+                "line_tax":      str(ln.line_tax),
+            }
+            for ln in po.lines
+        ],
+    }
+
+
+@router.get("/{po_id}/pdf")
+async def get_purchase_order_pdf(
+    po_id: UUID,
+    request: Request,
+    bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> Response:
+    """Render a purchase order as PDF (branded letterhead layout)."""
+    from sqlalchemy import select as sa_select
+
+    from saebooks.models.contact import Contact
+    from saebooks.services.latex_pdf import render_latex
+
+    tenant_id = resolve_tenant_id(request)
+    po = await svc.api_get(session, po_id, tenant_id=tenant_id, company_id=company_id)
+    if po is None:
+        raise HTTPException(404, "PurchaseOrder not found")
+
+    supplier = (
+        await session.execute(sa_select(Contact).where(Contact.id == po.contact_id))
+    ).scalars().first()
+
+    ctx = _build_po_pdf_ctx(po, supplier)
+    pdf_bytes = await render_latex("purchase_order", ctx)
+    filename = f"{ctx['number']}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )

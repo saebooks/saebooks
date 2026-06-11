@@ -89,6 +89,7 @@
 \fancyfoot[L]{\textcolor{saefooter}{\small Sauer Pty Ltd ACN 683\,275\,756 \enspace ATF \enspace Saueesti Trust ABN 87\,744\,586\,592}}
 \fancyfoot[R]{\textcolor{saefooter}{\small Page~\thepage}}
 
+\usepackage{graphicx}
 \usepackage{microtype}
 \usepackage{parskip}
 \setlength{\parindent}{0pt}
@@ -107,7 +108,11 @@
 %% =====================================================================
 \thispagestyle{fancy}
 \begin{tabularx}{\textwidth}{@{}Xr@{}}
+  {% if logo_path -%}
+  \raisebox{-3mm}{\includegraphics[height=16mm]{{ "{" }}{{ logo_path }}{{ "}" }}}
+  {%- else -%}
   {\LARGE\bfseries\color{saeblue} SAE Engineering}
+  {%- endif %}
   &
   \begin{tabular}[t]{@{}r@{}}
     \textcolor{saegrey}{\small PO Box 592, Bungalow QLD 4870} \\

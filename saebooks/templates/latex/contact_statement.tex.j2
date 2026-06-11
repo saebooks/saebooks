@@ -39,6 +39,12 @@
 
 \begin{document}
 
+{% if logo_path -%}
+%% Letterhead logo (LATEX_LOGO_PATH via render_latex; text-only when unset)
+\noindent\includegraphics[height=14mm]{{ "{" }}{{ logo_path }}{{ "}" }}\par
+\vspace{2mm}
+{%- endif %}
+
 %% =====================================================================
 %% DOCUMENT HEADER
 %% =====================================================================

@@ -1,0 +1,277 @@
+{#
+  purchase_order.tex.j2 — SAE Engineering purchase order
+
+  Context keys (all data values MUST be latex_escape'd before interpolation):
+    number          str   PO number, e.g. "PO-000001"
+    issue_date      str   ISO date "YYYY-MM-DD"
+    expected_date   str   ISO date "YYYY-MM-DD" or ""
+    currency        str   e.g. "AUD"
+    subtotal        str   decimal string (ex GST)
+    tax_total       str   decimal string (GST)
+    total           str   decimal string (inc GST)
+    notes           str   free text, omit section if empty
+    supplier        dict  keys: name, contact, email, phone
+    delivery_lines  list  of str — delivery address split into lines
+    lines           list  dicts with: line_no, description, quantity,
+                          unit_price, line_subtotal, line_tax
+    logo_path       str|None  absolute path (inside latex-api) to the
+                          letterhead logo PNG; injected by render_latex
+                          from LATEX_LOGO_PATH. None → text letterhead.
+
+  Letterhead/colours/fonts match quote.tex.j2 (Liberation Sans;
+  saeblue #1B3A5C, saegrey #4A4A4A, ltgrey #F2F2F2, accent #E8792B).
+
+  Bare % in .tex source = LaTeX comment — every literal percent MUST
+  come from |latex_escape which renders it as \%.
+#}
+{%- macro fmt_money(v) -%}
+  {%- if v is not none -%}\${{ "%.2f"|format(v|float) }}{%- else -%}\$0.00{%- endif -%}
+{%- endmacro -%}
+{%- macro fmt_qty(v) -%}
+  {%- if v is not none and v != "" -%}
+    {%- set d = v|float -%}
+    {%- if d == d|int|float -%}{{ d|int }}{%- else -%}{{ "%.2f"|format(d) }}{%- endif -%}
+  {%- endif -%}
+{%- endmacro -%}
+{%- macro fmt_date(iso) -%}
+  {%- if iso and iso|length >= 10 -%}
+    {%- set parts = iso[:10].split('-') -%}
+    {%- set months = ["January","February","March","April","May","June","July","August","September","October","November","December"] -%}
+    {{ parts[2]|int }} {{ months[parts[1]|int - 1] }} {{ parts[0] }}
+  {%- else -%}---{%- endif -%}
+{%- endmacro -%}
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[
+  a4paper,
+  top=15mm,
+  bottom=24mm,
+  left=20mm,
+  right=20mm,
+  headheight=15pt,
+]{geometry}
+
+\usepackage{fontspec}
+\setmainfont{Liberation Sans}
+\setsansfont{Liberation Sans}
+\setmonofont{Liberation Mono}
+
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{tabularx}
+\usepackage{array}
+\newcolumntype{R}{>{\raggedleft\arraybackslash}p{22mm}}
+\newcolumntype{L}{>{\raggedright\arraybackslash}X}
+
+\usepackage[table]{xcolor}
+\definecolor{saeblue}{HTML}{1B3A5C}
+\definecolor{saegrey}{HTML}{4A4A4A}
+\definecolor{ltgrey}{HTML}{F2F2F2}
+\definecolor{saeaccent}{HTML}{E8792B}
+\definecolor{saeborder}{HTML}{CCCCCC}
+\definecolor{saefooter}{HTML}{194291}
+\definecolor{midgrey}{HTML}{9CA3AF}
+
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+\fancyfoot[L]{\textcolor{saefooter}{\small Sauer Pty Ltd ACN 683\,275\,756 \enspace ATF \enspace Saueesti Trust ABN 87\,744\,586\,592}}
+\fancyfoot[R]{\textcolor{saefooter}{\small Page~\thepage}}
+
+\usepackage{graphicx}
+\usepackage{microtype}
+\usepackage{parskip}
+\setlength{\parindent}{0pt}
+
+\usepackage{titlesec}
+\titleformat{\section}{\large\bfseries\color{saeblue}}{}{0em}{}[\color{saeborder}\titlerule]
+\titlespacing*{\section}{0pt}{8pt}{4pt}
+
+\usepackage{hyperref}
+\hypersetup{colorlinks=true,linkcolor=saeblue,urlcolor=saeblue,pdfborder={0 0 0}}
+
+\begin{document}
+
+%% =====================================================================
+%% LETTERHEAD
+%% =====================================================================
+\thispagestyle{fancy}
+\begin{tabularx}{\textwidth}{@{}Xr@{}}
+  {% if logo_path -%}
+  \raisebox{-3mm}{\includegraphics[height=16mm]{{ "{" }}{{ logo_path }}{{ "}" }}}
+  {%- else -%}
+  {\LARGE\bfseries\color{saeblue} SAE Engineering}
+  {%- endif %}
+  &
+  \begin{tabular}[t]{@{}r@{}}
+    \textcolor{saegrey}{\small PO Box 592, Bungalow QLD 4870} \\
+    \textcolor{saegrey}{\small \textbf{P:}~07\,4243\,3488 \quad \textbf{M:}~0457\,704\,373} \\
+    \textcolor{saegrey}{\small \textbf{E:}~admin@saee.com.au \quad \textbf{W:}~saee.com.au} \\
+    \textcolor{saegrey}{\small ABN: 87\,744\,586\,592 \quad QBCC: 15231284} \\
+  \end{tabular}
+\end{tabularx}
+
+\vspace{2mm}
+{\color{saeblue}\rule{\textwidth}{1.5pt}}
+\vspace{3mm}
+
+%% =====================================================================
+%% TITLE ROW — PURCHASE ORDER + number
+%% =====================================================================
+\begin{tabularx}{\textwidth}{@{}Xl@{}}
+  {\huge\bfseries\color{saeblue} PURCHASE ORDER}
+  &
+  {\Large\bfseries\color{saeaccent} {{ number | latex_escape }}}
+\end{tabularx}
+
+\vspace{3mm}
+
+%% =====================================================================
+%% INFO BOXES — Supplier + Order Details (side-by-side)
+%% =====================================================================
+\begin{tabularx}{\textwidth}{@{}XX@{}}
+  \cellcolor{ltgrey}%
+  \begin{minipage}[t]{\linewidth}
+    \vspace{2mm}
+    {\small\bfseries\color{saeblue} SUPPLIER:}\\[2mm]
+    {\small\bfseries\color{saegrey} {{ supplier.name | latex_escape }}}\\
+    {% if supplier.contact -%}
+    {\small\color{saegrey} {{ supplier.contact | latex_escape }}}\\
+    {%- endif %}
+    {% if supplier.phone -%}
+    {\small\color{saegrey} \textbf{P:}~{{ supplier.phone | latex_escape }}}\\
+    {%- endif %}
+    {% if supplier.email -%}
+    {\small\color{saegrey} \textbf{E:}~{{ supplier.email | latex_escape }}}\\
+    {%- endif %}
+    \vspace{2mm}
+  \end{minipage}
+  &
+  \cellcolor{ltgrey}%
+  \begin{minipage}[t]{\linewidth}
+    \vspace{2mm}
+    {\small\bfseries\color{saeblue} ORDER DETAILS:}\\[2mm]
+    {\small\color{saegrey} \textbf{PO No:} \quad {{ number | latex_escape }}}\\
+    {\small\color{saegrey} \textbf{Date:} \quad {{ fmt_date(issue_date) | latex_escape }}}\\
+    {\small\color{saegrey} \textbf{Required By:} \quad
+      {% if expected_date -%}{{ fmt_date(expected_date) | latex_escape }}{%- else -%}---{%- endif %}
+    }
+    \vspace{2mm}
+  \end{minipage}
+\end{tabularx}
+
+%% =====================================================================
+%% DELIVER TO BOX
+%% =====================================================================
+\begin{tabularx}{\textwidth}{@{}X@{}}
+  \cellcolor{ltgrey}%
+  \begin{minipage}[t]{\linewidth}
+    \vspace{2mm}
+    {\small\bfseries\color{saeblue} DELIVER TO:}\\[2mm]
+    {% for dl in delivery_lines -%}
+    {\small\color{saegrey} {{ dl | latex_escape }}}\\
+    {% endfor %}
+    \vspace{2mm}
+  \end{minipage}
+\end{tabularx}
+
+\vspace{2mm}
+
+%% =====================================================================
+%% LINE ITEMS TABLE
+%% =====================================================================
+\begin{longtable}{@{}p{8mm}p{76mm}p{12mm}R R R@{}}
+  \toprule
+  \rowcolor{saeblue}
+  \textcolor{white}{\textbf{\small Item}} &
+  \textcolor{white}{\textbf{\small Description}} &
+  \textcolor{white}{\textbf{\small Qty}} &
+  \textcolor{white}{\textbf{\small Unit Price}} &
+  \textcolor{white}{\textbf{\small GST}} &
+  \textcolor{white}{\textbf{\small Amount}} \\
+  \midrule
+  \endfirsthead
+  \multicolumn{6}{l}{\textit{\small (continued)}} \\
+  \toprule
+  \rowcolor{saeblue}
+  \textcolor{white}{\textbf{\small Item}} &
+  \textcolor{white}{\textbf{\small Description}} &
+  \textcolor{white}{\textbf{\small Qty}} &
+  \textcolor{white}{\textbf{\small Unit Price}} &
+  \textcolor{white}{\textbf{\small GST}} &
+  \textcolor{white}{\textbf{\small Amount}} \\
+  \midrule
+  \endhead
+  \bottomrule
+  \endfoot
+  {% for ln in lines -%}
+  {%- set row_bg = "ltgrey" if loop.index is odd else "white" -%}
+  \rowcolor{{ "{" }}{{ row_bg }}{{ "}" }}
+  {\small\color{saegrey} {{ ln.line_no | latex_escape }}} &
+  {\small\color{saegrey} {{ ln.description | latex_escape }}} &
+  {\small\color{saegrey} {{ fmt_qty(ln.quantity) | latex_escape }}} &
+  {\small\color{saegrey} {{ fmt_money(ln.unit_price) }}} &
+  {\small\color{saegrey} {{ fmt_money(ln.line_tax) }}} &
+  {\small\color{saegrey} {{ fmt_money(ln.line_subtotal) }}} \\
+  {% endfor %}
+\end{longtable}
+
+{\small\color{midgrey} Unit prices and amounts are ex GST. GST shown per line.}
+
+\vspace{2mm}
+
+%% =====================================================================
+%% TOTALS
+%% =====================================================================
+\begin{flushright}
+\begin{tabular}{@{}l@{\qquad}r@{}}
+  {\color{saegrey} Subtotal (ex GST)} & {\color{saegrey} {{ fmt_money(subtotal) }}} \\
+  {\color{saegrey} GST}               & {\color{saegrey} {{ fmt_money(tax_total) }}} \\
+\end{tabular}
+\end{flushright}
+
+\vspace{1mm}
+{% raw %}\noindent\colorbox{saeblue}{%
+  \parbox{\dimexpr\textwidth-2\fboxsep\relax}{%
+    \rule[-1.2mm]{0pt}{5.5mm}%
+    {\large\bfseries\color{white} TOTAL (inc GST) {% endraw %}{{ currency | latex_escape }}{% raw %}}%
+    \hfill
+    {\large\bfseries\color{white} {% endraw %}{{ fmt_money(total) }}{% raw %}}%
+  }%
+}{% endraw %}
+
+{% if notes %}
+\vspace{3mm}
+\section*{\color{saeblue}Notes}
+{{ notes | latex_escape }}
+{% endif %}
+
+\vspace{3mm}
+
+%% =====================================================================
+%% SUPPLIER INSTRUCTIONS
+%% =====================================================================
+\section*{\color{saeblue}Supplier Instructions}
+
+\begin{itemize}
+  \setlength\itemsep{0pt}
+  \setlength\parskip{0pt}
+  \item Please reference \textbf{{ "{" }}{{ number | latex_escape }}{{ "}" }} on all invoices, packing slips and correspondence.
+  \item Email invoices to \href{mailto:admin@saee.com.au}{admin@saee.com.au}.
+  \item Notify us promptly of any supply delays or price variations before shipping.
+\end{itemize}
+
+\vspace{2mm}
+
+\noindent\begin{minipage}{\textwidth}
+\textbf{Authorised by:}\\[2mm]
+{\color{saegrey}
+Richard Sauer\\
+Director --- SAE Engineering\\
+\href{mailto:admin@saee.com.au}{admin@saee.com.au} \textbar{} 0457 704 373
+}
+\end{minipage}
+
+\end{document}

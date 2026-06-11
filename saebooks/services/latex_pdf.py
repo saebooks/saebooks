@@ -174,6 +174,12 @@ async def render_latex(template: str, ctx: dict) -> bytes:
 
     latex_api_url = settings.latex_api_url
 
+    # Inject the optional letterhead logo path (templates render the
+    # image when present, the text letterhead otherwise). A logo_path
+    # already present in ctx wins over the setting.
+    ctx = dict(ctx)
+    ctx.setdefault("logo_path", settings.latex_logo_path or None)
+
     # Render the Jinja2 template to a LaTeX source string.
     env = _get_env()
     tmpl = env.get_template(f"{template}.tex.j2")

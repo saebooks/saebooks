@@ -7,6 +7,16 @@ customer-facing outbound (quotes, invoices, bills, credit notes, remittances,
 letterheads) — every send going to a real customer inbox is a real-money
 event, so it sits behind a hard gate.
 
+# Draft mode (interim workflow)
+
+When ``settings.customer_email_draft_mode`` (SAEBOOKS_EMAIL_DRAFT_MODE) is
+true, the composed email + attachments are created as a DRAFT in the
+operator's Outlook mailbox (``GRAPH_DRAFT_MAILBOX``) via Microsoft Graph —
+see saebooks.services.outlook_drafts. No real send is attempted while
+draft mode is on; the kill switch below is not even consulted. The audit
+row records resend_status='drafted' with the Graph draft id in
+resend_message_id. This is the bridge until outbound send is authorised.
+
 # Kill switch
 
 A real network call to Resend ONLY happens when BOTH:
@@ -85,7 +95,7 @@ class CustomerEmailAttachment:
 
 @dataclass(frozen=True)
 class SendResult:
-    mode: str           # 'sent' | 'blocked' | 'failed' | 'queued'
+    mode: str           # 'sent' | 'blocked' | 'failed' | 'queued' | 'drafted'
     log_id: uuid.UUID
     message_id: str | None = None
     outbox_path: str | None = None
@@ -355,6 +365,60 @@ async def send_customer_email(
     timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
     outbox_path = outbox_dir / f"{timestamp}__{message_id[:8]}.eml"
     outbox_path.write_bytes(eml_bytes)
+
+    # ── DRAFT MODE — park in the operator's Outlook drafts for review ──
+    # Overrides the send path entirely: while SAEBOOKS_EMAIL_DRAFT_MODE is
+    # on, no real send is attempted regardless of the two-key kill switch.
+    # The operator reviews the draft in Outlook and sends it by hand.
+    # The Graph draft id is recorded in resend_message_id (column reused).
+    if settings.customer_email_draft_mode:
+        from saebooks.services.outlook_drafts import create_outlook_draft
+
+        draft = await create_outlook_draft(
+            mailbox=settings.graph_draft_mailbox,
+            subject=subject,
+            to=to,
+            cc=cc,
+            bcc=bcc,
+            body_html=body_html,
+            attachments=[
+                (att.filename, att.content, att.content_type) for att in attachments
+            ],
+        )
+        if draft.draft_id:
+            status = "drafted"
+            reason = (
+                f"draft mode: saved to Outlook drafts in {settings.graph_draft_mailbox}"
+            )
+        else:
+            status = "failed"
+            reason = f"draft mode: {draft.error}"
+            logger.error(
+                "customer_email DRAFT FAILED for doc %s/%s tenant %s: %s",
+                doc_type, doc_id, tenant_id, draft.error,
+            )
+        log_id = await _record_send_log(
+            session,
+            tenant_id=tenant_id, doc_type=doc_type, doc_id=doc_id, doc_version=doc_version,
+            sent_by_user_id=sent_by_user_id,
+            from_addr=from_addr, to=to, cc=cc, bcc=bcc,
+            subject=subject, body_html=body_html, body_text=body_text,
+            attachment_filenames=attachment_filenames,
+            attachment_bytes=attachment_bytes_list,
+            attachment_sha256=attachment_sha256_list,
+            attachment_content_types=attachment_content_types,
+            resend_message_id=draft.draft_id,
+            resend_status=status,
+            resend_error=draft.error,
+            kill_switch_reason=reason,
+        )
+        return SendResult(
+            mode="drafted" if draft.draft_id else "failed",
+            log_id=log_id,
+            message_id=draft.draft_id,
+            outbox_path=str(outbox_path),
+            reason=reason,
+        )
 
     if block_reasons:
         reason = "; ".join(block_reasons)
