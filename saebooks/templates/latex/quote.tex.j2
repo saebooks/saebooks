@@ -223,7 +223,7 @@
 {%- endfor %}
 
 {% if desc_lines %}
-\begin{longtable}{@{}p{6mm}p{52mm}p{32mm}p{12mm}p{25mm}p{30mm}@{}}
+\begin{longtable}{@{}p{6mm}>{\raggedright\arraybackslash}p{48mm}>{\raggedright\arraybackslash}p{28mm}>{\centering\arraybackslash}p{10mm}>{\raggedright\arraybackslash}p{24mm}>{\raggedright\arraybackslash}p{28mm}@{}}
   \toprule
   \rowcolor{saeblue}
   \textcolor{white}{\textbf{\small Item}} &
@@ -261,7 +261,7 @@
 {% endif %}
 
 {% for ln in price_lines %}
-\begin{tabularx}{\textwidth}{@{}Xr@{}}
+\begin{tabularx}{\textwidth}{@{}Lr@{}}
   \hline
   \rowcolor{ltgrey}
   {\small\bfseries\color{saeblue} {{ ln.description | latex_escape }}} &

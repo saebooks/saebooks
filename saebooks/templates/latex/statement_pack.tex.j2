@@ -62,7 +62,7 @@
 
 {% if comparative and comp_pl %}
 {# --- Comparative P&L ------------------------------------------------ #}
-\begin{longtable}{p{7cm} r r r}
+\begin{longtable}{>{\raggedright\arraybackslash}p{7cm} r r r}
   \toprule
   \textbf{Account} & \textbf{Code} &
   \textbf{ {{ from_date[:4] | latex_escape }}--{{ to_date[:4] | latex_escape }} \$} &
@@ -125,7 +125,7 @@
 {# --- Non-comparative P&L -------------------------------------------- #}
 {% set income_lines = pl_report.income.get("INCOME", []) + pl_report.income.get("OTHER_INCOME", []) %}
 {% set expense_lines = pl_report.expenses.get("EXPENSE", []) + pl_report.expenses.get("COST_OF_SALES", []) + pl_report.expenses.get("OTHER_EXPENSE", []) %}
-\begin{longtable}{p{9cm} r r}
+\begin{longtable}{>{\raggedright\arraybackslash}p{9cm} r r}
   \toprule
   \textbf{Account} & \textbf{Code} & \textbf{Amount \$} \\
   \midrule
@@ -182,7 +182,7 @@
 
 {% if comparative and comp_bs %}
 {# --- Comparative Balance Sheet ------------------------------------- #}
-\begin{longtable}{p{7cm} r r r}
+\begin{longtable}{>{\raggedright\arraybackslash}p{7cm} r r r}
   \toprule
   \textbf{Account} & \textbf{Code} &
   \textbf{ {{ as_of_date | latex_escape }} \$} &
@@ -248,7 +248,7 @@
 
 {% else %}
 {# --- Non-comparative Balance Sheet ---------------------------------- #}
-\begin{longtable}{p{9cm} r r}
+\begin{longtable}{>{\raggedright\arraybackslash}p{9cm} r r}
   \toprule
   \textbf{Account} & \textbf{Code} & \textbf{Balance \$} \\
   \midrule
@@ -308,7 +308,7 @@
 {% endif %}
 \vspace{4mm}
 
-\begin{longtable}{p{6.5cm} r r r}
+\begin{longtable}{>{\raggedright\arraybackslash}p{6.5cm} r r r}
   \toprule
   \textbf{Account} & \textbf{Code} & \textbf{Debit \$} & \textbf{Credit \$} \\
   \midrule
