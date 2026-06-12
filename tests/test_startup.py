@@ -52,8 +52,8 @@ async def test_grpc_server_importable() -> None:
 async def test_grpc_heartbeat_live() -> None:
     """Open a real gRPC channel to a live server and call Heartbeat."""
     from grpc import aio
-    from saebooks.grpc_gen import saebooks_pb2, saebooks_pb2_grpc
 
+    from saebooks.grpc_gen import saebooks_pb2, saebooks_pb2_grpc
     from saebooks.grpc_server import serve
 
     port = 50098  # non-default to avoid clash with dev server

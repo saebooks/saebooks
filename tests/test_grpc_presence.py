@@ -77,9 +77,8 @@ def _make_context() -> mock.MagicMock:
 
 def test_acquire_lock_basic() -> None:
     """AcquireLock returns acquired=True for a fresh lock."""
-    from saebooks.grpc_gen import saebooks_pb2
-
     import saebooks.grpc_server as srv
+    from saebooks.grpc_gen import saebooks_pb2
 
     # Isolate this test with a clean lock store.
     srv._lock_store.clear()
@@ -101,9 +100,8 @@ def test_acquire_lock_basic() -> None:
 
 def test_acquire_lock_conflict() -> None:
     """Second user cannot acquire a lock held by the first."""
-    from saebooks.grpc_gen import saebooks_pb2
-
     import saebooks.grpc_server as srv
+    from saebooks.grpc_gen import saebooks_pb2
 
     srv._lock_store.clear()
 
@@ -132,9 +130,8 @@ def test_acquire_lock_conflict() -> None:
 
 def test_release_lock() -> None:
     """Acquire, release, then re-acquire succeeds."""
-    from saebooks.grpc_gen import saebooks_pb2
-
     import saebooks.grpc_server as srv
+    from saebooks.grpc_gen import saebooks_pb2
 
     srv._lock_store.clear()
 
