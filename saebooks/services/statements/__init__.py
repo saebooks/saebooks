@@ -77,9 +77,11 @@ async def build_statement(
     if contact is None:
         raise ValueError(f"Contact {contact_id} not found in this company/tenant")
 
-    # Opening: sum of (total - amount_paid) for POSTED invoices issued BEFORE the period_start.
-    opening_q = select(
-        func.coalesce(func.sum(Invoice.total - Invoice.amount_paid), Decimal("0"))
+    # Opening balance = (invoiced before period_start) - (paid before period_start).
+    # Must net only PRE-period payments; using Invoice.amount_paid (the current
+    # all-time figure) double-counts payments dated inside the statement period.
+    opening_invoiced_q = select(
+        func.coalesce(func.sum(Invoice.total), Decimal("0"))
     ).where(
         Invoice.company_id == company_id,
         Invoice.tenant_id == tenant_id,
@@ -88,7 +90,18 @@ async def build_statement(
         Invoice.issue_date < period_start,
         Invoice.archived_at.is_(None),
     )
-    opening_balance = (await session.execute(opening_q)).scalar_one() or Decimal("0")
+    opening_paid_q = select(
+        func.coalesce(func.sum(Payment.amount), Decimal("0"))
+    ).where(
+        Payment.company_id == company_id,
+        Payment.tenant_id == tenant_id,
+        Payment.contact_id == contact_id,
+        Payment.direction == PaymentDirection.INCOMING,
+        Payment.payment_date < period_start,
+    )
+    opening_invoiced = (await session.execute(opening_invoiced_q)).scalar_one() or Decimal("0")
+    opening_paid = (await session.execute(opening_paid_q)).scalar_one() or Decimal("0")
+    opening_balance = opening_invoiced - opening_paid
 
     # Invoices in period.
     invoices_q = (

@@ -552,6 +552,7 @@ def _build_bill_ctx(bill: Any, supplier: Any, company: Any) -> dict[str, Any]:
         "company": {
             "name":    (company.legal_name or company.name) if company else "",
             "abn":     (company.abn or "") if company else "",
+            "address": company_addr,
             **({k: v for k, v in company_addr.items()} if company_addr else {}),
         },
         "contact": {

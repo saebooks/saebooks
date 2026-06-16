@@ -660,7 +660,7 @@ def _build_invoice_ctx(inv: Any, customer: Any, company: Any) -> dict[str, Any]:
         "company": {
             "name":    (company.legal_name or company.name) if company else "",
             "abn":     (company.abn or "") if company else "",
-            "address": customer_addr,  # placeholder if real address absent
+            "address": company_addr,  # supplier block uses the company's own address
             **({k: v for k, v in company_addr.items()} if company_addr else {}),
         },
         "contact": {
