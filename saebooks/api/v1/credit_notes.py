@@ -301,7 +301,8 @@ async def void_credit_note(
     try:
         if existing.status == svc.CreditNoteStatus.DRAFT:
             # DELETE soft-deletes: a DRAFT archives (no JE reversal, op="archive").
-            # POST /{id}/void stays strict (api_void_credit_note rejects DRAFT 422).
+            # A POSTED credit note voids with a reversing JE. The POST /{id}/void
+            # action stays strict (api_void_credit_note rejects DRAFT with 422).
             await svc.api_void(
                 session,
                 credit_note_id,
