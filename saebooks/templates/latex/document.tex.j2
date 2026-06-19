@@ -176,6 +176,37 @@
 \end{flushright}
 
 %% =====================================================================
+%% HOW TO PAY — prominent bank-details panel (Tax Invoice only)
+%% =====================================================================
+{% if kind == 'Tax Invoice' and company.bank and company.bank.account_number %}
+\vspace{6mm}
+\noindent\fcolorbox{saegreen}{lightgrey}{\parbox{\dimexpr\linewidth-2\fboxsep-2\fboxrule}{
+  \vspace{1mm}
+  {\large\bfseries\color{saegreen}How to Pay}\\[2mm]
+  \begin{tabular}{@{}ll@{}}
+    \textbf{Account Name:} & {{ company.bank.account_name | latex_escape }} \\[1mm]
+    \textbf{BSB:} & {\large\bfseries {{ company.bank.bsb | latex_escape }}} \\[1mm]
+    \textbf{Account Number:} & {\large\bfseries {{ company.bank.account_number | latex_escape }}} \\[1mm]
+    {% if company.bank.name %}\textbf{Bank:} & {{ company.bank.name | latex_escape }} \\[1mm]{% endif %}
+    \textbf{Reference:} & {{ number | latex_escape }} \\[2mm]
+    \textbf{Amount Payable:} & {\large\bfseries \$ {{ "%.2f"|format(balance_due) | latex_escape }}} \\[1mm]
+    {% if due_date %}\textbf{Due Date:} & {{ due_date | latex_escape }}{% endif %}
+  \end{tabular}
+  \vspace{1mm}
+}}
+{% endif %}
+
+%% =====================================================================
+%% STANDING PAYMENT TERMS / TERMS OF TRADE — fine print (Tax Invoice only)
+%% =====================================================================
+{% if kind == 'Tax Invoice' and payment_terms_text %}
+\vspace{4mm}
+{\footnotesize\color{midgrey}
+{{ payment_terms_text | latex_escape }}{% if terms_url %} See our \href{{ "{" }}{{ terms_url | latex_escape }}{{ "}{" }}Terms of Trade{{ "}" }}.{% endif %}
+\par}
+{% endif %}
+
+%% =====================================================================
 %% PAYMENT TERMS + NOTES (only when present)
 %% =====================================================================
 {% if payment_terms %}

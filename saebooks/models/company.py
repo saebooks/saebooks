@@ -26,6 +26,14 @@ class Company(Base):
     trading_name: Mapped[str | None] = mapped_column(String)
     abn: Mapped[str | None] = mapped_column(String(20))
     acn: Mapped[str | None] = mapped_column(String(20))
+    # Remittance / "How to Pay" details — rendered on the invoice PDF (0168).
+    # All nullable; NULL = nothing shown (template guards on bank_account_number).
+    bank_name: Mapped[str | None] = mapped_column(String)
+    bank_bsb: Mapped[str | None] = mapped_column(String)
+    bank_account_number: Mapped[str | None] = mapped_column(String)
+    bank_account_name: Mapped[str | None] = mapped_column(String)
+    payment_terms_text: Mapped[str | None] = mapped_column(String)
+    terms_url: Mapped[str | None] = mapped_column(String)
     address: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     base_currency: Mapped[str] = mapped_column(String(3), default="AUD", nullable=False)
     coa_template_key: Mapped[str] = mapped_column(

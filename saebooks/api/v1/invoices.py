@@ -657,11 +657,19 @@ def _build_invoice_ctx(inv: Any, customer: Any, company: Any) -> dict[str, Any]:
         "amount_paid":  str(inv.amount_paid),
         "notes":        inv.notes or "",
         "payment_terms": inv.payment_terms or "",
+        "payment_terms_text": (company.payment_terms_text or "") if company else "",
+        "terms_url":          (company.terms_url or "") if company else "",
         "company": {
             "name":    (company.legal_name or company.name) if company else "",
             "abn":     (company.abn or "") if company else "",
             "address": company_addr,  # supplier block uses the company's own address
             **({k: v for k, v in company_addr.items()} if company_addr else {}),
+            "bank": {
+                "name":           (company.bank_name or "") if company else "",
+                "bsb":            (company.bank_bsb or "") if company else "",
+                "account_number": (company.bank_account_number or "") if company else "",
+                "account_name":   (company.bank_account_name or "") if company else "",
+            },
         },
         "contact": {
             "name":    customer.name if customer else "",
