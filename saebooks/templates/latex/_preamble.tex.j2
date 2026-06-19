@@ -50,9 +50,9 @@
 \renewcommand{\footrulewidth}{0.4pt}
 \fancyhead[L]{\small\color{midgrey}Special Purpose Financial Statements}
 \fancyhead[R]{\small\color{midgrey}\leftmark}
-\fancyfoot[L]{\small\color{midgrey}{{ company.legal_name | latex_escape }}
+\fancyfoot[L]{\small\color{midgrey}\parbox[t]{120mm}{\raggedright {{ company.legal_name | latex_escape }}
 {%- if company.acn %} \textbullet{} ACN {{ company.acn | latex_escape }}{% endif -%}
-{%- if company.abn %} \textbullet{} ABN {{ company.abn | latex_escape }}{% endif -%}}
+{%- if company.abn %} \textbullet{} ABN {{ company.abn | latex_escape }}{% endif -%}}}
 \fancyfoot[R]{\small\color{midgrey}Page~\thepage}
 
 %% Misc
