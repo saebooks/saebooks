@@ -47,3 +47,6 @@ node_modules/
 
 # gRPC generated stubs (re-run protoc to regenerate)
 saebooks/grpc_gen/
+
+# generated graph analysis output
+graphify-out/

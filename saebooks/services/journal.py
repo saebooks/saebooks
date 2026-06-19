@@ -797,12 +797,17 @@ async def reverse(
             )
         )
 
-    await session.commit()
+    # ATOMICITY FIX: do NOT commit the reversal here. The reversal post and
+    # the original status flip must share ONE transaction, otherwise a guard
+    # failure on the original UPDATE (e.g. origin=UNKNOWN legacy entries) leaves
+    # the already-committed reversal as an orphan. Use post_in_txn (no commit)
+    # and a single trailing commit so the whole reverse is all-or-nothing.
+    await session.flush()
 
-    # Auto-post the reversal — pass actor_role through so the period-lock
-    # override gate fires consistently for the reversal post. Provenance:
+    # Auto-post the reversal WITHIN this txn — pass actor_role through so the
+    # period-lock override gate fires consistently. Provenance:
     # origin=REVERSAL, source = the original journal entry being reversed.
-    reversal = await post(
+    reversal = await post_in_txn(
         session,
         reversal.id,
         posted_by=posted_by,
@@ -813,7 +818,8 @@ async def reverse(
         source_id=original.id,
     )
 
-    # Mark original as reversed
+    # Mark original as reversed — same txn as the reversal post above, so a
+    # guard rejection here rolls the reversal back too (no orphan).
     original.status = EntryStatus.REVERSED
     await session.commit()
 
