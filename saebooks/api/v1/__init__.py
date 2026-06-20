@@ -59,7 +59,12 @@ from saebooks.api.v1.integrations import (
 from saebooks.api.v1.integrations import (
     router as integrations_router,
 )
-from saebooks.api.v1.intercompany import router as intercompany_router
+from saebooks.api.v1.intercompany import (
+    public_router as intercompany_public_router,
+)
+from saebooks.api.v1.intercompany import (
+    router as intercompany_router,
+)
 from saebooks.api.v1.invoices import router as invoices_router
 from saebooks.api.v1.items import router as items_router
 from saebooks.api.v1.journal_entries import router as journal_entries_router
@@ -183,6 +188,10 @@ router.include_router(transfers_router)
 # existing services/intercompany.py post_local_pair/reverse_local_pair.
 # No migration: ic_txn / ic_edges / ic_legs already exist (0154).
 router.include_router(intercompany_router)
+# Public inbound relay webhook (per-edge token + Ed25519, no JWT). The
+# receiver half of the cross-DB intercompany relay; gated default-off by
+# SAEBOOKS_IC_REMOTE_RELAY_ENABLED (returns 503 when off).
+router.include_router(intercompany_public_router)
 # Gap 2 (0158): first-class Reclassification — account-to-account
 # classification move of an already-posted amount (e.g. ~983 posted
 # expenses into child accounts) via a balanced engine-generated reclass
