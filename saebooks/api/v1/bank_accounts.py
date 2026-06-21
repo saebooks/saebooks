@@ -147,7 +147,9 @@ async def list_bank_accounts(
             .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
             .where(
                 JournalEntry.company_id == company_id,
-                JournalEntry.status == EntryStatus.POSTED,
+                # POSTED+REVERSED so void pairs cancel (see
+                # reports.REPORTABLE_STATUSES); POSTED-only double-counts voids.
+                JournalEntry.status.in_((EntryStatus.POSTED, EntryStatus.REVERSED)),
             )
             .group_by(JournalLine.account_id)
         )

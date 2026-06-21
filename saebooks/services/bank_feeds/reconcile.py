@@ -140,8 +140,8 @@ async def _ledger_total(
 
     ``debit - credit`` so the sign matches the bank-statement convention
     (positive = money into the bank account, negative = money out).
-    Only :attr:`EntryStatus.POSTED` entries count — draft/voided are
-    excluded.
+    POSTED and REVERSED entries count (draft excluded) so each voided
+    original and its reversal cancel, matching the financial reports.
     """
 
     row = (
@@ -156,7 +156,13 @@ async def _ledger_total(
             .join(JournalEntry, JournalEntry.id == JournalLine.entry_id)
             .where(
                 JournalLine.account_id == ledger_account_id,
-                JournalEntry.status == EntryStatus.POSTED.value,
+                # Include REVERSED so a voided original and its POSTED reversal
+                # cancel (matches reports.REPORTABLE_STATUSES). POSTED-only
+                # drops the reversed original but keeps its reversal, which
+                # double-counts every void and floats the ledger total.
+                JournalEntry.status.in_(
+                    (EntryStatus.POSTED.value, EntryStatus.REVERSED.value)
+                ),
             )
         )
     ).scalar_one()
