@@ -22,6 +22,7 @@ Design notes
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
@@ -31,6 +32,11 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 logger = logging.getLogger("saebooks.middleware.demo_touch")
+
+# Hold strong references to in-flight fire-and-forget touch tasks so the event
+# loop does not garbage-collect them mid-await (RUF006). Tasks remove
+# themselves on completion.
+_touch_tasks: set[asyncio.Task] = set()
 
 
 class DemoTouchMiddleware(BaseHTTPMiddleware):
@@ -65,8 +71,8 @@ class DemoTouchMiddleware(BaseHTTPMiddleware):
 
             await ephemeral_demo.touch_by_tenant(tenant_id)
 
-        try:
-            asyncio.create_task(_bump())
-        except RuntimeError:  # pragma: no cover — no running loop (sync test)
-            pass
+        with contextlib.suppress(RuntimeError):  # no running loop (sync test)
+            task = asyncio.create_task(_bump())
+            _touch_tasks.add(task)
+            task.add_done_callback(_touch_tasks.discard)
         return response

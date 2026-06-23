@@ -77,10 +77,16 @@ from saebooks.services.jwt_tokens import hash_password, make_access_token
 
 logger = logging.getLogger("saebooks.ephemeral_demo")
 
-# JWT TTL for a demo session — capped at the demo max age so a token can never
-# outlive its tenant (the company is reaped at DEMO_MAX_AGE; the token expiring
-# at the same horizon means a stale cookie self-heals into a fresh provision).
-_DEMO_TOKEN_TTL = lambda: int(settings.demo_max_age)  # noqa: E731
+
+def _demo_token_ttl() -> int:
+    """JWT TTL for a demo session — capped at the demo max age.
+
+    A token can never outlive its tenant (the company is reaped at
+    DEMO_MAX_AGE), so a stale ``sb_demo`` cookie self-heals into a fresh
+    provision rather than presenting a token whose tenant no longer exists.
+    Read live so a config override takes effect without a restart.
+    """
+    return int(settings.demo_max_age)
 
 
 class DemoAtCapacity(Exception):
@@ -306,7 +312,7 @@ async def provision(
 
         # 5. Mint the session JWT — identical claims to /auth/login.
         access_token = make_access_token(
-            demo_user, expires_in_seconds=_DEMO_TOKEN_TTL()
+            demo_user, expires_in_seconds=_demo_token_ttl()
         )
         logger.info(
             "provisioned demo tenant=%s company=%s user=%s ip=%s",
@@ -320,7 +326,7 @@ async def provision(
             tenant_id=tenant_id,
             demo_user_email=demo_email,
             access_token=access_token,
-            expires_in=_DEMO_TOKEN_TTL(),
+            expires_in=_demo_token_ttl(),
         )
 
 
@@ -633,6 +639,7 @@ async def run_reaper_loop(stop) -> None:  # type: ignore[no-untyped-def]
     than killing the loop. Started/stopped from the FastAPI lifespan.
     """
     import asyncio
+    import contextlib
 
     interval = max(1, int(settings.demo_reaper_interval))
     logger.info("ephemeral demo reaper started (interval=%ss)", interval)
@@ -641,8 +648,7 @@ async def run_reaper_loop(stop) -> None:  # type: ignore[no-untyped-def]
             await reap_once()
         except Exception as exc:  # pragma: no cover — keep the loop alive
             logger.warning("reaper sweep error: %r", exc)
-        try:
+        # Sleep ``interval`` seconds OR wake early on shutdown.
+        with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(stop.wait(), timeout=interval)
-        except (asyncio.TimeoutError, TimeoutError):
-            pass
     logger.info("ephemeral demo reaper stopped")

@@ -109,7 +109,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if reaper_task is not None:
             try:
                 await asyncio.wait_for(reaper_task, timeout=5)
-            except (asyncio.TimeoutError, TimeoutError):
+            except TimeoutError:
                 reaper_task.cancel()
         await grpc_server.stop(grace=5)
 
