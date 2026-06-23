@@ -416,8 +416,11 @@ async def _seed_company_dataset(
             bank_account_id=bank.id,
             actor="demo-seed",
         )
+        # Cap the entry count: each entry posts a journal entry; the full ~30
+        # set takes ~14s, over the web's provision timeout. 12 is a punchy demo
+        # (a few weeks of transactions) and keeps provision well under the limit.
         n = await _seed_entries(
-            session, tenant_id=tenant_id, company_id=company_id
+            session, tenant_id=tenant_id, company_id=company_id, limit=12
         )
         logger.info("cashbook demo seeded company=%s entries=%d", company_id, n)
         return
