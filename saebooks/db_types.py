@@ -49,7 +49,7 @@ intact. Verified 2026-05-14 against the default seed tenant.
 from __future__ import annotations
 
 from sqlalchemy import JSON
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, INET, JSONB, UUID
 from sqlalchemy.ext.compiler import compiles
 
 # --------------------------------------------------------------------------- #
@@ -96,4 +96,21 @@ def _uuid_sqlite(element, compiler, **kw):  # type: ignore[no-untyped-def]
     return "CHAR(32)"
 
 
-__all__ = ["ARRAY", "JSONB", "UUID"]
+@compiles(INET, "sqlite")
+def _inet_sqlite(element, compiler, **kw):  # type: ignore[no-untyped-def]
+    """Emit ``VARCHAR`` for postgresql.INET columns on SQLite.
+
+    INET is a Postgres-native type with no SQLite analogue; the only
+    consumer on SQLite would be the ``ephemeral_demo_tenants`` control
+    table, which never runs on the Cashbook backend (ephemeral demos are
+    a public-preview Postgres feature). The hook exists purely so
+    ``Base.metadata.create_all`` on a SQLite engine — used by
+    ``bootstrap_schema`` and the SQLite test path, which import every
+    model — does not blow up at DDL compile time on the unknown type.
+    Stored values are plain dotted-quad / IPv6 strings, which TEXT
+    affinity preserves verbatim.
+    """
+    return "VARCHAR"
+
+
+__all__ = ["ARRAY", "INET", "JSONB", "UUID"]

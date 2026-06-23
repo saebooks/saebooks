@@ -476,6 +476,49 @@ class Settings(BaseSettings):
         default='claude-haiku-4-5',
         alias='STATEMENT_LLM_VISION_MODEL',
     )
+
+    # ---------------------------------------------------------------- #
+    # Ephemeral per-visit demo tenants (public preview)                #
+    # ---------------------------------------------------------------- #
+    # See migration 0170 + saebooks/services/ephemeral_demo.py. The web
+    # container calls POST /internal/demo/provision over the docker
+    # network on a fresh root visit; the engine mints a brand-new
+    # company (its own RLS tenant) + demo user + JWT, then a 60s reaper
+    # hard-deletes idle / aged demos. All knobs below carry the design
+    # defaults; production overrides via env.
+    #
+    # demo_ephemeral_enabled — master switch. When false the provision
+    #   endpoint 503s ("demo_disabled") and the reaper loop does not run.
+    demo_ephemeral_enabled: bool = Field(
+        default=False, alias="DEMO_EPHEMERAL_ENABLED"
+    )
+    # Idle TTL in seconds — reap when now - last_seen_at exceeds this.
+    demo_idle_ttl: int = Field(default=1800, alias="DEMO_IDLE_TTL")
+    # Absolute max age in seconds — reap when now - created_at exceeds
+    # this, regardless of activity.
+    demo_max_age: int = Field(default=7200, alias="DEMO_MAX_AGE")
+    # Hard cap on concurrent live demo tenants. At cap, provision reaps
+    # the oldest-idle demo first; if still at cap it returns 503.
+    demo_max_tenants: int = Field(default=50, alias="DEMO_MAX_TENANTS")
+    # Per-source-IP provision rate-limit (provisions per rolling minute).
+    demo_provision_per_ip_per_min: int = Field(
+        default=6, alias="DEMO_PROVISION_PER_IP_PER_MIN"
+    )
+    # Reaper sweep interval in seconds.
+    demo_reaper_interval: int = Field(
+        default=60, alias="DEMO_REAPER_INTERVAL"
+    )
+    # Internal shared secret gating POST /internal/demo/provision. The web
+    # container sends it as the X-Internal-Secret header. Empty default:
+    # in dev/test the guard is skipped (the endpoint is already
+    # unreachable from the public edge, which only routes to the web
+    # container); in any non-dev/test env an empty secret hard-disables
+    # the endpoint (503) so a misconfigured prod can never expose it
+    # ungated.
+    demo_internal_secret: str = Field(
+        default="", alias="DEMO_INTERNAL_SECRET"
+    )
+
     @property
     def oauth_allowed_emails_set(self) -> set[str]:
         return {e.strip().lower() for e in self.oauth_allowed_emails.split(",") if e.strip()}

@@ -23,6 +23,7 @@ from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
 from saebooks.models.department import CostCentre, Department
 from saebooks.models.depreciation_model import DepreciationModel
+from saebooks.models.ephemeral_demo_tenant import EphemeralDemoTenant
 from saebooks.models.distribution import (
     BeneficiaryEntitlement,
     DistributionStatus,
@@ -117,6 +118,7 @@ __all__ = [
     "DepreciationModel",
     "DistributionStatus",
     "EntryStatus",
+    "EphemeralDemoTenant",
     "FixedAsset",
     "GrantStatus",
     "IcEdge",
