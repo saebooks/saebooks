@@ -518,6 +518,14 @@ class Settings(BaseSettings):
     demo_internal_secret: str = Field(
         default="", alias="DEMO_INTERNAL_SECRET"
     )
+    # demo_seed_flavour — which dataset a provisioned demo gets:
+    #   "saebooks" (default): full AU CoA + tax codes + draft invoices
+    #   "cashbook": AU CoA + tax codes, company flipped to bookkeeping_mode=
+    #     cashbook, + ~30 sole-trader cashbook entries (for the cashbook demo).
+    # Set per-api-instance (the cashbook-demo-api sets DEMO_SEED_FLAVOUR=cashbook).
+    demo_seed_flavour: str = Field(
+        default="saebooks", alias="DEMO_SEED_FLAVOUR"
+    )
 
     @property
     def oauth_allowed_emails_set(self) -> set[str]:

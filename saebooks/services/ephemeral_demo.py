@@ -388,6 +388,40 @@ async def _seed_company_dataset(
     )
     await session.commit()
 
+    # 3a. Cashbook flavour: flip the company into cashbook mode and seed the
+    #     ~30 sole-trader cashbook entries (reuses the cashbook-demo seeders,
+    #     scoped to this new company), then stop — no saebooks invoice fixtures.
+    #     Setup must run BEFORE any journal entry exists (full→cashbook is
+    #     refused once a company has ledger history); the entries below are the
+    #     first JEs and are posted in cashbook mode.
+    if settings.demo_seed_flavour.strip().lower() == "cashbook":
+        from saebooks.cli.seed_cashbook_demo import (
+            _find_default_bank_account,
+            _seed_entries,
+        )
+        from saebooks.services.cashbook import setup_cashbook_mode
+
+        bank = await _find_default_bank_account(session, company_id)
+        if bank is None:
+            logger.warning(
+                "cashbook demo seed: no bank account on company %s — serving "
+                "a non-cashbook tenant",
+                company_id,
+            )
+            return
+        await setup_cashbook_mode(
+            db=session,
+            tenant_id=tenant_id,
+            company_id=company_id,
+            bank_account_id=bank.id,
+            actor="demo-seed",
+        )
+        n = await _seed_entries(
+            session, tenant_id=tenant_id, company_id=company_id
+        )
+        logger.info("cashbook demo seeded company=%s entries=%d", company_id, n)
+        return
+
     # 3. A couple of customers + draft invoices so the demo isn't empty.
     #    Drafts (not posted) keep the seed fast and avoid the journal-posting
     #    tenant-propagation surface; the invoice service stamps tenant_id
@@ -577,27 +611,39 @@ async def _hard_delete_demo_company(
     if session.bind is not None and session.bind.dialect.name == "postgresql":
         await session.execute(text("SET LOCAL app.db_rebuild = 'on'"))
 
-    # FK-topological purge. A plain `DELETE FROM companies` CANNOT rely on the
-    # company_id ON DELETE CASCADE alone: ~25 transactional/line tables carry ON
-    # DELETE *RESTRICT* FKs to `accounts` (e.g. invoice_lines.account_id), and
-    # Postgres does not guarantee it removes those RESTRICT-referencing rows
-    # before the accounts they point at within one cascade — so the cascade can
-    # abort with a FK violation. We pre-delete the demo's only RESTRICT-bearing
-    # rows (invoice_lines — scoped via its parent invoice, as invoice_lines has
-    # no company_id column of its own), after which the company delete cascades
-    # every remaining company_id-scoped table cleanly.
+    # FK-topological pre-delete. A plain `DELETE FROM companies` CANNOT rely on
+    # the company_id ON DELETE CASCADE alone: ~25 transactional/line tables carry
+    # ON DELETE *RESTRICT* FKs to `accounts` (e.g. invoice_lines.account_id,
+    # journal_lines.account_id), and Postgres doesn't guarantee it removes those
+    # RESTRICT-referencing rows before the accounts they point at within one
+    # cascade — so the cascade aborts with a FK violation. AND a cashbook demo
+    # pins `companies.cashbook_default_bank_account_id → accounts (RESTRICT)`,
+    # which blocks deleting that account while the company row still exists.
     #
-    # DEMO FOOTPRINT CONTRACT: provision() + _seed_company_dataset() create only
-    # invoice_lines as RESTRICT-referencing rows. If the seed ever grows to post
-    # bills / payments / journal entries, pre-delete THEIR line rows here too —
-    # the reap test (seeds a full demo, reaps it, asserts the company is gone and
-    # a real company survives) fails loudly if a dangling RESTRICT row blocks the
-    # cascade.
+    # So before the company delete we (a) NULL the company's own account ref, and
+    # (b) pre-delete the demo's RESTRICT-bearing line rows:
+    #   saebooks flavour → invoice_lines (draft invoices; no company_id, via parent)
+    #   cashbook flavour → journal_lines (posted cashbook entries)
+    # After that the company delete cascades every remaining company_id table
+    # cleanly. If a future seed posts bills/payments, pre-delete THEIR lines too —
+    # the reap test (both flavours) fails loudly if a dangling RESTRICT row blocks
+    # the cascade.
+    await session.execute(
+        text(
+            "UPDATE companies SET cashbook_default_bank_account_id = NULL "
+            "WHERE id = :cid"
+        ).bindparams(cid=company_id)
+    )
     await session.execute(
         text(
             "DELETE FROM invoice_lines WHERE invoice_id IN "
             "(SELECT id FROM invoices WHERE company_id = :cid)"
         ).bindparams(cid=company_id)
+    )
+    await session.execute(
+        text("DELETE FROM journal_lines WHERE company_id = :cid").bindparams(
+            cid=company_id
+        )
     )
     await session.execute(
         text("DELETE FROM companies WHERE id = :cid").bindparams(cid=company_id)
