@@ -77,6 +77,14 @@ class JournalOrigin(enum.StrEnum):
     RECEIPT = "RECEIPT"
     # Account-to-account classification move (migration 0158).
     RECLASSIFICATION = "RECLASSIFICATION"
+    # Bad-debt write-off + recovery (Phase 1, bad-debt feature). Stored as
+    # plain strings on the String(32) origin column — NO DB migration needed.
+    # WRITEOFF: Dr Bad Debts (+ Dr GST Collected for taxable lines) / Cr Trade
+    # Debtors — the GST decreasing adjustment on an uncollectable sale.
+    # RECOVERY: Dr Bank / Cr Bad Debt Recovery (Other Income), NO GST — money
+    # received against a previously written-off debt is assessable income only.
+    BAD_DEBT_WRITEOFF = "BAD_DEBT_WRITEOFF"
+    BAD_DEBT_RECOVERY = "BAD_DEBT_RECOVERY"
 
 
 class JournalEntry(CompanyScoped, Base):

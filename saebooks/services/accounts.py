@@ -882,3 +882,118 @@ async def delete_account(
 
     await session.delete(account)
     await session.commit()
+
+
+# ---------------------------------------------------------------------------
+# Bad-debt account resolvers (create-on-demand)
+#
+# Mirrors the GST-account resolver pattern in services.credit_notes /
+# services.tax_engine.au — but where those return None when the chart lacks
+# the account, these CREATE the account on first use so the bad-debt write-off
+# and recovery postings always have a target. The AU seed CoA ships neither a
+# Bad Debts expense (6-2050) nor a Bad Debt Recovery other-income (4-1290)
+# account, so a resolver that merely looked them up would fail on a freshly
+# seeded company. Both are flagged ``system_managed`` (engine-owned) and
+# scoped to the companys own tenant.
+
+
+# ---------------------------------------------------------------------------
+# Bad-debt account resolvers (create-on-demand)
+#
+# Mirrors the GST-account resolver pattern in services.credit_notes /
+# services.tax_engine.au — but where those return None when the chart lacks
+# the account, these CREATE the account on first use so the bad-debt write-off
+# and recovery postings always have a target. The AU seed CoA ships neither a
+# Bad Debts expense (6-2050) nor a Bad Debt Recovery other-income (4-1290)
+# account, so a resolver that merely looked them up would fail on a freshly
+# seeded company. Both are flagged ``system_managed`` (engine-owned) and
+# scoped to the company's own tenant.
+# ---------------------------------------------------------------------------
+
+# Fixed chart codes for the bad-debt feature. Configurable per-company is a
+# Phase-2 (app settings) concern; the engine resolves these defaults.
+_BAD_DEBT_EXPENSE_CODE = "6-2050"
+_BAD_DEBT_EXPENSE_NAME = "Bad Debts"
+_BAD_DEBT_RECOVERY_CODE = "4-1290"
+_BAD_DEBT_RECOVERY_NAME = "Bad Debt Recovery"
+
+
+async def _resolve_or_create_system_account(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    *,
+    code: str,
+    name: str,
+    account_type: AccountType,
+) -> Account:
+    """Return the (company_id, code) account, creating it if absent.
+
+    The created account is ``system_managed`` and inherits the company's
+    tenant_id (NOT the legacy default tenant) so it is visible to the
+    tenant-scoped readers and passes the account<->company<->tenant
+    coherence trigger. Flushes but does NOT commit — the caller owns the
+    transaction so the new account commits atomically with the posting that
+    needs it.
+    """
+    existing = (
+        await session.execute(
+            select(Account).where(
+                Account.company_id == company_id,
+                Account.code == code,
+                Account.archived_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing
+
+    # Resolve the company's tenant_id so the new account lands in the right
+    # tenant (the account<->company tenant-coherence trigger rejects a
+    # mismatch). Import locally to avoid a module-level import cycle.
+    from saebooks.models.company import Company
+
+    company = await session.get(Company, company_id)
+    if company is None:
+        raise ValueError(f"Company {company_id} not found")
+
+    parent = await find_parent(session, company_id, code)
+    account = Account(
+        company_id=company_id,
+        tenant_id=company.tenant_id,
+        code=code,
+        name=name,
+        account_type=account_type,
+        parent_id=parent.id if parent else None,
+        system_managed=True,
+        version=1,
+    )
+    session.add(account)
+    await session.flush()
+    await session.refresh(account)
+    return account
+
+
+async def get_bad_debt_recovery_account(
+    session: AsyncSession, company_id: uuid.UUID
+) -> Account:
+    """Resolve 4-1290 "Bad Debt Recovery" (OTHER_INCOME), creating on demand."""
+    return await _resolve_or_create_system_account(
+        session,
+        company_id,
+        code=_BAD_DEBT_RECOVERY_CODE,
+        name=_BAD_DEBT_RECOVERY_NAME,
+        account_type=AccountType.OTHER_INCOME,
+    )
+
+
+async def get_bad_debt_expense_account(
+    session: AsyncSession, company_id: uuid.UUID
+) -> Account:
+    """Resolve 6-2050 "Bad Debts" (EXPENSE), creating on demand."""
+    return await _resolve_or_create_system_account(
+        session,
+        company_id,
+        code=_BAD_DEBT_EXPENSE_CODE,
+        name=_BAD_DEBT_EXPENSE_NAME,
+        account_type=AccountType.EXPENSE,
+    )
