@@ -915,6 +915,46 @@ class InvoiceConflictBody(BaseModel):
     current: InvoiceOut
 
 
+class InvoiceWriteOffBody(BaseModel):
+    """Body for POST /invoices/{id}/write-off.
+
+    ``write_off_date`` defaults to today (run/confirmation date, NOT the
+    invoice date) when omitted. ``reason`` is an optional note recorded on the
+    write-off journal entry (e.g. "EC Credit Control — uncollectable").
+    """
+
+    write_off_date: date | None = None
+    reason: str | None = None
+
+
+class InvoiceRecoveryBody(BaseModel):
+    """Body for POST /invoices/{id}/record-recovery.
+
+    Records money received against a previously written-off debt as Other
+    Income (no GST). ``bank_account_id`` is the account the funds landed in;
+    ``amount`` must be positive (supports partial / multiple recoveries).
+    ``payer_contact_id`` lets a collection agency be recorded as the payer
+    when it differs from the original debtor.
+    """
+
+    bank_account_id: uuid.UUID
+    amount: Decimal = Field(gt=0)
+    recovery_date: date | None = None
+    payer_contact_id: uuid.UUID | None = None
+
+
+class BadDebtRecoveryOut(BaseModel):
+    """Response for a recorded recovery — the posted journal entry summary."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    journal_entry_id: uuid.UUID
+    invoice_id: uuid.UUID
+    amount: Decimal
+    recovery_date: date
+    bank_account_id: uuid.UUID
+
+
 # ---------------------------------------------------------------------------
 # Bills — Phase 1 tier-3 (cycle 8)
 # ---------------------------------------------------------------------------

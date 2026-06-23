@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import select

@@ -41,11 +41,14 @@ from saebooks.api.v1.schemas import (
     InvoiceCreate,
     InvoiceListOut,
     InvoiceOut,
+    InvoiceRecoveryBody,
     InvoiceUpdate,
+    InvoiceWriteOffBody,
     ReviewFlagBody,
 )
 from saebooks.config import settings
 from saebooks.models.invoice import InvoiceStatus
+from saebooks.services import bad_debt as bad_debt_svc
 from saebooks.services import invoices as svc
 from saebooks.services import review_flags as review_flags_svc
 from saebooks.services.features import FLAG_STRIPE_INTEGRATION, require_feature
@@ -554,6 +557,123 @@ async def void_invoice_transition(
         await store_response(session, key, 200, json.dumps(body).encode())
         await session.commit()
     return JSONResponse(body, status_code=200)
+
+
+# ---------------------------------------------------------------------------
+# Bad-debt write-off (POST /{id}/write-off → WRITTEN_OFF)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/{invoice_id}/write-off",
+    responses={200: {"model": InvoiceOut}},
+)
+async def write_off_invoice_endpoint(
+    invoice_id: UUID,
+    request: Request,
+    body: InvoiceWriteOffBody | None = None,
+    bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> Any:
+    """Write off a POSTED invoice's unpaid balance as a bad debt.
+
+    Reclaims GST on taxable lines (decreasing adjustment), settles the invoice
+    (WRITTEN_OFF), and removes it from aged receivables. 409 if the invoice is
+    already written off / has nothing unpaid; 404 if not found; 422 otherwise.
+    """
+    tenant_id = resolve_tenant_id(request)
+    payload = body or InvoiceWriteOffBody()
+    write_off_date = payload.write_off_date or date.today()
+
+    if await svc.api_get(
+        session, invoice_id, tenant_id=tenant_id, company_id=company_id
+    ) is None:
+        raise HTTPException(404, "Invoice not found")
+
+    try:
+        inv = await bad_debt_svc.write_off_invoice(
+            session,
+            company_id=company_id,
+            tenant_id=tenant_id,
+            invoice_id=invoice_id,
+            write_off_date=write_off_date,
+            posted_by=f"api:{bearer[:8]}…",
+            reason=payload.reason,
+        )
+    except bad_debt_svc.BadDebtError as exc:
+        msg = str(exc)
+        low = msg.lower()
+        if "not found" in low:
+            raise HTTPException(404, msg) from exc
+        if "already written off" in low or "nothing to write off" in low:
+            raise HTTPException(409, msg) from exc
+        raise HTTPException(422, msg) from exc
+
+    return JSONResponse(_dump(inv), status_code=200)
+
+
+# ---------------------------------------------------------------------------
+# Bad-debt recovery (POST /{id}/record-recovery → Other Income, no GST)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/{invoice_id}/record-recovery",
+    status_code=201,
+)
+async def record_recovery_endpoint(
+    invoice_id: UUID,
+    body: InvoiceRecoveryBody,
+    request: Request,
+    bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> Any:
+    """Record money received against a written-off debt as Other Income (no GST).
+
+    Posts Dr <bank> / Cr 4-1290 Bad Debt Recovery. 409 if the invoice is not
+    written off; 404 if invoice / bank account not found; 422 otherwise.
+    """
+    tenant_id = resolve_tenant_id(request)
+    recovery_date = body.recovery_date or date.today()
+
+    if await svc.api_get(
+        session, invoice_id, tenant_id=tenant_id, company_id=company_id
+    ) is None:
+        raise HTTPException(404, "Invoice not found")
+
+    try:
+        entry = await bad_debt_svc.record_recovery(
+            session,
+            company_id=company_id,
+            tenant_id=tenant_id,
+            invoice_id=invoice_id,
+            bank_account_id=body.bank_account_id,
+            amount=body.amount,
+            recovery_date=recovery_date,
+            posted_by=f"api:{bearer[:8]}…",
+            payer_contact_id=body.payer_contact_id,
+        )
+    except bad_debt_svc.BadDebtError as exc:
+        msg = str(exc)
+        low = msg.lower()
+        if "not found" in low:
+            raise HTTPException(404, msg) from exc
+        if "not written_off" in low or "written-off" in low or "written off" in low:
+            raise HTTPException(409, msg) from exc
+        raise HTTPException(422, msg) from exc
+
+    return JSONResponse(
+        {
+            "journal_entry_id": str(entry.id),
+            "invoice_id": str(invoice_id),
+            "amount": str(body.amount),
+            "recovery_date": recovery_date.isoformat(),
+            "bank_account_id": str(body.bank_account_id),
+        },
+        status_code=201,
+    )
 
 
 # ---------------------------------------------------------------------------

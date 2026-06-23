@@ -13,7 +13,6 @@ Covers:
 """
 from __future__ import annotations
 
-import uuid
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -28,10 +27,10 @@ from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
 from saebooks.models.invoice import InvoiceStatus
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine, JournalOrigin
+from saebooks.models.payment import PaymentDirection
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import bad_debt as svc
 from saebooks.services import invoices as inv_svc
-from saebooks.models.payment import PaymentDirection
 from saebooks.services import payments as pay_svc
 from saebooks.services import reports as reports_svc
 from saebooks.services.bad_debt import BadDebtError, compute_write_off_split
@@ -305,15 +304,6 @@ async def test_write_off_rejects_already_written_off():
 # Property tests (Hypothesis) — pure money split. CONTRIBUTING.md requires
 # Hypothesis for money arithmetic.
 # ---------------------------------------------------------------------------
-
-_money = st.decimals(
-    min_value=Decimal("0.00"),
-    max_value=Decimal("100000.00"),
-    places=2,
-    allow_nan=False,
-    allow_infinity=False,
-)
-
 
 @settings(max_examples=300, deadline=None)
 @given(
