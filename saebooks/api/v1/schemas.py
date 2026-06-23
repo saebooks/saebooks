@@ -224,6 +224,11 @@ class CompanyOut(BaseModel):
     gst_registered: bool = False
     gst_effective_date: date | None = None
     psi_status: str = "unsure"
+    # Bad-debt write-off & recovery policy (Phase 2 settings).
+    writeoff_mode: str = "review"
+    writeoff_threshold_days: int = 90
+    recovery_mode: str = "smart_prompt"
+    bad_debt_recovery_account: str | None = None
     address: dict[str, Any] | None = None
     # Cashbook edition (single-entry UI mode). Surfaced here so the
     # web UI can hide full-edition menu items when mode='cashbook'.
@@ -260,6 +265,11 @@ class CompanyUpdate(BaseModel):
     gst_registered: bool | None = None
     gst_effective_date: date | None = None
     psi_status: str | None = None
+    # Bad-debt write-off & recovery policy (Phase 2 settings).
+    writeoff_mode: str | None = None
+    writeoff_threshold_days: int | None = None
+    recovery_mode: str | None = None
+    bad_debt_recovery_account: str | None = None
     address: dict[str, Any] | None = None
     # Legal-entity model
     entity_type: str | None = None
@@ -274,6 +284,35 @@ class CompanyUpdate(BaseModel):
         valid = {"yes", "no", "unsure"}
         if v not in valid:
             raise ValueError(f"psi_status must be one of: {sorted(valid)}")
+        return v
+
+    @field_validator("writeoff_mode")
+    @classmethod
+    def writeoff_mode_valid(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        valid = {"review", "auto", "manual"}
+        if v not in valid:
+            raise ValueError(f"writeoff_mode must be one of: {sorted(valid)}")
+        return v
+
+    @field_validator("recovery_mode")
+    @classmethod
+    def recovery_mode_valid(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        valid = {"smart_prompt", "manual", "reopen"}
+        if v not in valid:
+            raise ValueError(f"recovery_mode must be one of: {sorted(valid)}")
+        return v
+
+    @field_validator("writeoff_threshold_days")
+    @classmethod
+    def writeoff_threshold_positive(cls, v: int | None) -> int | None:
+        if v is None:
+            return v
+        if v <= 0:
+            raise ValueError("writeoff_threshold_days must be a positive integer")
         return v
 
     @field_validator("gst_effective_date")

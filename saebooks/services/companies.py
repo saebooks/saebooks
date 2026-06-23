@@ -46,6 +46,10 @@ _COMPANY_COLUMNS: tuple[str, ...] = (
     "gst_registered",
     "gst_effective_date",
     "psi_status",
+    "writeoff_mode",
+    "writeoff_threshold_days",
+    "recovery_mode",
+    "bad_debt_recovery_account",
     "version",
     "created_at",
     "archived_at",
@@ -193,6 +197,10 @@ async def update(
     gst_registered: bool | None = None,
     gst_effective_date: date | None = None,
     psi_status: str | None = None,
+    writeoff_mode: str | None = None,
+    writeoff_threshold_days: int | None = None,
+    recovery_mode: str | None = None,
+    bad_debt_recovery_account: str | None = None,
     address: dict | None = None,
     expected_version: int | None = None,
     actor: str = "web",
@@ -235,6 +243,24 @@ async def update(
         if psi_status not in valid:
             raise ValueError(f"psi_status must be one of: {sorted(valid)}")
         company.psi_status = psi_status
+    if writeoff_mode is not None:
+        valid_wm = {"review", "auto", "manual"}
+        if writeoff_mode not in valid_wm:
+            raise ValueError(f"writeoff_mode must be one of: {sorted(valid_wm)}")
+        company.writeoff_mode = writeoff_mode
+    if writeoff_threshold_days is not None:
+        if writeoff_threshold_days <= 0:
+            raise ValueError("writeoff_threshold_days must be a positive integer")
+        company.writeoff_threshold_days = writeoff_threshold_days
+    if recovery_mode is not None:
+        valid_rm = {"smart_prompt", "manual", "reopen"}
+        if recovery_mode not in valid_rm:
+            raise ValueError(f"recovery_mode must be one of: {sorted(valid_rm)}")
+        company.recovery_mode = recovery_mode
+    if bad_debt_recovery_account is not None:
+        company.bad_debt_recovery_account = (
+            bad_debt_recovery_account.strip() or None
+        )
     if address is not None:
         company.address = address
 

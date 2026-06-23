@@ -534,3 +534,100 @@ async def test_set_bookkeeping_mode_rejects_unknown_mode(
         json={"mode": "banana"},
     )
     assert r.status_code in (422, 400), r.text
+
+
+# ---------------------------------------------------------------------------
+# Bad-debt company settings (Phase 2 / Task 7) — writeoff_mode,
+# writeoff_threshold_days, recovery_mode, bad_debt_recovery_account.
+# These persist as plain company columns and round-trip via PATCH, mirroring
+# the psi_status / gst_* pattern. The web app reads/writes them through the
+# existing /settings/company form.
+# ---------------------------------------------------------------------------
+
+
+async def test_companies_bad_debt_settings_defaults(api_client: AsyncClient) -> None:
+    """A company exposes bad-debt settings with the documented defaults."""
+    company_id, _ = await _get_seed_company()
+    r = await api_client.get(f"/api/v1/companies/{company_id}")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # Defaults: review / 90 / smart_prompt / no explicit recovery account.
+    assert body["writeoff_mode"] == "review"
+    assert body["writeoff_threshold_days"] == 90
+    assert body["recovery_mode"] == "smart_prompt"
+    assert body["bad_debt_recovery_account"] is None
+
+
+async def test_companies_patch_bad_debt_settings_round_trip(
+    api_client: AsyncClient,
+) -> None:
+    """PATCH the four bad-debt settings; they persist and bump version."""
+    company_id, version = await _get_seed_company()
+    r = await api_client.patch(
+        f"/api/v1/companies/{company_id}",
+        json={
+            "writeoff_mode": "auto",
+            "writeoff_threshold_days": 120,
+            "recovery_mode": "manual",
+            "bad_debt_recovery_account": "4-1290",
+        },
+        headers={"If-Match": str(version)},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["writeoff_mode"] == "auto"
+    assert body["writeoff_threshold_days"] == 120
+    assert body["recovery_mode"] == "manual"
+    assert body["bad_debt_recovery_account"] == "4-1290"
+    assert body["version"] == version + 1
+
+    # Restore defaults.
+    await api_client.patch(
+        f"/api/v1/companies/{company_id}",
+        json={
+            "writeoff_mode": "review",
+            "writeoff_threshold_days": 90,
+            "recovery_mode": "smart_prompt",
+            "bad_debt_recovery_account": None,
+        },
+        headers={"If-Match": str(version + 1)},
+    )
+
+
+async def test_companies_patch_bad_debt_invalid_mode_rejected(
+    api_client: AsyncClient,
+) -> None:
+    """An out-of-range writeoff_mode is rejected with 422."""
+    company_id, version = await _get_seed_company()
+    r = await api_client.patch(
+        f"/api/v1/companies/{company_id}",
+        json={"writeoff_mode": "banana"},
+        headers={"If-Match": str(version)},
+    )
+    assert r.status_code == 422, r.text
+
+
+async def test_companies_patch_bad_debt_invalid_recovery_mode_rejected(
+    api_client: AsyncClient,
+) -> None:
+    """An out-of-range recovery_mode is rejected with 422."""
+    company_id, version = await _get_seed_company()
+    r = await api_client.patch(
+        f"/api/v1/companies/{company_id}",
+        json={"recovery_mode": "banana"},
+        headers={"If-Match": str(version)},
+    )
+    assert r.status_code == 422, r.text
+
+
+async def test_companies_patch_bad_debt_threshold_must_be_positive(
+    api_client: AsyncClient,
+) -> None:
+    """writeoff_threshold_days <= 0 is rejected with 422."""
+    company_id, version = await _get_seed_company()
+    r = await api_client.patch(
+        f"/api/v1/companies/{company_id}",
+        json={"writeoff_threshold_days": 0},
+        headers={"If-Match": str(version)},
+    )
+    assert r.status_code == 422, r.text

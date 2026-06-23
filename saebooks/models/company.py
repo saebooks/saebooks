@@ -66,6 +66,26 @@ class Company(Base):
     # "unsure" triggers a dashboard reminder to classify.
     psi_status: Mapped[str] = mapped_column(String(16), nullable=False, default="unsure")
 
+    # Bad-debt write-off & recovery policy (per-company settings). The ledger
+    # postings live in the engine bad_debt service; these columns only hold the
+    # bookkeeping *policy* the web app drives off. Validated at the schema /
+    # service layer (see CompanyUpdate). Defaults per design spec:
+    #   writeoff_mode             review | auto | manual         (default review)
+    #   writeoff_threshold_days   positive int                   (default 90)
+    #   recovery_mode             smart_prompt | manual | reopen (default smart_prompt)
+    #   bad_debt_recovery_account optional account code/id (NULL = engine resolves
+    #                             4-1290 Bad Debt Recovery on demand)
+    writeoff_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="review", server_default="review"
+    )
+    writeoff_threshold_days: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=90, server_default="90"
+    )
+    recovery_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="smart_prompt", server_default="smart_prompt"
+    )
+    bad_debt_recovery_account: Mapped[str | None] = mapped_column(String(64))
+
     # Cashbook edition (single-entry UX over double-entry storage). See
     # docs/cashbook-edition-design.md. ``bookkeeping_mode`` flips the UX
     # surface; the underlying ledger is always double-entry. CHECK
