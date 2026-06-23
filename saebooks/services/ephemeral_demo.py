@@ -620,20 +620,21 @@ async def _hard_delete_demo_company(
     # pins `companies.cashbook_default_bank_account_id → accounts (RESTRICT)`,
     # which blocks deleting that account while the company row still exists.
     #
-    # So before the company delete we (a) NULL the company's own account ref, and
-    # (b) pre-delete the demo's RESTRICT-bearing line rows:
+    # We pre-delete the demo's RESTRICT-bearing line rows up front:
     #   saebooks flavour → invoice_lines (draft invoices; no company_id, via parent)
     #   cashbook flavour → journal_lines (posted cashbook entries)
     # After that the company delete cascades every remaining company_id table
     # cleanly. If a future seed posts bills/payments, pre-delete THEIR lines too —
     # the reap test (both flavours) fails loudly if a dangling RESTRICT row blocks
     # the cascade.
-    await session.execute(
-        text(
-            "UPDATE companies SET cashbook_default_bank_account_id = NULL "
-            "WHERE id = :cid"
-        ).bindparams(cid=company_id)
-    )
+    #
+    # NOTE a cashbook company ALSO holds companies.cashbook_default_bank_account_id
+    # → accounts RESTRICT, but that needs NO handling here: the company row is the
+    # *referencing child*, so DELETE FROM companies removes it first (as the
+    # cascade root), and its accounts cascade-delete only afterwards, by which
+    # point no company references them. We must NOT null that column while the
+    # company is still in cashbook mode — the ck_cashbook_requires_bank CHECK
+    # constraint forbids a cashbook company with a null default bank account.
     await session.execute(
         text(
             "DELETE FROM invoice_lines WHERE invoice_id IN "
