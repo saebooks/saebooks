@@ -86,6 +86,9 @@ services:
 networks:
   testnet:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 10.99.224.0/24
 
 volumes:
   testdb:
