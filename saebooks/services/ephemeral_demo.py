@@ -467,6 +467,63 @@ async def _seed_company_dataset(
             logger.debug("demo invoice seed skip (%s): %r", desc, exc)
 
 
+# Cached children-first delete order for tenant-scoped tables (those carrying a
+# ``tenant_id`` column). The company cascade clears every company_id table, but
+# tenant_id-scoped rows (users, change_log, audit, …) FK ``tenants`` with
+# RESTRICT and would block the tenant delete — so they are purged first, in
+# dependency order. Computed once from the live FK graph.
+_TENANT_DELETE_ORDER: list[str] | None = None
+
+
+async def _tenant_scoped_delete_order(session: AsyncSession) -> list[str]:
+    """Public tables with a ``tenant_id`` column, ordered children-first (a table
+    that FKs another in the set is deleted before it) so RESTRICT FKs are
+    satisfied. Derived from the live FK graph; cached after first call."""
+    global _TENANT_DELETE_ORDER
+    if _TENANT_DELETE_ORDER is not None:
+        return _TENANT_DELETE_ORDER
+    tables = {
+        r[0]
+        for r in (
+            await session.execute(
+                text(
+                    "SELECT table_name FROM information_schema.columns "
+                    "WHERE table_schema = 'public' AND column_name = 'tenant_id'"
+                )
+            )
+        ).all()
+    }
+    edges = (
+        await session.execute(
+            text(
+                "SELECT src.relname AS child, tgt.relname AS parent "
+                "FROM pg_constraint c "
+                "JOIN pg_class src ON src.oid = c.conrelid "
+                "JOIN pg_class tgt ON tgt.oid = c.confrelid "
+                "WHERE c.contype = 'f' AND src.relname <> tgt.relname"
+            )
+        )
+    ).all()
+    # referencing[parent] = children (within the set) that FK it.
+    referencing: dict[str, set[str]] = {t: set() for t in tables}
+    for child, parent in edges:
+        if child in tables and parent in tables:
+            referencing[parent].add(child)
+    remaining = set(tables)
+    order: list[str] = []
+    while remaining:
+        deletable = sorted(
+            t for t in remaining if not (referencing[t] & remaining)
+        )
+        if not deletable:  # FK cycle (e.g. companies<->accounts) — break it
+            deletable = [sorted(remaining)[0]]
+        for t in deletable:
+            order.append(t)
+            remaining.discard(t)
+    _TENANT_DELETE_ORDER = order
+    return order
+
+
 async def _hard_delete_demo_company(
     session: AsyncSession, company_id: uuid.UUID
 ) -> None:
@@ -546,17 +603,22 @@ async def _hard_delete_demo_company(
         text("DELETE FROM companies WHERE id = :cid").bindparams(cid=company_id)
     )
 
-    # `users` are tenant-scoped (FK → tenants), NOT reached by the company
-    # cascade, and can RESTRICT-block the tenant delete — remove the demo's
-    # user(s) first, then the now-unreferenced tenant. Guard the shared default
-    # tenant so a mis-tagged demo can never drop it (or its users).
+    # Tenant-scoped rows (users, change_log, audit, …) are NOT reached by the
+    # company cascade and FK `tenants` with RESTRICT — so they block the tenant
+    # delete (e.g. change_log_tenant_id_fkey). Purge every tenant_id-scoped table
+    # for this tenant, children-first, then drop the tenant. Most tables in the
+    # order are already empty (the company cascade cleared their company_id rows)
+    # so those deletes are harmless no-ops; the ones that matter are the
+    # tenant-global tables (users, change_log, …). Guard the shared default
+    # tenant so a mis-tagged demo can never touch it.
     _DEFAULT_TENANT = uuid.UUID("00000000-0000-0000-0000-000000000001")
     if tenant_id is not None and tenant_id != _DEFAULT_TENANT:
-        await session.execute(
-            text("DELETE FROM users WHERE tenant_id = :tid").bindparams(
-                tid=tenant_id
+        for tbl in await _tenant_scoped_delete_order(session):
+            await session.execute(
+                text(f"DELETE FROM {tbl} WHERE tenant_id = :tid").bindparams(
+                    tid=tenant_id
+                )
             )
-        )
         await session.execute(
             text("DELETE FROM tenants WHERE id = :tid").bindparams(tid=tenant_id)
         )
