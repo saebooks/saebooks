@@ -514,22 +514,49 @@ async def _hard_delete_demo_company(
             EphemeralDemoTenant.company_id == company_id
         )
     )
-    # Delete the company — cascades to all tenant-scoped child rows via the
-    # ON DELETE CASCADE FKs those tables carry on company_id. We issue a raw
-    # DELETE so we do not trip ORM-level guards (e.g. the je_engine_guard
-    # trigger) that protect *real* books; the demo teardown is a sanctioned
-    # rebuild-class operation. SET app.db_rebuild=on declares it.
+    # Teardown is a sanctioned rebuild-class operation — declare it so the raw
+    # DELETEs below do not trip the ORM/trigger guards (e.g. je_engine_guard)
+    # that protect *real* books.
     if session.bind is not None and session.bind.dialect.name == "postgresql":
         await session.execute(text("SET LOCAL app.db_rebuild = 'on'"))
+
+    # FK-topological purge. A plain `DELETE FROM companies` CANNOT rely on the
+    # company_id ON DELETE CASCADE alone: ~25 transactional/line tables carry ON
+    # DELETE *RESTRICT* FKs to `accounts` (e.g. invoice_lines.account_id), and
+    # Postgres does not guarantee it removes those RESTRICT-referencing rows
+    # before the accounts they point at within one cascade — so the cascade can
+    # abort with a FK violation. We pre-delete the demo's only RESTRICT-bearing
+    # rows (invoice_lines — scoped via its parent invoice, as invoice_lines has
+    # no company_id column of its own), after which the company delete cascades
+    # every remaining company_id-scoped table cleanly.
+    #
+    # DEMO FOOTPRINT CONTRACT: provision() + _seed_company_dataset() create only
+    # invoice_lines as RESTRICT-referencing rows. If the seed ever grows to post
+    # bills / payments / journal entries, pre-delete THEIR line rows here too —
+    # the reap test (seeds a full demo, reaps it, asserts the company is gone and
+    # a real company survives) fails loudly if a dangling RESTRICT row blocks the
+    # cascade.
+    await session.execute(
+        text(
+            "DELETE FROM invoice_lines WHERE invoice_id IN "
+            "(SELECT id FROM invoices WHERE company_id = :cid)"
+        ).bindparams(cid=company_id)
+    )
     await session.execute(
         text("DELETE FROM companies WHERE id = :cid").bindparams(cid=company_id)
     )
-    # Drop the now-unreferenced demo tenant row (companies FK was
-    # ondelete=RESTRICT so it could not have cascaded; safe to delete now that
-    # the company is gone). Guarded so we never delete the shared default
-    # tenant even if a demo somehow carried it.
+
+    # `users` are tenant-scoped (FK → tenants), NOT reached by the company
+    # cascade, and can RESTRICT-block the tenant delete — remove the demo's
+    # user(s) first, then the now-unreferenced tenant. Guard the shared default
+    # tenant so a mis-tagged demo can never drop it (or its users).
     _DEFAULT_TENANT = uuid.UUID("00000000-0000-0000-0000-000000000001")
     if tenant_id is not None and tenant_id != _DEFAULT_TENANT:
+        await session.execute(
+            text("DELETE FROM users WHERE tenant_id = :tid").bindparams(
+                tid=tenant_id
+            )
+        )
         await session.execute(
             text("DELETE FROM tenants WHERE id = :tid").bindparams(tid=tenant_id)
         )
