@@ -572,59 +572,52 @@ def _template_ids(flavour: str) -> tuple[uuid.UUID, uuid.UUID]:
 async def _ensure_template() -> tuple[uuid.UUID, uuid.UUID]:
     """Return (template_company_id, template_tenant_id), building it once.
 
-    cashbook: reuse the boot-seeded default-tenant cashbook company (no extra
-    seed, no first-visit penalty). Otherwise lazily seed a dedicated template
-    via the service-layer seeders. Serialised by a lock so concurrent first
-    provisions don't double-seed.
+    A dedicated, deterministic template per flavour, seeded ONCE via the
+    service-layer seeders and then reused forever (it persists in the DB across
+    restarts). Serialised by a lock so concurrent first provisions don't
+    double-seed. We do NOT reuse the boot-seeded shared demo company: that one
+    is re-seeded on every container start and accumulates duplicate rows a clone
+    would faithfully (and uglily) copy into every visitor's demo (and can carry
+    dangling cross-company FK refs that break the clone).
     """
     flavour = (settings.demo_seed_flavour or "saebooks").strip().lower()
-    async with _template_lock:
-        async with LoginSessionLocal() as s:
-            # A dedicated, deterministic template per flavour — seeded ONCE and
-            # then reused forever (it persists in the DB across restarts). We do
-            # NOT reuse the boot-seeded shared demo company: that one is re-seeded
-            # on every container start and accumulates duplicate rows, which a
-            # clone would faithfully (and uglily) copy into every visitor's demo.
-            ttid, tcid = _template_ids(flavour)
-            exists = (
-                await s.execute(
-                    text("SELECT 1 FROM companies WHERE id = :c").bindparams(
-                        c=tcid
-                    )
+    async with _template_lock, LoginSessionLocal() as s:
+        ttid, tcid = _template_ids(flavour)
+        exists = (
+            await s.execute(
+                text("SELECT 1 FROM companies WHERE id = :c").bindparams(c=tcid)
+            )
+        ).first()
+        if exists is None:
+            s.add(
+                Tenant(
+                    id=ttid,
+                    name=f"Demo Template {flavour}",
+                    slug=f"demo-template-{flavour}",
+                    edition="pro",
                 )
-            ).first()
-            if exists is None:
-                s.add(
-                    Tenant(
-                        id=ttid,
-                        name=f"Demo Template {flavour}",
-                        slug=f"demo-template-{flavour}",
-                        edition="pro",
-                    )
+            )
+            await s.flush()
+            s.add(
+                Company(
+                    id=tcid,
+                    tenant_id=ttid,
+                    name=f"Demo Template ({flavour})",
+                    legal_name="Demo Template",
+                    base_currency="AUD",
+                    fin_year_start_month=7,
+                    gst_registered=True,
+                    gst_effective_date=datetime(2020, 7, 1, tzinfo=UTC).date(),
+                    version=1,
                 )
-                await s.flush()
-                s.add(
-                    Company(
-                        id=tcid,
-                        tenant_id=ttid,
-                        name=f"Demo Template ({flavour})",
-                        legal_name="Demo Template",
-                        base_currency="AUD",
-                        fin_year_start_month=7,
-                        gst_registered=True,
-                        gst_effective_date=datetime(
-                            2020, 7, 1, tzinfo=UTC
-                        ).date(),
-                        version=1,
-                    )
-                )
-                await s.flush()
-                await _seed_company_dataset(s, tenant_id=ttid, company_id=tcid)
-                await s.commit()
-                logger.info(
-                    "seeded demo template flavour=%s company=%s", flavour, tcid
-                )
-            return tcid, ttid
+            )
+            await s.flush()
+            await _seed_company_dataset(s, tenant_id=ttid, company_id=tcid)
+            await s.commit()
+            logger.info(
+                "seeded demo template flavour=%s company=%s", flavour, tcid
+            )
+        return tcid, ttid
 
 
 async def _clone_metadata(session: AsyncSession) -> dict:
