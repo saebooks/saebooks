@@ -89,6 +89,11 @@ OPEN_PATH_PREFIXES: tuple[str, ...] = (
     # ForwardAuthMiddleware rejecting these requests for not carrying
     # a session JWT.
     "/mcp",
+    # Internal-only endpoints (ephemeral demo provisioning) — called by
+    # sibling containers over the docker network with their own
+    # shared-secret guard, never carrying a session JWT. Served
+    # unauthenticated here; the router enforces the X-Internal-Secret gate.
+    "/internal/",
 )
 
 

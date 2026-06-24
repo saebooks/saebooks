@@ -183,11 +183,21 @@ _DEMO_ENTRIES: list[tuple[int, str, str, str, str]] = [
 
 
 async def _seed_entries(
-    session: AsyncSession, *, tenant_id: uuid.UUID, company_id: uuid.UUID
+    session: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    company_id: uuid.UUID,
+    limit: int | None = None,
 ) -> int:
+    """Seed cashbook entries. ``limit`` caps how many of ``_DEMO_ENTRIES`` are
+    posted (None = all, for the persistent shared demo). The ephemeral per-visit
+    demo passes a small limit because each entry posts a journal entry and the
+    full set takes ~14s — too slow for a synchronous provision."""
     today = date.today()
     inserted = 0
     for idx, (days_ago, direction, category, amount_s, desc) in enumerate(_DEMO_ENTRIES):
+        if limit is not None and idx >= limit:
+            break
         entry_date = today - timedelta(days=days_ago)
         # Stable idempotency key per (slot index, date) so reseeding picks
         # up where we left off and never duplicates.

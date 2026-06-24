@@ -28,6 +28,7 @@ from saebooks.models.distribution import (
     DistributionStatus,
     TrustDistribution,
 )
+from saebooks.models.ephemeral_demo_tenant import EphemeralDemoTenant
 from saebooks.models.fixed_asset import FixedAsset
 from saebooks.models.ic import (
     IcEdge,
@@ -117,6 +118,7 @@ __all__ = [
     "DepreciationModel",
     "DistributionStatus",
     "EntryStatus",
+    "EphemeralDemoTenant",
     "FixedAsset",
     "GrantStatus",
     "IcEdge",

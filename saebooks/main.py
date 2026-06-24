@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from saebooks import __version__
 from saebooks.api.errors import register_handlers
+from saebooks.api.internal import router as api_internal_router
 from saebooks.api.v1 import router as api_v1_router
 from saebooks.api.webhooks.stripe import router as _stripe_webhook_router
 from saebooks.config import settings
@@ -21,6 +22,7 @@ from saebooks.connect_app import (
 from saebooks.grpc_server import serve as grpc_serve
 from saebooks.middleware.active_company import ActiveCompanyMiddleware
 from saebooks.middleware.auth import ForwardAuthMiddleware
+from saebooks.middleware.demo_touch import DemoTouchMiddleware
 from saebooks.middleware.request_id import RequestIdMiddleware
 from saebooks.middleware.skip_audit import SkipAuditMiddleware
 from saebooks.routers import (
@@ -75,6 +77,8 @@ tenant.install()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    import asyncio
+
     logger.info("SAE Books starting (edition=%s)", settings.edition)
     if settings.edition == "community":
         await _assert_single_company()
@@ -82,6 +86,32 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Port env vars: SAEBOOKS_REST_PORT (default 8042), SAEBOOKS_GRPC_PORT (default 50051).
     grpc_port = int(os.getenv("SAEBOOKS_GRPC_PORT", "50051"))
     grpc_server = await grpc_serve(grpc_port)
+
+    # Ephemeral demo reaper — in-process 60s background sweep that
+    # hard-deletes idle / aged public-preview demo tenants. Only started
+    # when DEMO_EPHEMERAL_ENABLED; the stop Event lets the lifespan cancel
+    # it cleanly on shutdown. Kept as a plain asyncio task (consistent with
+    # the codebase's create_task background pattern; no scheduler needed for
+    # a single fixed-interval sweep).
+    reaper_stop: asyncio.Event | None = None
+    reaper_task: asyncio.Task | None = None
+    if settings.demo_ephemeral_enabled:
+        from saebooks.services import ephemeral_demo
+
+        reaper_stop = asyncio.Event()
+        reaper_task = asyncio.create_task(
+            ephemeral_demo.run_reaper_loop(reaper_stop)
+        )
+
+    async def _shutdown() -> None:
+        if reaper_stop is not None:
+            reaper_stop.set()
+        if reaper_task is not None:
+            try:
+                await asyncio.wait_for(reaper_task, timeout=5)
+            except TimeoutError:
+                reaper_task.cancel()
+        await grpc_server.stop(grace=5)
 
     # MCP streamable-HTTP session manager — must run inside an async
     # context so its anyio task group is initialised. Without this the
@@ -98,7 +128,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             yield
     else:
         yield
-    await grpc_server.stop(grace=5)
+    await _shutdown()
 
 
 def create_app() -> FastAPI:
@@ -126,6 +156,12 @@ def create_app() -> FastAPI:
     # SkipAuditMiddleware honours X-Dev-Skip-Audit on developer-tier
     # admin requests; short-circuits change_log writes for that request.
     app.add_middleware(SkipAuditMiddleware)
+    # DemoTouchMiddleware bumps an ephemeral demo tenant's last_seen_at on
+    # each authenticated request so the reaper measures real idle time. Added
+    # last so it sits OUTSIDE ForwardAuthMiddleware and therefore observes the
+    # jwt_claims that ForwardAuth stamps during call_next. No-op fast path when
+    # DEMO_EPHEMERAL_ENABLED is false.
+    app.add_middleware(DemoTouchMiddleware)
 
     @app.get("/")
     async def root() -> RedirectResponse:
@@ -174,6 +210,12 @@ def create_app() -> FastAPI:
     # gated per-router (see saebooks/api/v1/auth.py) — independent
     # from the HTML JWT middleware above (different decode path).
     app.include_router(api_v1_router)
+    # Internal-only surface (NOT under /api/v1, NOT public): the ephemeral
+    # demo provisioning endpoint the saebooks-web container calls over the
+    # docker network. Stripped from the published OpenAPI below and guarded by
+    # a shared secret. The public edge routes only the web container, so this
+    # is unreachable from a browser through the tunnel.
+    app.include_router(api_internal_router)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
     # Native MCP endpoint at /mcp — every SAE Books instance speaks
@@ -210,6 +252,7 @@ def create_app() -> FastAPI:
                 path.startswith("/admin/")
                 or path.startswith("/api/v1/admin/")
                 or path.startswith("/mcp")
+                or path.startswith("/internal/")
             )
         }
         return schema
