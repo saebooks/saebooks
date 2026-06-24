@@ -325,7 +325,8 @@ async def provision(
                         "ELSE (md5(:newc || "
                         "t.cashbook_default_bank_account_id::text))::uuid END "
                         "FROM companies AS t "
-                        "WHERE c.id = :newc::uuid AND t.id = :tc::uuid"
+                        "WHERE c.id = CAST(:newc AS uuid) "
+                        "AND t.id = CAST(:tc AS uuid)"
                     ).bindparams(
                         newc=str(company_id), tc=str(template_company_id)
                     )
@@ -579,19 +580,11 @@ async def _ensure_template() -> tuple[uuid.UUID, uuid.UUID]:
     flavour = (settings.demo_seed_flavour or "saebooks").strip().lower()
     async with _template_lock:
         async with LoginSessionLocal() as s:
-            if flavour == "cashbook":
-                row = (
-                    await s.execute(
-                        text(
-                            "SELECT id, tenant_id FROM companies "
-                            "WHERE tenant_id = :dt "
-                            "AND bookkeeping_mode = 'cashbook' "
-                            "ORDER BY created_at LIMIT 1"
-                        ).bindparams(dt=_DEFAULT_TENANT)
-                    )
-                ).first()
-                if row is not None:
-                    return row[0], row[1]
+            # A dedicated, deterministic template per flavour — seeded ONCE and
+            # then reused forever (it persists in the DB across restarts). We do
+            # NOT reuse the boot-seeded shared demo company: that one is re-seeded
+            # on every container start and accumulates duplicate rows, which a
+            # clone would faithfully (and uglily) copy into every visitor's demo.
             ttid, tcid = _template_ids(flavour)
             exists = (
                 await s.execute(
@@ -710,14 +703,19 @@ def _clone_insert_sql(
     """`INSERT INTO tbl (...) SELECT <remapped> FROM tbl WHERE <where>` — id and
     every FK→cloned-table column get the deterministic md5 remap; company_id /
     tenant_id are overridden to the new ids; all else copied verbatim."""
+    # NOTE: never write ``:param::uuid`` — SQLAlchemy's text() bind regex won't
+    # match a param immediately followed by ``::`` (Postgres-cast disambiguation),
+    # so it would be left unbound and Postgres errors on the literal ":". Use
+    # CAST(:param AS uuid). (``md5(:newc || id::text)`` is fine — the param is
+    # space-delimited; the ``::text`` there is on the column, not the param.)
     exprs: list[str] = []
     for c in cols:
         if c == "id":
             exprs.append("(md5(:newc || id::text))::uuid")
         elif c == "company_id":
-            exprs.append(":newc::uuid")
+            exprs.append("CAST(:newc AS uuid)")
         elif c == "tenant_id":
-            exprs.append(":newt::uuid")
+            exprs.append("CAST(:newt AS uuid)")
         elif c in fks:
             exprs.append(
                 f"(CASE WHEN {c} IS NULL THEN NULL "
@@ -765,7 +763,7 @@ async def _clone_template_into(
                 tbl,
                 meta["cols"][tbl],
                 meta["fks"].get(tbl, {}),
-                where="company_id = :tc::uuid",
+                where="company_id = CAST(:tc AS uuid)",
             )
         )
     # invoice_lines scopes via its parent invoice (no company_id of its own).
@@ -776,8 +774,8 @@ async def _clone_template_into(
                 meta["cols"]["invoice_lines"],
                 meta["fks"].get("invoice_lines", {}),
                 where=(
-                    "invoice_id IN "
-                    "(SELECT id FROM invoices WHERE company_id = :tc::uuid)"
+                    "invoice_id IN (SELECT id FROM invoices "
+                    "WHERE company_id = CAST(:tc AS uuid))"
                 ),
             )
         )
