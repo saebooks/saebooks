@@ -736,6 +736,18 @@ async def _clone_template_into(
     meta = await _clone_metadata(session)
     if session.bind is not None and session.bind.dialect.name == "postgresql":
         await session.execute(text("SET LOCAL app.db_rebuild = 'on'"))
+        # Disable FK-check triggers for the bulk clone so insertion ORDER does not
+        # matter: the md5 id remap makes every reference self-consistent by
+        # construction (a remapped FK = md5(:newc || old_id) = the clone of the
+        # referenced row), but Postgres would still RESTRICT a child inserted
+        # before its (also-cloned) parent, and a perfect topological order is
+        # fragile under FK cycles. The owner session is superuser, so the replica
+        # role is permitted; SET LOCAL reverts at commit. NB this disables user
+        # triggers too (audit/je-guard — fine for a sanctioned clone) but NOT
+        # CHECK constraints, which still hold.
+        await session.execute(
+            text("SET LOCAL session_replication_role = replica")
+        )
     p = {
         "newc": str(new_company_id),
         "newt": str(new_tenant_id),
