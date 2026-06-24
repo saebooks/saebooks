@@ -39,23 +39,26 @@ companies). That cap is meaningless for ephemeral demos, which run up to
 deliberate, documented bypass scoped to the demo path only; the human
 company-creation flows still go through ``create_company`` and its cap.
 
-Seeding: reseed, not clone
---------------------------
-The spec preferred CLONE-from-template for latency. A correct clone would have
-to copy and FK-remap rows across ~20 tenant-scoped tables (accounts,
-tax_codes, contacts, invoices + lines, journal_entries + lines, payments +
-allocations, ...) under FORCE RLS — a large, fragile surface that drifts every
-time a table is added. Reseed reuses the already-idempotent, service-layer
-seeders (``load_au_coa``-style account load + ``ensure_au_seed`` tax codes +
-contacts/invoices/quotes via their services), which post through the engine
-(real records, never manual JEs) and stay correct as the schema evolves. The
-per-company reseed is a CoA CSV load plus a handful of records — well within
-acceptable provision latency for a demo. If profiling later shows this is too
-slow, a template-clone can replace ``_seed_company_dataset`` without changing
-the endpoint contract.
+Seeding: clone-from-template
+----------------------------
+Per visit we CLONE a pre-seeded template company's rows into the new
+company/tenant rather than re-running the seed. A live reseed loads the AU CoA
+CSV and posts journal entries every visit — the cashbook flavour (30 posted
+entries) took ~14s, over the web's provision timeout. The clone is a pure-SQL
+``INSERT ... SELECT`` per company-scoped table with a deterministic id remap
+(``md5(new_company || old_id)::uuid``) that keeps every FK reference
+self-consistent without a Python round-trip (jsonb/enum/array stay server-side),
+turning provision into a sub-second bulk copy. The template is built ONCE
+(``_ensure_template`` — for cashbook it reuses the boot-seeded default-tenant
+cashbook company; otherwise it lazily seeds a dedicated, reaper-exempt template
+via the same service-layer seeders, so the data is still real engine-posted
+records). The clone is generic over the live FK graph, so it stays correct as
+tables are added. ``_seed_company_dataset`` remains the template builder and a
+per-visit fallback if a clone ever errors.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import uuid
@@ -295,20 +298,59 @@ async def provision(
         await session.commit()
         await session.refresh(demo_user)
 
-        # 4. Seed the dataset (CoA, tax codes, a few records). Done after the
-        #    commit above so a seed hiccup leaves a usable empty tenant rather
-        #    than rolling back the whole provision; seed errors are logged, not
-        #    fatal (a demo with an empty ledger is still a valid demo).
+        # 4. Populate the company by CLONING a pre-seeded template (fast bulk
+        #    row-copy, no CoA load / JE posting per visit). Done after the commit
+        #    above so a hiccup leaves a usable empty tenant. Falls back to a live
+        #    reseed if the clone path errors, so a template glitch still yields a
+        #    valid (if slower) demo.
         try:
-            await _seed_company_dataset(
-                session, tenant_id=tenant_id, company_id=company_id
+            template_company_id, _ = await _ensure_template()
+            await _clone_template_into(
+                session,
+                template_company_id=template_company_id,
+                new_company_id=company_id,
+                new_tenant_id=tenant_id,
             )
+            if (settings.demo_seed_flavour or "").strip().lower() == "cashbook":
+                # Copy the template's cashbook company settings, remapping the
+                # default bank account to its clone (same md5 remap as accounts).
+                # Mode + bank set together so ck_cashbook_requires_bank holds.
+                await session.execute(
+                    text(
+                        "UPDATE companies AS c SET "
+                        "bookkeeping_mode = t.bookkeeping_mode, "
+                        "cashbook_categories = t.cashbook_categories, "
+                        "cashbook_default_bank_account_id = CASE "
+                        "WHEN t.cashbook_default_bank_account_id IS NULL THEN NULL "
+                        "ELSE (md5(:newc || "
+                        "t.cashbook_default_bank_account_id::text))::uuid END "
+                        "FROM companies AS t "
+                        "WHERE c.id = :newc::uuid AND t.id = :tc::uuid"
+                    ).bindparams(
+                        newc=str(company_id), tc=str(template_company_id)
+                    )
+                )
+            await session.commit()
         except Exception as exc:  # pragma: no cover — defensive
+            await session.rollback()
             logger.warning(
-                "demo seed failed for company %s (serving empty tenant): %r",
+                "demo clone failed for company %s; falling back to reseed: %r",
                 company_id,
                 exc,
             )
+            try:
+                await _seed_company_dataset(
+                    session, tenant_id=tenant_id, company_id=company_id
+                )
+                await session.commit()
+            except Exception as exc2:  # pragma: no cover — defensive
+                await session.rollback()
+                logger.warning(
+                    "demo reseed fallback failed for company %s "
+                    "(serving empty tenant): %r",
+                    company_id,
+                    exc2,
+                )
 
         # 5. Mint the session JWT — identical claims to /auth/login.
         access_token = make_access_token(
@@ -416,11 +458,11 @@ async def _seed_company_dataset(
             bank_account_id=bank.id,
             actor="demo-seed",
         )
-        # Cap the entry count: each entry posts a journal entry; the full ~30
-        # set takes ~14s, over the web's provision timeout. 12 is a punchy demo
-        # (a few weeks of transactions) and keeps provision well under the limit.
+        # Full entry set — _seed_company_dataset now only builds the template
+        # (once) or runs as a rare fallback, so the ~14s posting cost is fine;
+        # per-visit provisions clone the template instantly.
         n = await _seed_entries(
-            session, tenant_id=tenant_id, company_id=company_id, limit=12
+            session, tenant_id=tenant_id, company_id=company_id
         )
         logger.info("cashbook demo seeded company=%s entries=%d", company_id, n)
         return
@@ -502,6 +544,228 @@ async def _seed_company_dataset(
         except Exception as exc:  # pragma: no cover — best-effort demo data
             await session.rollback()
             logger.debug("demo invoice seed skip (%s): %r", desc, exc)
+
+
+# --------------------------------------------------------------------------- #
+# Clone-from-template — fast per-visit dataset copy.                           #
+# --------------------------------------------------------------------------- #
+
+_DEFAULT_TENANT = uuid.UUID("00000000-0000-0000-0000-000000000001")
+_TEMPLATE_NS = uuid.UUID("d3e0a000-0000-4000-8000-0000000000aa")
+_template_lock = asyncio.Lock()
+_CLONE_META: dict | None = None
+
+
+def _template_ids(flavour: str) -> tuple[uuid.UUID, uuid.UUID]:
+    """Deterministic (tenant_id, company_id) for the per-flavour template."""
+    return (
+        uuid.uuid5(_TEMPLATE_NS, f"tenant:{flavour}"),
+        uuid.uuid5(_TEMPLATE_NS, f"company:{flavour}"),
+    )
+
+
+async def _ensure_template() -> tuple[uuid.UUID, uuid.UUID]:
+    """Return (template_company_id, template_tenant_id), building it once.
+
+    cashbook: reuse the boot-seeded default-tenant cashbook company (no extra
+    seed, no first-visit penalty). Otherwise lazily seed a dedicated template
+    via the service-layer seeders. Serialised by a lock so concurrent first
+    provisions don't double-seed.
+    """
+    flavour = (settings.demo_seed_flavour or "saebooks").strip().lower()
+    async with _template_lock:
+        async with LoginSessionLocal() as s:
+            if flavour == "cashbook":
+                row = (
+                    await s.execute(
+                        text(
+                            "SELECT id, tenant_id FROM companies "
+                            "WHERE tenant_id = :dt "
+                            "AND bookkeeping_mode = 'cashbook' "
+                            "ORDER BY created_at LIMIT 1"
+                        ).bindparams(dt=_DEFAULT_TENANT)
+                    )
+                ).first()
+                if row is not None:
+                    return row[0], row[1]
+            ttid, tcid = _template_ids(flavour)
+            exists = (
+                await s.execute(
+                    text("SELECT 1 FROM companies WHERE id = :c").bindparams(
+                        c=tcid
+                    )
+                )
+            ).first()
+            if exists is None:
+                s.add(
+                    Tenant(
+                        id=ttid,
+                        name=f"Demo Template {flavour}",
+                        slug=f"demo-template-{flavour}",
+                        edition="pro",
+                    )
+                )
+                await s.flush()
+                s.add(
+                    Company(
+                        id=tcid,
+                        tenant_id=ttid,
+                        name=f"Demo Template ({flavour})",
+                        legal_name="Demo Template",
+                        base_currency="AUD",
+                        fin_year_start_month=7,
+                        gst_registered=True,
+                        gst_effective_date=datetime(
+                            2020, 7, 1, tzinfo=UTC
+                        ).date(),
+                        version=1,
+                    )
+                )
+                await s.flush()
+                await _seed_company_dataset(s, tenant_id=ttid, company_id=tcid)
+                await s.commit()
+                logger.info(
+                    "seeded demo template flavour=%s company=%s", flavour, tcid
+                )
+            return tcid, ttid
+
+
+async def _clone_metadata(session: AsyncSession) -> dict:
+    """Introspect once: the parents-first insert order over company_id-scoped
+    tables, their non-generated columns, and the FK columns to id-remap (those
+    pointing at another cloned table). Cached for the process."""
+    global _CLONE_META
+    if _CLONE_META is not None:
+        return _CLONE_META
+    comp = {
+        r[0]
+        for r in (
+            await session.execute(
+                text(
+                    "SELECT table_name FROM information_schema.columns "
+                    "WHERE table_schema = 'public' AND column_name = 'company_id'"
+                )
+            )
+        ).all()
+    }
+    comp.discard("ephemeral_demo_tenants")
+    fk_rows = (
+        await session.execute(
+            text(
+                "SELECT src.relname AS child, att.attname AS col, "
+                "tgt.relname AS parent "
+                "FROM pg_constraint c "
+                "JOIN pg_class src ON src.oid = c.conrelid "
+                "JOIN pg_class tgt ON tgt.oid = c.confrelid "
+                "JOIN unnest(c.conkey) WITH ORDINALITY AS k(attnum, ord) ON true "
+                "JOIN pg_attribute att ON att.attrelid = c.conrelid "
+                "AND att.attnum = k.attnum "
+                "WHERE c.contype = 'f'"
+            )
+        )
+    ).all()
+    referencing: dict[str, set[str]] = {t: set() for t in comp}
+    fks: dict[str, dict[str, str]] = {}
+    for child, col, parent in fk_rows:
+        # company_id / tenant_id are overridden explicitly, never id-remapped
+        # (a composite FK can list company_id as referencing accounts — ignore).
+        if parent in comp and col not in ("company_id", "tenant_id"):
+            fks.setdefault(child, {})[col] = parent
+        if child in comp and parent in comp and child != parent:
+            referencing[parent].add(child)
+    remaining = set(comp)
+    order: list[str] = []
+    while remaining:
+        ready = sorted(t for t in remaining if not (referencing[t] & remaining))
+        if not ready:  # FK cycle — defensive
+            ready = [sorted(remaining)[0]]
+        for t in ready:
+            order.append(t)
+            remaining.discard(t)
+    parents_first = list(reversed(order))  # parents before children for insert
+    cols: dict[str, list[str]] = {}
+    for t in comp | {"invoice_lines"}:
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = 'public' AND table_name = :t "
+                    "AND is_generated = 'NEVER' ORDER BY ordinal_position"
+                ).bindparams(t=t)
+            )
+        ).all()
+        if rows:
+            cols[t] = [r[0] for r in rows]
+    _CLONE_META = {"order": parents_first, "cols": cols, "fks": fks}
+    return _CLONE_META
+
+
+def _clone_insert_sql(
+    tbl: str, cols: list[str], fks: dict[str, str], where: str
+) -> str:
+    """`INSERT INTO tbl (...) SELECT <remapped> FROM tbl WHERE <where>` — id and
+    every FK→cloned-table column get the deterministic md5 remap; company_id /
+    tenant_id are overridden to the new ids; all else copied verbatim."""
+    exprs: list[str] = []
+    for c in cols:
+        if c == "id":
+            exprs.append("(md5(:newc || id::text))::uuid")
+        elif c == "company_id":
+            exprs.append(":newc::uuid")
+        elif c == "tenant_id":
+            exprs.append(":newt::uuid")
+        elif c in fks:
+            exprs.append(
+                f"(CASE WHEN {c} IS NULL THEN NULL "
+                f"ELSE (md5(:newc || {c}::text))::uuid END)"
+            )
+        else:
+            exprs.append(c)
+    return (
+        f"INSERT INTO {tbl} ({', '.join(cols)}) "
+        f"SELECT {', '.join(exprs)} FROM {tbl} WHERE {where}"
+    )
+
+
+async def _clone_template_into(
+    session: AsyncSession,
+    *,
+    template_company_id: uuid.UUID,
+    new_company_id: uuid.UUID,
+    new_tenant_id: uuid.UUID,
+) -> None:
+    """Bulk-copy every company-scoped row of the template into the new
+    company/tenant, parents-first, with a deterministic id remap so all FK
+    references stay self-consistent. Runs under db_rebuild (cloned rows include
+    posted journal entries that would otherwise trip the JE guard)."""
+    meta = await _clone_metadata(session)
+    if session.bind is not None and session.bind.dialect.name == "postgresql":
+        await session.execute(text("SET LOCAL app.db_rebuild = 'on'"))
+    p = {
+        "newc": str(new_company_id),
+        "newt": str(new_tenant_id),
+        "tc": str(template_company_id),
+    }
+    for tbl in meta["order"]:
+        sql = _clone_insert_sql(
+            tbl,
+            meta["cols"][tbl],
+            meta["fks"].get(tbl, {}),
+            where="company_id = :tc::uuid",
+        )
+        await session.execute(text(sql).bindparams(**p))
+    # invoice_lines scopes via its parent invoice (no company_id of its own).
+    if "invoice_lines" in meta["cols"]:
+        sql = _clone_insert_sql(
+            "invoice_lines",
+            meta["cols"]["invoice_lines"],
+            meta["fks"].get("invoice_lines", {}),
+            where=(
+                "invoice_id IN "
+                "(SELECT id FROM invoices WHERE company_id = :tc::uuid)"
+            ),
+        )
+        await session.execute(text(sql).bindparams(**p))
 
 
 # Cached children-first delete order for tenant-scoped tables (those carrying a
