@@ -352,7 +352,11 @@ async def provision(
                     exc2,
                 )
 
-        # 5. Mint the session JWT — identical claims to /auth/login.
+        # 5. Mint the session JWT — identical claims to /auth/login. Refresh the
+        #    user first: the clone/fallback commit-or-rollback above expires its
+        #    attributes, and an AsyncSession forbids the implicit sync reload
+        #    that make_access_token's attribute access would otherwise trigger.
+        await session.refresh(demo_user)
         access_token = make_access_token(
             demo_user, expires_in_seconds=_demo_token_ttl()
         )
@@ -746,26 +750,37 @@ async def _clone_template_into(
         "newt": str(new_tenant_id),
         "tc": str(template_company_id),
     }
-    for tbl in meta["order"]:
-        sql = _clone_insert_sql(
-            tbl,
-            meta["cols"][tbl],
-            meta["fks"].get(tbl, {}),
-            where="company_id = :tc::uuid",
+
+    async def _exec(sql: str) -> None:
+        # Pass only the params this statement actually references — a table
+        # without a tenant_id column has no :newt, and bindparams() would reject
+        # the unused key.
+        await session.execute(
+            text(sql), {k: v for k, v in p.items() if f":{k}" in sql}
         )
-        await session.execute(text(sql).bindparams(**p))
+
+    for tbl in meta["order"]:
+        await _exec(
+            _clone_insert_sql(
+                tbl,
+                meta["cols"][tbl],
+                meta["fks"].get(tbl, {}),
+                where="company_id = :tc::uuid",
+            )
+        )
     # invoice_lines scopes via its parent invoice (no company_id of its own).
     if "invoice_lines" in meta["cols"]:
-        sql = _clone_insert_sql(
-            "invoice_lines",
-            meta["cols"]["invoice_lines"],
-            meta["fks"].get("invoice_lines", {}),
-            where=(
-                "invoice_id IN "
-                "(SELECT id FROM invoices WHERE company_id = :tc::uuid)"
-            ),
+        await _exec(
+            _clone_insert_sql(
+                "invoice_lines",
+                meta["cols"]["invoice_lines"],
+                meta["fks"].get("invoice_lines", {}),
+                where=(
+                    "invoice_id IN "
+                    "(SELECT id FROM invoices WHERE company_id = :tc::uuid)"
+                ),
+            )
         )
-        await session.execute(text(sql).bindparams(**p))
 
 
 # Cached children-first delete order for tenant-scoped tables (those carrying a
