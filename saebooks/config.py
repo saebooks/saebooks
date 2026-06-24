@@ -526,6 +526,13 @@ class Settings(BaseSettings):
     demo_seed_flavour: str = Field(
         default="saebooks", alias="DEMO_SEED_FLAVOUR"
     )
+    # demo_template_max_age — the clone template freezes its dates at seed time,
+    # so cloned demos drift stale (a "yesterday" transaction becomes "8 days
+    # ago"). The reaper purges + re-seeds the template once it is older than
+    # this, regenerating dates relative to today. Default 7 days; 0 disables.
+    demo_template_max_age: int = Field(
+        default=604800, alias="DEMO_TEMPLATE_MAX_AGE"
+    )
 
     @property
     def oauth_allowed_emails_set(self) -> set[str]:

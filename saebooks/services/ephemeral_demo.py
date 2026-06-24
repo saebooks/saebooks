@@ -1052,6 +1052,75 @@ async def reap_once() -> list[uuid.UUID]:
     return reaped
 
 
+async def _refresh_stale_template() -> None:
+    """Purge + re-seed the per-flavour template once it is older than
+    ``DEMO_TEMPLATE_MAX_AGE`` so cloned demos don't drift stale — the template
+    freezes its transaction dates at seed time, and re-seeding regenerates them
+    relative to today. Best-effort; called from the reaper loop. No-op until the
+    template exists (the first provision builds it) or until it ages out.
+
+    The rebuilt template keeps the SAME deterministic id; live clones are
+    independent copies that never reference the template, so replacing it is
+    safe and invisible to existing demos.
+    """
+    max_age = int(settings.demo_template_max_age)
+    if max_age <= 0:
+        return
+    flavour = (settings.demo_seed_flavour or "saebooks").strip().lower()
+    ttid, tcid = _template_ids(flavour)
+    async with _template_lock, LoginSessionLocal() as s:
+        row = (
+            await s.execute(
+                text("SELECT created_at FROM companies WHERE id = :c").bindparams(
+                    c=tcid
+                )
+            )
+        ).first()
+        if row is None:
+            return  # not built yet — _ensure_template will seed it on demand
+        age = (datetime.now(UTC) - row[0]).total_seconds()
+        if age < max_age:
+            return
+        # Purge the whole template (data + company + tenant). Under the replica
+        # role FK-check + cascade triggers are off, so we delete in ANY order
+        # without RESTRICT concerns; CHECK constraints don't bite a DELETE.
+        if s.bind is not None and s.bind.dialect.name == "postgresql":
+            await s.execute(text("SET LOCAL app.db_rebuild = 'on'"))
+            await s.execute(
+                text("SET LOCAL session_replication_role = replica")
+            )
+        meta = await _clone_metadata(s)
+        for tbl in meta["order"]:
+            await s.execute(
+                text(f"DELETE FROM {tbl} WHERE company_id = CAST(:c AS uuid)"),
+                {"c": str(tcid)},
+            )
+        await s.execute(
+            text(
+                "DELETE FROM invoice_lines WHERE invoice_id IN "
+                "(SELECT id FROM invoices WHERE company_id = CAST(:c AS uuid))"
+            ),
+            {"c": str(tcid)},
+        )
+        for tbl in await _tenant_scoped_delete_order(s):
+            await s.execute(
+                text(f"DELETE FROM {tbl} WHERE tenant_id = CAST(:t AS uuid)"),
+                {"t": str(ttid)},
+            )
+        await s.execute(
+            text("DELETE FROM tenants WHERE id = CAST(:t AS uuid)"),
+            {"t": str(ttid)},
+        )
+        await s.commit()
+        logger.info(
+            "purged stale demo template flavour=%s (age %.0fs) — re-seeding",
+            flavour,
+            age,
+        )
+    # Rebuild outside the lock (_ensure_template re-acquires it).
+    await _ensure_template()
+
+
 async def run_reaper_loop(stop) -> None:  # type: ignore[no-untyped-def]
     """Background loop: sweep every ``DEMO_REAPER_INTERVAL`` seconds until stop.
 
@@ -1067,6 +1136,7 @@ async def run_reaper_loop(stop) -> None:  # type: ignore[no-untyped-def]
     while not stop.is_set():
         try:
             await reap_once()
+            await _refresh_stale_template()
         except Exception as exc:  # pragma: no cover — keep the loop alive
             logger.warning("reaper sweep error: %r", exc)
         # Sleep ``interval`` seconds OR wake early on shutdown.
