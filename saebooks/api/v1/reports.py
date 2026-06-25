@@ -187,6 +187,7 @@ def _build_report(
     bucket_days: list[int],
     bucket_labels: list[str],
     retention_amounts: dict[UUID, Decimal] | None = None,
+    outstanding_by_id: dict[UUID, Decimal] | None = None,
 ) -> AgedReport:
     """Assemble an AgedReport from DB rows.
 
@@ -196,6 +197,13 @@ def _build_report(
     the trade-debtor remainder appears in the per-contact rows and ``totals``.
     Payments are assumed to reduce the trade-debtor portion first, so
     retentions are the last to be cleared.
+
+    When ``outstanding_by_id`` is supplied, each document's outstanding
+    balance is taken from it (a POINT-IN-TIME figure computed as at
+    ``as_of`` — see ``reports_svc._invoice_settled_asof`` /
+    ``_bill_settled_asof``) instead of the scalar ``total - amount_paid``,
+    so a payment or credit note dated after ``as_of`` does not reduce the
+    balance. Rows absent from the map (or mapping to <= 0) are skipped.
     """
     zero = Decimal("0")
 
@@ -208,7 +216,12 @@ def _build_report(
 
     for doc, contact_name in rows:
         contact_id: UUID = doc.contact_id
-        outstanding: Decimal = doc.total - doc.amount_paid
+        if outstanding_by_id is not None:
+            outstanding = outstanding_by_id.get(doc.id, zero)
+            if outstanding <= zero:
+                continue
+        else:
+            outstanding = doc.total - doc.amount_paid
         days_overdue: int = (as_of - doc.due_date).days
         label = _days_to_bucket(days_overdue, bucket_days)
 
@@ -313,13 +326,32 @@ async def aged_receivables(
                 Invoice.tenant_id == tenant_id,
                 Invoice.status == InvoiceStatus.POSTED,
                 Invoice.archived_at.is_(None),
-                Invoice.total > Invoice.amount_paid,
+                # No scalar ``total > amount_paid`` pre-filter — an invoice
+                # settled only by a *future* credit note / payment must still
+                # appear as outstanding as at ``as_of``. The point-in-time
+                # outstanding is computed below.
                 Invoice.issue_date <= as_of,
             )
         )
         .order_by(Contact.name, Invoice.due_date)
     )
-    rows = (await session.execute(stmt)).all()
+    candidate_rows = (await session.execute(stmt)).all()
+
+    # Point-in-time settlement as at ``as_of`` (POSTED payment allocations
+    # with payment_date <= as_of, plus unallocated POSTED credit notes with
+    # issue_date <= as_of), NOT the scalar Invoice.amount_paid.
+    settled = await reports_svc._invoice_settled_asof(
+        session, [doc.id for doc, _ in candidate_rows], as_of
+    )
+    outstanding_by_id: dict[UUID, Decimal] = {}
+    rows: list[tuple[Any, str]] = []
+    for doc, contact_name in candidate_rows:
+        bal = doc.total - settled.get(doc.id, Decimal("0"))
+        if bal < Decimal("0"):
+            bal = Decimal("0")
+        if bal > Decimal("0"):
+            outstanding_by_id[doc.id] = bal
+            rows.append((doc, contact_name))
 
     # Build per-invoice retention amounts from invoice_lines so the report
     # can display Retentions Receivable as a separate line from Trade Debtors.
@@ -343,7 +375,14 @@ async def aged_receivables(
             if amt and amt > Decimal("0"):
                 retention_amounts[inv_id] = amt
 
-    return _build_report(rows, as_of, bd, labels, retention_amounts=retention_amounts)
+    return _build_report(
+        rows,
+        as_of,
+        bd,
+        labels,
+        retention_amounts=retention_amounts,
+        outstanding_by_id=outstanding_by_id,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -382,15 +421,34 @@ async def aged_payables(
                 Bill.tenant_id == tenant_id,
                 Bill.status == BillStatus.POSTED,
                 Bill.archived_at.is_(None),
-                Bill.total > Bill.amount_paid,
+                # No scalar pre-filter — a bill settled only by a future
+                # payment must still appear as outstanding as at ``as_of``.
                 Bill.issue_date <= as_of,
             )
         )
         .order_by(Contact.name, Bill.due_date)
         )
-    rows = (await session.execute(stmt)).all()
+    candidate_rows = (await session.execute(stmt)).all()
 
-    return _build_report(rows, as_of, bd, labels)
+    # Point-in-time settlement as at ``as_of`` (POSTED payment allocations
+    # with payment_date <= as_of). There is no supplier-credit-note→bill
+    # link, so AP has only the payment-date component.
+    settled = await reports_svc._bill_settled_asof(
+        session, [doc.id for doc, _ in candidate_rows], as_of
+    )
+    outstanding_by_id: dict[UUID, Decimal] = {}
+    rows: list[tuple[Any, str]] = []
+    for doc, contact_name in candidate_rows:
+        bal = doc.total - settled.get(doc.id, Decimal("0"))
+        if bal < Decimal("0"):
+            bal = Decimal("0")
+        if bal > Decimal("0"):
+            outstanding_by_id[doc.id] = bal
+            rows.append((doc, contact_name))
+
+    return _build_report(
+        rows, as_of, bd, labels, outstanding_by_id=outstanding_by_id
+    )
 
 
 # ---------------------------------------------------------------------------
