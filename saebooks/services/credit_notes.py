@@ -401,6 +401,15 @@ async def post_credit_note(
     cn.posted_at = datetime.now(UTC)
     cn.posted_by = posted_by
     await session.commit()
+
+    # A posted credit note linked to an invoice relieves that invoice's
+    # outstanding balance (e.g. a bad-debt write-off). Recompute the
+    # invoice's amount_paid so it drops out of aged receivables.
+    if cn.original_invoice_id is not None:
+        from saebooks.services.payments import _refresh_invoice_amount_paid
+        await _refresh_invoice_amount_paid(session, cn.original_invoice_id)
+        await session.commit()
+
     return await get(session, cn.id)
 
 
@@ -435,6 +444,14 @@ async def void_credit_note(
     cn.status = CreditNoteStatus.VOIDED
     cn.void_journal_entry_id = reversal.id
     await session.commit()
+
+    # Voiding the credit note removes its relief of the linked invoice, so
+    # the invoice reverts to open and reappears in aged receivables.
+    if cn.original_invoice_id is not None:
+        from saebooks.services.payments import _refresh_invoice_amount_paid
+        await _refresh_invoice_amount_paid(session, cn.original_invoice_id)
+        await session.commit()
+
     return cn
 
 

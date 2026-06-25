@@ -178,6 +178,51 @@ async def _contact(name: str, company_id: uuid.UUID) -> uuid.UUID:
         return c.id
 
 
+async def _settle_bill_via_payment(
+    company_id: uuid.UUID,
+    contact_id: uuid.UUID,
+    bill_id: uuid.UUID,
+    amount: Decimal,
+    *,
+    pay_date: date,
+) -> None:
+    """Record a real posted outgoing payment + allocation against a bill.
+
+    Used instead of stamping ``Bill.amount_paid`` because the aged-AP
+    report is now point-in-time and reads the subledger (allocations whose
+    ``Payment.payment_date <= cutoff``).
+    """
+    from saebooks.models.payment import PaymentDirection
+    from saebooks.services import payments as pay_svc
+
+    async with AsyncSessionLocal() as session:
+        bank = (
+            await session.execute(
+                select(Account).where(
+                    Account.company_id == company_id,
+                    Account.code == "1-1110",
+                )
+            )
+        ).scalar_one()
+    async with AsyncSessionLocal() as session:
+        pay = await pay_svc.create_draft(
+            session,
+            company_id=company_id,
+            contact_id=contact_id,
+            bank_account_id=bank.id,
+            payment_date=pay_date,
+            amount=amount,
+            direction=PaymentDirection.OUTGOING,
+        )
+    async with AsyncSessionLocal() as session:
+        await pay_svc.post_payment(session, pay.id, posted_by="test")
+    async with AsyncSessionLocal() as session:
+        await pay_svc.allocate(
+            session, pay.id,
+            bill_allocations=[(bill_id, amount)],
+        )
+
+
 async def _post_bill(
     company_id: uuid.UUID,
     contact_id: uuid.UUID,
@@ -289,11 +334,13 @@ async def test_aged_ap_partial_payment_shows_balance_due() -> None:
         due_date=as_at - timedelta(days=5),
         total=Decimal("1000.00"),
     )
-    # Stamp amount_paid directly — testing the report math, not allocation.
-    async with AsyncSessionLocal() as session:
-        bill = await bill_svc.get(session, bill_id)
-        bill.amount_paid = Decimal("250.00")
-        await session.commit()
+    # Record a real partial payment via a POSTED outgoing PaymentAllocation
+    # dated on/before the as-of date. The aged report is now point-in-time
+    # and reads the subledger (allocations whose ``Payment.payment_date <=
+    # cutoff``), not the scalar ``Bill.amount_paid``.
+    await _settle_bill_via_payment(
+        cid, contact, bill_id, Decimal("250.00"), pay_date=as_at
+    )
 
     async with AsyncSessionLocal() as session:
         report = await svc.aged_ap(session, cid, as_at=as_at)

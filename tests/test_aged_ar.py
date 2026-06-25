@@ -188,6 +188,51 @@ async def _contact(name: str, company_id: uuid.UUID) -> uuid.UUID:
         return c.id
 
 
+async def _settle_invoice_via_payment(
+    company_id: uuid.UUID,
+    contact_id: uuid.UUID,
+    invoice_id: uuid.UUID,
+    amount: Decimal,
+    *,
+    pay_date: date,
+) -> None:
+    """Record a real posted payment + allocation against ``invoice_id``.
+
+    Used by the aged-AR tests instead of stamping ``Invoice.amount_paid``
+    directly, because the report is now point-in-time and reads the
+    subledger (allocations whose ``Payment.payment_date <= cutoff``).
+    """
+    from saebooks.models.payment import PaymentDirection
+    from saebooks.services import payments as pay_svc
+
+    async with AsyncSessionLocal() as session:
+        bank = (
+            await session.execute(
+                select(Account).where(
+                    Account.company_id == company_id,
+                    Account.code == "1-1110",
+                )
+            )
+        ).scalar_one()
+    async with AsyncSessionLocal() as session:
+        pay = await pay_svc.create_draft(
+            session,
+            company_id=company_id,
+            contact_id=contact_id,
+            bank_account_id=bank.id,
+            payment_date=pay_date,
+            amount=amount,
+            direction=PaymentDirection.INCOMING,
+        )
+    async with AsyncSessionLocal() as session:
+        await pay_svc.post_payment(session, pay.id, posted_by="test")
+    async with AsyncSessionLocal() as session:
+        await pay_svc.allocate(
+            session, pay.id,
+            invoice_allocations=[(invoice_id, amount)],
+        )
+
+
 async def _post_invoice(
     company_id: uuid.UUID,
     contact_id: uuid.UUID,
@@ -322,12 +367,14 @@ async def test_aged_ar_partial_payment_shows_balance_due() -> None:
         due_date=as_at - timedelta(days=5),
         total=Decimal("1000.00"),
     )
-    # Stamp amount_paid directly — normally done by payment allocation,
-    # but we're testing the aged report, not the payment service.
-    async with AsyncSessionLocal() as session:
-        inv = await inv_svc.get(session, inv_id)
-        inv.amount_paid = Decimal("300.00")
-        await session.commit()
+    # Record a real partial payment via a POSTED PaymentAllocation dated
+    # on/before the as-of date. The aged report is now point-in-time and
+    # reads the subledger (allocations + credit notes <= cutoff), not the
+    # scalar ``Invoice.amount_paid`` — so the settlement must be a real
+    # allocation row, not a direct scalar stamp.
+    await _settle_invoice_via_payment(
+        cid, contact, inv_id, Decimal("300.00"), pay_date=as_at
+    )
 
     async with AsyncSessionLocal() as session:
         report = await svc.aged_ar(session, cid, as_at=as_at)

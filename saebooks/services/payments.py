@@ -358,9 +358,32 @@ async def _refresh_invoice_amount_paid(
             Payment.status == PaymentStatus.POSTED,
         )
     )
-    total = Decimal(str(result.scalar_one() or 0))
+    alloc_sum = Decimal(str(result.scalar_one() or 0))
+
+    # A posted customer credit note linked to this invoice via
+    # original_invoice_id settles the invoice by the portion of its value
+    # that has NOT been consumed elsewhere (amount_allocated). For a
+    # bad-debt / applied write-off the CN is never allocated, so its full
+    # ``total`` relieves the invoice. A CN that was cash-refunded has
+    # ``amount_allocated == total`` and contributes 0, so we never
+    # double-count a refund against the AR balance.
+    cn_result = await session.execute(
+        select(
+            func.coalesce(
+                func.sum(CreditNote.total - CreditNote.amount_allocated), 0
+            )
+        ).where(
+            CreditNote.original_invoice_id == invoice_id,
+            CreditNote.status == CreditNoteStatus.POSTED,
+        )
+    )
+    cn_applied = Decimal(str(cn_result.scalar_one() or 0))
+
     inv = await session.get(Invoice, invoice_id)
     if inv is not None:
+        # Cap at the invoice total so an over-large credit note can't push
+        # amount_paid above what was owed.
+        total = min(Decimal(str(inv.total)), alloc_sum + cn_applied)
         inv.amount_paid = total
         # base_amount_paid tracks the amount paid translated at the
         # invoice's own rate — that's the portion of AR that actually
