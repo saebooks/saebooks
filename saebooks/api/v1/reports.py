@@ -324,7 +324,12 @@ async def aged_receivables(
             and_(
                 Invoice.company_id == company_id,
                 Invoice.tenant_id == tenant_id,
-                Invoice.status == InvoiceStatus.POSTED,
+                # Include WRITTEN_OFF too — a write-off dated AFTER as_of has
+                # not happened yet, so the invoice is still receivable as at
+                # the cutoff (dropped below once its write-off date arrives).
+                Invoice.status.in_(
+                    (InvoiceStatus.POSTED, InvoiceStatus.WRITTEN_OFF)
+                ),
                 Invoice.archived_at.is_(None),
                 # No scalar ``total > amount_paid`` pre-filter — an invoice
                 # settled only by a *future* credit note / payment must still
@@ -336,16 +341,26 @@ async def aged_receivables(
         .order_by(Contact.name, Invoice.due_date)
     )
     candidate_rows = (await session.execute(stmt)).all()
+    candidate_ids = [doc.id for doc, _ in candidate_rows]
 
     # Point-in-time settlement as at ``as_of`` (POSTED payment allocations
     # with payment_date <= as_of, plus unallocated POSTED credit notes with
     # issue_date <= as_of), NOT the scalar Invoice.amount_paid.
     settled = await reports_svc._invoice_settled_asof(
-        session, [doc.id for doc, _ in candidate_rows], as_of
+        session, candidate_ids, as_of
+    )
+    # Effective write-off date per WRITTEN_OFF invoice — a write-off dated
+    # > as_of hasn't happened yet so the invoice stays open until then.
+    writeoff_date = await reports_svc._writeoff_date_by_invoice(
+        session, candidate_ids
     )
     outstanding_by_id: dict[UUID, Decimal] = {}
     rows: list[tuple[Any, str]] = []
     for doc, contact_name in candidate_rows:
+        if doc.status == InvoiceStatus.WRITTEN_OFF:
+            wod = writeoff_date.get(doc.id)
+            if wod is None or wod <= as_of:
+                continue
         bal = doc.total - settled.get(doc.id, Decimal("0"))
         if bal < Decimal("0"):
             bal = Decimal("0")

@@ -519,6 +519,38 @@ async def _bill_settled_asof(
     return settled
 
 
+async def _writeoff_date_by_invoice(
+    session: AsyncSession,
+    invoice_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, date]:
+    """Effective write-off date per WRITTEN_OFF invoice (point-in-time).
+
+    A bad-debt write-off relieves the invoice via its
+    ``write_off_journal_entry_id``; the write-off's *effective date* is that
+    journal entry's ``entry_date``. Aged AR uses this so a write-off dated
+    in the future (e.g. a year-end 30-Jun write-off booked early) does NOT
+    drop the invoice from receivables until that date arrives — matching the
+    date-aware Trade Debtors control on the balance sheet. Invoices whose
+    ``write_off_journal_entry_id`` is NULL (legacy status-only write-offs
+    with no backing JE) are absent from the result and treated as already
+    off-ledger, preserving prior behaviour.
+    """
+    out: dict[uuid.UUID, date] = {}
+    if not invoice_ids:
+        return out
+    rows = await session.execute(
+        select(Invoice.id, JournalEntry.entry_date)
+        .join(JournalEntry, Invoice.write_off_journal_entry_id == JournalEntry.id)
+        .where(
+            Invoice.id.in_(invoice_ids),
+            Invoice.write_off_journal_entry_id.is_not(None),
+        )
+    )
+    for inv_id, wod in rows.all():
+        out[inv_id] = wod
+    return out
+
+
 async def aged_ar(
     session: AsyncSession,
     company_id: uuid.UUID,
@@ -527,38 +559,56 @@ async def aged_ar(
 ) -> AgedReport:
     """Return the aged-debtors report as at ``as_at`` (default today).
 
-    POINT-IN-TIME: walks POSTED, non-archived invoices with
-    ``issue_date <= as_at`` and keeps those still outstanding *as at the
-    cutoff*. Settlement is computed date-aware (see
+    POINT-IN-TIME: walks POSTED (and future-dated-write-off WRITTEN_OFF),
+    non-archived invoices with ``issue_date <= as_at`` and keeps those still
+    outstanding *as at the cutoff*. Settlement is computed date-aware (see
     ``_invoice_settled_asof``) rather than from the scalar
     ``Invoice.amount_paid``, so a payment or credit note dated after the
-    report date does not reduce the outstanding balance. Voided and
-    archived invoices are excluded.
+    report date does not reduce the outstanding balance. A WRITTEN_OFF
+    invoice whose bad-debt write-off is dated AFTER ``as_at`` (e.g. a
+    year-end 30-Jun write-off booked early) is still receivable as at the
+    cutoff and IS included until the write-off date; once the write-off
+    date is reached it drops out — matching the date-aware Trade Debtors
+    control on the balance sheet. Voided and archived invoices are excluded.
     """
     cutoff = as_at or date.today()
     # Do NOT pre-filter on the scalar ``total > amount_paid`` — that would
     # wrongly drop an invoice that is only settled by a *future* credit note
-    # or payment. Fetch all candidate invoices, then compute the point-in-
-    # time outstanding below and keep those with outstanding > 0.
+    # or payment. Include WRITTEN_OFF invoices too, then exclude below the
+    # ones whose write-off is already effective as at the cutoff. Fetch all
+    # candidates, compute point-in-time outstanding, keep those > 0.
     stmt = (
         select(Invoice, Contact.name)
         .join(Contact, Invoice.contact_id == Contact.id)
         .where(
             Invoice.company_id == company_id,
-            Invoice.status == InvoiceStatus.POSTED,
+            Invoice.status.in_(
+                (InvoiceStatus.POSTED, InvoiceStatus.WRITTEN_OFF)
+            ),
             Invoice.archived_at.is_(None),
             Invoice.issue_date <= cutoff,
         )
         .order_by(Contact.name, Invoice.due_date)
     )
     candidate_rows = (await session.execute(stmt)).all()
+    candidate_ids = [inv.id for inv, _ in candidate_rows]
 
     settled_by_invoice = await _invoice_settled_asof(
-        session, [inv.id for inv, _ in candidate_rows], cutoff
+        session, candidate_ids, cutoff
     )
+    # Effective write-off date per WRITTEN_OFF invoice: a write-off dated
+    # > cutoff has not happened yet, so the invoice is still receivable.
+    writeoff_date = await _writeoff_date_by_invoice(session, candidate_ids)
     outstanding_by_invoice: dict[uuid.UUID, Decimal] = {}
     rows: list[tuple[Invoice, str]] = []
     for inv, contact_name in candidate_rows:
+        if inv.status == InvoiceStatus.WRITTEN_OFF:
+            wod = writeoff_date.get(inv.id)
+            # No backing write-off JE (legacy) or already written off as at
+            # the cutoff → off-ledger, exclude. Only a future write-off keeps
+            # the invoice open.
+            if wod is None or wod <= cutoff:
+                continue
         settled = settled_by_invoice.get(inv.id, Decimal("0"))
         outstanding = inv.total - settled
         if outstanding < Decimal("0"):
