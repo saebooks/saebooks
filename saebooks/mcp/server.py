@@ -776,7 +776,10 @@ async def create_bill(
         "issue_date": issue_date,
         "lines": lines or [],
     }
-    for k, v in (("due_date", due_date), ("reference", reference),
+    # The bill create/update API field is ``supplier_reference`` (the
+    # supplier's own invoice number), NOT ``reference`` — map it so the
+    # MCP-facing ``reference`` arg actually lands on the bill.
+    for k, v in (("due_date", due_date), ("supplier_reference", reference),
                  ("currency", currency), ("notes", notes)):
         if v:
             body[k] = v
@@ -798,7 +801,7 @@ async def update_bill(
     """Edit a DRAFT bill."""
     body = _drop_empty({
         "contact_id": contact_id, "issue_date": issue_date,
-        "due_date": due_date, "reference": reference,
+        "due_date": due_date, "supplier_reference": reference,
         "lines": lines, "notes": notes,
     })
     return await _patch(ctx, f"/api/v1/bills/{bill_id}", body, if_match=version)
@@ -2254,7 +2257,7 @@ async def archive_time_entry(ctx: Context, entry_id: str, version: int) -> dict[
 @_gated_tool(safety="safe")
 async def trial_balance(ctx: Context, as_at: str = "") -> dict[str, Any]:
     """Trial balance as at a date."""
-    return await _get(ctx, "/api/v1/reports/trial_balance", as_at=as_at)
+    return await _get(ctx, "/api/v1/reports/trial_balance", as_of_date=as_at)
 
 
 @_gated_tool(safety="safe")
@@ -2268,19 +2271,19 @@ async def profit_and_loss(ctx: Context, from_date: str, to_date: str) -> dict[st
 @_gated_tool(safety="safe")
 async def balance_sheet(ctx: Context, as_at: str = "") -> dict[str, Any]:
     """Balance sheet as at a date."""
-    return await _get(ctx, "/api/v1/reports/balance_sheet", as_at=as_at)
+    return await _get(ctx, "/api/v1/reports/balance_sheet", as_of_date=as_at)
 
 
 @_gated_tool(safety="safe")
 async def aged_receivables(ctx: Context, as_at: str = "") -> dict[str, Any]:
     """Aged receivables (AR aging)."""
-    return await _get(ctx, "/api/v1/reports/aged_receivables", as_at=as_at)
+    return await _get(ctx, "/api/v1/reports/aged_receivables", as_of_date=as_at)
 
 
 @_gated_tool(safety="safe")
 async def aged_payables(ctx: Context, as_at: str = "") -> dict[str, Any]:
     """Aged payables (AP aging)."""
-    return await _get(ctx, "/api/v1/reports/aged_payables", as_at=as_at)
+    return await _get(ctx, "/api/v1/reports/aged_payables", as_of_date=as_at)
 
 
 @_gated_tool(safety="safe")
@@ -2309,13 +2312,13 @@ async def budget_vs_actual(ctx: Context, from_date: str, to_date: str, budget_id
 @_gated_tool(safety="safe")
 async def depreciation_schedule(ctx: Context, as_at: str = "") -> dict[str, Any]:
     """Fixed-asset depreciation schedule."""
-    return await _get(ctx, "/api/v1/reports/depreciation_schedule", as_at=as_at)
+    return await _get(ctx, "/api/v1/reports/depreciation_schedule", as_of_date=as_at)
 
 
 @_gated_tool(safety="safe")
 async def fx_revaluation(ctx: Context, as_at: str = "") -> dict[str, Any]:
     """FX revaluation report (unrealised gains/losses)."""
-    return await _get(ctx, "/api/v1/reports/fx_revaluation", as_at=as_at)
+    return await _get(ctx, "/api/v1/reports/fx_revaluation", as_of_date=as_at)
 
 
 @_gated_tool(safety="safe")
@@ -2346,7 +2349,7 @@ async def revenue_by_customer(ctx: Context, from_date: str, to_date: str) -> dic
 @_gated_tool(safety="safe")
 async def ytd_turnover(ctx: Context, as_at: str = "") -> dict[str, Any]:
     """Year-to-date turnover (useful for GST threshold checks)."""
-    return await _get(ctx, "/api/v1/reports/ytd_turnover", as_at=as_at)
+    return await _get(ctx, "/api/v1/reports/ytd_turnover", as_of_date=as_at)
 
 
 # ===========================================================================
