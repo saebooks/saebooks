@@ -246,7 +246,7 @@ def _client_for(ctx: Context | None) -> httpx.AsyncClient:
     if not token:
         token = SHARED_API_TOKEN or None
 
-    headers = {"User-Agent": "saebooks-mcp/0.2"}
+    headers = {"User-Agent": f"saebooks-mcp/{__version__}"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
