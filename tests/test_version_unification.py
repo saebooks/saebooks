@@ -86,3 +86,30 @@ async def test_api_version_endpoint_matches_module(unauth_client: AsyncClient) -
     body = r.json()
     assert "version" in body
     assert body["version"], "version field must not be empty"
+
+
+def test_pyproject_version_matches_module() -> None:
+    """pyproject.toml [project] version must equal saebooks.__version__.
+
+    /api/v1/version reports importlib.metadata.version("saebooks"), which is
+    baked from pyproject.toml at install time, while OpenAPI and the MCP
+    surfaces read saebooks.__version__ directly. The two source literals must
+    therefore stay in lockstep — scripts/bump-version.sh sets both atomically;
+    this test guards against a hand-edit that touches only one of them.
+
+    Skips gracefully when pyproject.toml is not on disk (e.g. a packaged-only
+    runtime image) so it never false-fails outside a source checkout.
+    """
+    import tomllib
+    from pathlib import Path
+
+    pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    if not pyproject_path.exists():
+        pytest.skip("pyproject.toml not present in this checkout")
+
+    pyproject = tomllib.loads(pyproject_path.read_text())
+    declared = pyproject["project"]["version"]
+    assert declared == saebooks.__version__, (
+        f"pyproject.toml version {declared!r} != __version__ "
+        f"{saebooks.__version__!r} — run scripts/bump-version.sh to sync them"
+    )
