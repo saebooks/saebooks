@@ -466,6 +466,41 @@ async def aged_payables(
     )
 
 
+async def _later_dated_warning(
+    session: AsyncSession,
+    company_id: UUID,
+    tenant_id: UUID,
+    cutoff: date,
+) -> list[str]:
+    """Flag POSTED journal entries dated AFTER a report's end date.
+
+    Such entries are silently excluded from the report, so a mid-period
+    snapshot can be materially misleading -- e.g. year-end bad-debt
+    write-offs dated 30 Jun are omitted from a P&L run to 27 Jun, turning a
+    real loss into a phantom profit. Returns a human-readable warning list
+    (empty when nothing is later-dated).
+    """
+    count, latest = (
+        await session.execute(
+            select(func.count(), func.max(JournalEntry.entry_date)).where(
+                JournalEntry.company_id == company_id,
+                JournalEntry.tenant_id == tenant_id,
+                JournalEntry.status.in_(reports_svc.REPORTABLE_STATUSES),
+                JournalEntry.archived_at.is_(None),
+                JournalEntry.entry_date > cutoff,
+            )
+        )
+    ).one()
+    if not count:
+        return []
+    plural = "y" if count == 1 else "ies"
+    return [
+        f"{count} posted journal entr{plural} dated after {cutoff.isoformat()} "
+        f"are excluded from this report (latest {latest.isoformat()}). "
+        f"Extend the end date for a full-period view."
+    ]
+
+
 # ---------------------------------------------------------------------------
 # GET /api/v1/reports/profit_loss
 # ---------------------------------------------------------------------------
@@ -574,6 +609,7 @@ async def profit_loss(
         for line in lines
     )
 
+    warnings = await _later_dated_warning(session, company_id, tenant_id, to_date)
     return PnLReport(
         from_date=from_date,
         to_date=to_date,
@@ -589,6 +625,7 @@ async def profit_loss(
             "total_expenses": total_expenses,
         },
         net_profit=total_income - total_expenses,
+        warnings=warnings,
     )
 
 
@@ -729,6 +766,7 @@ async def balance_sheet(
     total_equity = sum(line["balance"] for line in equity)
     difference = abs(total_assets - total_liabilities - total_equity)
 
+    warnings = await _later_dated_warning(session, company_id, tenant_id, as_of_date)
     return BSReport(
         as_of_date=as_of_date,
         assets={"ASSET": assets, "total_assets": total_assets},
@@ -736,6 +774,7 @@ async def balance_sheet(
         equity={"EQUITY": equity, "total_equity": total_equity},
         balanced=difference < 0.01,
         difference=round(difference, 2),
+        warnings=warnings,
     )
 
 
