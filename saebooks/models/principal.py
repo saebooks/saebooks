@@ -186,9 +186,14 @@ class PrincipalFido2Credential(Base):
         sa.BigInteger(), nullable=False, server_default="0"
     )
     transports: Mapped[list[str]] = mapped_column(
+        # No PG-array server_default in the model: ARRAY[]::varchar[] does not
+        # narrow to SQLite and breaks the offline Cashbook schema bootstrap
+        # (create_all renders the literal verbatim -> sqlite syntax error).
+        # PG keeps its DB-level default via migration 0156; default=list sets
+        # [] on insert cross-dialect (mirrors user_webauthn_credential).
         ARRAY(String(16)),
         nullable=False,
-        server_default=sa.text("ARRAY[]::varchar[]"),
+        default=list,
     )
     friendly_name: Mapped[str] = mapped_column(
         String(64), nullable=False, server_default="Security key"
