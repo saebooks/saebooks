@@ -187,6 +187,7 @@ def _build_report(
     bucket_days: list[int],
     bucket_labels: list[str],
     retention_amounts: dict[UUID, Decimal] | None = None,
+    outstanding_by_id: dict[UUID, Decimal] | None = None,
 ) -> AgedReport:
     """Assemble an AgedReport from DB rows.
 
@@ -196,6 +197,13 @@ def _build_report(
     the trade-debtor remainder appears in the per-contact rows and ``totals``.
     Payments are assumed to reduce the trade-debtor portion first, so
     retentions are the last to be cleared.
+
+    When ``outstanding_by_id`` is supplied, each document's outstanding
+    balance is taken from it (a POINT-IN-TIME figure computed as at
+    ``as_of`` — see ``reports_svc._invoice_settled_asof`` /
+    ``_bill_settled_asof``) instead of the scalar ``total - amount_paid``,
+    so a payment or credit note dated after ``as_of`` does not reduce the
+    balance. Rows absent from the map (or mapping to <= 0) are skipped.
     """
     zero = Decimal("0")
 
@@ -208,7 +216,12 @@ def _build_report(
 
     for doc, contact_name in rows:
         contact_id: UUID = doc.contact_id
-        outstanding: Decimal = doc.total - doc.amount_paid
+        if outstanding_by_id is not None:
+            outstanding = outstanding_by_id.get(doc.id, zero)
+            if outstanding <= zero:
+                continue
+        else:
+            outstanding = doc.total - doc.amount_paid
         days_overdue: int = (as_of - doc.due_date).days
         label = _days_to_bucket(days_overdue, bucket_days)
 
@@ -311,15 +324,49 @@ async def aged_receivables(
             and_(
                 Invoice.company_id == company_id,
                 Invoice.tenant_id == tenant_id,
-                Invoice.status == InvoiceStatus.POSTED,
+                # Include WRITTEN_OFF too — a write-off dated AFTER as_of has
+                # not happened yet, so the invoice is still receivable as at
+                # the cutoff (dropped below once its write-off date arrives).
+                Invoice.status.in_(
+                    (InvoiceStatus.POSTED, InvoiceStatus.WRITTEN_OFF)
+                ),
                 Invoice.archived_at.is_(None),
-                Invoice.total > Invoice.amount_paid,
+                # No scalar ``total > amount_paid`` pre-filter — an invoice
+                # settled only by a *future* credit note / payment must still
+                # appear as outstanding as at ``as_of``. The point-in-time
+                # outstanding is computed below.
                 Invoice.issue_date <= as_of,
             )
         )
         .order_by(Contact.name, Invoice.due_date)
     )
-    rows = (await session.execute(stmt)).all()
+    candidate_rows = (await session.execute(stmt)).all()
+    candidate_ids = [doc.id for doc, _ in candidate_rows]
+
+    # Point-in-time settlement as at ``as_of`` (POSTED payment allocations
+    # with payment_date <= as_of, plus unallocated POSTED credit notes with
+    # issue_date <= as_of), NOT the scalar Invoice.amount_paid.
+    settled = await reports_svc._invoice_settled_asof(
+        session, candidate_ids, as_of
+    )
+    # Effective write-off date per WRITTEN_OFF invoice — a write-off dated
+    # > as_of hasn't happened yet so the invoice stays open until then.
+    writeoff_date = await reports_svc._writeoff_date_by_invoice(
+        session, candidate_ids
+    )
+    outstanding_by_id: dict[UUID, Decimal] = {}
+    rows: list[tuple[Any, str]] = []
+    for doc, contact_name in candidate_rows:
+        if doc.status == InvoiceStatus.WRITTEN_OFF:
+            wod = writeoff_date.get(doc.id)
+            if wod is None or wod <= as_of:
+                continue
+        bal = doc.total - settled.get(doc.id, Decimal("0"))
+        if bal < Decimal("0"):
+            bal = Decimal("0")
+        if bal > Decimal("0"):
+            outstanding_by_id[doc.id] = bal
+            rows.append((doc, contact_name))
 
     # Build per-invoice retention amounts from invoice_lines so the report
     # can display Retentions Receivable as a separate line from Trade Debtors.
@@ -343,7 +390,14 @@ async def aged_receivables(
             if amt and amt > Decimal("0"):
                 retention_amounts[inv_id] = amt
 
-    return _build_report(rows, as_of, bd, labels, retention_amounts=retention_amounts)
+    return _build_report(
+        rows,
+        as_of,
+        bd,
+        labels,
+        retention_amounts=retention_amounts,
+        outstanding_by_id=outstanding_by_id,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -382,15 +436,69 @@ async def aged_payables(
                 Bill.tenant_id == tenant_id,
                 Bill.status == BillStatus.POSTED,
                 Bill.archived_at.is_(None),
-                Bill.total > Bill.amount_paid,
+                # No scalar pre-filter — a bill settled only by a future
+                # payment must still appear as outstanding as at ``as_of``.
                 Bill.issue_date <= as_of,
             )
         )
         .order_by(Contact.name, Bill.due_date)
         )
-    rows = (await session.execute(stmt)).all()
+    candidate_rows = (await session.execute(stmt)).all()
 
-    return _build_report(rows, as_of, bd, labels)
+    # Point-in-time settlement as at ``as_of`` (POSTED payment allocations
+    # with payment_date <= as_of). There is no supplier-credit-note→bill
+    # link, so AP has only the payment-date component.
+    settled = await reports_svc._bill_settled_asof(
+        session, [doc.id for doc, _ in candidate_rows], as_of
+    )
+    outstanding_by_id: dict[UUID, Decimal] = {}
+    rows: list[tuple[Any, str]] = []
+    for doc, contact_name in candidate_rows:
+        bal = doc.total - settled.get(doc.id, Decimal("0"))
+        if bal < Decimal("0"):
+            bal = Decimal("0")
+        if bal > Decimal("0"):
+            outstanding_by_id[doc.id] = bal
+            rows.append((doc, contact_name))
+
+    return _build_report(
+        rows, as_of, bd, labels, outstanding_by_id=outstanding_by_id
+    )
+
+
+async def _later_dated_warning(
+    session: AsyncSession,
+    company_id: UUID,
+    tenant_id: UUID,
+    cutoff: date,
+) -> list[str]:
+    """Flag POSTED journal entries dated AFTER a report's end date.
+
+    Such entries are silently excluded from the report, so a mid-period
+    snapshot can be materially misleading -- e.g. year-end bad-debt
+    write-offs dated 30 Jun are omitted from a P&L run to 27 Jun, turning a
+    real loss into a phantom profit. Returns a human-readable warning list
+    (empty when nothing is later-dated).
+    """
+    count, latest = (
+        await session.execute(
+            select(func.count(), func.max(JournalEntry.entry_date)).where(
+                JournalEntry.company_id == company_id,
+                JournalEntry.tenant_id == tenant_id,
+                JournalEntry.status.in_(reports_svc.REPORTABLE_STATUSES),
+                JournalEntry.archived_at.is_(None),
+                JournalEntry.entry_date > cutoff,
+            )
+        )
+    ).one()
+    if not count:
+        return []
+    plural = "y" if count == 1 else "ies"
+    return [
+        f"{count} posted journal entr{plural} dated after {cutoff.isoformat()} "
+        f"are excluded from this report (latest {latest.isoformat()}). "
+        f"Extend the end date for a full-period view."
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -501,6 +609,7 @@ async def profit_loss(
         for line in lines
     )
 
+    warnings = await _later_dated_warning(session, company_id, tenant_id, to_date)
     return PnLReport(
         from_date=from_date,
         to_date=to_date,
@@ -516,6 +625,7 @@ async def profit_loss(
             "total_expenses": total_expenses,
         },
         net_profit=total_income - total_expenses,
+        warnings=warnings,
     )
 
 
@@ -656,6 +766,7 @@ async def balance_sheet(
     total_equity = sum(line["balance"] for line in equity)
     difference = abs(total_assets - total_liabilities - total_equity)
 
+    warnings = await _later_dated_warning(session, company_id, tenant_id, as_of_date)
     return BSReport(
         as_of_date=as_of_date,
         assets={"ASSET": assets, "total_assets": total_assets},
@@ -663,6 +774,7 @@ async def balance_sheet(
         equity={"EQUITY": equity, "total_equity": total_equity},
         balanced=difference < 0.01,
         difference=round(difference, 2),
+        warnings=warnings,
     )
 
 

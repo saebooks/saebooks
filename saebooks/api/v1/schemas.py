@@ -929,6 +929,7 @@ class InvoiceOut(BaseModel):
     payment_terms: str | None = None
     journal_entry_id: uuid.UUID | None = None
     void_journal_entry_id: uuid.UUID | None = None
+    write_off_journal_entry_id: uuid.UUID | None = None
     posted_at: datetime | None = None
     posted_by: str | None = None
     # Gap 3 (0157) — review flag + optional note.
@@ -1985,6 +1986,7 @@ class PnLReport(BaseModel):
     income: PnLIncome
     expenses: PnLExpenses
     net_profit: float
+    warnings: list[str] = Field(default_factory=list)
 
 
 class BSAccountLine(BaseModel):
@@ -2026,6 +2028,7 @@ class BSReport(BaseModel):
     equity: BSEquity
     balanced: bool
     difference: float
+    warnings: list[str] = Field(default_factory=list)
 
 
 class AgedContact(BaseModel):

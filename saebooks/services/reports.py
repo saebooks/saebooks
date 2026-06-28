@@ -19,8 +19,10 @@ from saebooks.models.account import Account, AccountType
 from saebooks.models.bill import Bill, BillStatus
 from saebooks.models.budget import Budget
 from saebooks.models.contact import Contact
+from saebooks.models.credit_note import CreditNote, CreditNoteStatus
 from saebooks.models.department import CostCentre, Department
 from saebooks.models.invoice import Invoice, InvoiceLine, InvoiceStatus
+from saebooks.models.payment import Payment, PaymentAllocation, PaymentStatus
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
 from saebooks.models.project import Project
 from saebooks.models.recurring_invoice import (
@@ -422,6 +424,133 @@ class AgedReport:
         return sum(self.retentions_grand_totals.values(), Decimal("0"))
 
 
+async def _invoice_settled_asof(
+    session: AsyncSession,
+    invoice_ids: list[uuid.UUID],
+    cutoff: date,
+) -> dict[uuid.UUID, Decimal]:
+    """Per-invoice settled amount AS AT ``cutoff`` (point-in-time).
+
+    Unlike the scalar ``Invoice.amount_paid`` (which reflects the *current*
+    settled total regardless of date), this sums only the relief that had
+    actually occurred on or before ``cutoff``:
+
+    * POSTED payment allocations whose parent ``Payment.payment_date <=
+      cutoff``; plus
+    * the unallocated portion of POSTED credit notes linked via
+      ``original_invoice_id`` whose ``issue_date <= cutoff``.
+
+    A payment or credit note dated *after* the report's as-of date does not
+    reduce the outstanding balance — matching the date-aware AR control on
+    the balance sheet (GL ``entry_date <= as_of``).
+    """
+    settled: dict[uuid.UUID, Decimal] = {iid: Decimal("0") for iid in invoice_ids}
+    if not invoice_ids:
+        return settled
+
+    pay_rows = await session.execute(
+        select(
+            PaymentAllocation.invoice_id,
+            func.coalesce(func.sum(PaymentAllocation.amount), 0),
+        )
+        .join(Payment, PaymentAllocation.payment_id == Payment.id)
+        .where(
+            PaymentAllocation.invoice_id.in_(invoice_ids),
+            Payment.status == PaymentStatus.POSTED,
+            Payment.payment_date <= cutoff,
+        )
+        .group_by(PaymentAllocation.invoice_id)
+    )
+    for inv_id, amt in pay_rows.all():
+        settled[inv_id] += Decimal(str(amt or 0))
+
+    cn_rows = await session.execute(
+        select(
+            CreditNote.original_invoice_id,
+            func.coalesce(
+                func.sum(CreditNote.total - CreditNote.amount_allocated), 0
+            ),
+        )
+        .where(
+            CreditNote.original_invoice_id.in_(invoice_ids),
+            CreditNote.status == CreditNoteStatus.POSTED,
+            CreditNote.issue_date <= cutoff,
+        )
+        .group_by(CreditNote.original_invoice_id)
+    )
+    for inv_id, amt in cn_rows.all():
+        settled[inv_id] += Decimal(str(amt or 0))
+
+    return settled
+
+
+async def _bill_settled_asof(
+    session: AsyncSession,
+    bill_ids: list[uuid.UUID],
+    cutoff: date,
+) -> dict[uuid.UUID, Decimal]:
+    """Per-bill settled amount AS AT ``cutoff`` (point-in-time).
+
+    Sums only POSTED payment allocations whose parent ``Payment.payment_date
+    <= cutoff``. There is no supplier-credit-note model linking to bills
+    (``CreditNote`` carries only ``original_invoice_id``), so the AP side has
+    no credit-note component to make date-aware — only the payment date.
+    """
+    settled: dict[uuid.UUID, Decimal] = {bid: Decimal("0") for bid in bill_ids}
+    if not bill_ids:
+        return settled
+
+    pay_rows = await session.execute(
+        select(
+            PaymentAllocation.bill_id,
+            func.coalesce(func.sum(PaymentAllocation.amount), 0),
+        )
+        .join(Payment, PaymentAllocation.payment_id == Payment.id)
+        .where(
+            PaymentAllocation.bill_id.in_(bill_ids),
+            Payment.status == PaymentStatus.POSTED,
+            Payment.payment_date <= cutoff,
+        )
+        .group_by(PaymentAllocation.bill_id)
+    )
+    for bill_id, amt in pay_rows.all():
+        settled[bill_id] += Decimal(str(amt or 0))
+
+    return settled
+
+
+async def _writeoff_date_by_invoice(
+    session: AsyncSession,
+    invoice_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, date]:
+    """Effective write-off date per WRITTEN_OFF invoice (point-in-time).
+
+    A bad-debt write-off relieves the invoice via its
+    ``write_off_journal_entry_id``; the write-off's *effective date* is that
+    journal entry's ``entry_date``. Aged AR uses this so a write-off dated
+    in the future (e.g. a year-end 30-Jun write-off booked early) does NOT
+    drop the invoice from receivables until that date arrives — matching the
+    date-aware Trade Debtors control on the balance sheet. Invoices whose
+    ``write_off_journal_entry_id`` is NULL (legacy status-only write-offs
+    with no backing JE) are absent from the result and treated as already
+    off-ledger, preserving prior behaviour.
+    """
+    out: dict[uuid.UUID, date] = {}
+    if not invoice_ids:
+        return out
+    rows = await session.execute(
+        select(Invoice.id, JournalEntry.entry_date)
+        .join(JournalEntry, Invoice.write_off_journal_entry_id == JournalEntry.id)
+        .where(
+            Invoice.id.in_(invoice_ids),
+            Invoice.write_off_journal_entry_id.is_not(None),
+        )
+    )
+    for inv_id, wod in rows.all():
+        out[inv_id] = wod
+    return out
+
+
 async def aged_ar(
     session: AsyncSession,
     company_id: uuid.UUID,
@@ -430,25 +559,63 @@ async def aged_ar(
 ) -> AgedReport:
     """Return the aged-debtors report as at ``as_at`` (default today).
 
-    Walks POSTED, non-archived invoices with a balance_due > 0 (i.e.
-    ``total > amount_paid``). Issued-date filter is ``issue_date <=
-    as_at`` so future-dated invoices don't appear. Voided and archived
-    invoices are excluded.
+    POINT-IN-TIME: walks POSTED (and future-dated-write-off WRITTEN_OFF),
+    non-archived invoices with ``issue_date <= as_at`` and keeps those still
+    outstanding *as at the cutoff*. Settlement is computed date-aware (see
+    ``_invoice_settled_asof``) rather than from the scalar
+    ``Invoice.amount_paid``, so a payment or credit note dated after the
+    report date does not reduce the outstanding balance. A WRITTEN_OFF
+    invoice whose bad-debt write-off is dated AFTER ``as_at`` (e.g. a
+    year-end 30-Jun write-off booked early) is still receivable as at the
+    cutoff and IS included until the write-off date; once the write-off
+    date is reached it drops out — matching the date-aware Trade Debtors
+    control on the balance sheet. Voided and archived invoices are excluded.
     """
     cutoff = as_at or date.today()
+    # Do NOT pre-filter on the scalar ``total > amount_paid`` — that would
+    # wrongly drop an invoice that is only settled by a *future* credit note
+    # or payment. Include WRITTEN_OFF invoices too, then exclude below the
+    # ones whose write-off is already effective as at the cutoff. Fetch all
+    # candidates, compute point-in-time outstanding, keep those > 0.
     stmt = (
         select(Invoice, Contact.name)
         .join(Contact, Invoice.contact_id == Contact.id)
         .where(
             Invoice.company_id == company_id,
-            Invoice.status == InvoiceStatus.POSTED,
+            Invoice.status.in_(
+                (InvoiceStatus.POSTED, InvoiceStatus.WRITTEN_OFF)
+            ),
             Invoice.archived_at.is_(None),
             Invoice.issue_date <= cutoff,
-            Invoice.total > Invoice.amount_paid,
         )
         .order_by(Contact.name, Invoice.due_date)
     )
-    rows = (await session.execute(stmt)).all()
+    candidate_rows = (await session.execute(stmt)).all()
+    candidate_ids = [inv.id for inv, _ in candidate_rows]
+
+    settled_by_invoice = await _invoice_settled_asof(
+        session, candidate_ids, cutoff
+    )
+    # Effective write-off date per WRITTEN_OFF invoice: a write-off dated
+    # > cutoff has not happened yet, so the invoice is still receivable.
+    writeoff_date = await _writeoff_date_by_invoice(session, candidate_ids)
+    outstanding_by_invoice: dict[uuid.UUID, Decimal] = {}
+    rows: list[tuple[Invoice, str]] = []
+    for inv, contact_name in candidate_rows:
+        if inv.status == InvoiceStatus.WRITTEN_OFF:
+            wod = writeoff_date.get(inv.id)
+            # No backing write-off JE (legacy) or already written off as at
+            # the cutoff → off-ledger, exclude. Only a future write-off keeps
+            # the invoice open.
+            if wod is None or wod <= cutoff:
+                continue
+        settled = settled_by_invoice.get(inv.id, Decimal("0"))
+        outstanding = inv.total - settled
+        if outstanding < Decimal("0"):
+            outstanding = Decimal("0")
+        if outstanding > Decimal("0"):
+            outstanding_by_invoice[inv.id] = outstanding
+            rows.append((inv, contact_name))
 
     # Fetch per-invoice retention amounts so Trade Debtors and
     # Retentions Receivable can be reported as separate lines.
@@ -477,7 +644,7 @@ async def aged_ar(
 
     for inv, contact_name in rows:
         days_overdue = (cutoff - inv.due_date).days
-        outstanding = inv.total - inv.amount_paid
+        outstanding = outstanding_by_invoice[inv.id]
         ret_amt = retention_by_invoice.get(inv.id, Decimal("0"))
         # Payments reduce Trade Debtors first; retentions are last to clear.
         ret_outstanding = min(ret_amt, outstanding)
@@ -489,7 +656,9 @@ async def aged_ar(
             issue_date=inv.issue_date,
             due_date=inv.due_date,
             total=inv.total,
-            amount_paid=inv.amount_paid,
+            # Point-in-time settled amount (total - outstanding), NOT the
+            # scalar inv.amount_paid which may include future settlements.
+            amount_paid=inv.total - outstanding,
             days_overdue=days_overdue,
         )
         group = groups.get(inv.contact_id)
@@ -578,8 +747,17 @@ async def aged_ap(
     *,
     as_at: date | None = None,
 ) -> AgedReport:
-    """Return the aged-creditors report as at ``as_at`` (default today)."""
+    """Return the aged-creditors report as at ``as_at`` (default today).
+
+    POINT-IN-TIME: settlement is computed date-aware (see
+    ``_bill_settled_asof``) so a payment dated after the report date does
+    not reduce the outstanding balance. There is no supplier-credit-note
+    model linking to bills, so the AP side has only the payment-date
+    component (no credit-note component, unlike AR).
+    """
     cutoff = as_at or date.today()
+    # As with AR, do NOT pre-filter on the scalar ``total > amount_paid`` —
+    # a future-dated payment must not drop a bill from the as-of report.
     stmt = (
         select(Bill, Contact.name)
         .join(Contact, Bill.contact_id == Contact.id)
@@ -588,14 +766,23 @@ async def aged_ap(
             Bill.status == BillStatus.POSTED,
             Bill.archived_at.is_(None),
             Bill.issue_date <= cutoff,
-            Bill.total > Bill.amount_paid,
         )
         .order_by(Contact.name, Bill.due_date)
     )
-    rows = (await session.execute(stmt)).all()
+    candidate_rows = (await session.execute(stmt)).all()
+
+    settled_by_bill = await _bill_settled_asof(
+        session, [bill.id for bill, _ in candidate_rows], cutoff
+    )
 
     groups: dict[uuid.UUID, AgedContactGroup] = {}
-    for bill, contact_name in rows:
+    for bill, contact_name in candidate_rows:
+        settled = settled_by_bill.get(bill.id, Decimal("0"))
+        outstanding = bill.total - settled
+        if outstanding < Decimal("0"):
+            outstanding = Decimal("0")
+        if outstanding <= Decimal("0"):
+            continue
         days_overdue = (cutoff - bill.due_date).days
         row = AgedInvoiceRow(
             invoice_id=bill.id,
@@ -603,7 +790,8 @@ async def aged_ap(
             issue_date=bill.issue_date,
             due_date=bill.due_date,
             total=bill.total,
-            amount_paid=bill.amount_paid,
+            # Point-in-time settled amount, NOT the scalar bill.amount_paid.
+            amount_paid=bill.total - outstanding,
             days_overdue=days_overdue,
         )
         group = groups.get(bill.contact_id)

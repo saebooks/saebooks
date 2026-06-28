@@ -339,3 +339,33 @@ def test_split_rejects_fully_paid():
             line_subtotals=[Decimal("100.00")],
             line_taxes=[Decimal("0.00")],
         )
+
+
+@pytest.mark.asyncio
+async def test_future_dated_write_off_stays_open_until_write_off_date():
+    """A write-off dated in the FUTURE keeps the invoice in aged AR until that
+    date (matching the date-aware Trade Debtors control), then drops it on the
+    write-off date. Guards the year-end (e.g. 30-Jun booked early) case."""
+    cid, tid, contact, income, _gst, fre, _bank = await _ctx()
+    inv_id = await _make_posted_invoice(cid, contact, income, fre, Decimal("1234.00"))
+
+    # Write the invoice off effective _WO_DATE (booked ahead of its date).
+    async with AsyncSessionLocal() as session:
+        await svc.write_off_invoice(
+            session, company_id=cid, tenant_id=tid, invoice_id=inv_id,
+            write_off_date=_WO_DATE, posted_by="test",
+        )
+
+    day_before = _WO_DATE - timedelta(days=1)
+
+    # As at the day BEFORE the write-off date: still receivable → present.
+    async with AsyncSessionLocal() as session:
+        report = await reports_svc.aged_ar(session, cid, as_at=day_before)
+        ids = {row.invoice_id for g in report.groups for row in g.invoices}
+        assert inv_id in ids, "future-dated write-off must remain open before its date"
+
+    # As at the write-off date itself: now off-ledger → gone.
+    async with AsyncSessionLocal() as session:
+        report = await reports_svc.aged_ar(session, cid, as_at=_WO_DATE)
+        ids = {row.invoice_id for g in report.groups for row in g.invoices}
+        assert inv_id not in ids, "write-off effective on its date must drop the invoice"
