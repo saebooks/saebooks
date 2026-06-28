@@ -46,7 +46,11 @@ log = logging.getLogger(__name__)
 # Set in production builds via the env (Compose passes it through).
 import os as _os  # noqa: E402  read after the module docstring/comment block above
 
-PORTAL_PUBKEY_B64: str = _os.environ.get("SAEBOOKS_PORTAL_PUBKEY", "")
+# Production portal Ed25519 public key (kid=saebooks-portal). Baked in so a
+# released build verifies portal-issued subscription JWTs out of the box;
+# override via SAEBOOKS_PORTAL_PUBKEY to point at a staging/test portal.
+_PROD_PORTAL_PUBKEY = "b8oVN3f+gZVKMmcHQZp3HkyvlpiTUDX7Zx2eE93fJjI="
+PORTAL_PUBKEY_B64: str = _os.environ.get("SAEBOOKS_PORTAL_PUBKEY", _PROD_PORTAL_PUBKEY)
 
 # Maximum days past ``exp`` we'll still accept a JWT as "read-only".
 # CHARTER §6.6: day 31-60 = read-only; past 60, drop to community.
