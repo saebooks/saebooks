@@ -1,0 +1,21 @@
+# Australian retirement/superannuation vehicle types (M1.5 · T6).
+# Each local ATO/APRA vehicle maps to a jurisdiction-neutral
+# canonical_bucket + tax_treatment so the engine reasons about the vehicle
+# family regardless of the local label. jurisdiction is the 3-char code
+# 'AUS'. See retirement_vehicle.py for the rationale.
+table: retirement_vehicle_types
+key: [jurisdiction, code]
+rows:
+  - jurisdiction: AUS
+    code: apra_super
+    local_name: APRA-Regulated Superannuation Fund
+    canonical_bucket: occupational_pension
+    tax_treatment: EET
+    description: Superannuation fund regulated by APRA (identified by USI); employer-sponsored accumulation (defined-contribution) fund, contributions concessionally taxed, benefits taxed on withdrawal below preservation age.
+
+  - jurisdiction: AUS
+    code: smsf
+    local_name: Self-Managed Superannuation Fund
+    canonical_bucket: self_directed
+    tax_treatment: EET
+    description: Member-controlled super fund regulated by the ATO (ABN + ESA, up to 6 members); same EET tax treatment as APRA funds.

@@ -1,0 +1,74 @@
+# SAE Books — Document Inbox cron template (issue #33 phase 3)
+# (NOT installed by default — copy to /etc/cron.d/saebooks-inbox to enable)
+#
+# Two cron-kicked CLI jobs as the RLS-enforced ``saebooks_app`` role
+# (sibling of cron-sync-feeds.template — same role plumbing):
+#
+#   inbox-extract    every minute   — the extraction sweep (spec §5):
+#                                     reclaim stale EXTRACTING claims
+#                                     (>10 min), claim due RECEIVED docs
+#                                     (batch 10, FOR UPDATE SKIP LOCKED),
+#                                     extract with exponential backoff
+#                                     60s·5^(n−1), FAILED after 5.
+#                                     Safe to overlap with itself and
+#                                     with the interactive path.
+#   inbox-poll-mail  every 2 min    — drain the email-in catch-all
+#                                     mailbox (spec §4): token routing,
+#                                     quarantine on miss (never a
+#                                     bounce), attachments-first ingest,
+#                                     per-tenant daily quota.
+#
+# Activation checklist
+# --------------------
+# 1.  SAEBOOKS_APP_DATABASE_URL must point at the saebooks_app role
+#     (see cron-sync-feeds.template steps 1-2 — same role, same env).
+#
+# 2.  Apply migration 0176 (the email tables + SECURITY DEFINER
+#     enumerators the two commands route through):
+#
+#         sudo docker compose exec -T api alembic upgrade head
+#
+# 3.  Email-in transport is PURE ENV CONFIG — set in the api .env
+#     (variable names only; values live in the secret store):
+#
+#         SAEBOOKS_INBOX_MAIL_PROVIDER=imap | graph
+#         SAEBOOKS_INBOX_MAIL_DOMAIN=in.saebooks.com.au
+#         SAEBOOKS_INBOX_EMAIL_DAILY_QUOTA=200            # optional
+#         SAEBOOKS_INBOX_MAIL_PROCESSED_FOLDER=Processed  # optional
+#         SAEBOOKS_INBOX_MAIL_QUARANTINE_FOLDER=Quarantine
+#
+#       IMAP:  SAEBOOKS_INBOX_IMAP_HOST / _PORT / _USERNAME /
+#              _PASSWORD / _USE_SSL / _FOLDER
+#       Graph: SAEBOOKS_INBOX_GRAPH_TENANT_ID / _CLIENT_ID /
+#              _CLIENT_SECRET / _MAILBOX  (app-only Mail.ReadWrite,
+#              admin-consented, scoped by an application access policy)
+#
+# 4.  Verify each command end-to-end (both are idempotent):
+#
+#         sudo docker compose exec -T api \
+#             python -m saebooks.cli inbox-extract
+#         sudo docker compose exec -T api \
+#             python -m saebooks.cli inbox-poll-mail
+#
+# 5.  Install this file as /etc/cron.d/saebooks-inbox (root:root, 0644).
+#
+# 6.  Observability (spec §5): every state change emits one structured
+#     "inbox transition:" line (doc_id, tenant, from→to, attempt,
+#     duration_ms, model) — point the Loki absent-log alert at 10
+#     minutes of silence on the inbox-extract log; the number-one
+#     failure mode is "cron never installed". The saebooks-web banner
+#     reads oldest_unextracted_age_s from /api/v1/inbox/stats.
+#
+# Self-hosted compose alternative: run these two lines from a
+# supercronic sidecar (`inbox-cron`) instead of host cron — same
+# commands, same env-file as the api service.
+#
+# * * * * * deploy cd /opt/saebooks && \
+#     sudo docker compose exec -T api \
+#     python -m saebooks.cli inbox-extract \
+#     >> /var/log/saebooks/inbox-extract.log 2>&1
+#
+# */2 * * * * deploy cd /opt/saebooks && \
+#     sudo docker compose exec -T api \
+#     python -m saebooks.cli inbox-poll-mail \
+#     >> /var/log/saebooks/inbox-poll-mail.log 2>&1

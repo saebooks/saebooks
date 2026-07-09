@@ -1,0 +1,14 @@
+# Australian employee social-contribution schemes (M1.5 · T7).
+# jurisdiction is the 3-char code 'AUS'. This is a jurisdiction-neutral
+# canonical table alongside (not replacing) medicare_levy — see
+# social_contribution_scheme.py for the rationale.
+table: social_contribution_schemes
+key: [jurisdiction, code, effective_from]
+rows:
+  - jurisdiction: AUS
+    code: au_medicare
+    name: Medicare Levy
+    payer: employee
+    rate_percent: 2.0000
+    collection_mechanism: assessment
+    effective_from: 2024-07-01

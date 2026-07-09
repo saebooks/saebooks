@@ -1,0 +1,84 @@
+# Australian legal-entity / business-structure types (M1.5 · T4).
+# Each local ATO/ASIC structure maps to a jurisdiction-neutral
+# canonical_bucket so the engine reasons about the structure family
+# regardless of the local label. jurisdiction is the 3-char code 'AUS'.
+table: entity_structure_types
+key: [jurisdiction, code]
+rows:
+  - jurisdiction: AUS
+    code: sole_trader
+    local_name: Sole Trader
+    canonical_bucket: sole_trader
+    description: An individual trading in their own right (ABN, individual TFN).
+
+  - jurisdiction: AUS
+    code: partnership
+    local_name: Partnership
+    canonical_bucket: partnership
+    description: Two or more people/entities carrying on business together; lodges a partnership return, income flows to partners.
+
+  - jurisdiction: AUS
+    code: pty_ltd
+    local_name: Proprietary Limited Company
+    canonical_bucket: company_limited
+    description: Private company limited by shares (Pty Ltd); has an ACN, pays company tax, may frank dividends.
+
+  - jurisdiction: AUS
+    code: public_ltd
+    local_name: Public Company (Limited)
+    canonical_bucket: company_limited
+    description: Public company limited by shares (Ltd); ACN, company tax, may be listed.
+
+  - jurisdiction: AUS
+    code: disc_trust
+    local_name: Discretionary Trust
+    canonical_bucket: trust
+    description: Trust where the trustee has discretion over distributions to beneficiaries (family trust).
+
+  - jurisdiction: AUS
+    code: unit_trust
+    local_name: Unit Trust
+    canonical_bucket: trust
+    description: Trust where beneficial interest is divided into fixed units held by unitholders.
+
+  - jurisdiction: AUS
+    code: hybrid_trust
+    local_name: Hybrid Trust
+    canonical_bucket: trust
+    description: Trust combining discretionary and fixed (unit) features.
+
+  - jurisdiction: AUS
+    code: smsf
+    local_name: Self-Managed Superannuation Fund
+    canonical_bucket: pension_fund
+    description: Member-controlled super fund regulated by the ATO (ABN + ESA, ≤6 members).
+
+  - jurisdiction: AUS
+    code: apra_super
+    local_name: APRA-Regulated Superannuation Fund
+    canonical_bucket: pension_fund
+    description: Superannuation fund regulated by APRA (identified by USI).
+
+  - jurisdiction: AUS
+    code: incorporated_assoc
+    local_name: Incorporated Association
+    canonical_bucket: nonprofit
+    description: Not-for-profit association incorporated under state/territory law.
+
+  - jurisdiction: AUS
+    code: company_ltd_guarantee
+    local_name: Company Limited by Guarantee
+    canonical_bucket: nonprofit
+    description: Company (often charitable/NFP) whose members' liability is limited to a guarantee amount.
+
+  - jurisdiction: AUS
+    code: cooperative
+    local_name: Co-operative
+    canonical_bucket: cooperative
+    description: Member-owned co-operative registered under state co-operatives law.
+
+  - jurisdiction: AUS
+    code: government_entity
+    local_name: Government Entity
+    canonical_bucket: government
+    description: Commonwealth, state, territory or local government body or statutory authority.

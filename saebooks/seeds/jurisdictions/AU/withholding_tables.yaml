@@ -1,0 +1,30 @@
+# Australian PAYG withholding tables (M1.5 · T7).
+# jurisdiction is the 3-char code 'AUS'. This is a jurisdiction-neutral
+# canonical table alongside (not replacing) payg_withholding_scales — see
+# withholding_table.py for the rationale. Coefficients here are a small
+# illustrative set, not a full ATO scale-2 tax table; the full weekly
+# a/b-coefficient rows for every bracket live in payg_withholding_scales.
+table: withholding_tables
+key: [jurisdiction, code, effective_from]
+rows:
+  - jurisdiction: AUS
+    code: au_payg_scale2
+    name: PAYG Withholding Scale 2 — with tax-free threshold
+    withholding_type: wage_paye
+    formula_type: coefficient
+    parameters:
+      formula: "withholding = a * gross_weekly - b"
+      brackets:
+        - lower: 0
+          upper: 361.99
+          a: 0.0000
+          b: 0.00
+        - lower: 362.00
+          upper: 500.00
+          a: 0.1900
+          b: 68.34
+        - lower: 500.01
+          upper: null
+          a: 0.3477
+          b: 152.62
+    effective_from: 2024-07-01

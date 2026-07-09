@@ -1,0 +1,13 @@
+# Australian capital gains tax (CGT) relief mechanisms (M1.5 · T11).
+# The 50% CGT discount applies to individuals/trusts (not companies) on
+# assets held for at least 12 months (365 days), for CGT events on or
+# after the discount's 1999-09-21 commencement.
+table: capital_gains_tax_regimes
+key: [jurisdiction, taxpayer_type, relief_mechanism, effective_from]
+rows:
+  - jurisdiction: AUS
+    taxpayer_type: individual_or_trust
+    relief_mechanism: discount
+    relief_rate_or_schedule: {rate_percent: 50.0}
+    holding_period_threshold_days: 365
+    effective_from: 1999-09-21

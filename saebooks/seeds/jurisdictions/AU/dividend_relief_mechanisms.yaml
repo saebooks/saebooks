@@ -1,0 +1,12 @@
+# Australian dividend relief mechanism (M1.5 · T11).
+# Franking (AU's imputation variant): the 30% company tax already paid is
+# imputed to the shareholder as a franking credit, refundable to
+# individuals/trusts if it exceeds their tax payable.
+table: dividend_relief_mechanisms
+key: [jurisdiction, mechanism_type, effective_from]
+rows:
+  - jurisdiction: AUS
+    mechanism_type: franking
+    credit_or_exemption_rate: 30.0000
+    refundable: true
+    effective_from: 2000-07-01

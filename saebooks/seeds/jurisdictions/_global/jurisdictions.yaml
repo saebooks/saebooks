@@ -1,0 +1,70 @@
+# Jurisdiction registry. AU, NZ, GBR, EST are first-class (engine seeded);
+# DE/FR/IT/ES are EU shells that fill in at v0.1.9 with rates and OSS plumbing.
+# US/IN/CA are shells too (bug fix round 6): services.business_identifiers
+# ``_SCHEME_JURISDICTION`` defaults us_ein/in_gstin/in_pan/ca_bn to
+# USA/IND/CAN respectively — those codes must have a row here or the
+# default is a silent no-match against this table (see
+# models/business_identifier.py's ``jurisdiction`` column docstring).
+table: jurisdictions
+key: [code]
+rows:
+  - code: AUS
+    name: Australia
+    currency_default: AUD
+    regulator_name: Australian Taxation Office
+    regulator_protocol: sbr-ebms3
+    decimal_places: 2
+    active: true
+  - code: NZL
+    name: New Zealand
+    currency_default: NZD
+    regulator_name: Inland Revenue Department
+    regulator_protocol: ird-gateway
+    decimal_places: 2
+    active: true
+  - code: GBR
+    name: United Kingdom
+    currency_default: GBP
+    regulator_name: HM Revenue & Customs
+    regulator_protocol: mtd-oauth
+    decimal_places: 2
+    active: true
+  - code: EST
+    name: Estonia
+    currency_default: EUR
+    regulator_name: Maksu- ja Tolliamet
+    regulator_protocol: e-mta-x-road
+    decimal_places: 2
+    active: true
+  - code: DEU
+    name: Germany
+    currency_default: EUR
+    regulator_protocol: oss-portal
+    active: true
+  - code: FRA
+    name: France
+    currency_default: EUR
+    regulator_protocol: oss-portal
+    active: true
+  - code: ITA
+    name: Italy
+    currency_default: EUR
+    regulator_protocol: oss-portal
+    active: true
+  - code: ESP
+    name: Spain
+    currency_default: EUR
+    regulator_protocol: oss-portal
+    active: true
+  - code: USA
+    name: United States
+    currency_default: USD
+    active: true
+  - code: IND
+    name: India
+    currency_default: INR
+    active: true
+  - code: CAN
+    name: Canada
+    currency_default: CAD
+    active: true

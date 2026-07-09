@@ -1,0 +1,93 @@
+# SAE Books — Self-Hosted Accounting Platform (SAP) bundle
+#
+# Three services: db (Postgres 16) + api (saebooks-api) + web (saebooks-web)
+#
+# Quickstart:
+#   cp .env.example .env
+#   # Edit .env — set POSTGRES_PASSWORD and SAEBOOKS_WEB_SECRET_KEY at minimum
+#   docker compose up -d
+#
+# The web UI is available at http://localhost:8080
+# The REST API is available at http://localhost:8042
+# The gRPC surface is available at localhost:50051 (desktop client)
+#
+# Repo layout assumed:
+#   ~/projects/saebooks/          ← this file is at deploy/sap/
+#   ~/projects/saebooks-web/      ← sibling repo (web image built from here)
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-saebooks}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-saebooks}
+    volumes:
+      - saebooks_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  api:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-saebooks}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-saebooks}"
+      SAEBOOKS_EDITION: ${SAEBOOKS_EDITION:-community}
+      SAEBOOKS_LOG_LEVEL: ${SAEBOOKS_LOG_LEVEL:-INFO}
+      SAEBOOKS_LOG_JSON: ${SAEBOOKS_LOG_JSON:-false}
+      # Optional — leave empty to disable
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SEED_COMPANY_NAME: ${SEED_COMPANY_NAME:-}
+      SEED_COMPANY_LEGAL_NAME: ${SEED_COMPANY_LEGAL_NAME:-}
+      SEED_COMPANY_ABN: ${SEED_COMPANY_ABN:-}
+      SAEBOOKS_FIELD_ENCRYPTION_KEY: ${SAEBOOKS_FIELD_ENCRYPTION_KEY:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-books@example.com}
+    ports:
+      - "8042:8000"
+      - "50051:50051"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/api/v1/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+
+  web:
+    build:
+      context: ../../../saebooks-web
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      SAEBOOKS_API_URL: "http://api:8000"
+      SAEBOOKS_WEB_SECRET_KEY: ${SAEBOOKS_WEB_SECRET_KEY:?SAEBOOKS_WEB_SECRET_KEY must be set in .env}
+      SAEBOOKS_WEB_PORT: "8080"
+      SAEBOOKS_WEB_LOG_LEVEL: ${SAEBOOKS_WEB_LOG_LEVEL:-INFO}
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  saebooks_db:
+    driver: local

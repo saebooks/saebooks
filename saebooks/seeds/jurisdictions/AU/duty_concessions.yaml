@@ -1,0 +1,22 @@
+# Australian stamp/transfer duty concessions and exemptions (M1.5 · T5).
+# Two representative concessions a DutiableTransactionEvent can reference
+# via applied_concession_id. jurisdiction is the 3-char code 'AUS' — a
+# state-specific implementation of either scheme varies by jurisdiction
+# and would seed as its own row once sub-national jurisdiction codes are
+# populated (T3 hierarchy).
+table: duty_concessions
+key: [jurisdiction, code]
+rows:
+  - jurisdiction: AUS
+    code: first_home_concession
+    name: First Home Concession
+    relief_type: threshold_abatement
+    rate_or_amount: 500000.0000
+    description: Reduced/nil duty on a first home below a dutiable-value threshold, subject to occupancy conditions.
+
+  - jurisdiction: AUS
+    code: family_farm_exemption
+    name: Family Primary Production Transfer Exemption
+    relief_type: full_exemption
+    rate_or_amount: 0.0000
+    description: Full exemption on transfer of primary-production land between family members continuing to work the land.

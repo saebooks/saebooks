@@ -1,0 +1,196 @@
+# SAE Books — Community Edition bundle
+#
+# The engine is a pure API service (REST + MCP + gRPC/Connect). The
+# embedded HTML UI was retired in #32; saebooks-web is the ONLY
+# bookkeeper. This bundle wires the four pieces of a self-hosted
+# community install:
+#
+#   db        — Postgres 16 (the ledger)
+#   api       — the engine (this repo): REST + MCP + gRPC/Connect
+#   web       — saebooks-web: the browser UI (talks to api over REST)
+#   latex-api — XeLaTeX render service: compiles invoice/statement PDFs
+#
+# Quickstart:
+#   cp .env.example .env        # in THIS directory
+#   # Edit .env — set every value marked "REQUIRED" (the compose file
+#   # is fail-closed: a missing required token aborts `up`, it does not
+#   # silently start an unauthenticated service).
+#   docker compose up -d
+#
+#   Web UI  → http://localhost:8080
+#   REST    → http://localhost:8042        (docs at /docs)
+#   gRPC    → localhost:50051               (desktop / connect clients)
+#
+# Ops conventions (#32):
+#   * Tokens fail-closed. Shared secrets between containers use the
+#     `${VAR:?message}` form so an empty/undefined token aborts startup
+#     rather than booting an open internal endpoint.
+#   * URLs are container-name-pinned. Services address each other by
+#     compose service name on the private default network
+#     (http://api:8000, http://latex-api:8080, db:5432) — never by
+#     host port or 127.0.0.1. Only the published `ports:` below cross
+#     the host boundary.
+#
+# Repo layout assumed (sibling checkouts):
+#   ~/projects/saebooks/            ← this file is at deploy/community/
+#   ~/projects/saebooks-web/        ← the browser UI image
+#   ~/projects/saebooks-latex-api/  ← the XeLaTeX render service image
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-saebooks}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?REQUIRED — set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-saebooks}
+    volumes:
+      - saebooks_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  api:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      latex-api:
+        condition: service_healthy
+    environment:
+      # Container-name-pinned: the engine reaches Postgres by the `db`
+      # service name on the private network.
+      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-saebooks}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-saebooks}"
+      SAEBOOKS_EDITION: ${SAEBOOKS_EDITION:-community}
+      SAEBOOKS_LOG_LEVEL: ${SAEBOOKS_LOG_LEVEL:-INFO}
+      SAEBOOKS_LOG_JSON: ${SAEBOOKS_LOG_JSON:-false}
+      # Field-level encryption key for stored secrets (bank tokens etc).
+      SAEBOOKS_FIELD_ENCRYPTION_KEY: ${SAEBOOKS_FIELD_ENCRYPTION_KEY:-}
+      # PDF render service — container-name-pinned at latex-api. The
+      # shared X-Render-Token is REQUIRED (fail-closed): with it unset the
+      # internal render endpoint would accept unauthenticated calls.
+      RENDER_SERVICE_URL: "http://latex-api:8080"
+      RENDER_SERVICE_TOKEN: ${RENDER_SERVICE_TOKEN:?REQUIRED — shared render-service token}
+      # Gate for the engine's /internal/* module hand-off endpoints.
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?REQUIRED — internal module hand-off token}
+      # Outbound mail (magic-link / invoice email). Leave blank to disable.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-books@example.com}
+      # Optional first-boot company seed.
+      SEED_COMPANY_NAME: ${SEED_COMPANY_NAME:-}
+      SEED_COMPANY_LEGAL_NAME: ${SEED_COMPANY_LEGAL_NAME:-}
+      SEED_COMPANY_ABN: ${SEED_COMPANY_ABN:-}
+    ports:
+      - "8042:8000"
+      - "50051:50051"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/api/v1/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+
+  web:
+    build:
+      context: ../../../saebooks-web
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      # Container-name-pinned: the UI reaches the engine by the `api`
+      # service name, never a host port.
+      SAEBOOKS_API_URL: "http://api:8000"
+      SAEBOOKS_WEB_SECRET_KEY: ${SAEBOOKS_WEB_SECRET_KEY:?REQUIRED — web session signing key}
+      SAEBOOKS_WEB_PORT: "8080"
+      SAEBOOKS_WEB_LOG_LEVEL: ${SAEBOOKS_WEB_LOG_LEVEL:-INFO}
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  latex-api:
+    build:
+      context: ../../../saebooks-latex-api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      # Must MATCH the engine's RENDER_SERVICE_TOKEN — the render service
+      # rejects any /internal/render call whose X-Render-Token differs.
+      RENDER_SERVICE_TOKEN: ${RENDER_SERVICE_TOKEN:?REQUIRED — shared render-service token}
+    # No published port — reachable only on the private network by the
+    # engine as http://latex-api:8080.
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # ------------------------------------------------------------------ #
+  # Optional module containers — uncomment to enable. Each shares the   #
+  # private network and is addressed by its service name. All module    #
+  # tokens are fail-closed: set them in .env before uncommenting.       #
+  # ------------------------------------------------------------------ #
+  #
+  # preaccounting:
+  #   build:
+  #     context: ../..
+  #     dockerfile: Dockerfile.preaccounting
+  #   restart: unless-stopped
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  #   environment:
+  #     DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-saebooks}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-saebooks}"
+  #     # Inbound gate on the module; the engine presents this as X-PreAccounting-Token.
+  #     PREACCOUNTING_TOKEN: ${PREACCOUNTING_TOKEN:?REQUIRED when preaccounting is enabled}
+  #   expose:
+  #     - "8080"
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "curl -fsS http://localhost:8080/healthz || exit 1"]
+  #     interval: 30s
+  #     timeout: 5s
+  #     retries: 3
+  #     start_period: 20s
+  #
+  #   # …and add to the `api` service environment (container-name-pinned):
+  #   #   PREACCOUNTING_BASE_URL: "http://preaccounting:8080"
+  #   #   PREACCOUNTING_SERVICE_TOKEN: ${PREACCOUNTING_TOKEN:?...}
+  #
+  # capture:
+  #   build:
+  #     context: ../..
+  #     dockerfile: Dockerfile.capture
+  #   restart: unless-stopped
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  #   expose:
+  #     - "8080"
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "curl -fsS http://localhost:8080/healthz || exit 1"]
+  #     interval: 30s
+  #     timeout: 5s
+  #     retries: 3
+  #     start_period: 20s
+
+volumes:
+  saebooks_db:
+    driver: local

@@ -1,0 +1,46 @@
+# 30+ ISO countries, EU/EEA/OSS flags as at 2026.
+# Source: ISO 3166-1; EU/EEA membership per official rosters.
+table: countries
+key: [code]
+rows:
+  - {code: AUS, code_alpha2: AU, name: Australia,        currency_default: AUD, in_eu: false, in_eea: false, in_oss: false}
+  - {code: NZL, code_alpha2: NZ, name: New Zealand,      currency_default: NZD, in_eu: false, in_eea: false, in_oss: false}
+  - {code: GBR, code_alpha2: GB, name: United Kingdom,   currency_default: GBP, in_eu: false, in_eea: false, in_oss: false}
+  - {code: USA, code_alpha2: US, name: United States,    currency_default: USD, in_eu: false, in_eea: false, in_oss: false}
+  - {code: CAN, code_alpha2: CA, name: Canada,           in_eu: false, in_eea: false, in_oss: false}
+  - {code: CHN, code_alpha2: CN, name: China,            in_eu: false, in_eea: false, in_oss: false}
+  - {code: HKG, code_alpha2: HK, name: Hong Kong,        in_eu: false, in_eea: false, in_oss: false}
+  - {code: JPN, code_alpha2: JP, name: Japan,            in_eu: false, in_eea: false, in_oss: false}
+  - {code: KOR, code_alpha2: KR, name: South Korea,      in_eu: false, in_eea: false, in_oss: false}
+  - {code: SGP, code_alpha2: SG, name: Singapore,        in_eu: false, in_eea: false, in_oss: false}
+  - {code: MYS, code_alpha2: MY, name: Malaysia,         in_eu: false, in_eea: false, in_oss: false}
+  - {code: IDN, code_alpha2: ID, name: Indonesia,        in_eu: false, in_eea: false, in_oss: false}
+  - {code: IND, code_alpha2: IN, name: India,            in_eu: false, in_eea: false, in_oss: false}
+  - {code: PHL, code_alpha2: PH, name: Philippines,      in_eu: false, in_eea: false, in_oss: false}
+  - {code: THA, code_alpha2: TH, name: Thailand,         in_eu: false, in_eea: false, in_oss: false}
+  - {code: VNM, code_alpha2: VN, name: Viet Nam,         in_eu: false, in_eea: false, in_oss: false}
+  - {code: ZAF, code_alpha2: ZA, name: South Africa,     in_eu: false, in_eea: false, in_oss: false}
+  - {code: BRA, code_alpha2: BR, name: Brazil,           in_eu: false, in_eea: false, in_oss: false}
+  - {code: MEX, code_alpha2: MX, name: Mexico,           in_eu: false, in_eea: false, in_oss: false}
+  - {code: CHE, code_alpha2: CH, name: Switzerland,      in_eu: false, in_eea: false, in_oss: false}
+  - {code: NOR, code_alpha2: "NO", name: Norway,           in_eu: false, in_eea: true,  in_oss: false}
+  - {code: ISL, code_alpha2: IS, name: Iceland,          in_eu: false, in_eea: true,  in_oss: false}
+  - {code: LIE, code_alpha2: LI, name: Liechtenstein,    in_eu: false, in_eea: true,  in_oss: false}
+  - {code: DEU, code_alpha2: DE, name: Germany,          currency_default: EUR, in_eu: true, in_eea: true, in_oss: true}
+  - {code: FRA, code_alpha2: FR, name: France,           currency_default: EUR, in_eu: true, in_eea: true, in_oss: true}
+  - {code: ITA, code_alpha2: IT, name: Italy,            currency_default: EUR, in_eu: true, in_eea: true, in_oss: true}
+  - {code: ESP, code_alpha2: ES, name: Spain,            currency_default: EUR, in_eu: true, in_eea: true, in_oss: true}
+  - {code: PRT, code_alpha2: PT, name: Portugal,         currency_default: EUR, in_eu: true, in_eea: true, in_oss: true}
+  - {code: NLD, code_alpha2: NL, name: Netherlands,      currency_default: EUR, in_eu: true, in_eea: true, in_oss: true}
+  - {code: BEL, code_alpha2: BE, name: Belgium,          currency_default: EUR, in_eu: true, in_eea: true, in_oss: true}
+  - {code: LUX, code_alpha2: LU, name: Luxembourg,       currency_default: EUR, in_eu: true, in_eea: true, in_oss: true}
+  - {code: AUT, code_alpha2: AT, name: Austria,          currency_default: EUR, in_eu: true, in_eea: true, in_oss: true}
+  - {code: IRL, code_alpha2: IE, name: Ireland,          currency_default: EUR, in_eu: true, in_eea: true, in_oss: true}
+  - {code: FIN, code_alpha2: FI, name: Finland,          currency_default: EUR, in_eu: true, in_eea: true, in_oss: true}
+  - {code: SWE, code_alpha2: SE, name: Sweden,           in_eu: true, in_eea: true, in_oss: true}
+  - {code: DNK, code_alpha2: DK, name: Denmark,          in_eu: true, in_eea: true, in_oss: true}
+  - {code: POL, code_alpha2: PL, name: Poland,           in_eu: true, in_eea: true, in_oss: true}
+  - {code: CZE, code_alpha2: CZ, name: Czechia,          in_eu: true, in_eea: true, in_oss: true}
+  - {code: EST, code_alpha2: EE, name: Estonia,          currency_default: EUR, in_eu: true, in_eea: true, in_oss: true}
+  - {code: LVA, code_alpha2: LV, name: Latvia,           currency_default: EUR, in_eu: true, in_eea: true, in_oss: true}
+  - {code: LTU, code_alpha2: LT, name: Lithuania,        currency_default: EUR, in_eu: true, in_eea: true, in_oss: true}

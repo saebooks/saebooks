@@ -1,0 +1,36 @@
+# AU recommended chart of accounts — used at company creation. Numbering
+# follows the common SME convention (1xxx assets, 2xxx liabilities, …).
+# Tax-code defaults reference the codes seeded in tax_codes.yaml.
+table: chart_template
+key: [jurisdiction, account_code]
+rows:
+  - {jurisdiction: AUS, account_code: "1100", account_name: "Bank — operating", account_type: ASSET, display_order: 10}
+  - {jurisdiction: AUS, account_code: "1110", account_name: "Bank — savings",   account_type: ASSET, display_order: 11}
+  - {jurisdiction: AUS, account_code: "1200", account_name: "Accounts Receivable", account_type: ASSET, display_order: 20}
+  - {jurisdiction: AUS, account_code: "1300", account_name: "Inventory",        account_type: ASSET, display_order: 30}
+  - {jurisdiction: AUS, account_code: "1400", account_name: "GST Receivable",   account_type: ASSET, display_order: 40}
+  - {jurisdiction: AUS, account_code: "1500", account_name: "Prepayments",      account_type: ASSET, display_order: 50}
+  - {jurisdiction: AUS, account_code: "1700", account_name: "Plant & Equipment — at cost", account_type: ASSET, display_order: 70}
+  - {jurisdiction: AUS, account_code: "1710", account_name: "Plant & Equipment — accumulated depreciation", account_type: ASSET, display_order: 71}
+  - {jurisdiction: AUS, account_code: "2100", account_name: "Accounts Payable",   account_type: LIABILITY, display_order: 100}
+  - {jurisdiction: AUS, account_code: "2200", account_name: "GST Payable",       account_type: LIABILITY, display_order: 110}
+  - {jurisdiction: AUS, account_code: "2300", account_name: "PAYG Withheld",     account_type: LIABILITY, display_order: 120}
+  - {jurisdiction: AUS, account_code: "2400", account_name: "Superannuation Payable", account_type: LIABILITY, display_order: 130}
+  - {jurisdiction: AUS, account_code: "2500", account_name: "Income Tax Payable", account_type: LIABILITY, display_order: 140}
+  - {jurisdiction: AUS, account_code: "2700", account_name: "Loan — bank",        account_type: LIABILITY, display_order: 160}
+  - {jurisdiction: AUS, account_code: "3100", account_name: "Owner contributions", account_type: EQUITY, display_order: 200}
+  - {jurisdiction: AUS, account_code: "3200", account_name: "Retained earnings",  account_type: EQUITY, display_order: 210}
+  - {jurisdiction: AUS, account_code: "3300", account_name: "Current year earnings", account_type: EQUITY, display_order: 220}
+  - {jurisdiction: AUS, account_code: "4100", account_name: "Sales — services",   account_type: INCOME, default_tax_code: GST, display_order: 300}
+  - {jurisdiction: AUS, account_code: "4200", account_name: "Sales — products",   account_type: INCOME, default_tax_code: GST, display_order: 310}
+  - {jurisdiction: AUS, account_code: "4300", account_name: "Other income",       account_type: OTHER_INCOME, default_tax_code: GST, display_order: 320}
+  - {jurisdiction: AUS, account_code: "4900", account_name: "Interest income",    account_type: OTHER_INCOME, default_tax_code: NTR, display_order: 330}
+  - {jurisdiction: AUS, account_code: "5100", account_name: "Cost of goods sold", account_type: COST_OF_SALES, default_tax_code: NCG, display_order: 400}
+  - {jurisdiction: AUS, account_code: "6100", account_name: "Wages & salaries",   account_type: EXPENSE, default_tax_code: NTR, display_order: 500}
+  - {jurisdiction: AUS, account_code: "6110", account_name: "Superannuation expense", account_type: EXPENSE, default_tax_code: NTR, display_order: 510}
+  - {jurisdiction: AUS, account_code: "6200", account_name: "Rent",               account_type: EXPENSE, default_tax_code: NCG, display_order: 520}
+  - {jurisdiction: AUS, account_code: "6300", account_name: "Utilities",          account_type: EXPENSE, default_tax_code: NCG, display_order: 530}
+  - {jurisdiction: AUS, account_code: "6400", account_name: "Telephone & internet", account_type: EXPENSE, default_tax_code: NCG, display_order: 540}
+  - {jurisdiction: AUS, account_code: "6500", account_name: "Motor vehicle",      account_type: EXPENSE, default_tax_code: NCG, display_order: 550}
+  - {jurisdiction: AUS, account_code: "6600", account_name: "Bank fees",          account_type: EXPENSE, default_tax_code: FRE, display_order: 560}
+  - {jurisdiction: AUS, account_code: "6700", account_name: "Depreciation",       account_type: EXPENSE, default_tax_code: NTR, display_order: 570}

@@ -1,0 +1,98 @@
+# SAE Books — isolated test stack
+#
+# Run via scripts/run-tests.sh (which always passes -p saebooks-test).
+# Never run against a live DB. Volumes are ephemeral (-v on down nukes them).
+#
+# Project name is NOT set here with `name:` because docker compose v2 reads
+# it from the -p flag passed by run-tests.sh, keeping isolation explicit.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: saebooks_test
+      POSTGRES_PASSWORD: saebooks_test_pw
+      POSTGRES_DB: saebooks_test
+    volumes:
+      # Named volume scoped to this compose project (saebooks-test_testdb).
+      # Completely separate from the production saebooks_db volume.
+      - testdb:/var/lib/postgresql/data
+      # Init scripts: create the saebooks + saebooks_app roles that
+      # migrations reference by name. Runs once on first DB init.
+      - ./docker/test-initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # Probe via TCP loopback (-h 127.0.0.1), NOT the unix socket. During
+      # postgres first-init the entrypoint runs a temporary socket-only
+      # server (listen_addresses='') to apply init scripts, then restarts
+      # with TCP. A socket pg_isready can report healthy during that window,
+      # so the api container would start and alembic would hit ConnectionRefused
+      # on db:5432. Forcing TCP keeps the check unhealthy until the real
+      # listener is up, closing the first-init race.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U saebooks_test -d saebooks_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    networks:
+      - testnet
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+      target: test
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://saebooks_test:saebooks_test_pw@db:5432/saebooks_test"
+      SAEBOOKS_ENV: "test"
+      SAEBOOKS_MAIL_OUTBOX_DIR: "/tmp/saebooks-mail-outbox"
+      SAEBOOKS_TEST_TRUSTED_USER_HEADER: "1"
+      # Disable Sentry in test runs — no noise in the DSN project.
+      SENTRY_DSN: ""
+      # Prevent any accidental outbound mail relay.
+      SAEBOOKS_MAIL_HOST: ""
+      # Migration 0087 creates the saebooks_sql_ro role and requires a
+      # password. Use a throwaway credential — the role has no access
+      # outside this ephemeral network.
+      SAEBOOKS_SQL_RO_PASSWORD: "saebooks_sql_ro_test_pw"
+      # ensure_seed_company defaults to "Default Company" without this;
+      # test_accounts_page.test_accounts_list_renders asserts the literal
+      # production-like name renders on /accounts, so seed it explicitly.
+      SEED_COMPANY_NAME: "Example Pty Ltd"
+      # Deterministic Fernet test key (NOT FOR PRODUCTION). Without this,
+      # any test that touches Fernet-encrypted fields (SISS creds, ATO SBR
+      # config, employees TFN) raises FieldEncryptionNotConfiguredError
+      # and the whole encrypted-field test surface crashes.
+      SAEBOOKS_FIELD_ENCRYPTION_KEY: "c2FlYm9va3MtdGVzdC1rZXktZG8tbm90LXVzZS1wcm8="
+      # Migration 0128 ALTERs the saebooks_app role password. The
+      # docker/test-initdb/01-test-roles.sql script seeds the role with
+      # this same value so the test compose stays self-consistent.
+      SAEBOOKS_APP_DB_PASSWORD: "saebooks_app_test_pw"
+      # feat/accountant-login: principal WebAuthn ceremony needs an RP id +
+      # origin configured or the login endpoints 503. Test-only values.
+      SAEBOOKS_WEBAUTHN_RP_ID: "books.test"
+      SAEBOOKS_WEBAUTHN_ORIGIN: "https://books.test"
+    # entrypoint.sh with args execs them directly (no uvicorn).
+    # We migrate the company DB and the reference DB, then run pytest.
+    # The reference-DB URL is derived at runtime from DATABASE_URL (swap the
+    # db name → saebooks_reference_test) so no credentials live in this file.
+    # $$ escapes compose interpolation so bash sees a literal $ (param expansion
+    # + the reference-schema DB created by docker/test-initdb/02-reference-db.sql).
+    # bash -c is passed as the single arg so entrypoint execs it.
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - "export REFERENCE_MIGRATION_DATABASE_URL=\"$${DATABASE_URL%/*}/saebooks_reference_test\"; alembic upgrade head && alembic -c alembic_reference.ini upgrade head && python -m pytest -q --ignore=tests/services/lodgement/test_adapter_registry.py --ignore=tests/test_m0_synthetic_nz_company.py ${PYTEST_TARGET:-tests/}"
+    # No published ports — test network is internal only.
+    networks:
+      - testnet
+
+networks:
+  testnet:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.99.224.0/24
+
+volumes:
+  testdb:

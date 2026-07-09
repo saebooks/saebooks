@@ -1,0 +1,44 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-saebooks}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-local-only}
+      POSTGRES_DB: ${POSTGRES_DB:-saebooks}
+    volumes:
+      - saebooks_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # The engine — a pure API service (REST + MCP + gRPC/Connect). The
+  # embedded HTML UI was retired in #32; saebooks-web is now the only
+  # bookkeeper. For a full community-edition bundle (engine +
+  # saebooks-web + latex-api) see deploy/community/docker-compose.yml.
+  app:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./saebooks:/app/saebooks
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+      - ./tests:/app/tests
+      # Backup directory mounted read-only so the backups service can list
+      # dumps + parse the status log. The host path is whatever pg_dump
+      # writes to (defaults to $HOME/saebooks-backups in scripts/backup.sh).
+      - ${SAEBOOKS_BACKUP_DIR:-${HOME}/saebooks-backups}:/app/backups:ro
+    environment:
+      SAEBOOKS_BACKUP_DIR_IN_CONTAINER: /app/backups
+    ports:
+      - "8042:8000"
+
+volumes:
+  saebooks_db:

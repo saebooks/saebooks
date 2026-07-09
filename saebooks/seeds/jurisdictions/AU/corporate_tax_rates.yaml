@@ -1,0 +1,17 @@
+# Australian corporate income tax rates (M1.5 · T11).
+# base_rate_entity: aggregated turnover < $50m AND <= 80% passive income.
+# standard: every other company. Both national-only (sub_jurisdiction null).
+table: corporate_tax_rates
+key: [jurisdiction, sub_jurisdiction, tax_year, entity_scope]
+rows:
+  - jurisdiction: AUS
+    tax_year: 2026
+    entity_scope: base_rate_entity
+    rate_percent: 25.0000
+    effective_from: 2025-07-01
+
+  - jurisdiction: AUS
+    tax_year: 2026
+    entity_scope: standard
+    rate_percent: 30.0000
+    effective_from: 2025-07-01

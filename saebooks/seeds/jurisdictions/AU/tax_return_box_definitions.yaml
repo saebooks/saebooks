@@ -1,0 +1,98 @@
+# Australian BAS box definitions (M1.5 · T8).
+#
+# Feeds saebooks.services.tax_return_generator.generate_return(), the
+# generic jurisdiction-parameterised return calculator. Before this
+# theme, G1/G2/G3/G10/G11/1A/1B were hardcoded Python branches in
+# services/tax_engine/au.py::bas_report — this table is now the single
+# authoritative source for which company TaxCode.reporting_type values
+# feed which BAS label, and how. See
+# docs/multi-jurisdiction.md (M1.5) (theme T8).
+#
+# ``aggregation`` grammar (parsed by tax_return_generator._parse_box_definition):
+#
+#   sum_taxable_for_codes:<bucket>:<gst_inclusive|gst_exclusive>
+#     Sums the ledger "net" for lines whose account is in <bucket>
+#     ("income" = INCOME/OTHER_INCOME, net = credit - debit; "purchase"
+#     = EXPENSE/COST_OF_SALES/OTHER_EXPENSE/ASSET, net = debit - credit)
+#     and whose company-side TaxCode.reporting_type is in feeder_tax_codes.
+#     gst_inclusive adds the line's tax amount on top of net (preferring
+#     the journal_line_tax_components row from T2, falling back to the
+#     legacy JournalLine.gst_amount scalar); gst_exclusive does not.
+#
+#   sum_tax_amount_for_codes:<bucket>
+#     Sums just the tax amount (same component-preferring/gst_amount-
+#     fallback source) for lines matching <bucket> + feeder_tax_codes.
+#
+# feeder_tax_codes here are TaxCode.reporting_type values (taxable /
+# export / gst_free / capital) — NOT RefTaxCode.code strings — because
+# that is the dimension the AU engine keys BAS boxes off today.
+#
+# This table intentionally matches services.tax_engine.au.bas_report's
+# existing, test-pinned formulas exactly (keystone:
+# tests/services/test_cashbook_bas.py::test_keystone_cashbook_gst_sale_flows_to_bas_g1
+# requires G1 to be GST-inclusive) — that is the AU tax engine's
+# reference implementation, and generate_return is a thin wrapper over
+# it via services/tax_engine/au.py::bas_report. api/v1/reports.py's
+# bas_summary endpoint reuses this table for G2/G3/G10 (which already
+# agree with the formulas here) but keeps its own inline, deliberately
+# GST-EXCLUSIVE G1/G11 and its own GST-control-account-sourced 1A/1B —
+# see the docstring on reports.py::_bas_aggregate for why those three
+# do not — and must not — delegate here.
+table: tax_return_box_definitions
+key: [jurisdiction, return_type, box_code]
+rows:
+  - jurisdiction: AUS
+    return_type: BAS
+    box_code: G1
+    box_label: Total sales (including any GST)
+    aggregation: "sum_taxable_for_codes:income:gst_inclusive"
+    feeder_tax_codes: ["taxable"]
+    display_order: 1
+
+  - jurisdiction: AUS
+    return_type: BAS
+    box_code: G2
+    box_label: Export sales
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["export"]
+    display_order: 2
+
+  - jurisdiction: AUS
+    return_type: BAS
+    box_code: G3
+    box_label: Other GST-free sales
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["gst_free"]
+    display_order: 3
+
+  - jurisdiction: AUS
+    return_type: BAS
+    box_code: G10
+    box_label: Capital purchases (including any GST)
+    aggregation: "sum_taxable_for_codes:purchase:gst_inclusive"
+    feeder_tax_codes: ["capital"]
+    display_order: 4
+
+  - jurisdiction: AUS
+    return_type: BAS
+    box_code: G11
+    box_label: Non-capital purchases (including any GST)
+    aggregation: "sum_taxable_for_codes:purchase:gst_inclusive"
+    feeder_tax_codes: ["taxable"]
+    display_order: 5
+
+  - jurisdiction: AUS
+    return_type: BAS
+    box_code: "1A"
+    box_label: GST collected on sales
+    aggregation: "sum_tax_amount_for_codes:income"
+    feeder_tax_codes: ["taxable"]
+    display_order: 6
+
+  - jurisdiction: AUS
+    return_type: BAS
+    box_code: "1B"
+    box_label: GST paid on purchases
+    aggregation: "sum_tax_amount_for_codes:purchase"
+    feeder_tax_codes: ["taxable", "capital"]
+    display_order: 7

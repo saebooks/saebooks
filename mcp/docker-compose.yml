@@ -1,0 +1,36 @@
+name: saebooks-mcp
+
+services:
+  mcp:
+    build:
+      # Build context is the repo root because the standalone MCP
+      # now installs the saebooks package (one source of truth with
+      # the in-tree mount at /mcp). Dockerfile sits in mcp/.
+      context: ../
+      dockerfile: mcp/Dockerfile
+    image: saebooks-mcp:0.3
+    container_name: saebooks-mcp
+    restart: unless-stopped
+    ports:
+      - "<lan-ip>:18314:8000"
+    environment:
+      SAEBOOKS_API_URL: http://saebooks-example-api-1:8000
+      SAEBOOKS_MCP_TRANSPORT: sse
+      SAEBOOKS_MCP_LOG_LEVEL: INFO
+      SAEBOOKS_API_TOKEN: ${SAEBOOKS_API_TOKEN:-}
+      # SAEBOOKS_API_TOKEN read from a gitignored .env file in this dir — every
+      # client SHOULD supply their own saebk_* token via the MCP transport
+      # Authorization header (once per-session forwarding is wired);
+      # until then this shared env token covers the demo / single-tenant case.
+    networks:
+      - saebooks-example_default
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/sse', timeout=2).status < 500 else 1)\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  saebooks-example_default:
+    external: true
+    name: saebooks-example_default

@@ -1,0 +1,26 @@
+# Australian mandatory retirement-contribution rule (M1.5 · T6).
+# jurisdiction is the 3-char code 'AUS'. This is a jurisdiction-neutral
+# canonical table alongside (not replacing) super_guarantee_rates — see
+# mandatory_contribution_rule.py for the rationale. Rate is the legislated
+# Superannuation Guarantee percentage for FY2024-25 (11.5%, ordinary time
+# earnings); the SG rate reaches its final legislated 12% from 1 July 2025,
+# seeded here as the current dated row (open-ended).
+table: mandatory_contribution_rules
+key: [jurisdiction, code, effective_from]
+rows:
+  - jurisdiction: AUS
+    code: au_super_guarantee
+    payer: employer
+    rate_percent: 11.5000
+    earnings_base: ordinary_time_earnings
+    cap_amount: null
+    effective_from: 2024-07-01
+    effective_to: 2025-06-30
+  - jurisdiction: AUS
+    code: au_super_guarantee
+    payer: employer
+    rate_percent: 12.0000
+    earnings_base: ordinary_time_earnings
+    cap_amount: null
+    effective_from: 2025-07-01
+    effective_to: null

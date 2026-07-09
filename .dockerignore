@@ -1,0 +1,62 @@
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# Python cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.pycache
+.mypy_cache
+.ruff_cache
+.pytest_cache
+*.egg-info
+*.egg
+dist/
+build/
+
+# Virtual environments / uv
+.venv
+venv
+env
+.uv
+uv.lock
+
+# Development config
+.env
+.env.*
+!.env.example
+
+# Tests (not needed in production image)
+tests/
+
+# Documentation
+*.md
+!README.md
+docs/
+SPEC-*.md
+CONTRIBUTING.md
+CHARTER.md
+
+# IDE / editor
+.idea
+.vscode
+*.swp
+*.swo
+.DS_Store
+
+# Local data / backups
+*.sql
+*.dump
+saebooks-backups/
+
+# CI
+.github/
+
+# Deploy tooling (not needed inside the image)
+deploy/
+ops/
+scripts/
+Makefile

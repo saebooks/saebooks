@@ -1,0 +1,4 @@
+table: fiscal_year_definitions
+key: [jurisdiction]
+rows:
+  - {jurisdiction: EST, fy_start_month: 1, fy_start_day: 1, quarter_anchors: [1, 4, 7, 10]}
