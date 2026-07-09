@@ -1,0 +1,43 @@
+# Estonian employee/employer social-contribution schemes (M1.5 · T7).
+# jurisdiction is the 3-char code 'EST'. Mirrors AU's social_contribution_schemes.yaml
+# (Medicare levy) shape — general wage-based social insurance, collected
+# alongside payroll via TSD.
+#
+# SCHEMA LIMITATION (flag, not fixed here — seed data only): EE social
+# tax has a statutory MONTHLY MINIMUM BASE (EUR 886 for 2026, giving a
+# minimum monthly employer liability of EUR 292.38 = 886 x 33%) that
+# applies regardless of actual wages paid. SocialContributionScheme only
+# has a wage_base_cap (an upper bound the rate stops applying above) —
+# there is no floor/minimum-base field, so this floor cannot be
+# faithfully represented here. Recorded in this comment and in the final
+# report; would need a schema change (out of scope — SEED DATA ONLY) to
+# seed properly.
+table: social_contribution_schemes
+key: [jurisdiction, code, effective_from]
+rows:
+  - jurisdiction: EST
+    code: ee_social_tax
+    name: "Sotsiaalmaks (Pillar I riiklik pension + ravikindlustus)"
+    payer: employer
+    rate_percent: 33.0000
+    wage_base_cap: null
+    collection_mechanism: payroll_withholding
+    effective_from: 2026-01-01
+
+  - jurisdiction: EST
+    code: ee_unemployment_employee
+    name: "Töötuskindlustusmakse — kindlustatu (töötaja)"
+    payer: employee
+    rate_percent: 1.6000
+    wage_base_cap: null
+    collection_mechanism: payroll_withholding
+    effective_from: 2025-01-01  # fixed for 2025-2028 per the underlying rate-setting act.
+
+  - jurisdiction: EST
+    code: ee_unemployment_employer
+    name: "Töötuskindlustusmakse — tööandja"
+    payer: employer
+    rate_percent: 0.8000
+    wage_base_cap: null
+    collection_mechanism: payroll_withholding
+    effective_from: 2025-01-01  # fixed for 2025-2028; unlike the employee rate this continues even for employees of pensionable age.

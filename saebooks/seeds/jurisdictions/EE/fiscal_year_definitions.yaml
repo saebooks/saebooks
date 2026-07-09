@@ -1,3 +1,10 @@
+# Estonian fiscal year — default is the calendar year (Raamatupidamise
+# seadus / Accounting Act §13(3)) unless the entity's articles of
+# association specify otherwise; a non-calendar financial year is
+# permitted. On formation/dissolution/a change to the financial-year
+# start, the year may be shorter or longer than 12 months but must NOT
+# exceed 18 months (RPS §13(2)). Annual report due 6 months after
+# financial-year end (30 June for a calendar-year entity's prior FY).
 table: fiscal_year_definitions
 key: [jurisdiction]
 rows:

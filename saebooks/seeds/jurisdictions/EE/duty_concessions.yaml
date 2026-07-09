@@ -1,0 +1,20 @@
+# Estonian stamp/transfer duty concessions (M1.5 · T5, EE seed).
+#
+# DELIBERATELY EMPTY — not an oversight. The supplied research for this
+# task covered VAT/KMD, TSD payroll/withholding, entity/corporate-tax,
+# capital-gains, dividend-relief, non-resident-withholding, company
+# registration fees, pension pillars, and e-invoicing — it did NOT cover
+# an Estonian stamp/transfer-duty concession regime, and "using ONLY the
+# researched facts" means no rows are fabricated here. Estonia does not
+# operate a general ad-valorem transfer/stamp duty on real estate or
+# share transfers analogous to AU state stamp duty (Estonian real-estate
+# transfers instead attract notary fees + a state fee under the
+# Riigilõivuseadus / State Fees Act — a different mechanism, out of
+# scope of this table's DutyReliefType taxonomy). If EE duty-concession
+# reference data becomes needed, this is a flagged follow-up research
+# item, not a schema problem — the table and loader already support it
+# (see AU/duty_concessions.yaml for the shape), this file just has zero
+# rows to load.
+table: duty_concessions
+key: [jurisdiction, code]
+rows: []

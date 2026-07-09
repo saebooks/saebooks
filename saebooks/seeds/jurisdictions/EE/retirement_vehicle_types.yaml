@@ -1,0 +1,49 @@
+# Estonian retirement/pension vehicle types (M1.5 · T6, EE seed).
+# jurisdiction is the 3-char code 'EST'.
+#
+# Pillar I (state PAYG pension) is DELIBERATELY NOT SEEDED as a vehicle
+# row: it is a universal, non-account, pay-as-you-go entitlement funded
+# from the general 33% social tax (see social_contribution_schemes.yaml
+# ee_social_tax) — not an individually-referenceable "vehicle" a
+# company/employee picks a code for, same reason AU does not seed a
+# row for the (also universal, non-account) Age Pension here.
+#
+# Pillar II (kohustuslik kogumispension, mandatory funded pension) and
+# Pillar III (vabatahtlik kogumispension, voluntary supplementary
+# pension) ARE individually-held funded accounts and are seeded below.
+table: retirement_vehicle_types
+key: [jurisdiction, code]
+rows:
+  - jurisdiction: EST
+    code: pillar_ii
+    local_name: "Kohustuslik kogumispension (II sammas)"
+    canonical_bucket: defined_contribution
+    tax_treatment: EET
+    # UNVERIFIED: the exact income-tax treatment of the employee's
+    # 2/4/6% contribution slice (withheld pre- or post-income-tax) was
+    # not independently confirmed in this research pass — EET below is
+    # the standard pattern assumed by analogy to comparable
+    # jurisdictions (AU super, US 401(k)), not a directly quoted
+    # EMTA/Pensionikeskus statement of the EE-specific mechanic.
+    description: >-
+      Mandatory funded pension. Employee contribution 2% of gross wages
+      by default (electable to 4% or 6%, application to Pensionikeskus
+      by 30 November for the following calendar year), plus a fixed 4%
+      state top-up funded from the 33% social tax (not an additional
+      employer/employee cost). English: "Pillar II — Mandatory Funded
+      Pension".
+
+  - jurisdiction: EST
+    code: pillar_iii
+    local_name: "Vabatahtlik kogumispension (III sammas)"
+    canonical_bucket: personal_pension
+    tax_treatment: EET
+    description: >-
+      Voluntary supplementary pension. No state-mandated contribution
+      level — set by the individual (or employer on the employee's
+      behalf). Contributions tax-deductible up to 15% of taxable income
+      per calendar year, capped at EUR 6,000/year. English: "Pillar III
+      — Voluntary Supplementary Pension". UNVERIFIED: early-withdrawal
+      tax treatment (typically ordinary income, sometimes with a
+      penalty, if withdrawn before the qualifying age/holding period)
+      was not directly confirmed in this research pass.

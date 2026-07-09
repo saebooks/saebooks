@@ -1,0 +1,57 @@
+# Estonian capital gains tax (CGT) relief mechanisms (M1.5 · T11, EE seed).
+#
+# Corporate gains: NO separate CGT regime — gains on disposal of assets,
+# shares, or property by an Estonian company are ordinary profit inside
+# the distribution-based CIT system (0% while retained, 22/78 when
+# distributed — see corporate_tax_rates.yaml). This is deliberately
+# seeded as taxpayer_type=company / relief_mechanism=none: 'rollover'
+# (CgtReliefMechanism's "gain deferred onto a REPLACEMENT ASSET") would
+# be a mismatched label — Estonia's deferral is not asset-replacement
+# rollover relief, it is the ordinary distribution-based CIT mechanism
+# that already applies to ALL company profit, not a CGT-specific relief.
+# Forcing it into 'rollover' would seed a relief mechanism that does not
+# exist; 'none' + this comment (pointing at corporate_tax_rates.yaml as
+# the actual mechanism) is the honest representation.
+#
+# Individual gains: taxed as ordinary income at the flat 22% rate
+# (proceeds - acquisition cost - documented transaction costs; FIFO or
+# weighted-average for securities) — relief_mechanism=none, the standard
+# case. A genuine reinvestment-conditioned DEFERRAL exists via the
+# Investment Account (investeerimiskonto): gains stay untaxed while
+# reinvested within a qualifying account, taxed only on net withdrawals
+# exceeding contributions — this legitimately fits 'rollover' (deferred
+# reinvestment, the same shape as the enum's intent, just not tied to a
+# single replacement asset) and is seeded as a second individual row.
+#
+# FIE gains fold into ordinary business income (22% income tax + 33%
+# social tax on net profit, Form E) — not a separate CGT category at
+# all, so no additional row is seeded for FIE; see entity_structure_types.yaml.
+table: capital_gains_tax_regimes
+key: [jurisdiction, taxpayer_type, relief_mechanism, effective_from]
+rows:
+  - jurisdiction: EST
+    taxpayer_type: company
+    relief_mechanism: none
+    relief_rate_or_schedule: {note: "No separate corporate CGT — see corporate_tax_rates.yaml (0% retained / 22-78 distributed)."}
+    holding_period_threshold_days: null
+    effective_from: 2025-01-01
+
+  - jurisdiction: EST
+    taxpayer_type: individual
+    relief_mechanism: none
+    relief_rate_or_schedule: {rate_percent: 22.0, cost_basis_method: "FIFO or weighted-average (securities)"}
+    holding_period_threshold_days: null
+    effective_from: 2025-01-01
+
+  - jurisdiction: EST
+    taxpayer_type: individual
+    relief_mechanism: rollover
+    relief_rate_or_schedule:
+      vehicle: "Investment Account (investeerimiskonto)"
+      note: >-
+        Gains untaxed while reinvested within a qualifying Investment
+        Account; taxed only on net withdrawals exceeding contributions.
+        Not an asset-replacement rollover in the classic sense —
+        reinvestment-conditioned deferral, the closest available bucket.
+    holding_period_threshold_days: null
+    effective_from: 2011-01-01  # Verified: amendments introducing the Investment Account (Tulumaksuseadus §17^1-17^2) came into force 01.01.2011 (Rahandusministeerium 2010-12-15 "Mis on investeerimiskonto?"; Riigi Teataja) — not a 2026 change.

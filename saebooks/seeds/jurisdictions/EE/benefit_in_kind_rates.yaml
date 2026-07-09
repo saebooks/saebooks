@@ -1,0 +1,47 @@
+# Estonian fringe benefits (erisoodustus) as benefit-in-kind rates
+# (M1.5 · T11, EE seed). EST is employer_taxed (same incidence as AU
+# FBT) — the employer pays the tax on the benefit's value, not the
+# employee. Declared monthly on TSD Annex 4 (Lisa 4), due together with
+# payment by the 10th of the following month (unlike AU's April-March
+# FBT year — EE fringe benefits are a MONTHLY filing period, reflected
+# below as filing_period_start_month=1 / end_month=12).
+#
+# COMPOUND-TAX SCHEMA LIMITATION (flag, not fixed here — seed data only):
+# EE fringe benefits carry TWO taxes, not one flat rate:
+#
+#   income_tax = taxable_value * 22 / 78        (the SAME 22/78 gross-up
+#                                                  as corporate_tax_rates.yaml)
+#   social_tax = (taxable_value + income_tax) * 0.33
+#
+# BenefitInKindRate.rate_percent is a single Numeric field ("Rate as a
+# percentage ... applied to the valued benefit") — it cannot represent
+# this two-tax, gross-up-then-33%-on-top compound formula. rate_percent
+# below is seeded as 22.0000 (the income-tax leg's 22/78 numerator, same
+# convention as corporate_tax_rates.yaml) with the full formula spelled
+# out in this comment; a consuming service must NOT compute
+# taxable_value * rate_percent / 100 as the total liability — that would
+# capture neither the gross-up nor the social-tax leg. Flagged in the
+# final report as a genuine schema limitation (a single rate_percent
+# field understates a compound two-tax mechanic), not implemented here.
+#
+# Company-car benefit (EUR 1.96/kW/month standard, EUR 1.47/kW/month for
+# cars over 5 years old) is DELIBERATELY NOT SEEDED here: rate_percent is
+# percentage-shaped, and the car benefit's statutory valuation is a
+# EUR-per-kW-per-month AMOUNT, not a percentage — forcing it into this
+# field would misrepresent the unit, exactly the kind of silent bug this
+# seed is required to avoid. The underlying fact is also marked
+# verified=false (single secondary-source corroboration, not
+# independently re-checked against a live EMTA page) in the supplied
+# research. Skipped; flag for a future amount_per_unit-shaped field if
+# company-car BIK needs to be reference-data-driven.
+table: benefit_in_kind_rates
+key: [jurisdiction, benefit_category, effective_from]
+rows:
+  - jurisdiction: EST
+    benefit_category: general
+    incidence: employer_taxed
+    valuation_method: cost_basis
+    rate_percent: 22.0000
+    filing_period_start_month: 1
+    filing_period_end_month: 12
+    effective_from: 2025-01-01

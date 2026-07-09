@@ -1,0 +1,55 @@
+# EE recommended chart of accounts — used at company creation.
+#
+# NOT a state mandate — Estonia has NO mandated chart of accounts for
+# private companies (Raamatupidamise seadus / Accounting Act §8(1) only
+# requires each entity to prepare its own kontoplaan; a mandated
+# kontoplaan exists solely for public-sector entities via the Riigi
+# raamatupidamise üldeeskiri). This template follows the de-facto SME
+# numbering convention used across mainstream Estonian accounting
+# software (Merit Aktiva, SimplBooks) and general reference material:
+# 1xxx Vara (Assets), 2xxx Kohustised (Liabilities), 3xxx Omakapital
+# (Equity), 4xxx Tulud (Revenue), 5xxx-6xxx Kulud (Expenses) — a
+# convenience default a company may freely deviate from.
+#
+# Tax-code defaults reference the codes seeded in tax_codes.yaml.
+# Names given as "Estonian (English)".
+table: chart_template
+key: [jurisdiction, account_code]
+rows:
+  - {jurisdiction: EST, account_code: "1100", account_name: "Pank — arvelduskonto (Bank — operating)", account_type: ASSET, display_order: 10}
+  - {jurisdiction: EST, account_code: "1110", account_name: "Pank — hoiukonto (Bank — savings)", account_type: ASSET, display_order: 11}
+  - {jurisdiction: EST, account_code: "1200", account_name: "Ostjatega arveldused (Accounts Receivable)", account_type: ASSET, display_order: 20}
+  - {jurisdiction: EST, account_code: "1300", account_name: "Varud (Inventory)", account_type: ASSET, display_order: 30}
+  - {jurisdiction: EST, account_code: "1400", account_name: "Käibemaks (VAT) Receivable", account_type: ASSET, display_order: 40}
+  - {jurisdiction: EST, account_code: "1500", account_name: "Ettemakstud kulud (Prepayments)", account_type: ASSET, display_order: 50}
+  - {jurisdiction: EST, account_code: "1700", account_name: "Materiaalne põhivara — soetusmaksumus (Property, Plant & Equipment — at cost)", account_type: ASSET, display_order: 70}
+  - {jurisdiction: EST, account_code: "1710", account_name: "Materiaalne põhivara — akumuleeritud kulum (Property, Plant & Equipment — accumulated depreciation)", account_type: ASSET, display_order: 71}
+  - {jurisdiction: EST, account_code: "2100", account_name: "Hankijatega arveldused (Accounts Payable)", account_type: LIABILITY, display_order: 100}
+  - {jurisdiction: EST, account_code: "2200", account_name: "Käibemaks (VAT) Payable", account_type: LIABILITY, display_order: 110}
+  - {jurisdiction: EST, account_code: "2300", account_name: "Kinnipeetud tulumaks (Withheld Income Tax Payable — TSD)", account_type: LIABILITY, display_order: 120}
+  - {jurisdiction: EST, account_code: "2310", account_name: "Sotsiaalmaks (Social Tax Payable)", account_type: LIABILITY, display_order: 121}
+  - {jurisdiction: EST, account_code: "2320", account_name: "Töötuskindlustusmakse (Unemployment Insurance Payable)", account_type: LIABILITY, display_order: 122}
+  - {jurisdiction: EST, account_code: "2330", account_name: "Kohustuslik kogumispension — II sammas (Mandatory Funded Pension — Pillar II Payable)", account_type: LIABILITY, display_order: 123}
+  - {jurisdiction: EST, account_code: "2400", account_name: "Palgakohustused (Wages Payable)", account_type: LIABILITY, display_order: 130}
+  - {jurisdiction: EST, account_code: "2500", account_name: "Ettevõtte tulumaks — jaotatud kasum (Corporate Income Tax Payable — Distributed Profit)", account_type: LIABILITY, display_order: 140}
+  - {jurisdiction: EST, account_code: "2700", account_name: "Pangalaen (Bank Loan)", account_type: LIABILITY, display_order: 160}
+  - {jurisdiction: EST, account_code: "3100", account_name: "Osa-/aktsiakapital (Share Capital)", account_type: EQUITY, display_order: 200}
+  - {jurisdiction: EST, account_code: "3200", account_name: "Jaotamata kasum (eelmised perioodid) (Retained Earnings)", account_type: EQUITY, display_order: 210}
+  - {jurisdiction: EST, account_code: "3300", account_name: "Aruandeaasta kasum/kahjum (Current Year Earnings)", account_type: EQUITY, display_order: 220}
+  - {jurisdiction: EST, account_code: "4100", account_name: "Müügitulu — teenused (Sales — Services)", account_type: INCOME, default_tax_code: STD, display_order: 300}
+  - {jurisdiction: EST, account_code: "4200", account_name: "Müügitulu — kaubad (Sales — Goods)", account_type: INCOME, default_tax_code: STD, display_order: 310}
+  - {jurisdiction: EST, account_code: "4300", account_name: "Muud äritulud (Other Operating Income)", account_type: OTHER_INCOME, default_tax_code: STD, display_order: 320}
+  - {jurisdiction: EST, account_code: "4400", account_name: "Eksport ja ühendusesisene käive (Export & Intra-Community Supply)", account_type: INCOME, default_tax_code: ZERO, display_order: 325}
+  - {jurisdiction: EST, account_code: "4900", account_name: "Intressitulu (Interest Income)", account_type: OTHER_INCOME, default_tax_code: NTR, display_order: 330}
+  - {jurisdiction: EST, account_code: "5100", account_name: "Müüdud kaupade kulu (Cost of Goods Sold)", account_type: COST_OF_SALES, default_tax_code: INPUT_STD, display_order: 400}
+  - {jurisdiction: EST, account_code: "6100", account_name: "Palgakulu (Wages & Salaries)", account_type: EXPENSE, default_tax_code: NTR, display_order: 500}
+  - {jurisdiction: EST, account_code: "6110", account_name: "Sotsiaalmaksu kulu (Social Tax Expense)", account_type: EXPENSE, default_tax_code: NTR, display_order: 510}
+  - {jurisdiction: EST, account_code: "6120", account_name: "Töötuskindlustusmakse kulu — tööandja (Unemployment Insurance Expense — Employer)", account_type: EXPENSE, default_tax_code: NTR, display_order: 511}
+  - {jurisdiction: EST, account_code: "6200", account_name: "Üür (Rent)", account_type: EXPENSE, default_tax_code: INPUT_STD, display_order: 520}
+  - {jurisdiction: EST, account_code: "6300", account_name: "Kommunaalkulud (Utilities)", account_type: EXPENSE, default_tax_code: INPUT_STD, display_order: 530}
+  - {jurisdiction: EST, account_code: "6400", account_name: "Side- ja internetikulud (Telephone & Internet)", account_type: EXPENSE, default_tax_code: INPUT_STD, display_order: 540}
+  - {jurisdiction: EST, account_code: "6500", account_name: "Sõidukikulud (Motor Vehicle)", account_type: EXPENSE, default_tax_code: INPUT_STD, display_order: 550}
+  - {jurisdiction: EST, account_code: "6600", account_name: "Pangakulud (Bank Fees)", account_type: EXPENSE, default_tax_code: INPUT_EXEMPT, display_order: 560}
+  - {jurisdiction: EST, account_code: "6700", account_name: "Kulum (Depreciation)", account_type: EXPENSE, default_tax_code: NTR, display_order: 570}
+  - {jurisdiction: EST, account_code: "6800", account_name: "Erisoodustused (Fringe Benefits — TSD Lisa 4)", account_type: EXPENSE, default_tax_code: NTR, display_order: 580}
+  - {jurisdiction: EST, account_code: "6900", account_name: "Ettevõtte tulumaks — jaotatud kasum (Corporate Income Tax Expense — Distributed Profit)", account_type: OTHER_EXPENSE, default_tax_code: NTR, display_order: 590}

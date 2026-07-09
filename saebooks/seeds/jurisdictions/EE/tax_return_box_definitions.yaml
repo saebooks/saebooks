@@ -1,0 +1,423 @@
+# Estonian tax return box definitions — KMD (VAT return), KMD-INF (VAT
+# return invoice annex), and TSD (income/social/withholding tax return),
+# modelled as three separate return_type values, per the task brief.
+#
+# Grammar: see saebooks/seeds/jurisdictions/AU/tax_return_box_definitions.yaml
+# for the full ``aggregation`` grammar this file uses
+# (sum_taxable_for_codes:<bucket>:<gst_inclusive|gst_exclusive> and
+# sum_tax_amount_for_codes:<bucket>), parsed by
+# saebooks.services.tax_return_generator._parse_box_definition.
+# feeder_tax_codes are company-side TaxCode.reporting_type tags (NOT
+# RefTaxCode.code strings) — this seed defines the EE convention:
+# standard / standard_legacy_20 / standard_legacy_22 / reduced_13 /
+# reduced_9 / reduced_5_legacy / zero_rated / exempt / capital.
+#
+# Box-code convention: EMTA's own KMD form uses superscript sub-box
+# notation (1¹, 1², 2¹, 2², 4¹) and dotted sub-totals (3.1, 3.1.1, 3.2,
+# 3.2.1, 5.1-5.4, 6.1, 7.1). This seed represents superscript boxes with
+# an ASCII hyphen (box_code "1-1" for EMTA's "1¹") and keeps the dotted
+# boxes as-is (quoted, since e.g. "3.1" unquoted parses as a YAML float).
+# tax_codes.yaml's report_box_keys use the same "KMD:<box_code>" strings
+# — cross-checked for consistency as part of this seed's validation.
+#
+# Aggregation kind per box: the rate-bucketed taxable-value boxes
+# (1, 1-1, 1-2, 2, 2-1, 2-2, 3, 8), the input-VAT total (5), and the
+# output-VAT total (4, a plain sum of tax_amount across every sale-side
+# rate-bucket reporting_type — NOT a box-combining formula, despite its
+# box_label reading like one: 24%×1 + 20%×1-1 + ... is arithmetically
+# identical to summing tax_amount over codes
+# [standard, standard_legacy_20, standard_legacy_22, reduced_13,
+# reduced_9, reduced_5_legacy] within the income bucket) all map cleanly
+# onto the generic sum_taxable_for_codes / sum_tax_amount_for_codes
+# grammar (mirrors AU's G1/G2/G3/1A/1B pattern). Every other KMD box is a
+# genuine cross-box formula (4-1, 12, 13), an informational sub-total/
+# cross-check (3.1, 3.1.1, 3.2, 3.2.1, 5.1-5.4, 6, 6.1, 7, 7.1, 9) or an
+# adjustment entry (10, 11) with no single-bucket ledger-aggregation
+# shape — these are seeded with aggregation "manual" (a valid, documented
+# kind per TaxReturnBoxDefinition's own comment: "... | formula:<expr> |
+# manual"), which parses cleanly via _parse_box_definition without
+# attempting the unimplemented formula: prefix.
+#
+# KMD-INF (the >=EUR1,000-per-counterparty invoice annex) and TSD (the
+# payroll/withholding/social-tax return, main form + 8 annexes/Lisa) have
+# NO ledger-bucket aggregation shape at all in this engine today — TSD in
+# particular is a payroll data model, not a general-ledger
+# income/purchase-bucket-and-tax-code model. Both are seeded as "manual"
+# structural/descriptive rows (return layout only), not computed boxes.
+#
+# OSS-Q is seeded as a single deliberate STUB row — see tax_codes.yaml's
+# OSS_EU/IOSS_IMPORT header comment. A full per-member-state OSS/IOSS
+# rate table was out of scope of the supplied research for this pass.
+table: tax_return_box_definitions
+key: [jurisdiction, return_type, box_code]
+rows:
+  # =====================================================================
+  # KMD — käibedeklaratsioon (VAT return), monthly, due 20th of the
+  # following month. Form valid from 2025-07-01 (vorm_kmd_2025_07.pdf).
+  # =====================================================================
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "1"
+    box_label: "24% määraga maksustatavad toimingud ja tehingud"
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["standard"]
+    display_order: 1
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "1-1"
+    box_label: "20% määraga maksustatavad toimingud ja tehingud (legacy)"
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["standard_legacy_20"]
+    display_order: 2
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "1-2"
+    box_label: "22% määraga maksustatavad toimingud ja tehingud (legacy)"
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["standard_legacy_22"]
+    display_order: 3
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "2"
+    box_label: "9% määraga maksustatavad toimingud ja tehingud"
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["reduced_9"]
+    display_order: 4
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "2-1"
+    box_label: "5% määraga maksustatavad toimingud ja tehingud (legacy)"
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["reduced_5_legacy"]
+    display_order: 5
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "2-2"
+    box_label: "13% määraga maksustatavad toimingud ja tehingud"
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["reduced_13"]
+    display_order: 6
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "3"
+    box_label: "0% määraga maksustatavad toimingud ja tehingud, sh"
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["zero_rated"]
+    display_order: 7
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "3.1"
+    box_label: "kauba ühendusesisene käive ja teise liikmesriigi maksukohustuslasele osutatud teenuste käive kokku"
+    aggregation: manual
+    display_order: 8
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "3.1.1"
+    box_label: "kauba ühendusesisene käive"
+    aggregation: manual
+    display_order: 9
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "3.2"
+    box_label: "kauba eksport"
+    aggregation: manual
+    display_order: 10
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "3.2.1"
+    box_label: "käibemaksutagastusega müük reisijale"
+    aggregation: manual
+    display_order: 11
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "4"
+    box_label: "Käibemaks kokku = 24%×1 + 20%×1-1 + 22%×1-2 + 9%×2 + 5%×2-1 + 13%×2-2"
+    aggregation: "sum_tax_amount_for_codes:income"
+    feeder_tax_codes: ["standard", "standard_legacy_20", "standard_legacy_22", "reduced_13", "reduced_9", "reduced_5_legacy"]
+    display_order: 12
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "4-1"
+    box_label: "Impordilt tasumisele kuuluv käibemaks"
+    aggregation: manual
+    display_order: 13
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "5"
+    box_label: "Kokku sisendkäibemaksu summa, mis on seadusega lubatud maha arvata"
+    aggregation: "sum_tax_amount_for_codes:purchase"
+    # Unlike the output-side boxes (1/1-1/1-2/etc, correctly rate-bucketed
+    # per period), this row has no effective_from in its key — it is a
+    # single row applying to every period — so its feeder list must cover
+    # every input-VAT reporting_type across all rate vintages (including
+    # the legacy 20%/22% purchase-side rates tax_codes.yaml's INPUT_STD
+    # dated rows carry) to correctly compute box 5 for historical periods,
+    # not just the current 24% rate.
+    feeder_tax_codes: ["standard", "standard_legacy_20", "standard_legacy_22", "reduced_13", "reduced_9", "capital"]
+    display_order: 14
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "5.1"
+    box_label: "impordilt tasutud või tasumisele kuuluv käibemaks"
+    aggregation: manual
+    display_order: 15
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "5.2"
+    box_label: "põhivara soetamiselt tasutud või tasumisele kuuluv käibemaks"
+    aggregation: manual
+    display_order: 16
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "5.3"
+    box_label: "100% ettevõtluses kasutatava sõiduauto sisendkäibemaks + arv"
+    aggregation: manual
+    display_order: 17
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "5.4"
+    box_label: "osaliselt ettevõtluses kasutatava sõiduauto sisendkäibemaks (max 50%) + arv"
+    aggregation: manual
+    display_order: 18
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "6"
+    box_label: "Kauba ühendusesisene soetamine ja teise liikmesriigi maksukohustuslaselt saadud teenused kokku (informatiivne)"
+    aggregation: manual
+    display_order: 19
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "6.1"
+    box_label: "kauba ühendusesisene soetamine (informatiivne)"
+    aggregation: manual
+    display_order: 20
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "7"
+    box_label: "Muu kauba soetamine ja teenuse saamine, mida maksustatakse käibemaksuga (informatiivne)"
+    aggregation: manual
+    display_order: 21
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "7.1"
+    box_label: "erikorra alusel maksustatava kinnisasja, metallijäätmete, väärismetalli ja metalltoodete soetamine (informatiivne)"
+    aggregation: manual
+    display_order: 22
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "8"
+    box_label: "Maksuvaba käive"
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["exempt"]
+    display_order: 23
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "9"
+    box_label: "Erikorra alusel maksustatava kinnisasja, metallijäätmete, väärismetalli ja metalltoodete käive (KMS §41^1), sh teises liikmesriigis paigaldatava/kokkupandava kauba maksustatav väärtus (informatiivne, müüja pool)"
+    aggregation: manual
+    display_order: 24
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "10"
+    box_label: "Täpsustused +"
+    aggregation: manual
+    display_order: 25
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "11"
+    box_label: "Täpsustused –"
+    aggregation: manual
+    display_order: 26
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "12"
+    box_label: "Tasumisele kuuluv käibemaks = 4 + 4-1 – 5 + 10 – 11"
+    aggregation: manual
+    display_order: 27
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "13"
+    box_label: "Enammakstud käibemaks = 4 + 4-1 – 5 + 10 – 11"
+    aggregation: manual
+    display_order: 28
+
+  # =====================================================================
+  # KMD-INF — VAT return invoice annex (Part A issued / Part B received),
+  # filed together with KMD, same 20th-of-following-month due date.
+  # Threshold: every invoice/credit-note to or from a single transaction
+  # partner reaching EUR 1,000 ex-VAT in the period (assessed separately
+  # for issued vs received, and for invoices vs credit notes) — once
+  # either sub-total hits the threshold, ALL of that partner's
+  # invoices/credit-notes for the period must be listed. No ledger
+  # aggregation shape exists for an invoice-level listing annex in this
+  # engine — both parts are structural/descriptive "manual" rows.
+  # =====================================================================
+  # Columns/erisuse-kood detail (box_label kept <=256 chars per
+  # TaxReturnBoxDefinition.box_label's String(256) limit — full column
+  # list is in this file's header-adjacent comment block below):
+  #   Part A columns: #, partneri kood, partneri nimi, arve nr, arve
+  #   kuupäev, arve kogusumma ilma käibemaksuta, maksumäär, KMD lahtrites
+  #   1/2/2^2 kajastatud maksustatav käive, erisuse kood. Erisuse kood:
+  #   01=erikorra §41/§42 käive, 02=§41^1 pöördmaksustatav käive (buyer
+  #   self-assesses), 03=segamaksumäär/muu (mixed rate / other).
+  - jurisdiction: EST
+    return_type: KMD-INF
+    box_code: A
+    box_label: >-
+      Osa A — andmed väljastatud arvete kohta (>=EUR 1,000 ex-VAT per
+      tehingupartner, eraldi arved ja kreeditarved)
+    aggregation: manual
+    display_order: 1
+
+  #   Part B columns: #, partneri kood, partneri nimi, arve nr, arve
+  #   kuupäev, arve kogusumma koos käibemaksuga, KMD lahtris 5 kajastatud
+  #   sisendkäibemaksu summa, erisuse kood. Erisuse kood: 11=osaline
+  #   mahaarvamine (partial input-VAT deduction), 12=§41^1
+  #   pöördmaksustatav soetamine (reverse-charge acquisition, buyer
+  #   self-assesses). Only Estonian-VAT-registered suppliers with
+  #   deductible input VAT are listed.
+  - jurisdiction: EST
+    return_type: KMD-INF
+    box_code: B
+    box_label: >-
+      Osa B — andmed saadud arvete kohta (ainult mahaarvatava
+      sisendkäibemaksuga, >=EUR 1,000 ex-VAT per tehingupartner)
+    aggregation: manual
+    display_order: 2
+
+  # =====================================================================
+  # TSD — income and social tax return (main form + Lisa 1-8), monthly,
+  # due 10th of the following month. No ledger-bucket aggregation shape
+  # exists for payroll/withholding data in this engine today — every row
+  # is a structural/descriptive "manual" entry describing the annex.
+  # CAVEAT (flag for the engineering team): from October 2026 transactions
+  # (first filed under the new system by 2026-11-10), Lisa 1 and Lisa 2
+  # are being replaced by a "data-based reporting" (andmepõhine aruandlus)
+  # mechanism — accounting software submits granular wage/tax data
+  # directly and EMTA auto-compiles the declaration. The field/code
+  # semantics documented here (payment-type codes, basic-exemption codes
+  # etc., carried in withholding_tables.yaml / social_contribution_schemes.yaml)
+  # remain the right data model; only the submission channel changes.
+  # =====================================================================
+  - jurisdiction: EST
+    return_type: TSD
+    box_code: MAIN
+    box_label: "Vorm TSD — koonddeklaratsioon (tulu- ja sotsiaalmaks)"
+    aggregation: manual
+    display_order: 1
+
+  # box_label kept <=256 chars per box_label's String(256) limit — the
+  # Oct-2026 data-based-reporting caveat above (this section's header
+  # comment) applies to this row; not repeated per-row.
+  - jurisdiction: EST
+    return_type: TSD
+    box_code: LISA1
+    box_label: >-
+      Lisa 1 — residendist füüsilisele isikule tehtud väljamaksed
+      (palk, juhatuse tasu, pension, muu tulu, kapitalitulu); kinnipeetud
+      tulumaks, kohustuslik kogumispension, töötuskindlustusmakse
+    aggregation: manual
+    display_order: 2
+
+  - jurisdiction: EST
+    return_type: TSD
+    box_code: LISA2
+    box_label: >-
+      Lisa 2 — mitteresidendist füüsilisele või juriidilisele isikule
+      tehtud väljamaksed; kinnipeetud tulumaks ja töötuskindlustusmakse.
+      NOTE: from Oct-2026 transactions replaced by data-based reporting.
+    aggregation: manual
+    display_order: 3
+
+  - jurisdiction: EST
+    return_type: TSD
+    box_code: LISA3
+    box_label: "Lisa 3 — mitteresidendi püsiva tegevuskoha kasumi väljaviimine / krediidiasutuse kasumi ettemaksustamine"
+    aggregation: manual
+    display_order: 4
+
+  - jurisdiction: EST
+    return_type: TSD
+    box_code: LISA4
+    box_label: >-
+      Lisa 4 — erisoodustused: tulumaks = maksustatav väärtus × 22/78
+      (tööandja kanda); sotsiaalmaks = (maksustatav väärtus + tulumaks) ×
+      33% (tööandja kanda). Deklareeritakse kuiselt, tasumine 10. kuupäevaks.
+    aggregation: manual
+    display_order: 5
+
+  - jurisdiction: EST
+    return_type: TSD
+    box_code: LISA5
+    box_label: "Lisa 5 — kingitused, annetused ja vastuvõtukulud"
+    aggregation: manual
+    display_order: 6
+
+  - jurisdiction: EST
+    return_type: TSD
+    box_code: LISA6
+    box_label: "Lisa 6 — ettevõtlusega mitteseotud kulud ja muud väljamaksed"
+    aggregation: manual
+    display_order: 7
+
+  - jurisdiction: EST
+    return_type: TSD
+    box_code: LISA7
+    box_label: >-
+      Lisa 7 — dividendid ja muud kasumieraldised, väljamaksed omakapitalilt,
+      varjatud kasumieraldised, CFC kasum. Jaotatud kasum maksustatakse
+      22/78 määraga (vt corporate_tax_rates.yaml); tasumine 10. kuupäevaks.
+    aggregation: manual
+    display_order: 8
+
+  - jurisdiction: EST
+    return_type: TSD
+    box_code: LISA8
+    box_label: >-
+      Lisa 8 — rahvusvahelise mereveo tulu (tonnaažikord). 2025+ vormidel
+      valdavalt Lisa 1 makseliikide koodide alla koondatud
+      (tonnaažikorra meremeeste väljamaksed).
+    aggregation: manual
+    display_order: 9
+
+  # =====================================================================
+  # OSS-Q — deliberate stub only. See tax_codes.yaml OSS_EU/IOSS_IMPORT
+  # header comment: full per-member-state OSS/IOSS rate table is out of
+  # scope of the supplied research for this pass.
+  # =====================================================================
+  - jurisdiction: EST
+    return_type: OSS-Q
+    box_code: "1"
+    box_label: >-
+      Liidu erikord (Union OSS) — käive liikmesriigi ja määra kaupa
+      (kvartaalne, deklareeritakse väljaspool KMD-d). STUB: per-liikmesriigi
+      määratabel ei ole selle seedi ulatuses uuritud/seeditud.
+    aggregation: manual
+    display_order: 1

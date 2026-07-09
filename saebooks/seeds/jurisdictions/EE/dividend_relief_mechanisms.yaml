@@ -1,0 +1,32 @@
+# Estonian dividend relief mechanism (M1.5 · T11, EE seed).
+# Since 2025-01-01, dividends paid out of profit already taxed at the
+# standard 22/78 rate (see corporate_tax_rates.yaml) carry 0% Estonian
+# withholding at the recipient level — taxation happens ONCE, at the
+# distributing company. There is no further shareholder-level credit
+# mechanism to model (unlike AU franking, which grants an explicit,
+# refundable credit) — the dividend simply passes through untaxed. Of
+# DividendReliefMechanismType's five buckets (imputation / franking /
+# partial_credit / exemption / classical), 'exemption' ("dividend wholly
+# or largely exempt — one-tier systems") is the closest and most honest
+# fit: this is a one-tier-style outcome even though it is reached via a
+# distribution tax at the company level rather than a formal exemption
+# statute.
+#
+# The narrow pre-2025 14/86-pool transitional carve-out (redistribution
+# of dividends received before 2025-01-01, taxed at the now-abolished
+# 14/86 rate, subject to a >=10% holding) is NOT seeded as a second
+# dated row here: its precise commencement date (when the 14/86 regime
+# itself began) was not given in the supplied research, and fabricating
+# one would violate "using ONLY the researched facts". The mechanic
+# itself IS captured — see withholding_tables.yaml's
+# ee_dividend_wht_legacy_1486_pool row, which carries the full condition
+# text and is dated from the one confirmed date (2025-01-01, when the
+# transitional rule took effect).
+table: dividend_relief_mechanisms
+key: [jurisdiction, mechanism_type, effective_from]
+rows:
+  - jurisdiction: EST
+    mechanism_type: exemption
+    credit_or_exemption_rate: 100.0000
+    refundable: false
+    effective_from: 2025-01-01

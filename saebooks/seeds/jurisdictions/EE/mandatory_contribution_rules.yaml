@@ -1,0 +1,80 @@
+# Estonian mandatory retirement-contribution rules (M1.5 · T6, EE seed).
+# jurisdiction is the 3-char code 'EST'. Covers ONLY the II pillar
+# (kohustuslik kogumispension) — the genuinely earmarked-to-a-specific-
+# retirement-vehicle contribution. Pillar I (state PAYG pension) is
+# funded from the general 33% social tax, which is NOT a separate
+# earmarked retirement rate — it is seeded once, whole, under
+# social_contribution_schemes.yaml (ee_social_tax), matching how AU's
+# Medicare levy (also general, not retirement-earmarked) is kept out of
+# this table. Pillar III (voluntary) has no mandatory contribution rate
+# by definition and is therefore not seeded here either — see
+# retirement_vehicle_types.yaml for the vehicle-type row.
+#
+# SCHEMA NOTE: the state's 4% top-up contribution is funded out of the
+# 33% social tax already collected (not an additional employer/employee
+# cost) — it is paid by neither the employer nor the employee in the
+# ordinary sense. MandatoryContributionRule.payer is a plain String(16)
+# column (comment says "one of MandatoryContributionPayer" but there is
+# NO database CHECK constraint enforcing that StrEnum — confirmed by
+# reading mandatory_contribution_rule.py), so 'state' is used below as
+# the most accurate available value; this is a genuine schema/taxonomy
+# gap (MandatoryContributionPayer only defines EMPLOYER/EMPLOYEE/BOTH),
+# flagged in the final report rather than silently forced into one of
+# the three existing enum values.
+table: mandatory_contribution_rules
+key: [jurisdiction, code, effective_from]
+rows:
+  - jurisdiction: EST
+    code: ee_pillar_ii_employee_default
+    payer: employee
+    rate_percent: 2.0000
+    earnings_base: gross_wages
+    cap_amount: null
+    # UNVERIFIED — placeholder. Corrected FROM the prior 2026-01-01 (which
+    # was wrong: 2026 is not when this rate started, it's just "current").
+    # 2025-01-01 was considered and rejected: fin.ee's "Increase of the
+    # rate of second pillar" is explicit that only the 4%/6% ELECTIVE
+    # option is new from 2025 — "by default, the contribution rate
+    # remains at 2%", i.e. the 2% default pre-dates the 2025 reform. The
+    # II pillar itself launched 2002 (Funded Pensions Act); the exact
+    # commencement of the 2%-default rate specifically was not
+    # independently verified in this research pass, so 2002-01-01 is used
+    # as an explicit "not confirmed precise" sentinel, not a sourced fact.
+    effective_from: 2002-01-01
+    effective_to: null
+
+  - jurisdiction: EST
+    # 'elective' dropped from the code to fit String(32) — the elective
+    # (application-required) nature is documented here and in the file
+    # header, not lost, just not in the code string itself.
+    code: ee_pillar_ii_employee_4pct
+    payer: employee
+    rate_percent: 4.0000
+    earnings_base: gross_wages
+    cap_amount: null
+    age_band: null
+    effective_from: 2025-01-01  # Verified (Rahandusministeerium/fin.ee "Increase of the rate of second pillar"): application window opened 2024-01-01, "contributions at the higher rate can be made from 1 January 2025" — this ELECTIVE rate (not the 2% default) is the part of the 2-4-6 reform that is genuinely new in 2025.
+    effective_to: null
+
+  - jurisdiction: EST
+    code: ee_pillar_ii_employee_6pct
+    payer: employee
+    rate_percent: 6.0000
+    earnings_base: gross_wages
+    cap_amount: null
+    effective_from: 2025-01-01  # Verified — see ee_pillar_ii_employee_4pct row above (fin.ee: elective rate effective 1 January 2025).
+    effective_to: null
+
+  - jurisdiction: EST
+    code: ee_pillar_ii_state_topup
+    payer: state
+    rate_percent: 4.0000
+    earnings_base: social_tax_base
+    cap_amount: null
+    # UNVERIFIED — placeholder, same reasoning as ee_pillar_ii_employee_default
+    # above: fin.ee states the state's contribution is unchanged by the
+    # 2025 elective-rate reform ("the state continues to add 4% from the
+    # social tax regardless of the person's own contribution rate") — this
+    # top-up pre-dates 2025, exact commencement not independently verified.
+    effective_from: 2002-01-01
+    effective_to: null

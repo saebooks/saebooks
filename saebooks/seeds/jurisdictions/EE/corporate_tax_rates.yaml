@@ -1,0 +1,64 @@
+# Estonian corporate income tax rates (M1.5 · T11, EE seed).
+#
+# ****************************************************************
+# CRITICAL — Estonia is a DISTRIBUTION-BASED system, not a flat-rate
+# system on accounting profit. Porting a flat-rate assumption here is
+# exactly the classic bug this seed is required to avoid:
+#
+#   * entity_scope=retained_reinvested, rate_percent=0.0000 — profit that
+#     stays in the company (not distributed) is taxed at 0%. This is the
+#     core, defining feature of the regime: tax is DEFERRED until profit
+#     leaves the company.
+#   * entity_scope=distributed_profit, rate_percent=22.0000 — this is
+#     NOT "22% of accounting profit". rate_percent=22.0000 is the
+#     numerator of EMTA's own stated fraction: tax on a distribution
+#     ("22/78 of the net amount distributed"). The correct formula is:
+#
+#         corporate_income_tax = net_distributed_amount * 22 / 78
+#
+#     which is equivalent to 22% of the GROSSED-UP distribution
+#     (net / 0.78), or ~28.2051% of the net distributed amount. DO NOT
+#     compute tax as net_distributed_amount * rate_percent / 100 — that
+#     silently reproduces a flat-rate bug (28.2051% would be the correct
+#     multiplier for a straight net-amount multiplication, NOT 22%).
+#     rate_percent=22.0000 is stored here because it is the auditable,
+#     EMTA-sourced number ("22/78"); a consuming service MUST implement
+#     the 22/78 gross-up formula explicitly, not a naive percentage
+#     multiplication. This is a genuine schema limitation — this table
+#     has no dedicated gross-up-numerator/denominator field — flagged in
+#     the final report as a candidate future migration, not implemented
+#     here (SEED DATA ONLY task scope).
+#
+# Uniform 22/78 rate applies to ALL distributions since 2025-01-01
+# (dividends, and deemed distributions such as certain fringe
+# benefits/gifts/donations). The prior reduced 14/86 rate for "regular"
+# dividends was ABOLISHED 2025-01-01 (see dividend_relief_mechanisms.yaml
+# and withholding_tables.yaml's legacy-pool row for the narrow
+# transitional carve-out on pre-2025 14/86-taxed profit).
+# ****************************************************************
+table: corporate_tax_rates
+key: [jurisdiction, sub_jurisdiction, tax_year, entity_scope]
+rows:
+  - jurisdiction: EST
+    tax_year: 2026
+    entity_scope: retained_reinvested
+    rate_percent: 0.0000
+    effective_from: 2025-01-01
+
+  - jurisdiction: EST
+    tax_year: 2026
+    entity_scope: distributed_profit
+    rate_percent: 22.0000
+    effective_from: 2025-01-01
+
+  - jurisdiction: EST
+    # UNVERIFIED (verified=false in supplied research) — single-source
+    # (WebFetch summary of emta.ee, not independently corroborated by a
+    # second source in the research pass). Niche rule (credit
+    # institutions' advance CIT payments on profit) — seeded per "seed
+    # the best value, flag UNVERIFIED" but confirm against a second
+    # primary source before relying on it.
+    tax_year: 2026
+    entity_scope: credit_institution_advance
+    rate_percent: 18.0000
+    effective_from: 2025-01-01

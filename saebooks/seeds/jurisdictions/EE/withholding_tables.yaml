@@ -1,0 +1,145 @@
+# Estonian withholding rules (M1.5 · T7, EE jurisdiction seed).
+# jurisdiction is the 3-char code 'EST'. Mirrors AU's withholding_tables.yaml
+# shape: a formula_type tag + a free-shape parameters JSONB blob.
+#
+# Personal income tax rate for 2026 is 22% (flat) — the legislated rise
+# to 24% was CANCELLED by the Riigikogu on 2025-12-03, so 22% remains in
+# force. This is the exact "cancellation" flagged in the task brief;
+# confirmed live against emta.ee's 2026 tax-rates page, not a stale
+# secondary source. Basic exemption (maksuvaba tulu) changed structurally
+# for 2026 to a universal, non-income-dependent EUR 700/month
+# (EUR 8,400/year), EUR 776/month (EUR 9,312/year) for pensionable-age
+# persons — replacing the prior income-dependent sliding-scale exemption.
+table: withholding_tables
+key: [jurisdiction, code, effective_from]
+rows:
+  - jurisdiction: EST
+    code: ee_tsd_income_tax_paye
+    name: "TSD tulumaksu kinnipidamine (Vorm TSD Lisa 1)"
+    withholding_type: wage_paye
+    formula_type: flat_rate
+    parameters:
+      rate_percent: 22.0
+      basic_exemption_monthly_standard: 700.00
+      basic_exemption_annual_standard: 8400.00
+      basic_exemption_monthly_pensionable_age: 776.00
+      basic_exemption_annual_pensionable_age: 9312.00
+      basic_exemption_code_standard: "610"
+      basic_exemption_code_pensionable_age: "650"
+      note: >-
+        Universal, non-income-dependent basic exemption for 2026 (replaces
+        the pre-2026 income-dependent sliding-scale exemption / "maksuküür").
+    effective_from: 2026-01-01
+
+  - jurisdiction: EST
+    code: ee_dividend_wht
+    name: "Dividendide kinnipeetav tulumaks — jaotatud kasumilt (22/78) maksustatud kasum"
+    withholding_type: dividend
+    formula_type: flat_rate
+    parameters:
+      rate_percent: 0.0
+      note: >-
+        0% withholding since 2025-01-01 on dividends from profit already
+        taxed at the standard 22/78 rate — single-layer taxation at the
+        distributing company only, for both resident and non-resident
+        recipients (individuals and companies).
+    effective_from: 2025-01-01
+
+  - jurisdiction: EST
+    code: ee_dividend_wht_legacy_1486_pool
+    name: "Dividendide kinnipeetav tulumaks — legacy 14/86 kasumipool (üleminekusäte)"
+    withholding_type: dividend
+    formula_type: flat_rate
+    parameters:
+      rate_percent: 7.0
+      condition: >-
+        Applies ONLY when redistributing dividends the company itself
+        received on or before 2024-12-31 that were taxed at the
+        now-abolished 14/86 rate, conditional on the redistributing
+        company holding >=10% of the paying company when the dividend was
+        received. Redistribution to a natural-person shareholder carries
+        this 7% withholding, treaty-reducible (e.g. 5%; 0% under some
+        treaties — UAE, Bahrain, Georgia, Jersey, Cyprus, Isle of Man,
+        Mexico). A closing/transitional relief — the pool only shrinks
+        over time; no new 14/86-taxed profit is generated after
+        2025-01-01. See dividend_relief_mechanisms.yaml for the paired
+        participation-exemption row.
+    effective_from: 2025-01-01
+
+  - jurisdiction: EST
+    code: ee_interest_wht
+    name: "Intressi kinnipeetav tulumaks mitteresidendile"
+    withholding_type: interest
+    formula_type: flat_rate
+    parameters:
+      rate_percent: 0.0
+      exception:
+        condition: >-
+          Interest connected to a holding in a common investment fund or
+          asset pool where >50% of the fund's assets are Estonian
+          immovable property/construction works, held by a qualifying
+          non-resident.
+        rate_percent: 22.0
+        treaty_reduced_typical_range: "10-12% under some treaties (e.g. US, Greece, Vietnam) — verify per specific treaty before applying."
+    effective_from: 2026-01-01
+
+  - jurisdiction: EST
+    code: ee_royalty_wht
+    name: "Litsentsitasu (kasutustasu) kinnipeetav tulumaks mitteresidendile"
+    withholding_type: royalty
+    formula_type: flat_rate
+    parameters:
+      rate_percent: 10.0
+      eu_swiss_group_exemption:
+        condition: >-
+          Royalties to an associated company resident in another EU
+          member state or Switzerland, where payer and recipient have
+          held a direct >=25% participation for a continuous period of
+          >=2 years (implements the EU Interest and Royalties Directive).
+        rate_percent: 0.0
+      note: "Tax treaties may further reduce the 10% rate for other jurisdictions."
+    effective_from: 2026-01-01
+
+  - jurisdiction: EST
+    # UNVERIFIED (verified=false in supplied research) — CONFLICTING
+    # primary-vs-secondary sources: EMTA's own non-resident-taxation page
+    # states 10% for a "service fee" payment to a non-resident legal
+    # person (Form TSD Annex 2); a PwC secondary summary states 22%
+    # domestic withholding specifically for management/consultancy fees.
+    # Could not be resolved by reading Income Tax Act (Tulumaksuseadus)
+    # §41 directly in this research pass (riigiteataja.ee did not render
+    # as text via the fetch tool used). Seeded at the EMTA-sourced 10%
+    # figure per "seed the best value, flag UNVERIFIED" — do NOT treat
+    # this as a confirmed rate for management/consultancy fee payments
+    # specifically without reading Tulumaksuseadus §41 directly first.
+    code: ee_non_resident_service_fee_wht
+    name: "Teenustasu kinnipeetav tulumaks mitteresidendile (UNVERIFIED — vt kommentaar)"
+    withholding_type: non_resident
+    formula_type: flat_rate
+    parameters:
+      rate_percent: 10.0
+      conflicting_source_note: >-
+        EMTA (primary): 10% for "service fee" to a non-resident legal
+        person. PwC (secondary): 22% domestic withholding specifically
+        for management/consultancy fees. Unresolved without a direct
+        read of Tulumaksuseadus §41 — treat "ordinary cross-border B2B
+        service payments with no Estonian permanent establishment" as
+        generally NOT subject to Estonian withholding (the common
+        default) and flag management/consultancy/service-fee and
+        entertainer/athlete payments as special categories needing a
+        rate lookup before relying on this row.
+    effective_from: 2026-01-01
+
+  - jurisdiction: EST
+    code: ee_nonresident_re_gain_wht
+    name: "Mitteresidendi kinnisvaratulu (võõrandamiskasu) maksustamine"
+    withholding_type: non_resident
+    formula_type: flat_rate
+    parameters:
+      rate_percent: 22.0
+      condition: >-
+        Gain on transfer of Estonian immovable property, or of a holding
+        in a company/fund where >50% of assets consist (directly or
+        indirectly) of Estonian immovable property, realised by a
+        non-resident.
+    effective_from: 2026-01-01

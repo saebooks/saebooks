@@ -1,0 +1,340 @@
+# Estonian käibemaks (VAT) reference tax codes — feeds KMD box aggregation
+# (see tax_return_box_definitions.yaml in this directory) and
+# chart_template.yaml's default_tax_code assignments.
+#
+# Rate history (KMS §15, primary source: emta.ee vorm_kmd_2025_07.pdf +
+# EMTA VAT-rates page, fetched 2026-07):
+#   20%  until 2023-12-31  (legacy)
+#   22%  2024-01-01 – 2025-06-30  (legacy)
+#   24%  from 2025-07-01  (current standard rate — EMTA describes this as
+#        the ongoing standard rate; no sunset date stated)
+#   13%  from 2025-01-01  (new reduced rate — accommodation, up from 9%)
+#    9%  reduced rate — books/workbooks (not e-books), periodicals/press
+#        (raised from 5% to 9% on 2025-01-01), medicines, contraceptives,
+#        hygiene products, medical devices
+#    5%  legacy reduced rate for press, superseded 2025-01-01
+#    0%  intra-Community goods supply, exports, international transport,
+#        certain cross-border B2B services (KMS §15(3)-(4))
+#
+# Same "code" reused across dated rows for a rate that changed over time
+# (mirrors AU's mandatory_contribution_rules.yaml au_super_guarantee
+# pattern) — the natural key is (jurisdiction, code, effective_from).
+#
+# UNVERIFIED DATES: the supplied research confirmed rate *values* and the
+# *end* dates of superseded rates (e.g. "20% until 2023-12-31") but did
+# not confirm the historical *start* dates of the 20%, 5%, and 0%-rate
+# regimes, nor the exemption/reverse-charge regimes' commencement. Rather
+# than omit these long-standing codes, each is seeded with a placeholder
+# effective_from of 1991-01-01 (Estonia's post-independence baseline, used
+# here purely as an explicit "not the real date" sentinel, not a sourced
+# fact) and flagged '# UNVERIFIED' — do not rely on these placeholder
+# dates for pre-2024 history without independent verification.
+#
+# OSS/IOSS: represented as supply-classification marker codes (OSS_EU,
+# IOSS_IMPORT) with rate_percent=0.0000 because the actual VAT under
+# these EU-wide simplification schemes is assessed at the DESTINATION
+# member state's rate and reported via the quarterly Union OSS / monthly
+# IOSS return (return_type 'OSS-Q' — see tax_return_box_definitions.yaml,
+# seeded there as a deliberate stub only), not at an Estonian domestic
+# rate. These two codes exist so a company's chart/tax-code UI can flag a
+# supply as OSS/IOSS-reportable; they are not a rate to apply.
+table: tax_codes
+key: [jurisdiction, code, effective_from]
+rows:
+  # --- Standard rate (dated series) -----------------------------------
+  - jurisdiction: EST
+    code: STD
+    name: "Käibemaks — üldine määr (20%, legacy)"
+    rate_percent: 20.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "Käibemaks (VAT) Payable"
+    effective_from: 1991-01-01  # UNVERIFIED — placeholder; only the 2023-12-31 end date is confirmed by research.
+    effective_to: 2023-12-31
+    report_box_keys: ["KMD:1-1"]
+
+  - jurisdiction: EST
+    code: STD
+    name: "Käibemaks — üldine määr (22%, legacy)"
+    rate_percent: 22.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "Käibemaks (VAT) Payable"
+    effective_from: 2024-01-01
+    effective_to: 2025-06-30
+    report_box_keys: ["KMD:1-2"]
+
+  - jurisdiction: EST
+    code: STD
+    name: "Käibemaks — üldine määr (24%)"
+    rate_percent: 24.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "Käibemaks (VAT) Payable"
+    effective_from: 2025-07-01
+    report_box_keys: ["KMD:1"]
+
+  # --- Reduced rates ----------------------------------------------------
+  - jurisdiction: EST
+    code: RED13
+    name: "Käibemaks — vähendatud määr 13% (majutus)"
+    rate_percent: 13.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "Käibemaks (VAT) Payable"
+    effective_from: 2025-01-01
+    report_box_keys: ["KMD:2-2"]
+
+  - jurisdiction: EST
+    code: RED9
+    name: "Käibemaks — vähendatud määr 9% (raamatud, ajakirjandus, ravimid)"
+    rate_percent: 9.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "Käibemaks (VAT) Payable"
+    effective_from: 2025-01-01  # the 2025-01-01 press-rate-rise reform date is confirmed; the earlier commencement of the 9% category for books/medicines is not separately verified in this research pass.
+    report_box_keys: ["KMD:2"]
+
+  - jurisdiction: EST
+    code: RED5_LEGACY
+    name: "Käibemaks — vähendatud määr 5% (ajakirjandus, legacy)"
+    rate_percent: 5.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "Käibemaks (VAT) Payable"
+    effective_from: 1991-01-01  # UNVERIFIED — placeholder start date; superseded 2025-01-01 per KMS §46(27) transitional rule.
+    effective_to: 2024-12-31
+    report_box_keys: ["KMD:2-1"]
+
+  # --- Zero rate + exempt -------------------------------------------------
+  - jurisdiction: EST
+    code: ZERO
+    name: "Käibemaks — 0% määr (eksport, ühendusesisene käive)"
+    rate_percent: 0.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "Käibemaks (VAT) Payable"
+    effective_from: 1991-01-01  # UNVERIFIED — placeholder start date; 0%-rating for exports/intra-EU is a long-standing KMS §15(3)-(4) feature, not separately dated in supplied research.
+    report_box_keys: ["KMD:3"]
+
+  - jurisdiction: EST
+    code: EXEMPT
+    name: "Maksuvaba käive (finants-, kindlustus-, tervishoiu- jm teenused)"
+    rate_percent: 0.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    input_credit_recoverable: false
+    gl_account_hint: "Käibemaks (VAT) Payable"
+    effective_from: 1991-01-01  # UNVERIFIED — placeholder start date; KMS §16 exempt categories are long-standing.
+    report_box_keys: ["KMD:8"]
+
+  - jurisdiction: EST
+    code: INPUT_EXEMPT
+    name: "Maksuvaba ost (finants-, kindlustus- jm teenused, nt pangateenused)"
+    rate_percent: 0.0000
+    direction: purchase
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    input_credit_recoverable: false
+    gl_account_hint: "Käibemaks (VAT) Receivable"
+    effective_from: 1991-01-01  # UNVERIFIED — placeholder start date; mirrors EXEMPT (sale-side) above — KMS §16 exempt categories (incl. financial/insurance services purchased, e.g. bank fees) are long-standing.
+    # No report_box_keys: unlike the company's own exempt sales (KMD
+    # box 8), the KMD form has no box for domestic exempt purchases
+    # received — this code exists only to give purchase-bucket accounts
+    # (e.g. Bank Fees) a direction-correct default, not to feed a box.
+
+  # --- Reverse charge -----------------------------------------------------
+  # Scope note (RC_EU_ACQ box-4/5 wiring): report_box_keys
+  # below now lists KMD:4 and KMD:5 alongside KMD:1/KMD:6, matching the
+  # documentary convention AU's own reverse-charge code (ITS) uses
+  # (report_box_keys: ["BAS:1A", "BAS:1B"]) and confirmed correct per
+  # EMTA guidance (intra-Community acquisitions are declared on KMD rows
+  # 1, 6, 6.1 with the reverse VAT itself on rows 4 and 5). This is a
+  # reference-data fix only. The *engine-side* box-aggregation mechanism
+  # (tax_return_box_definitions.yaml's feeder_tax_codes, keyed off the
+  # company-side TaxCode.reporting_type tag — a separate mechanism from
+  # this file's report_box_keys) does NOT wire reverse-charge codes into
+  # boxes 4/5 either here or in AU (BAS:1A feeder_tax_codes is just
+  # ["taxable"], BAS:1B is ["taxable","capital"] — no "reverse_charge"
+  # tag despite ITS existing) — box-level reverse-charge aggregation via
+  # feeder_tax_codes is a deferred, engine-wide gap, not an EE-specific
+  # one, and out of scope for this fix.
+  - jurisdiction: EST
+    code: RC_DOMESTIC
+    name: "Pöördmaksustamine — kinnisasi, metallijäätmed, väärismetall (KMS §41^1)"
+    rate_percent: 0.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: true
+    tax_family: vat_gst
+    gl_account_hint: "Käibemaks (VAT) Payable"
+    effective_from: 1991-01-01  # UNVERIFIED — placeholder start date; KMS §41^1 domestic reverse charge scheme.
+    report_box_keys: ["KMD:9"]
+
+  - jurisdiction: EST
+    code: RC_EU_ACQ
+    name: "Pöördmaksustamine — ühendusesisene soetamine / imporditud teenused (20%, legacy)"
+    rate_percent: 20.0000
+    direction: purchase
+    is_inclusive: false
+    reverse_charge: true
+    tax_family: vat_gst
+    gl_account_hint: "Käibemaks (VAT) Receivable"
+    effective_from: 1991-01-01  # UNVERIFIED — placeholder; mirrors STD's identical caveat (only the 2023-12-31 end date is confirmed by research). The reverse-charge/self-assessed rate tracks the general standard rate.
+    effective_to: 2023-12-31
+    report_box_keys: ["KMD:1", "KMD:4", "KMD:5", "KMD:6"]
+
+  - jurisdiction: EST
+    code: RC_EU_ACQ
+    name: "Pöördmaksustamine — ühendusesisene soetamine / imporditud teenused (22%, legacy)"
+    rate_percent: 22.0000
+    direction: purchase
+    is_inclusive: false
+    reverse_charge: true
+    tax_family: vat_gst
+    gl_account_hint: "Käibemaks (VAT) Receivable"
+    effective_from: 2024-01-01
+    effective_to: 2025-06-30
+    report_box_keys: ["KMD:1", "KMD:4", "KMD:5", "KMD:6"]
+
+  - jurisdiction: EST
+    code: RC_EU_ACQ
+    name: "Pöördmaksustamine — ühendusesisene soetamine / imporditud teenused"
+    rate_percent: 24.0000
+    direction: purchase
+    is_inclusive: false
+    reverse_charge: true
+    tax_family: vat_gst
+    gl_account_hint: "Käibemaks (VAT) Receivable"
+    effective_from: 2025-07-01
+    report_box_keys: ["KMD:1", "KMD:4", "KMD:5", "KMD:6"]
+
+  # --- Input VAT (purchase side, dated series matching the standard rate) --
+  - jurisdiction: EST
+    code: INPUT_STD
+    name: "Sisendkäibemaks — üldine määr (20%, legacy)"
+    rate_percent: 20.0000
+    direction: purchase
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "Käibemaks (VAT) Receivable"
+    effective_from: 1991-01-01  # UNVERIFIED — placeholder; see STD row above for the same caveat.
+    effective_to: 2023-12-31
+    report_box_keys: ["KMD:5"]
+
+  - jurisdiction: EST
+    code: INPUT_STD
+    name: "Sisendkäibemaks — üldine määr (22%, legacy)"
+    rate_percent: 22.0000
+    direction: purchase
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "Käibemaks (VAT) Receivable"
+    effective_from: 2024-01-01
+    effective_to: 2025-06-30
+    report_box_keys: ["KMD:5"]
+
+  - jurisdiction: EST
+    code: INPUT_STD
+    name: "Sisendkäibemaks — üldine määr (24%)"
+    rate_percent: 24.0000
+    direction: purchase
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "Käibemaks (VAT) Receivable"
+    effective_from: 2025-07-01
+    report_box_keys: ["KMD:5"]
+
+  - jurisdiction: EST
+    code: INPUT_CAP
+    name: "Sisendkäibemaks — põhivara soetamine (20%, legacy)"
+    rate_percent: 20.0000
+    direction: purchase
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "Käibemaks (VAT) Receivable"
+    effective_from: 1991-01-01  # UNVERIFIED — placeholder; see STD/INPUT_STD rows above for the same caveat.
+    effective_to: 2023-12-31
+    report_box_keys: ["KMD:5.2"]
+
+  - jurisdiction: EST
+    code: INPUT_CAP
+    name: "Sisendkäibemaks — põhivara soetamine (22%, legacy)"
+    rate_percent: 22.0000
+    direction: purchase
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "Käibemaks (VAT) Receivable"
+    effective_from: 2024-01-01
+    effective_to: 2025-06-30
+    report_box_keys: ["KMD:5.2"]
+
+  - jurisdiction: EST
+    code: INPUT_CAP
+    name: "Sisendkäibemaks — põhivara soetamine"
+    rate_percent: 24.0000
+    direction: purchase
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "Käibemaks (VAT) Receivable"
+    effective_from: 2025-07-01
+    report_box_keys: ["KMD:5.2"]
+
+  # --- OSS / IOSS marker codes (see file header) ---------------------------
+  - jurisdiction: EST
+    code: OSS_EU
+    name: "Liidu erikord (Union OSS) — B2C piiriülene käive teise liikmesriiki"
+    rate_percent: 0.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "OSS VAT Payable (foreign, per destination member state)"
+    effective_from: 2021-07-01
+    report_box_keys: ["OSS-Q:1"]
+
+  - jurisdiction: EST
+    code: IOSS_IMPORT
+    name: "Import OSS — kaupade kaugmüük (saadetise väärtus <=EUR150)"
+    rate_percent: 0.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "IOSS VAT Payable (foreign, per destination member state)"
+    effective_from: 2021-07-01  # UNVERIFIED — the 2021-07-01 EU e-commerce package date is well known but was only explicitly confirmed for OSS (not IOSS specifically) in the supplied research.
+    report_box_keys: ["OSS-Q:1"]
+
+  # --- Not reportable -------------------------------------------------------
+  - jurisdiction: EST
+    code: NTR
+    name: "Ei kuulu deklareerimisele (väljaspool käibemaksu reguleerimisala)"
+    rate_percent: 0.0000
+    direction: both
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    effective_from: 1991-01-01  # UNVERIFIED — placeholder; matches ZERO/EXEMPT/INPUT_EXEMPT/RC_DOMESTIC above. NTR ("outside VAT scope") has no relationship to VAT-rate history and must resolve for any transaction date, not just from the unrelated 2025-07-01 standard-rate change.

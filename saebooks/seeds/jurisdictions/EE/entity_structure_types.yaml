@@ -1,0 +1,101 @@
+# Estonian legal-entity / business-structure types (M1.5 · T4, EE jurisdiction seed).
+# Each local Äriregister (Business Register) structure maps to a
+# jurisdiction-neutral canonical_bucket so the engine reasons about the
+# structure family regardless of the local label. jurisdiction is the
+# 3-char reference-DB code 'EST' (directory name 'EE' is filesystem-only —
+# see saebooks/services/reference/loader.py and
+# saebooks/services/tax_return_generator.py::_JURISDICTION_TO_REFERENCE_CODE
+# for the 2-char engine code <-> 3-char reference code mapping).
+table: entity_structure_types
+key: [jurisdiction, code]
+rows:
+  - jurisdiction: EST
+    code: ou
+    local_name: Osaühing (OÜ)
+    canonical_bucket: company_limited
+    description: >-
+      Private limited company. Minimum share capital EUR 0.01 per
+      shareholder since the 2023-02-01 reform abolished the former
+      EUR 2,500 minimum; capital must be confirmed at registration
+      (no longer deferrable). Shareholders' liability limited to
+      their contribution. English: "Private Limited Company".
+
+  - jurisdiction: EST
+    code: as
+    local_name: Aktsiaselts (AS)
+    canonical_bucket: company_limited
+    description: >-
+      Public limited company. Minimum share capital EUR 25,000,
+      minimum nominal value per share EUR 1, cannot be deferred at
+      incorporation (Commercial Code / Äriseadustik). English:
+      "Public Limited Company".
+
+  - jurisdiction: EST
+    code: fie
+    local_name: Füüsilisest isikust ettevõtja (FIE)
+    canonical_bucket: sole_trader
+    description: >-
+      Sole proprietor / natural person conducting business in their
+      own name; unlimited personal liability with all personal
+      assets (no liability shield). Must register in the Commercial
+      Register. Business income taxed at the flat personal income
+      tax rate (22% for 2026) plus 33% social tax on business
+      profit, declared annually on Form E. English: "Self-Employed
+      Person / Sole Proprietor".
+
+  - jurisdiction: EST
+    code: filiaal
+    local_name: Filiaal
+    canonical_bucket: other
+    description: >-
+      Branch of a foreign company. NOT a separate legal entity — the
+      foreign parent company is fully liable for the branch's
+      obligations; no share-capital requirement. Must register in
+      the Commercial Register and appoint a director resident in the
+      EU/EEA/Switzerland. English: "Branch".
+
+  - jurisdiction: EST
+    code: tu
+    local_name: Täisühing (TÜ)
+    canonical_bucket: partnership
+    description: >-
+      General partnership. No minimum capital requirement; all
+      partners jointly and severally liable with their full personal
+      assets. English: "General Partnership".
+
+  - jurisdiction: EST
+    code: uu
+    local_name: Usaldusühing (UÜ)
+    canonical_bucket: partnership
+    description: >-
+      Limited partnership. No minimum capital requirement; at least
+      one general partner with unlimited liability plus at least one
+      limited partner liable only to the extent of their agreed
+      contribution. English: "Limited Partnership".
+
+  - jurisdiction: EST
+    code: mtu
+    local_name: Mittetulundusühing (MTÜ)
+    canonical_bucket: nonprofit
+    description: >-
+      Non-profit association. Minimum 2 founders (natural and/or
+      legal persons); registered in RIK's Register of Non-Profit
+      Associations and Foundations, NOT the Commercial Register.
+      Management board of at least 1 natural person. May not
+      distribute profit to members. English: "Non-Profit
+      Association".
+
+  - jurisdiction: EST
+    code: sa
+    local_name: Sihtasutus (SA)
+    canonical_bucket: nonprofit
+    description: >-
+      Foundation. Asset-based (no membership), founded by 1 or more
+      founders for a stated purpose; governed by the Foundations Act
+      (Sihtasutuste seadus). At least half of management board
+      members must reside in Estonia/EEA/Switzerland. Registered
+      with RIK's non-profit register. English: "Foundation". NOTE:
+      the primary-source Foundations Act text did not yield a
+      minimum-asset figure in this research pass — do not assume
+      EUR 0; treat as a follow-up if a minimum-asset figure is
+      needed.
