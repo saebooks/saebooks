@@ -1,6 +1,6 @@
 """Add franking credit columns to journal_lines, invoice_lines, and distributions.
 
-Gap PRTR-4 (medium-property-trust): Franking credits not modelled; a fully-
+Franking credits not modelled; a fully-
 franked dividend could only record the cash component, losing the imputation
 credit.  This migration adds annotation columns so operators can record the
 grossed-up income and pass franking credits through to beneficiary statements.

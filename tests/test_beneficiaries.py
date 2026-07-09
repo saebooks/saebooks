@@ -1,4 +1,4 @@
-"""Tests for the beneficiary register (gap PRTR-3).
+"""Tests for the beneficiary register.
 
 Covers:
 * DB: contact_type_enum includes BENEFICIARY value.

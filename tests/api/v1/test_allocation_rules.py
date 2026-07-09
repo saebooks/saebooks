@@ -1,6 +1,6 @@
 """Contract tests for /api/v1/allocation_rules.
 
-Gap FITC-6 (medium-fitness-chain): routes previously returned 404.
+Routes previously returned 404.
 
 Covers:
 * Feature gate: Community → 404 on all endpoints

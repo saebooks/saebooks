@@ -1,8 +1,6 @@
-"""CIVL-1 P0 regression — cross-tenant FK injection on bills.
+"""P0 regression — cross-tenant FK injection on bills.
 
-audit-trail reference: medium-civil-contractor-2026-04-27T192354Z (gap CIVL-1)
-
-The medium-civil-contractor critic landed bill 8de8b51f via POST /bills/new
+A review scenario landed a bill via POST /bills/new
 with foreign-tenant ``contact_id``, ``account_id`` and ``tax_code_id``
 values supplied verbatim. Apex's session accepted the walsh-co UUIDs and
 the line item's GST was computed at walsh's 10% rate instead of Apex's 7%.

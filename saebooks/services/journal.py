@@ -371,8 +371,7 @@ async def _check_trust_commingling(
                 "account. Rent and other funds collected in trust on behalf of clients "
                 "are not agency income — the credit must go to a trust liability account "
                 "(e.g. Landlord / Owner Trust Liability, account 2-1780). Only management "
-                "fees and commissions earned by the agency should credit revenue accounts. "
-                "See gap RLES-2."
+                "fees and commissions earned by the agency should credit revenue accounts."
             )
 
 
@@ -433,7 +432,7 @@ async def _check_psi_distribution(
             "Non-arms-length wage payment flagged for PSI review: "
             "s.86-70 ITAA97 restricts deductibility of distributions to related parties. "
             "Provide a compliance override reason (e.g. 'Business determination in place' "
-            "or 'PAYG-W withholding applied') to post this entry. (gap PSI-3)"
+            "or 'PAYG-W withholding applied') to post this entry."
         )
 
 

@@ -1,4 +1,4 @@
-"""Company hard-delete cascade tests (gap ADMIN-DELETE-1).
+"""Company hard-delete cascade tests.
 
 * 409 + blocking_refs when txns exist
 * 204 when clean

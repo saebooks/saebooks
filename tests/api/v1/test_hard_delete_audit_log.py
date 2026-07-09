@@ -1,4 +1,4 @@
-"""Schema sanity tests for audit_log (gap ADMIN-DELETE-1)."""
+"""Schema sanity tests for audit_log."""
 from __future__ import annotations
 
 import pytest

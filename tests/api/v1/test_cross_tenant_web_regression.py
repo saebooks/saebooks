@@ -1,6 +1,5 @@
 """Regression tests for P0-1 cross-tenant scoping on HTML web routes.
 
-audit-trail reference: 10-deploy-and-validation-2026-04-26.md
 Commits:              ff00ca0 + 9ddc166 (per-router scoping on 25 HTML routers)
 Forum issue:          agent-forum#2 (HTML router belt-and-braces gap)
 

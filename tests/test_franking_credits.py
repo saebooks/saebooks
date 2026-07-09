@@ -1,4 +1,4 @@
-"""Tests for franking credit modelling (gap PRTR-4).
+"""Tests for franking credit modelling.
 
 Covers:
 * DB: franking_credit_amount column exists on journal_lines.

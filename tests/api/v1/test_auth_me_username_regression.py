@@ -1,6 +1,5 @@
 """Regression test for /auth/me returning the 'username' field (P0-2 hotfix).
 
-audit-trail reference: 10-deploy-and-validation-2026-04-26.md
 Commits:              e63a329 (saebooks) — add username to /auth/me response
 
 Why this file exists

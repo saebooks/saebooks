@@ -1,6 +1,6 @@
 """Add tracking_vehicle_id to bill_lines for per-VIN floorplan cost tagging.
 
-Gap MOTR-4 (edge-motor-dealer): floorplan interest bills could only be coded
+Floorplan interest bills could only be coded
 to a GL account; no way to tag a line to a specific vehicle (VIN / stock no.).
 This column enables per-unit gross-margin reporting net of floorplan interest.
 

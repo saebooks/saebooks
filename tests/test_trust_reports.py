@@ -1,4 +1,4 @@
-"""Tests for trust account reports (gap RLES-3).
+"""Tests for trust account reports.
 
 Covers:
 * trust_cashbook: empty when no trust bank accounts exist

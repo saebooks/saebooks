@@ -1,6 +1,6 @@
 """Add retention_pct to bill_lines for civil construction AP retention.
 
-Gap CIVL-3 (medium-civil-contractor): no retention_pct field on bill lines;
+No retention_pct field on bill lines;
 controller had to track 5% retention holdback in a spreadsheet. This column
 stores the per-line retention percentage so the posting pipeline can split
 Cr AP into Trade Creditors (net payable) and Retentions Payable (withheld).

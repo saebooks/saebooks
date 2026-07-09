@@ -1,4 +1,4 @@
-"""Hard-delete tests for invoices (gap ADMIN-DELETE-1).
+"""Hard-delete tests for invoices.
 
 * admin (X-Admin: true) can hard-delete with ?hard=true → 204
 * non-admin (no X-Admin header) → 403

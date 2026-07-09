@@ -206,7 +206,7 @@ async def test_idempotent_key_conflict_on_different_body(api_client: AsyncClient
 
 
 async def test_currency_code_roundtrip(api_client: AsyncClient) -> None:
-    """currency_code stored and returned on create + patch (gap ETSY-2)."""
+    """currency_code stored and returned on create + patch."""
     r = await api_client.post(
         "/api/v1/contacts",
         json={"name": _rand_name("JPSupplier"), "contact_type": "SUPPLIER", "country": "Japan", "currency_code": "JPY"},

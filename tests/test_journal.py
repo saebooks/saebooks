@@ -542,7 +542,7 @@ _DEFAULT_TENANT = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
 async def test_trust_commingling_blocked_on_post() -> None:
-    """gap RLES-1: posting a JE that moves funds between trust and operating bank accounts
+    """Posting a JE that moves funds between trust and operating bank accounts
     must raise PostingError — commingling is a NSW Property Act breach."""
     company_id, _a, _b = await _ctx()
     uid = str(uuid.uuid4())[:6].upper()
@@ -679,7 +679,7 @@ async def test_trust_payment_to_expense_allowed() -> None:
 
 
 async def test_trust_debit_to_revenue_blocked() -> None:
-    """gap RLES-2: Dr Trust Bank / Cr Revenue must be blocked.
+    """Dr Trust Bank / Cr Revenue must be blocked.
 
     Rent collected on behalf of landlords is trust money — crediting a
     revenue account inflates BAS G1 and misrepresents agency turnover.
@@ -728,7 +728,7 @@ async def test_trust_debit_to_revenue_blocked() -> None:
 
 
 async def test_trust_debit_to_liability_allowed() -> None:
-    """gap RLES-2 positive control: Dr Trust Bank / Cr Trust Liability must post.
+    """Positive control: Dr Trust Bank / Cr Trust Liability must post.
 
     This is the correct pattern for receiving rent on behalf of a landlord.
     """
@@ -776,7 +776,7 @@ async def test_trust_debit_to_liability_allowed() -> None:
 
 
 async def test_ref_too_long_on_create_draft_raises_422() -> None:
-    """gap RLES-7: create_draft with ref >32 chars must raise PostingError (not propagate as 500)."""
+    """create_draft with ref >32 chars must raise PostingError (not propagate as 500)."""
     company_id, acct_a, acct_b = await _ctx()
     long_ref = "A" * 33
     async with AsyncSessionLocal() as session:
@@ -795,7 +795,7 @@ async def test_ref_too_long_on_create_draft_raises_422() -> None:
 
 
 async def test_ref_too_long_on_update_draft_raises_422() -> None:
-    """gap RLES-7: update_draft with ref >32 chars must raise PostingError."""
+    """update_draft with ref >32 chars must raise PostingError."""
     company_id, acct_a, acct_b = await _ctx()
     async with AsyncSessionLocal() as session:
         entry = await svc.create_draft(
@@ -821,7 +821,7 @@ async def test_ref_too_long_on_update_draft_raises_422() -> None:
 
 async def test_cross_tenant_account_rejected_on_create_draft() -> None:
     """create_draft must reject line accounts that belong to a foreign
-    company/tenant (gap PRTR-1).
+    company/tenant.
 
     Migration 0131_tenant_id_coherence_trigger now enforces at the DB
     layer that ``accounts.tenant_id == companies.tenant_id`` — so we
@@ -938,7 +938,7 @@ async def _psi_ctx() -> tuple[uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID]:
 
 
 async def test_psi_spouse_wages_blocked_on_post() -> None:
-    """gap PSI-3 negative control: Dr Wages[6-243x] with 'spouse' in description must block."""
+    """Negative control: Dr Wages[6-243x] with 'spouse' in description must block."""
     company_id, wages_id, bank_id, _other_id = await _psi_ctx()
 
     async with AsyncSessionLocal() as session:
@@ -958,7 +958,7 @@ async def test_psi_spouse_wages_blocked_on_post() -> None:
 
 
 async def test_psi_related_party_line_description_blocked() -> None:
-    """gap PSI-3: related-party indicator in line description (not entry) also triggers."""
+    """Related-party indicator in line description (not entry) also triggers."""
     company_id, wages_id, bank_id, _other_id = await _psi_ctx()
 
     async with AsyncSessionLocal() as session:
@@ -978,7 +978,7 @@ async def test_psi_related_party_line_description_blocked() -> None:
 
 
 async def test_psi_override_reason_allows_post() -> None:
-    """gap PSI-3: providing override_reason records compliance and allows post."""
+    """Providing override_reason records compliance and allows post."""
     company_id, wages_id, bank_id, _other_id = await _psi_ctx()
 
     async with AsyncSessionLocal() as session:
@@ -1002,7 +1002,7 @@ async def test_psi_override_reason_allows_post() -> None:
 
 
 async def test_psi_unrelated_contractor_wages_allowed() -> None:
-    """gap PSI-3 positive control: wages to unrelated contractor post without warning."""
+    """Positive control: wages to unrelated contractor post without warning."""
     company_id, wages_id, bank_id, _other_id = await _psi_ctx()
 
     async with AsyncSessionLocal() as session:
@@ -1022,7 +1022,7 @@ async def test_psi_unrelated_contractor_wages_allowed() -> None:
 
 
 async def test_psi_non_wages_account_not_flagged() -> None:
-    """gap PSI-3: 'spouse' in description for a non-wages account does not trigger."""
+    """'spouse' in description for a non-wages account does not trigger."""
     company_id, _wages_id, bank_id, other_id = await _psi_ctx()
 
     async with AsyncSessionLocal() as session:

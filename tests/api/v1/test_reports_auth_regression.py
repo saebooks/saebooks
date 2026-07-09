@@ -1,6 +1,5 @@
 """Regression tests for /reports/* HTML routes and /api/v1/reports/* 401 regression.
 
-audit-trail reference: 10-deploy-and-validation-2026-04-26.md
 Commits:              ff00ca0 (per-router scoping cycle)
 
 Why this file exists

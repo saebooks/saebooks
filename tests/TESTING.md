@@ -115,7 +115,7 @@ that need case-by-case judgment.
 `test_payment_allocation_invariants`, `test_invoices`,
 `test_items`, `test_tax_treatment_snapshot`,
 `test_journal_delete_audit` (resurfaced after a re-run — needs
-re-check), `test_je_cross_tenant_write_rles4`,
+re-check), `test_je_cross_tenant_write`,
 `test_admin_gate_jwt_role`, `test_payments_page`,
 `test_observability`.
 

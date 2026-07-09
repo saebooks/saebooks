@@ -1,6 +1,6 @@
 """Add retention_pct to invoice_lines for civil construction retention billing.
 
-Gap CIVL-2 (medium-civil-contractor): no retention_pct field on invoice lines;
+No retention_pct field on invoice lines;
 negative-line workaround reduced gross revenue and GST simultaneously by $22k,
 breaking the audit trail. This column stores the per-line retention percentage
 so the posting pipeline can split Dr AR into Trade Debtors (net payable) and

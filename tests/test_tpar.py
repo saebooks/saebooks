@@ -1,4 +1,4 @@
-"""Tests for TPAR report — service and router (gap CIVL-5)."""
+"""Tests for TPAR report — service and router."""
 from __future__ import annotations
 
 import uuid

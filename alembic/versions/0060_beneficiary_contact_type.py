@@ -1,6 +1,6 @@
 """Add BENEFICIARY contact type and beneficiary-specific columns.
 
-Gap PRTR-3 (medium-property-trust persona): /beneficiaries 404, no
+/beneficiaries 404, no
 BENEFICIARY contact type, no TFN or share-percentage fields.
 
 Changes:

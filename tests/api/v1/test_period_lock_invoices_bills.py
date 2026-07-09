@@ -1,4 +1,4 @@
-"""Period-lock enforcement tests for invoices and bills (gap CIVL-4).
+"""Period-lock enforcement tests for invoices and bills.
 
 CIVL-4 (P1): invoices and bills dated inside a locked period were accepted
 without warning. The fix adds a period-lock check to api_create() for both
@@ -112,7 +112,7 @@ async def _make_client(company_id: uuid.UUID) -> AsyncClient:
 async def test_invoice_create_blocked_by_period_lock() -> None:
     """POST /invoices with issue_date inside locked period must return 422.
 
-    Gap CIVL-4 (P1): before the fix api_create() had no period-lock check
+    Before the fix api_create() had no period-lock check
     and accepted backdated invoice DRAFTs silently.
     """
     cid, contact_id, income_id = await _create_locked_company()
@@ -150,7 +150,7 @@ async def test_invoice_create_blocked_by_period_lock() -> None:
 async def test_bill_create_blocked_by_period_lock() -> None:
     """POST /bills with issue_date inside locked period must return 422.
 
-    Gap CIVL-4 (P1): same guard applied to bills as per the finding.
+    Same guard applied to bills as per the finding.
     """
     cid, contact_id, expense_id = await _create_locked_company()
 

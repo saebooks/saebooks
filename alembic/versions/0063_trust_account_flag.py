@@ -1,6 +1,6 @@
 """Add is_trust_account flag to accounts table.
 
-Gap RLES-1 (edge-real-estate): vendor deposits were movable from trust to
+Vendor deposits were movable from trust to
 operating in a single JE with no validation. This boolean enables the journal
 posting service to detect and block such commingling.
 

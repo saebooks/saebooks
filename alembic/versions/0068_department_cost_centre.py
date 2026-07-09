@@ -1,6 +1,6 @@
 """Add departments and cost_centres tables; add FK columns to journal_lines.
 
-Gap FITC-5 (medium-fitness-chain): pl_by_segment returned zero rows for
+pl_by_segment returned zero rows for
 department and cost_centre because the columns didn't exist on journal_lines.
 Project segmentation was the only working dimension. This migration adds the
 two dimension tables and the nullable FK columns so those segments now work.

@@ -1,4 +1,4 @@
-"""Audit log for hard-delete forensics (gap ADMIN-DELETE-1).
+"""Audit log for hard-delete forensics.
 
 Every admin hard-delete inserts one row here with a full JSONB snapshot of
 the deleted row. The live row is then physically removed. The snapshot

@@ -1,8 +1,6 @@
-"""BKPR-1 P0 regression — cross-tenant FK injection on invoices.
+"""P0 regression — cross-tenant FK injection on invoices.
 
-audit-trail reference: edge-motor-dealer-20260427T144846Z (gap BKPR-1)
-
-The edge-motor-dealer critic POSTed an invoice via POST /invoices/new with
+A review scenario POSTed an invoice via POST /invoices/new with
 foreign-tenant ``contact_id``, ``account_id``, and ``tax_code_id`` values
 supplied verbatim. The session accepted the walsh-co UUIDs without any
 tenant-scope check.

@@ -2,7 +2,7 @@
 
 Why these tests exist
 ---------------------
-Alex Morgan's API critic (P0-4, audit-trail/05-api-critic-alex-morgan.md)
+An API review (P0-4)
 found that 10 parallel POSTs with the same ``X-Idempotency-Key`` produced
 1x success + 9x HTTP 500 (worker crashes from DB unique-constraint
 violations).  Simultaneously, the same key with a different body silently

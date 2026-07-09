@@ -271,7 +271,7 @@ async def update_company(
 
 
 # ---------------------------------------------------------------------------
-# Hard-delete (admin only — gap ADMIN-DELETE-1)
+# Hard-delete (admin only)
 # ---------------------------------------------------------------------------
 
 # Tables that hold a company_id FK — checked at hard-delete pre-flight.

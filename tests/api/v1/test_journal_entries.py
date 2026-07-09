@@ -912,10 +912,8 @@ async def test_create_je_rejects_cross_tenant_account(
     api_client: AsyncClient,
     account_ids: dict[str, str],
 ) -> None:
-    """PRTR-1: POST /api/v1/journal_entries with a line referencing an account
+    """POST /api/v1/journal_entries with a line referencing an account
     from a different tenant must return 422, not 201/303.
-
-    Carousel run: 20260427T203251Z, gap PRTR-1 (cross_tenant_write).
     """
     foreign_tid = uuid.uuid4()
     foreign_cid = uuid.uuid4()
@@ -991,9 +989,7 @@ async def test_create_je_reference_too_long_returns_422(
     api_client: AsyncClient,
     account_ids: dict[str, str],
 ) -> None:
-    """CAFE-1: POST with reference > 32 chars must return 422, not 500.
-
-    Gap CAFE-1 (validation_ux), carousel run 20260427T210813Z.
+    """POST with reference > 32 chars must return 422, not 500.
     """
     payload = _entry_payload(account_ids, reference="X" * 33)
     r = await api_client.post("/api/v1/journal_entries", json=payload)
@@ -1037,7 +1033,7 @@ async def test_create_je_reference_at_max_length_accepted(
 
 
 # ---------------------------------------------------------------------------
-# PSI-5: period-lock enforcement via POST /{id}/post (gap PSI-5 carousel 20260427T220251Z)
+# Period-lock enforcement via POST /{id}/post
 # ---------------------------------------------------------------------------
 
 
@@ -1047,7 +1043,7 @@ async def test_je_post_blocked_by_period_lock(
 ) -> None:
     """POST /{id}/post must return 4xx when the JE date falls inside a locked period.
 
-    Gap PSI-5 (P1): before the fix, PostingError from _check_period_lock()
+    Before the fix, PostingError from _check_period_lock()
     escaped api_post() uncaught and produced a 500 instead of a 4xx, leaving
     the entry DRAFT but returning no useful error to the caller. The fix
     translates PostingError → JournalEntryError so the router returns 422.
@@ -1170,7 +1166,7 @@ async def test_je_post_blocked_by_period_lock(
 
 
 # ---------------------------------------------------------------------------
-# FITC-4: period-lock gate + override_reason bypass (gap FITC-4 from medium-fitness-chain)
+# Period-lock gate + override_reason bypass
 # ---------------------------------------------------------------------------
 
 
@@ -1180,7 +1176,7 @@ async def test_fitc4_period_lock_gate_and_override(
 ) -> None:
     """POST /{id}/post must reject entries dated inside a locked period (FITC-4).
 
-    Gap FITC-4 (P1): the period_locks table was empty on the dev instance so
+    The period_locks table was empty on the dev instance so
     every entry_date was accepted. The fix seeds Q1 2026 (locked_through
     2026-03-31) and exposes override_reason in the /post request body so a
     bookkeeper can still post with an explicit justification.

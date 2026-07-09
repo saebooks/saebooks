@@ -1,11 +1,8 @@
-"""RLES-4 P0 regression — cross-tenant FK injection on journal entry lines.
+"""P0 regression — cross-tenant FK injection on journal entry lines.
 
-audit-trail reference: edge-real-estate-20260427T182650Z (gap RLES-4)
-
-The edge-real-estate critic accepted journal entry d39d814b via the API
-with a line referencing account 85202b25 (walsh-co bank account) from a
-different tenant (acct_tenant=fd77be6f) while the JE belonged to
-chen_apex (je_tenant=37bfa91f).
+A review scenario accepted a journal entry via the API with a line
+referencing a bank account owned by a different tenant (walsh) while
+the JE belonged to another tenant (apex).
 
 The fix in ``services/journal_entries.py`` calls ``_validate_accounts_tenant``
 before any INSERT so accounts from foreign tenants are rejected. This file
@@ -38,7 +35,7 @@ pytestmark = pytest.mark.postgres_only
 
 
 @pytest.fixture
-async def rles4_seed() -> dict:
+async def cross_tenant_seed() -> dict:
     """Create two tenants — apex (home) and walsh (foreign) — each with
     company + two accounts (ASSET + EXPENSE). Returns IDs for line assembly.
     """
@@ -138,8 +135,8 @@ async def rles4_seed() -> dict:
 # ---------------------------------------------------------------------------
 
 
-async def test_je_create_same_tenant_succeeds(rles4_seed: dict) -> None:
-    apex = rles4_seed["apex"]
+async def test_je_create_same_tenant_succeeds(cross_tenant_seed: dict) -> None:
+    apex = cross_tenant_seed["apex"]
 
     async with AsyncSessionLocal() as session:
         entry = await svc.create(
@@ -165,13 +162,12 @@ async def test_je_create_same_tenant_succeeds(rles4_seed: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_je_create_foreign_tenant_account_rejected(rles4_seed: dict) -> None:
-    """RLES-4 core regression: JE line with walsh-co account in apex session must
-    raise JournalEntryError — the same scenario as JE d39d814b from the
-    edge-real-estate carousel run.
+async def test_je_create_foreign_tenant_account_rejected(cross_tenant_seed: dict) -> None:
+    """Core regression: a JE line with a walsh account in an apex session must
+    raise JournalEntryError.
     """
-    apex = rles4_seed["apex"]
-    walsh = rles4_seed["walsh"]
+    apex = cross_tenant_seed["apex"]
+    walsh = cross_tenant_seed["walsh"]
 
     async with AsyncSessionLocal() as session:
         with pytest.raises(svc.JournalEntryError) as exc:
@@ -199,8 +195,8 @@ async def test_je_create_foreign_tenant_account_rejected(rles4_seed: dict) -> No
 # ---------------------------------------------------------------------------
 
 
-async def test_je_create_unknown_account_rejected(rles4_seed: dict) -> None:
-    apex = rles4_seed["apex"]
+async def test_je_create_unknown_account_rejected(cross_tenant_seed: dict) -> None:
+    apex = cross_tenant_seed["apex"]
 
     async with AsyncSessionLocal() as session:
         with pytest.raises(svc.JournalEntryError):
@@ -223,10 +219,10 @@ async def test_je_create_unknown_account_rejected(rles4_seed: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_je_update_foreign_tenant_account_rejected(rles4_seed: dict) -> None:
+async def test_je_update_foreign_tenant_account_rejected(cross_tenant_seed: dict) -> None:
     """RLES-4: PATCH path must also validate account tenant ownership."""
-    apex = rles4_seed["apex"]
-    walsh = rles4_seed["walsh"]
+    apex = cross_tenant_seed["apex"]
+    walsh = cross_tenant_seed["walsh"]
 
     # First create a clean entry
     async with AsyncSessionLocal() as session:
