@@ -12,6 +12,7 @@ from sqlalchemy import select, text
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.business_identifier import BusinessIdentifier
 from saebooks.models.company import Company
+from saebooks.models.tenant import Tenant
 from saebooks.services import business_identifiers as bi_svc
 
 _GLOBAL_JURISDICTIONS_SEED = (
@@ -121,23 +122,78 @@ async def test_rls_policy_installed_on_business_identifiers() -> None:
 
 
 async def test_backfill_seeded_au_abn_from_companies_abn() -> None:
-    """Migration backfill: any company with companies.abn set should have
-    a matching scheme='au_abn' row after migration. We tolerate the seed
-    company having no ABN — only assert the row exists when the column
-    is populated.
+    """Migration 0145 backfill: any company with companies.abn set at
+    migration time gets a matching scheme='au_abn' business_identifiers
+    row (see ``alembic/versions/0145_business_identifiers.py::upgrade``).
+
+    Hermetic by construction, not by asserting against the shared
+    suite-global seed company (previously: skip-if-no-ABN /
+    skip-if-no-backfilled-row against ``_seed_company()``). That made the
+    test order-dependent: ``tests/api/v1/test_tax_returns_lodge_bas.py``
+    mutates the shared seed company's ``abn`` directly (and leaves it set
+    after the last test in that file runs), collected before this file
+    (``tests/api`` sorts before ``tests/services``). In the full suite
+    that leak makes ``co.abn`` truthy but leaves no migration-time
+    ``au_abn`` row for it (the seed company is created at app-startup,
+    strictly AFTER migrations run, so migration 0145's backfill never
+    saw it) — so the two skip guards no longer protect the assertion
+    the way they do in isolation.
+
+    Instead of depending on global seed-company state, this test creates
+    its own tenant + company with a known ABN, then re-runs migration
+    0145's exact backfill INSERT (scoped to just this company via
+    ``AND c.id = :company_id``) against it, and asserts the resulting
+    row. This proves the backfill SQL's behaviour directly and is
+    immune to what any other test does to any other company.
     """
-    _tenant_id, company_id = await _seed_company()
+    tenant_id = uuid.uuid4()
+    company_id = uuid.uuid4()
+    suffix = uuid.uuid4().hex[:8]
+    abn = "51824753556"
+
     async with AsyncSessionLocal() as session:
-        co = await session.get(Company, company_id)
-        if not co or not co.abn:
-            pytest.skip("seed company has no ABN to backfill against")
+        session.add(
+            Tenant(
+                id=tenant_id,
+                name=f"business-identifiers-backfill-{suffix}",
+                slug=f"bi-backfill-{suffix}",
+            )
+        )
+        await session.flush()
+        session.add(
+            Company(
+                id=company_id,
+                tenant_id=tenant_id,
+                name=f"BI178-backfill-co-{suffix}",
+                abn=abn,
+                base_currency="AUD",
+                fin_year_start_month=7,
+            )
+        )
+        await session.commit()
+
+        # The exact backfill statement from 0145_business_identifiers.py,
+        # scoped to just the company created above.
+        await session.execute(
+            text(
+                "INSERT INTO business_identifiers "
+                "  (id, company_id, tenant_id, scheme, value, created_at, updated_at) "
+                "SELECT gen_random_uuid(), c.id, c.tenant_id, 'au_abn', c.abn, NOW(), NOW() "
+                "FROM companies c "
+                "WHERE c.abn IS NOT NULL "
+                "  AND c.abn <> '' "
+                "  AND c.id = :company_id "
+                "  AND NOT EXISTS ("
+                "    SELECT 1 FROM business_identifiers bi "
+                "    WHERE bi.company_id = c.id AND bi.scheme = 'au_abn'"
+                "  )"
+            ).bindparams(company_id=company_id)
+        )
+        await session.commit()
+
         existing = await bi_svc.get(session, company_id, "au_abn")
-        if existing is None:
-            # The backfill runs at MIGRATION time; the test seed company is
-            # created at app startup AFTER migrations, so it is never covered.
-            # Skip deterministically rather than flake on test ordering.
-            pytest.skip("no migration-backfilled au_abn row for the runtime seed company")
-        assert existing.value == co.abn
+        assert existing is not None
+        assert existing.value == abn
 
 
 # ---------------------------------------------------------------------------

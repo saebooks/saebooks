@@ -29,6 +29,16 @@ invalid with a line-numbered error rather than silently dropped.
 
 Depreciation model IDs are the catalogue slugs (``asset_5_year_linear``,
 ``asset_dv_30``, etc.).
+
+Wave A note (2026-07-10): this is the FLAG_ASSET_V2 v2 action (CSV bulk
+import) per the planned-modules build plan, but it has ZERO API/web/MCP
+callers today -- confirmed by grep across saebooks/ (see the Wave A
+build report). Not even ``api/v1/imports.py``'s generic ``kind``
+dispatcher knows about it (``_ALL_KINDS`` has no assets entry). Nothing
+to attach ``require_feature`` to yet. When a route/kind is added, gate
+it unconditionally with ``require_feature(FLAG_ASSET_V2)`` -- CSV
+bulk-importing a whole register is a v2-scale operation regardless of
+which depreciation models the rows select.
 """
 from __future__ import annotations
 

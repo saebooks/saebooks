@@ -1,13 +1,10 @@
-"""BAS / IAS (Activity Statement) SBR document generator — COMMUNITY EDITION STUB.
+"""BAS SBR document generator — PUBLIC SHIM (generation stubbed).
 
-The community (AGPL) edition ships the BAS *figure* mapping
-(``BasFigures`` — normalises the engine's computed labels onto the public
-BAS label codes G1/G2/G3/G10/G11/1A/1B/9) but not the regulator-facing XBRL
-*document* generator. Building + validating the actual SBR Activity
-Statement business document (concept QNames, taxonomy namespace, schemaRef
-per the ATO SBR MIG, EVTE conformance) is a commercial SAE Books feature —
-see CHARTER.md / LICENSING.md. ``build_bas_document`` raises
-``NotImplementedError`` in this edition.
+The ``BasFigures`` input contract (normalised BAS GST labels) stays real — it is
+pure data mapping the engine's tax figures onto the label set, and kept code
+(``api/v1/tax_returns.py``) imports it. The XBRL *generation*
+(``build_bas_document``) is part of the certified ATO transmission path and
+raises ``NotImplementedError("commercial feature")`` in the open engine.
 """
 from __future__ import annotations
 
@@ -16,6 +13,18 @@ from decimal import Decimal
 from typing import Any
 
 from saebooks.services.lodgement.sbr.xbrl import ReportingContext
+
+_COMMERCIAL = (
+    "commercial feature: ATO SBR BAS document generation is not available in "
+    "the open engine"
+)
+
+#: Marks this module as the open-engine PUBLIC SHIM (certified ATO SBR XBRL
+#: transmission stubbed out). The private build's real generator never defines
+#: this, so tests can ``skipif(getattr(bas, "__OPEN_ENGINE_STUB__", False), ...)``
+#: to auto-skip the certified-transmission assertion in the open tree while still
+#: running it (unchanged) in the private build.
+__OPEN_ENGINE_STUB__ = True
 
 
 def _dec(value: Any) -> Decimal:
@@ -58,18 +67,16 @@ class BasFigures:
 
     @classmethod
     def from_figures_json(cls, figures: dict[str, Any]) -> BasFigures:
-        """Build from a ``tax_returns.figures`` JSONB dict, tolerant of key style.
-
-        Accepts label keys in any of: ``G1``/``g1``, ``1A``/``label_1a``/``1a``.
-        Unknown keys are ignored; missing labels default to 0.
-        """
-        norm = {str(k).lower().replace("-", "").replace("_", ""): v for k, v in figures.items()}
+        """Build from a ``tax_returns.figures`` JSONB dict, tolerant of key style."""
+        norm = {
+            str(k).lower().replace("-", "").replace("_", ""): v
+            for k, v in figures.items()
+        }
 
         def pick(*keys: str) -> Decimal:
             for k in keys:
                 if k in norm:
                     val = norm[k]
-                    # tolerate nested {"amount": x} (BASLine-style) JSON
                     if isinstance(val, dict) and "amount" in val:
                         val = val["amount"]
                     return _dec(val)
@@ -87,16 +94,4 @@ class BasFigures:
 
 
 def build_bas_document(figures: BasFigures, ctx: ReportingContext) -> bytes:
-    """Render a BAS/IAS Activity Statement as XBRL instance bytes.
-
-    COMMUNITY EDITION STUB — always raises. Building + validating the
-    regulator-conformant SBR Activity Statement business document (the
-    real ATO taxonomy concepts, schemaRef, and EVTE-tested structure) is
-    a commercial SAE Books feature; the community edition ships the box
-    definitions and ``BasFigures`` mapping above but not this generator.
-    """
-    raise NotImplementedError(
-        "Certified e-lodgement is a commercial SAE Books feature; the community "
-        "edition ships box definitions + the return calculator but not the "
-        "regulator transmission adapters. See CHARTER.md / LICENSING.md."
-    )
+    raise NotImplementedError(_COMMERCIAL)

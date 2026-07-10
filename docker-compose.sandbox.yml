@@ -1,0 +1,28 @@
+# M2 delegated-module SANDBOX override (throwaway).
+# Layered on docker-compose.yml with:
+#   docker compose -p saebooks-m2-sandbox -f docker-compose.yml -f docker-compose.sandbox.yml --profile modules ...
+#
+# Purpose:
+#  1. Turn delegation ON — set the three *_BASE_URL vars on the engine ONLY
+#     (never in the shared .env, or the modules would recurse into themselves).
+#  2. Publish NO host ports — clear the base compose's 8042:8000 with !reset.
+services:
+  app:
+    ports: !reset []
+    # Sandbox-only: drop the base compose's live-source bind mount for
+    # ./saebooks. That mount shadows the image's baked-in generated
+    # saebooks/grpc_gen/ (gitignored, produced by `protoc` at build time
+    # per Dockerfile) with the host checkout, which does NOT have
+    # grpc_gen generated locally -> ModuleNotFoundError at boot
+    # (saebooks.connect_app imports saebooks.grpc_gen). This sandbox is
+    # verifying the built image's delegation behaviour, not live-editing
+    # source, so we want the baked image contents intact.
+    volumes: !reset
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+      - ./tests:/app/tests
+      - ${SAEBOOKS_BACKUP_DIR:-/home/youruser/saebooks-backups}:/app/backups:ro
+    environment:
+      CAPTURE_BASE_URL: "http://capture:8080"
+      PREACCOUNTING_BASE_URL: "http://preaccounting:8080"
+      PLATFORM_BASE_URL: "http://platform:8080"

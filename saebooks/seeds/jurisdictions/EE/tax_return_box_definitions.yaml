@@ -10,7 +10,11 @@
 # feeder_tax_codes are company-side TaxCode.reporting_type tags (NOT
 # RefTaxCode.code strings) — this seed defines the EE convention:
 # standard / standard_legacy_20 / standard_legacy_22 / reduced_13 /
-# reduced_9 / reduced_5_legacy / zero_rated / exempt / capital.
+# reduced_9 / reduced_5_legacy / exempt / capital, plus (KMD-formula
+# support Packet 2, see below) zero_ic_goods / zero_ic_services /
+# zero_export / zero_traveller (replacing the old single "zero_rated")
+# and input_import. See tax_codes.yaml's header for the full convention
+# list, including the not-yet-postable RC/installation leaves.
 #
 # Box-code convention: EMTA's own KMD form uses superscript sub-box
 # notation (1¹, 1², 2¹, 2², 4¹) and dotted sub-totals (3.1, 3.1.1, 3.2,
@@ -21,22 +25,99 @@
 # — cross-checked for consistency as part of this seed's validation.
 #
 # Aggregation kind per box: the rate-bucketed taxable-value boxes
-# (1, 1-1, 1-2, 2, 2-1, 2-2, 3, 8), the input-VAT total (5), and the
-# output-VAT total (4, a plain sum of tax_amount across every sale-side
-# rate-bucket reporting_type — NOT a box-combining formula, despite its
-# box_label reading like one: 24%×1 + 20%×1-1 + ... is arithmetically
-# identical to summing tax_amount over codes
-# [standard, standard_legacy_20, standard_legacy_22, reduced_13,
-# reduced_9, reduced_5_legacy] within the income bucket) all map cleanly
-# onto the generic sum_taxable_for_codes / sum_tax_amount_for_codes
-# grammar (mirrors AU's G1/G2/G3/1A/1B pattern). Every other KMD box is a
-# genuine cross-box formula (4-1, 12, 13), an informational sub-total/
-# cross-check (3.1, 3.1.1, 3.2, 3.2.1, 5.1-5.4, 6, 6.1, 7, 7.1, 9) or an
-# adjustment entry (10, 11) with no single-bucket ledger-aggregation
-# shape — these are seeded with aggregation "manual" (a valid, documented
-# kind per TaxReturnBoxDefinition's own comment: "... | formula:<expr> |
-# manual"), which parses cleanly via _parse_box_definition without
-# attempting the unimplemented formula: prefix.
+# (1, 1-1, 1-2, 2, 2-1, 2-2, 3, 8), the input-VAT total (5), all map
+# cleanly onto the generic sum_taxable_for_codes / sum_tax_amount_for_codes
+# grammar (mirrors AU's G1/G2/G3/1A/1B pattern).
+#
+# KMD-formula support Packet 2 (see
+# ~/.claude/plans/kmd-formula-support-scope.md §2/§7 Packet 2) refines this
+# further, using the `formula` aggregation kind Packet 1 added to
+# services.tax_return_generator (box arithmetic: box references, + - *,
+# max(0, <expr>) — see that module's _FormulaParser docstring):
+#
+#   * Box 4 (output VAT) is now a RATE-FORMULA box: `0.24*KMD:1 +
+#     0.20*KMD:1-1 + 0.22*KMD:1-2 + 0.09*KMD:2 + 0.05*KMD:2-1 +
+#     0.13*KMD:2-2` — [FORM] Lahter 4's own definition, matching its
+#     box_label. For a domestic-only company (no reverse-charge
+#     acquisitions — RC-FANOUT is Packet 3) this is arithmetically
+#     identical to the old `sum_tax_amount_for_codes:income` sum (scope
+#     §3.3 confirms Σtax_amount ≡ Σrate×base to the cent with no RC in
+#     play), so adopting the rate-derived form now — one packet earlier
+#     than the scope's own §3.3 recommendation of "flip in Packet 3
+#     alongside RC-FANOUT" — is a safe, numerically-inert sequencing
+#     choice: it exercises the formula engine on a KMD box for real,
+#     while box 4's *value* is unchanged for every domestic-only period.
+#   * Boxes 12 (payable) and 13 (refund) are BOX-FORMULA: both share the
+#     one signed net N = box4 + box4-1 − box5 + box10 − box11
+#     ([FORM] Lahtrites 12/13), split as `max(0, N)` / `max(0, -N)` — the
+#     scope's decisive 12/13 finding (exactly one side is non-zero).
+#   * Boxes 3.1, 3.1.1, 3.2, 3.2.1 (zero-rate sub-totals), 5.1/5.2
+#     (input-VAT sub-totals), 6/6.1/7/7.1 (informative acquisition
+#     sub-totals) and 9 (informative §41^1/install-elsewhere supply) are
+#     now CODES-SEED: the same sum_taxable_for_codes/sum_tax_amount_for_codes
+#     grammar as boxes 1-8, pointed at finer feeder_tax_codes leaves that
+#     tax_codes.yaml's header now documents (see that file for the split
+#     of the old single "zero_rated" convention into
+#     zero_ic_goods/zero_ic_services/zero_export/zero_traveller, plus the
+#     new "input_import" leaf). Boxes 6/6.1/7/7.1/9's feeder tags
+#     (rc_eu_acq_goods, rc_eu_acq_services, ic_acq_exempt, rc_domestic_acq,
+#     ee_acq_foreign, rc_domestic_supply, install_other_ms) name the
+#     company-side TaxCode.reporting_type convention a reverse-charge/
+#     installation posting would need to carry; no company-side EE
+#     tax-code provisioning or posting-dispatcher exists yet to actually
+#     produce lines tagged with them (that is Packet 3's prerequisite,
+#     scope §3.4 point 1) — until then these boxes correctly read 0 for
+#     every domestic-only company, which is the right answer, not a
+#     placeholder.
+#   * Boxes 4-1, 10, 11, 5.3, 5.4 stay aggregation "manual" — see the
+#     per-row comments below for why each has no ledger-bucket shape.
+#     NOTE (deviation from the scope's own §2 disposition table, flagged
+#     per this packet's brief): the scope marks 5.3/5.4 as "CODES-SEED
+#     (amount) + MANUAL (count)" — i.e. it expected an input_car_100 /
+#     input_car_50 feeder split for the deductible amount, leaving only
+#     the non-monetary "Autode arv" (car count) manual. This packet's
+#     brief narrowed that to "5.3, 5.4 manual BY DESIGN" in full (amount
+#     included) — deferring the car-apportionment feeder split rather
+#     than introducing two more reporting_type leaves this packet's box
+#     list didn't call for. The seed is unchanged for 5.3/5.4 pending
+#     that follow-up; nothing here blocks adding it later exactly the way
+#     5.1/5.2 were just added.
+#
+# KMD-formula support Packet 3 (RC-FANOUT, see scope §3.4) closes the
+# gap Packet 2's box 6/6.1/7/7.1/9 comment (above) flagged: the
+# per-jurisdiction posting dispatcher now exists
+# (services.journal._apply_tax_treatment resolves Company.jurisdiction
+# instead of hardcoding AU) and services.tax_engine.ee.EETaxEngine emits
+# TWO tax components (output + input) for a line tagged
+# "rc_eu_acq_goods"/"rc_eu_acq_services" — so those two tags are now
+# genuinely postable and reach boxes 1 and 5, not just the informative
+# box 6/6.1 they already fed:
+#   * Boxes 1 and 5 are now themselves BOX-FORMULA, each summing an
+#     internal-only "*_DOMESTIC" ledger box (the exact pre-Packet-3
+#     recipe, unchanged) with a new "*_RC" ledger box that reads off the
+#     generator's new role-based ("output"/"input") bucket kind — see
+#     tax_return_generator._aggregate_ledger_by_box's docstring for why
+#     this needs two summed boxes rather than one box spanning both
+#     query paths, and why it leaves the domestic-only golden figures
+#     byte-identical (the "*_RC" boxes read 0 with no RC postings). Box
+#     4's rate-formula needed NO change — 0.24*KMD:1 auto-includes the
+#     RC output VAT the moment box 1 includes the RC base, which is
+#     exactly the payoff scope §3.3 predicted from adopting the
+#     rate-derived box 4 one packet early.
+#   * Scope narrowing (flagged): this packet wires RC-FANOUT for the
+#     CURRENT standard rate (24%, tags rc_eu_acq_goods/rc_eu_acq_services)
+#     only — boxes 2/2-2 (9%/13%) and the legacy-rate boxes 1-1/1-2
+#     do NOT gain a role-based RC contribution in this packet (their
+#     "(historical)"/reduced-rate RC variants would need per-rate
+#     reporting_type tags this packet's required test list did not call
+#     for — see the "1_RC"/"5_RC" row comments and this packet's build
+#     report). Boxes 6/6.1/7/7.1/9 are unchanged from Packet 2 — they
+#     were already CODES-SEED (account-type "purchase"/"income" bucket,
+#     reading the RC line's net directly) and need no role-based query.
+#
+# KMD-INF (invoice annex) and TSD (payroll return) remain entirely
+# "manual" — no ledger-bucket aggregation shape exists for either (see
+# their own section header below) — untouched by Packet 2 or Packet 3.
 #
 # KMD-INF (the >=EUR1,000-per-counterparty invoice annex) and TSD (the
 # payroll/withholding/social-tax return, main form + 8 annexes/Lisa) have
@@ -59,9 +140,55 @@ rows:
     return_type: KMD
     box_code: "1"
     box_label: "24% määraga maksustatavad toimingud ja tehingud"
+    # Packet 3 (RC-FANOUT, scope §3.4): [FORM] Lahtrites 1, 2 ja 2^2
+    # juhis declares intra-Community acquisitions/self-assessed §7
+    # reverse-charge purchases IN box 1 alongside domestic 24% sales —
+    # box 1 is now a BOX-FORMULA summing two internal-only ledger boxes
+    # below: "1_DOMESTIC" (the OLD box-1 recipe verbatim, account-type
+    # bucket, unchanged) + "1_RC" (the new role-based RC contribution).
+    # Kept as two summed boxes rather than one box spanning both query
+    # paths — see _aggregate_ledger_by_box's docstring for why bucket
+    # kinds don't mix within a single box, and why this split leaves the
+    # domestic-only value byte-identical (1_RC reads 0 with no RC
+    # postings, exactly reproducing Packet 2's golden figure).
+    aggregation: formula
+    formula: "KMD:1_DOMESTIC + KMD:1_RC"
+    display_order: 1
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "1_DOMESTIC"
+    box_label: "(internal) 24% domestic — pre-Packet-3 box-1 recipe, unchanged"
     aggregation: "sum_taxable_for_codes:income:gst_exclusive"
     feeder_tax_codes: ["standard"]
-    display_order: 1
+    display_order: 101
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "1_RC"
+    box_label: "(internal) 24% reverse-charge EU-acquisition base — feeds box 1 + box 4"
+    # Role-based ("output") bucket, Packet 3: matches a line's
+    # OUTPUT-role tax component regardless of the posting account's
+    # type — this is what lets a purchase-account EU-acquisition line
+    # (services.tax_engine.ee.EETaxEngine's reverse-charge fan-out)
+    # contribute its base to an output-side box. feeder_tax_codes are
+    # the SAME company-side reporting_type tags box 6/6.1 already read
+    # (see this file's header + tax_codes.yaml's header) — current
+    # standard rate (24%) only; the legacy-rate/historical RC variant
+    # (mirroring box 1-1/1-2's own "(historical)" scoping) is
+    # deliberately NOT built in this packet — see this packet's build
+    # report. Reads 0 for a domestic-only company (no matching
+    # component exists), so box 1's formula above reproduces the
+    # Packet 2 golden figure exactly.
+    # Finding 1 (rate-aware RC routing): pinned to the 24% applied rate
+    # via the "@24" qualifier so a 9%/13% EU-acquisition (same
+    # reporting_type tag, different rate) lands in box 2_RC / 2-2_RC
+    # instead — the rate, not the tag, discriminates. box 4's rate-formula
+    # then taxes THIS base at 0.24 (0.24*KMD:1) and the 9%/13% bases at
+    # 0.09*KMD:2 / 0.13*KMD:2-2, each correct.
+    aggregation: "sum_taxable_for_codes:output@24:gst_exclusive"
+    feeder_tax_codes: ["rc_eu_acq_goods", "rc_eu_acq_services"]
+    display_order: 102
 
   - jurisdiction: EST
     return_type: KMD
@@ -83,9 +210,31 @@ rows:
     return_type: KMD
     box_code: "2"
     box_label: "9% määraga maksustatavad toimingud ja tehingud"
+    # Finding 1 (rate-aware RC routing): [FORM] "Lahtrites 1, 2 ja 2^2"
+    # declares reverse-charge acquisitions in boxes 1/2/2-2 BY RATE — a 9%
+    # EU-acquisition base belongs here, not in box 1. Like box 1, box 2 is
+    # now a BOX-FORMULA summing a domestic leg (the old recipe verbatim)
+    # and a rate-pinned RC leg. Byte-identical for a domestic-only company
+    # (2_RC reads 0 with no 9% RC postings).
+    aggregation: formula
+    formula: "KMD:2_DOMESTIC + KMD:2_RC"
+    display_order: 4
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "2_DOMESTIC"
+    box_label: "(internal) 9% domestic — pre-finding-1 box-2 recipe, unchanged"
     aggregation: "sum_taxable_for_codes:income:gst_exclusive"
     feeder_tax_codes: ["reduced_9"]
-    display_order: 4
+    display_order: 104
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "2_RC"
+    box_label: "(internal) 9% reverse-charge EU-acquisition base — feeds box 2 + box 4"
+    aggregation: "sum_taxable_for_codes:output@9:gst_exclusive"
+    feeder_tax_codes: ["rc_eu_acq_goods", "rc_eu_acq_services"]
+    display_order: 105
 
   - jurisdiction: EST
     return_type: KMD
@@ -99,58 +248,112 @@ rows:
     return_type: KMD
     box_code: "2-2"
     box_label: "13% määraga maksustatavad toimingud ja tehingud"
+    # Finding 1 (rate-aware RC routing): 13% ("2^2" on [FORM]) — the third
+    # of the three current positive-rate output boxes reverse charge feeds.
+    # Same DOMESTIC + rate-pinned-RC split as boxes 1 and 2.
+    aggregation: formula
+    formula: "KMD:2-2_DOMESTIC + KMD:2-2_RC"
+    display_order: 6
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "2-2_DOMESTIC"
+    box_label: "(internal) 13% domestic — pre-finding-1 box-2-2 recipe, unchanged"
     aggregation: "sum_taxable_for_codes:income:gst_exclusive"
     feeder_tax_codes: ["reduced_13"]
-    display_order: 6
+    display_order: 106
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "2-2_RC"
+    box_label: "(internal) 13% reverse-charge EU-acquisition base — feeds box 2-2 + box 4"
+    aggregation: "sum_taxable_for_codes:output@13:gst_exclusive"
+    feeder_tax_codes: ["rc_eu_acq_goods", "rc_eu_acq_services"]
+    display_order: 107
 
   - jurisdiction: EST
     return_type: KMD
     box_code: "3"
     box_label: "0% määraga maksustatavad toimingud ja tehingud, sh"
     aggregation: "sum_taxable_for_codes:income:gst_exclusive"
-    feeder_tax_codes: ["zero_rated"]
+    # Packet 2: the old single "zero_rated" tag is split into its four
+    # KMD sub-total leaves (box 3.1/3.1.1/3.2/3.2.1 below) — box 3 is the
+    # union of all four, unchanged in value from the pre-split single-tag
+    # sum, just now decomposed. See tax_codes.yaml's header for the tag
+    # convention.
+    feeder_tax_codes: ["zero_ic_goods", "zero_ic_services", "zero_export", "zero_traveller"]
     display_order: 7
 
   - jurisdiction: EST
     return_type: KMD
     box_code: "3.1"
     box_label: "kauba ühendusesisene käive ja teise liikmesriigi maksukohustuslasele osutatud teenuste käive kokku"
-    aggregation: manual
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["zero_ic_goods", "zero_ic_services"]
     display_order: 8
 
   - jurisdiction: EST
     return_type: KMD
     box_code: "3.1.1"
     box_label: "kauba ühendusesisene käive"
-    aggregation: manual
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["zero_ic_goods"]
     display_order: 9
 
   - jurisdiction: EST
     return_type: KMD
     box_code: "3.2"
     box_label: "kauba eksport"
-    aggregation: manual
+    # zero_traveller included too: a tax-free sale to a traveller is
+    # legally a species of goods export under KMS, and box 3.2.1 (below)
+    # is a disclosure sub-breakout of what's inside 3.2 — same
+    # containment shape as 3.1/3.1.1's zero_ic_goods relationship, not a
+    # sibling.
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["zero_export", "zero_traveller"]
     display_order: 10
 
   - jurisdiction: EST
     return_type: KMD
     box_code: "3.2.1"
     box_label: "käibemaksutagastusega müük reisijale"
-    aggregation: manual
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["zero_traveller"]
     display_order: 11
 
   - jurisdiction: EST
     return_type: KMD
     box_code: "4"
     box_label: "Käibemaks kokku = 24%×1 + 20%×1-1 + 22%×1-2 + 9%×2 + 5%×2-1 + 13%×2-2"
-    aggregation: "sum_tax_amount_for_codes:income"
-    feeder_tax_codes: ["standard", "standard_legacy_20", "standard_legacy_22", "reduced_13", "reduced_9", "reduced_5_legacy"]
+    # Packet 2: RATE-FORMULA — [FORM] Lahter 4's own definition (rate ×
+    # box, not a ledger sum). For a domestic-only period this equals the
+    # old sum_tax_amount_for_codes:income total to the cent (scope §3.3);
+    # adopted one packet earlier than the scope's §3.3 recommendation of
+    # "flip alongside RC-FANOUT in Packet 3" because it was numerically
+    # inert for every domestic-only period at the time. Packet 3: this
+    # formula needed NO CHANGE to gain the RC output VAT — box 1 (above)
+    # now includes the RC base itself, so 0.24*KMD:1 automatically picks
+    # it up. This is the concrete payoff of adopting the rate-derived
+    # definition early (scope §3.3's stated reason for doing so).
+    aggregation: formula
+    formula: "0.24*KMD:1 + 0.20*KMD:1-1 + 0.22*KMD:1-2 + 0.09*KMD:2 + 0.05*KMD:2-1 + 0.13*KMD:2-2"
     display_order: 12
 
   - jurisdiction: EST
     return_type: KMD
     box_code: "4-1"
     box_label: "Impordilt tasumisele kuuluv käibemaks"
+    # MANUAL by design (unchanged from pre-Packet-2): [FORM] Lahter 4^1 —
+    # only importers holding an EMTA §38(2^1-2^5) self-assessment
+    # authorisation file this box, and the amount comes from the customs
+    # declaration, not a GL income/purchase-bucket shape this engine
+    # aggregates. No feeder_tax_codes convention applies.
+    # Finding 7: box 4-1 FEEDS the box 12/13 formula (max(0, 4 + 4-1 − 5 +
+    # 10 − 11)). A manual box has no ledger recipe, so the aggregator
+    # initialises it to 0 and it stays 0 unless the filer supplies a value
+    # — an ABSENT 4-1 is therefore an explicit 0 in that formula (box 12/13
+    # compute correctly for the common no-import case), and a filer-entered
+    # 4-1 flows into 12/13 when passed via generate_return(manual_values=…).
     aggregation: manual
     display_order: 13
 
@@ -158,6 +361,24 @@ rows:
     return_type: KMD
     box_code: "5"
     box_label: "Kokku sisendkäibemaksu summa, mis on seadusega lubatud maha arvata"
+    # Packet 3 (RC-FANOUT, scope §3.4): box 5 now sums two internal-only
+    # ledger boxes below — "5_DOMESTIC" (the OLD box-5 recipe verbatim,
+    # account-type "purchase" bucket, unchanged) + "5_RC" (the new
+    # role-based RC deductible-input contribution). Same
+    # two-summed-boxes pattern as box 1 above, and for the same reason:
+    # a reverse-charge line's two components (output tax feeding box 1,
+    # input tax feeding box 5) live on the SAME journal line and must
+    # NOT be blended by the old per-line-summed component query — see
+    # _aggregate_ledger_by_box's docstring. 5_RC reads 0 with no RC
+    # postings, so this reproduces Packet 2's golden figure exactly.
+    aggregation: formula
+    formula: "KMD:5_DOMESTIC + KMD:5_RC"
+    display_order: 14
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "5_DOMESTIC"
+    box_label: "(internal) input VAT, domestic — pre-Packet-3 box-5 recipe, unchanged"
     aggregation: "sum_tax_amount_for_codes:purchase"
     # Unlike the output-side boxes (1/1-1/1-2/etc, correctly rate-bucketed
     # per period), this row has no effective_from in its key — it is a
@@ -165,28 +386,72 @@ rows:
     # every input-VAT reporting_type across all rate vintages (including
     # the legacy 20%/22% purchase-side rates tax_codes.yaml's INPUT_STD
     # dated rows carry) to correctly compute box 5 for historical periods,
-    # not just the current 24% rate.
-    feeder_tax_codes: ["standard", "standard_legacy_20", "standard_legacy_22", "reduced_13", "reduced_9", "capital"]
-    display_order: 14
+    # not just the current 24% rate. Packet 2: "input_import" added
+    # (box 5.1 is a subset of box 5 — [FORM] Lahter 5 juhis explicitly
+    # lists import VAT among box 5's components; omitting it here would
+    # under-state box 5, and therefore over-state box 12, the moment a
+    # company posts an import-VAT line, which is postable today, not
+    # gated on the Packet 3 RC dispatcher). "capital" (box 5.2) was
+    # already present pre-Packet-2. NOTE: "reduced_5_legacy" is NOT
+    # added — no purchase-side 5%-legacy input-VAT code exists in
+    # tax_codes.yaml (INPUT_STD's dated series only ever carried
+    # 20%/22%/24%), so there is nothing to feed; a conscious gap, not an
+    # oversight, left for a future historical-correctness pass if a
+    # pre-2025 5%-rate purchase ever needs it. Packet 3: reverse-charge
+    # reporting_types are DELIBERATELY absent from this list — they feed
+    # "5_RC" (below) via the role-based query instead; adding them here
+    # too would double-count (see _aggregate_ledger_by_box's docstring).
+    feeder_tax_codes: ["standard", "standard_legacy_20", "standard_legacy_22", "reduced_13", "reduced_9", "capital", "input_import"]
+    display_order: 141
+
+  - jurisdiction: EST
+    return_type: KMD
+    box_code: "5_RC"
+    box_label: "(internal) reverse-charge EU-acquisition deductible input VAT — feeds box 5"
+    # Role-based ("input") bucket, Packet 3 — mirrors "1_RC" above,
+    # matching the SAME line's INPUT-role component instead of its
+    # OUTPUT-role one. Full deduction only in this packet
+    # (services.tax_engine.ee.EETaxEngine's deductible_fraction default
+    # is 1) — a §30 partial-deduction variant is a future extension of
+    # the SAME mechanism, not a new box.
+    aggregation: "sum_tax_amount_for_codes:input"
+    feeder_tax_codes: ["rc_eu_acq_goods", "rc_eu_acq_services"]
+    display_order: 142
 
   - jurisdiction: EST
     return_type: KMD
     box_code: "5.1"
     box_label: "impordilt tasutud või tasumisele kuuluv käibemaks"
-    aggregation: manual
+    aggregation: "sum_tax_amount_for_codes:purchase"
+    feeder_tax_codes: ["input_import"]
     display_order: 15
 
   - jurisdiction: EST
     return_type: KMD
     box_code: "5.2"
     box_label: "põhivara soetamiselt tasutud või tasumisele kuuluv käibemaks"
-    aggregation: manual
+    # "capital" is the same feeder tag AU's own G10/1B boxes use for
+    # capital acquisitions (services/tax_engine's shared convention) —
+    # no new tag needed, just pointed at box 5.2 instead of staying manual.
+    aggregation: "sum_tax_amount_for_codes:purchase"
+    feeder_tax_codes: ["capital"]
     display_order: 16
 
   - jurisdiction: EST
     return_type: KMD
     box_code: "5.3"
     box_label: "100% ettevõtluses kasutatava sõiduauto sisendkäibemaks + arv"
+    # MANUAL by design (Packet 2 scope note): the box combines a
+    # deductible-VAT amount AND a non-monetary "Autode arv" (car count)
+    # sub-field ([FORM] Lahter 5.3). The scope's own disposition table
+    # (§2) marks the amount half CODES-SEED (an input_car_100 feeder,
+    # mirroring 5.1/5.2's pattern) with only the count staying manual —
+    # this packet's brief narrowed the cut to "5.3 manual BY DESIGN" in
+    # full, deferring the input_car_100 feeder split (car-apportionment
+    # tracking wasn't in this packet's box list) rather than half-seed a
+    # box whose other half is inescapably manual. Flagged here, not
+    # silently dropped — the amount split can be added later exactly the
+    # way 5.1/5.2 were just added, with no other engine change.
     aggregation: manual
     display_order: 17
 
@@ -194,6 +459,11 @@ rows:
     return_type: KMD
     box_code: "5.4"
     box_label: "osaliselt ettevõtluses kasutatava sõiduauto sisendkäibemaks (max 50%) + arv"
+    # MANUAL by design — same reasoning as box 5.3 above (deferred
+    # input_car_50 feeder split), plus box 5.4's amount is itself capped
+    # at 50% of the input VAT by KMS, a policy computation this engine's
+    # ledger-aggregation grammar does not express even once a feeder tag
+    # exists — the ledger only knows what was posted, not the §30 cap.
     aggregation: manual
     display_order: 18
 
@@ -201,28 +471,38 @@ rows:
     return_type: KMD
     box_code: "6"
     box_label: "Kauba ühendusesisene soetamine ja teise liikmesriigi maksukohustuslaselt saadud teenused kokku (informatiivne)"
-    aggregation: manual
+    # Informative purchase-bucket net (base only, not the self-assessed
+    # VAT itself — that is box 4/5 via the output-role selector, which
+    # is RC-FANOUT/Packet 3, not this box). CODES-SEED: expressible
+    # today with the existing grammar; reads 0 until a company posts a
+    # line tagged with one of these reporting_type leaves (no EE
+    # posting-dispatcher exists yet — scope §3.4 point 1, Packet 3).
+    aggregation: "sum_taxable_for_codes:purchase:gst_exclusive"
+    feeder_tax_codes: ["rc_eu_acq_goods", "rc_eu_acq_services", "ic_acq_exempt"]
     display_order: 19
 
   - jurisdiction: EST
     return_type: KMD
     box_code: "6.1"
     box_label: "kauba ühendusesisene soetamine (informatiivne)"
-    aggregation: manual
+    aggregation: "sum_taxable_for_codes:purchase:gst_exclusive"
+    feeder_tax_codes: ["rc_eu_acq_goods", "ic_acq_exempt"]
     display_order: 20
 
   - jurisdiction: EST
     return_type: KMD
     box_code: "7"
     box_label: "Muu kauba soetamine ja teenuse saamine, mida maksustatakse käibemaksuga (informatiivne)"
-    aggregation: manual
+    aggregation: "sum_taxable_for_codes:purchase:gst_exclusive"
+    feeder_tax_codes: ["rc_domestic_acq", "ee_acq_foreign"]
     display_order: 21
 
   - jurisdiction: EST
     return_type: KMD
     box_code: "7.1"
     box_label: "erikorra alusel maksustatava kinnisasja, metallijäätmete, väärismetalli ja metalltoodete soetamine (informatiivne)"
-    aggregation: manual
+    aggregation: "sum_taxable_for_codes:purchase:gst_exclusive"
+    feeder_tax_codes: ["rc_domestic_acq"]
     display_order: 22
 
   - jurisdiction: EST
@@ -237,13 +517,27 @@ rows:
     return_type: KMD
     box_code: "9"
     box_label: "Erikorra alusel maksustatava kinnisasja, metallijäätmete, väärismetalli ja metalltoodete käive (KMS §41^1), sh teises liikmesriigis paigaldatava/kokkupandava kauba maksustatav väärtus (informatiivne, müüja pool)"
-    aggregation: manual
+    # Sale-direction (seller-side) reverse charge/installation supply —
+    # income bucket, expressible today with the existing grammar (unlike
+    # boxes 6/6.1/7/7.1's purchase-side RC, this is output-side and does
+    # not need the box-4/box-1 output-role selector RC-FANOUT is gated
+    # on). Reads 0 until a company posts a line tagged with one of these
+    # reporting_type leaves.
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["rc_domestic_supply", "install_other_ms"]
     display_order: 24
 
   - jurisdiction: EST
     return_type: KMD
     box_code: "10"
     box_label: "Täpsustused +"
+    # MANUAL by design (unchanged): [FORM] Lahtrites 10 ja 11 juhis —
+    # period-end §32/§29^1/§30/§3(6) recalculations. No single ledger
+    # bucket produces these; they are a filer-entered correction to an
+    # otherwise-computed return, not a supply/purchase aggregation.
+    # Finding 7: boxes 10 (+) and 11 (−) FEED the box 12/13 formula; an
+    # absent value is an explicit 0 (no adjustment), a filer-entered value
+    # flows in via generate_return(manual_values=…). See box 4-1's comment.
     aggregation: manual
     display_order: 25
 
@@ -251,6 +545,7 @@ rows:
     return_type: KMD
     box_code: "11"
     box_label: "Täpsustused –"
+    # MANUAL by design — same reasoning as box 10 above.
     aggregation: manual
     display_order: 26
 
@@ -258,14 +553,20 @@ rows:
     return_type: KMD
     box_code: "12"
     box_label: "Tasumisele kuuluv käibemaks = 4 + 4-1 – 5 + 10 – 11"
-    aggregation: manual
+    # Packet 2: BOX-FORMULA — the payable half of the scope's decisive
+    # 12/13 finding (both boxes share one signed net N; box 12 holds
+    # max(0, N), box 13 holds max(0, -N) — exactly one is non-zero).
+    aggregation: formula
+    formula: "max(0, KMD:4 + KMD:4-1 - KMD:5 + KMD:10 - KMD:11)"
     display_order: 27
 
   - jurisdiction: EST
     return_type: KMD
     box_code: "13"
     box_label: "Enammakstud käibemaks = 4 + 4-1 – 5 + 10 – 11"
-    aggregation: manual
+    # Packet 2: BOX-FORMULA — the refund half; see box 12's comment.
+    aggregation: formula
+    formula: "max(0, -(KMD:4 + KMD:4-1 - KMD:5 + KMD:10 - KMD:11))"
     display_order: 28
 
   # =====================================================================

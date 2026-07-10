@@ -39,6 +39,7 @@ from saebooks.models.expense import ExpenseStatus
 from saebooks.models.journal import JournalEntry
 from saebooks.services import expenses as svc
 from saebooks.services import review_flags as review_flags_svc
+from saebooks.services.fx import gate_non_base_currency
 from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 
@@ -186,6 +187,7 @@ async def create_expense(
     company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
+    await gate_non_base_currency(session, request, company_id, payload.currency)
     key = _parse_idempotency_key(idempotency_key)
 
     if key is not None:

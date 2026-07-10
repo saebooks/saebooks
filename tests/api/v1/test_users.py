@@ -576,3 +576,152 @@ async def test_user_permissions_put_overlap_422(
             json={"grants": [code], "revokes": [code]},
         )
         assert r.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Themes (Wave B / FLAG_THEMES) — allow-list + tier gate on preferred_theme
+#
+# The static bearer token used by ``admin_client``/``api_client`` carries no
+# ``request.state.user`` (no promo JWT), so ``_effective_edition_for_request``
+# falls back to the process-wide singleton — exactly the same monkeypatch
+# pattern ``test_features.py`` uses for ``require_feature``.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def community_edition(monkeypatch: pytest.MonkeyPatch) -> None:
+    from saebooks.config import settings as module_settings
+    monkeypatch.setattr(module_settings, "edition", "community")
+
+
+@pytest.fixture
+def offline_edition(monkeypatch: pytest.MonkeyPatch) -> None:
+    from saebooks.config import settings as module_settings
+    monkeypatch.setattr(module_settings, "edition", "offline")
+
+
+async def test_create_user_unknown_theme_422_every_tier(
+    admin_client: AsyncClient, offline_edition: None
+) -> None:
+    """Allow-list membership is format validation, not a tier gate — an
+    unknown theme id 422s even at a tier that has FLAG_THEMES."""
+    r = await admin_client.post(
+        "/api/v1/users",
+        json={"username": _rand_username(), "role": "viewer", "preferred_theme": "chartreuse"},
+    )
+    assert r.status_code == 422
+
+
+async def test_create_user_default_theme_works_on_community(
+    admin_client: AsyncClient, community_edition: None
+) -> None:
+    """The always-free stock theme must never be blocked, even on
+    Community (below FLAG_THEMES)."""
+    r = await admin_client.post(
+        "/api/v1/users",
+        json={"username": _rand_username(), "role": "viewer", "preferred_theme": "default"},
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["preferred_theme"] == "default"
+
+
+async def test_create_user_no_theme_works_on_community(
+    admin_client: AsyncClient, community_edition: None
+) -> None:
+    """Omitting preferred_theme entirely must never be blocked either."""
+    r = await admin_client.post(
+        "/api/v1/users",
+        json={"username": _rand_username(), "role": "viewer"},
+    )
+    assert r.status_code == 201, r.text
+
+
+async def test_create_user_non_default_theme_404_on_community(
+    admin_client: AsyncClient, community_edition: None
+) -> None:
+    """A REAL non-default theme id is gated (404-not-403) below Offline —
+    Community can't advertise/select the paid-tier theme set."""
+    r = await admin_client.post(
+        "/api/v1/users",
+        json={"username": _rand_username(), "role": "viewer", "preferred_theme": "myob_classic"},
+    )
+    assert r.status_code == 404
+
+
+async def test_create_user_non_default_theme_201_on_offline(
+    admin_client: AsyncClient, offline_edition: None
+) -> None:
+    r = await admin_client.post(
+        "/api/v1/users",
+        json={"username": _rand_username(), "role": "viewer", "preferred_theme": "myob_classic"},
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["preferred_theme"] == "myob_classic"
+
+
+async def test_update_user_non_default_theme_404_on_community(
+    admin_client: AsyncClient, api_client: AsyncClient
+) -> None:
+    from saebooks.config import settings as module_settings
+
+    # Create the user at offline (so the create itself isn't gated),
+    # THEN drop to community and attempt the theme change.
+    uname = _rand_username()
+    cr = await admin_client.post("/api/v1/users", json={"username": uname, "role": "viewer"})
+    assert cr.status_code == 201
+    uid = cr.json()["id"]
+    v = cr.json()["version"]
+
+    original_edition = module_settings.edition
+    module_settings.edition = "community"
+    try:
+        r = await api_client.patch(
+            f"/api/v1/users/{uid}",
+            json={"preferred_theme": "myob_classic"},
+            headers={"If-Match": str(v)},
+        )
+        assert r.status_code == 404
+    finally:
+        module_settings.edition = original_edition
+
+
+async def test_update_user_default_theme_200_on_community(
+    admin_client: AsyncClient, api_client: AsyncClient
+) -> None:
+    from saebooks.config import settings as module_settings
+
+    uname = _rand_username()
+    cr = await admin_client.post("/api/v1/users", json={"username": uname, "role": "viewer"})
+    assert cr.status_code == 201
+    uid = cr.json()["id"]
+    v = cr.json()["version"]
+
+    original_edition = module_settings.edition
+    module_settings.edition = "community"
+    try:
+        r = await api_client.patch(
+            f"/api/v1/users/{uid}",
+            json={"preferred_theme": "default"},
+            headers={"If-Match": str(v)},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["preferred_theme"] == "default"
+    finally:
+        module_settings.edition = original_edition
+
+
+async def test_update_user_unknown_theme_422(
+    admin_client: AsyncClient, api_client: AsyncClient, offline_edition: None
+) -> None:
+    uname = _rand_username()
+    cr = await admin_client.post("/api/v1/users", json={"username": uname, "role": "viewer"})
+    assert cr.status_code == 201
+    uid = cr.json()["id"]
+    v = cr.json()["version"]
+
+    r = await api_client.patch(
+        f"/api/v1/users/{uid}",
+        json={"preferred_theme": "chartreuse"},
+        headers={"If-Match": str(v)},
+    )
+    assert r.status_code == 422

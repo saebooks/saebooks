@@ -17,7 +17,7 @@ RUN apt-get update \
     && chmod +x /usr/local/bin/grpcwebproxy
 
 # Minimal runtime — gcr.io/distroless/base would be nicer but
-# debian-slim is what the rest of the deployment stack uses.
+# debian-slim is what the rest of the server stack uses.
 FROM debian:bookworm-slim
 
 RUN apt-get update \

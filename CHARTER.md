@@ -500,9 +500,9 @@ costs money.
   - Pro: up to 3
   - Enterprise: unlimited
 - **Multi-company / intercompany unlocks at Offline.** Multiple companies
-  under one login, reciprocal journals between them — e.g. a trading
-  company and its family trust under one login. Offline gets this because
-  it's a pure-code feature with no ongoing cost to us; Business+ raises the
+  under one login, reciprocal journals between them — e.g. Sauer Pty Ltd
+  and Saueesti Trust under one login. Offline gets this because it's a
+  pure-code feature with no ongoing cost to us; Business+ raises the
   cap.
 - **Self-compiling users can flip the flag.** AGPL reality. Accepted.
   The friction of rebuilding + self-supporting + forgoing signed
@@ -524,18 +524,15 @@ filters every read and write.
 
 The schema-owner role saebooks keeps BYPASSRLS for DDL +
 alembic migrations and as a deliberate emergency-rescue path. It
-must not be the runtime role — an internal cross-tenant-leak audit
-(2026-05-23) is what produced this split.
+must not be the runtime role — see audit-trail/02 for the leak
+diagnosis that produced this split.
 
 For cross-tenant cron walkers (python -m saebooks.cli sync-feeds,
 refresh-feed-issues) enumeration goes through SECURITY DEFINER
 helper functions that the saebooks_app role is granted EXECUTE
 on, so iterating all active feeds across all tenants is possible
-without temporarily downgrading to a BYPASSRLS connection. The
-activation procedure is an internal deployment runbook, not part of
-this repository — the RLS design itself is enforced by the migrations
-in ``alembic/versions/`` regardless of which role a given deployment
-runs as.
+without temporarily downgrading to a BYPASSRLS connection. See
+docs/operations/rls-flip.md for the activation procedure.
 
 ### 7.2 Audit / immutability model
 
@@ -889,16 +886,16 @@ a third-party service to see their own data. This is a hard line.
 
 ## 14. Reference material
 
-Extracted during project kickoff, retained as source material in an
-internal reference archive (not part of this repository):
+Extracted during project kickoff, retained as source material:
 
-- an internal technical spec from an MYOB-format teardown
-  (subordinate to this charter), covering:
-  - the MYOB ODBC Direct v10 data model — 48+ business tables documented
-    from the authoritative user guide.
-  - a sample MYOB Clearwater company file used to validate the teardown.
-  - the Odoo Community AU chart of accounts + tax codes + BAS tags,
-    which is our v1 seed.
+- `/home/youruser/projects/infra-blueprint/teardowns/myob-v19/SPEC.md`
+  — the detailed technical spec (subordinate to this charter).
+- `/home/youruser/projects/infra-blueprint/teardowns/myob-v19/reference/`:
+  - `odbc_user_guide.pdf` — MYOB ODBC Direct v10 user guide (494 pp.)
+    Authoritative MYOB data model. 48+ business tables documented.
+  - `Clearwtr.MYO` — MYOB Clearwater sample company file.
+  - `odoo-l10n-au/` — Odoo Community AU chart of accounts + tax codes
+    + BAS tags. This is our v1 seed.
 
 ## 15. What's next
 

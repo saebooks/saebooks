@@ -99,7 +99,7 @@ async def _create_and_post_je(
     entry_date: str,
     lines: list[dict],
 ) -> dict:
-    """Create a DRAFT journal entry then PATCH it to POSTED. Return posted body."""
+    """Create a DRAFT journal entry then POST it to POSTED via /{id}/post. Return posted body."""
     r = await client.post(
         "/api/v1/journal_entries",
         json={
@@ -113,9 +113,8 @@ async def _create_and_post_je(
     je_id = body["id"]
     version = body["version"]
 
-    r2 = await client.patch(
-        f"/api/v1/journal_entries/{je_id}",
-        json={"status": "POSTED"},
+    r2 = await client.post(
+        f"/api/v1/journal_entries/{je_id}/post",
         headers={"If-Match": str(version)},
     )
     assert r2.status_code == 200, r2.text
@@ -163,7 +162,10 @@ async def test_pnl_income_line(
     api_client: AsyncClient, gl_accounts: dict[str, str]
 ) -> None:
     """POST a JE crediting an INCOME account → appears in income section."""
-    entry_date = "2026-02-15"
+    # 2026-04 — the seed company carries a Q1-2026 period lock (through
+    # 2026-03-31, see saebooks/seed/load_au_coa.py); post after it closes
+    # so /post's period-lock guard doesn't 422.
+    entry_date = "2026-04-15"
     income_id = gl_accounts[AccountType.INCOME.value]
     asset_id = gl_accounts[AccountType.ASSET.value]
 
@@ -176,7 +178,7 @@ async def test_pnl_income_line(
 
     r = await api_client.get(
         "/api/v1/reports/profit_loss",
-        params={"from_date": "2026-02-01", "to_date": "2026-02-28"},
+        params={"from_date": "2026-04-01", "to_date": "2026-04-30"},
     )
     assert r.status_code == 200, r.text
     body = r.json()
@@ -193,7 +195,9 @@ async def test_pnl_expense_line(
     api_client: AsyncClient, gl_accounts: dict[str, str]
 ) -> None:
     """POST a JE debiting an EXPENSE account → appears in expenses section."""
-    entry_date = "2026-03-10"
+    # 2026-05 — past the seed company's Q1-2026 period lock (through
+    # 2026-03-31); a date inside the lock now 422s at /post.
+    entry_date = "2026-05-10"
     expense_id = gl_accounts[AccountType.EXPENSE.value]
     asset_id = gl_accounts[AccountType.ASSET.value]
 
@@ -206,7 +210,7 @@ async def test_pnl_expense_line(
 
     r = await api_client.get(
         "/api/v1/reports/profit_loss",
-        params={"from_date": "2026-03-01", "to_date": "2026-03-31"},
+        params={"from_date": "2026-05-01", "to_date": "2026-05-31"},
     )
     assert r.status_code == 200, r.text
     body = r.json()
@@ -267,17 +271,20 @@ async def test_pnl_date_range_filter(
     income_id = gl_accounts[AccountType.INCOME.value]
     asset_id = gl_accounts[AccountType.ASSET.value]
 
-    # Post JE in May 2025 (outside our query range)
+    # Post JE in May 2094 (outside our query range). Uses a far-future
+    # year — both to avoid the seed company's Q1-2026 period lock
+    # (through 2026-03-31) 422ing at /post, and to avoid collision with
+    # other tests' postings.
     await _create_and_post_je(
         api_client,
-        "2025-05-15",
+        "2094-05-15",
         lines=_balanced_lines(asset_id, income_id, "9999.00"),
     )
 
-    # Query only June 2025
+    # Query only June 2094
     r = await api_client.get(
         "/api/v1/reports/profit_loss",
-        params={"from_date": "2025-06-01", "to_date": "2025-06-30"},
+        params={"from_date": "2094-06-01", "to_date": "2094-06-30"},
     )
     assert r.status_code == 200, r.text
     body = r.json()
@@ -303,10 +310,12 @@ async def test_pnl_tenant_isolation(
     income_id = gl_accounts[AccountType.INCOME.value]
     asset_id = gl_accounts[AccountType.ASSET.value]
 
-    # Post a JE under the default tenant (A)
+    # Post a JE under the default tenant (A). Uses a far-future year to
+    # stay clear of the seed company's Q1-2026 period lock (through
+    # 2026-03-31), which /post now enforces.
     await _create_and_post_je(
         api_client,
-        "2026-01-20",
+        "2095-01-20",
         lines=_balanced_lines(asset_id, income_id, "8888.00"),
     )
 
@@ -317,7 +326,7 @@ async def test_pnl_tenant_isolation(
     try:
         r = await api_client.get(
             "/api/v1/reports/profit_loss",
-            params={"from_date": "2026-01-01", "to_date": "2026-01-31"},
+            params={"from_date": "2095-01-01", "to_date": "2095-01-31"},
         )
     finally:
         if original:
@@ -396,31 +405,33 @@ async def test_balance_sheet_cumulative(
     asset_id = gl_accounts[AccountType.ASSET.value]
     income_id = gl_accounts[AccountType.INCOME.value]
 
-    # Post JE in July 2025 (should appear in a July 31 BS)
+    # Post JE in July 2096 (should appear in a July 31 BS). Uses a
+    # far-future year to stay clear of the seed company's Q1-2026 period
+    # lock (through 2026-03-31), which /post now enforces.
     await _create_and_post_je(
         api_client,
-        "2025-07-10",
+        "2096-07-10",
         lines=_balanced_lines(asset_id, income_id, "4000.00"),
     )
-    # Post JE in August 2025 (should NOT appear in July 31 BS)
+    # Post JE in August 2096 (should NOT appear in July 31 BS)
     await _create_and_post_je(
         api_client,
-        "2025-08-05",
+        "2096-08-05",
         lines=_balanced_lines(asset_id, income_id, "7777.00"),
     )
 
-    # Balance sheet as at 2025-07-31 — includes July JE, excludes August JE
+    # Balance sheet as at 2096-07-31 — includes July JE, excludes August JE
     r_july = await api_client.get(
         "/api/v1/reports/balance_sheet",
-        params={"as_of_date": "2025-07-31"},
+        params={"as_of_date": "2096-07-31"},
     )
     assert r_july.status_code == 200, r_july.text
     body_july = r_july.json()
 
-    # Balance sheet as at 2025-08-31 — includes both JEs
+    # Balance sheet as at 2096-08-31 — includes both JEs
     r_aug = await api_client.get(
         "/api/v1/reports/balance_sheet",
-        params={"as_of_date": "2025-08-31"},
+        params={"as_of_date": "2096-08-31"},
     )
     assert r_aug.status_code == 200, r_aug.text
     body_aug = r_aug.json()

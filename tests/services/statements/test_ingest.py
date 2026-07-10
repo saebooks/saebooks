@@ -65,7 +65,7 @@ def _llm_response(
         ]
     return json.dumps({
         "supplier_name": supplier_name,
-        "supplier_abn": "32 000 143 608",
+        "supplier_abn": "83 914 571 673",
         "customer_ref": "SAE-0042",
         "statement_date": "2026-05-31",
         "terms": "30 Days",
@@ -99,7 +99,7 @@ class _FakePaperlessClient:
         return {
             "id": document_id,
             "title": f"Statement {document_id}.pdf",
-            "content": "Motion Australia Pty Ltd\nABN: 32 000 143 608\nStatement Date: 31/05/2026\n...",
+            "content": "Motion Australia Pty Ltd\nABN: 83 914 571 673\nStatement Date: 31/05/2026\n...",
         }
 
 

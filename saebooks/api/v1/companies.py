@@ -40,7 +40,13 @@ from saebooks.api.v1.schemas import (
 from saebooks.models.company import Company
 from saebooks.models.invoice import Invoice, InvoiceStatus
 from saebooks.services import companies as svc
-from saebooks.services.features import FLAG_MULTI_COMPANY, require_feature
+from saebooks.services.authz import no_additional_gate, require_permission_or_role
+from saebooks.services.features import (
+    FLAG_EXTENDED_AUDIT_MODES,
+    FLAG_MULTI_COMPANY,
+    require_feature,
+    require_feature_inline,
+)
 from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 
@@ -196,6 +202,9 @@ async def get_company(
         200: {"model": CompanyOut},
         409: {"model": CompanyConflictBody, "description": "Version mismatch"},
     },
+    dependencies=[
+        Depends(require_permission_or_role("settings.edit", no_additional_gate))
+    ],
 )
 async def update_company(
     request: Request,
@@ -237,6 +246,15 @@ async def update_company(
                 content=json.loads(claim.response_body) if claim.response_body else {},
                 status_code=claim.response_status or 200,
             )
+
+    # extended_audit_modes gate (Wave C / CHARTER §12.1): the immutable
+    # default is free at every tier; only a request that sets audit_mode
+    # to a non-immutable value ("open"/"hybrid") crosses the Offline+ tier
+    # boundary. Inline (not a router dependency) — this route is legitimate
+    # at every tier for every OTHER field, mirroring the multi_currency /
+    # themes precedent (require_feature_inline's docstring).
+    if payload.audit_mode is not None and payload.audit_mode != "immutable":
+        require_feature_inline(FLAG_EXTENDED_AUDIT_MODES, request)
 
     try:
         company = await svc.update(
@@ -332,6 +350,16 @@ async def _company_ref_counts(
         204: {"description": "Deleted"},
         409: {"description": "Company has linked rows; hard-delete the rows first."},
     },
+    # NOT wired to require_permission_or_role in this pass —
+    # hard_delete_admin_gate's `hard` bool is both the gate AND data
+    # the handler branches on (this route requires ?hard=true
+    # unconditionally, see the 400 below), so swapping it for the
+    # composite dependency needs a small decoupling refactor first
+    # (extract the bool separately from the permission check) rather
+    # than a mechanical dependencies=[] edit. Stays admin-only at every
+    # tier for now (company.delete's catastrophic risk class already
+    # matches that floor for the six starter roles — only a genuinely
+    # custom at-tier role would notice the gap). Flagged as follow-up.
 )
 async def hard_delete_company(
     request: Request,

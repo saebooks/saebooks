@@ -639,6 +639,359 @@ async def test_companies_house_gate_community(
 
 
 # ---------------------------------------------------------------------------
+# ABR (Australian Business Register) lookup — Wave A (2026-07-10)
+# ---------------------------------------------------------------------------
+
+
+def _abr_lookup_result(**overrides: Any) -> Any:
+    from saebooks.services.abr import AbrLookup
+
+    defaults: dict[str, Any] = dict(
+        abn="51824753556",
+        abn_status="Active",
+        acn="683275756",
+        entity_name="Example Pty Ltd",
+        entity_type_code="DIT",
+        entity_type_name="Discretionary Investment Trust",
+        business_names=(),
+        trading_names=(),
+        address_state="QLD",
+        address_postcode="4350",
+        gst_registered=True,
+        gst_from="2024-02-15",
+        raw={},
+    )
+    defaults.update(overrides)
+    return AbrLookup(**defaults)
+
+
+@pytest.mark.asyncio
+async def test_abr_lookup_401_anon(client: AsyncClient) -> None:
+    """POST /integrations/abr/lookup with no bearer token → 401."""
+    resp = await client.post(
+        "/api/v1/integrations/abr/lookup",
+        json={"abn": "51824753556"},
+    )
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_abr_lookup_gate_community(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """FLAG_ABR_LOOKUP gate: community → 404 (ABR is Business+)."""
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "community")
+    resp = await client.post(
+        "/api/v1/integrations/abr/lookup",
+        json={"abn": "51824753556"},
+        headers=_auth_headers("community"),
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_abr_lookup_gate_offline(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """FLAG_ABR_LOOKUP gate: offline → 404 (ABR is Business+, not Offline)."""
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "offline")
+    resp = await client.post(
+        "/api/v1/integrations/abr/lookup",
+        json={"abn": "51824753556"},
+        headers=_auth_headers("offline"),
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_abr_lookup_gate_business_succeeds(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """FLAG_ABR_LOOKUP gate: business tier → 200 (this is where it turns on)."""
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "business")
+    with patch(
+        "saebooks.api.v1.integrations.lookup_abn",
+        new_callable=AsyncMock,
+        return_value=_abr_lookup_result(),
+    ):
+        resp = await client.post(
+            "/api/v1/integrations/abr/lookup",
+            json={"abn": "51824753556"},
+            headers=_auth_headers("business"),
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["abn"] == "51824753556"
+    assert body["entity_name"] == "Example Pty Ltd"
+    assert body["gst_registered"] is True
+    assert "contact_id" not in body
+
+
+@pytest.mark.asyncio
+async def test_abr_lookup_returns_result_lookup_only(
+    client: AsyncClient,
+) -> None:
+    """POST /integrations/abr/lookup with no contact_id → lookup only, no write."""
+    with patch(
+        "saebooks.api.v1.integrations.lookup_abn",
+        new_callable=AsyncMock,
+        return_value=_abr_lookup_result(),
+    ):
+        resp = await client.post(
+            "/api/v1/integrations/abr/lookup",
+            json={"abn": "51 824 753 556"},
+            headers=_auth_headers(),
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["abn"] == "51824753556"
+    assert body["address_state"] == "QLD"
+    assert "contact_id" not in body
+    assert "contact_changed_fields" not in body
+
+
+@pytest.mark.asyncio
+async def test_abr_lookup_404_not_found(client: AsyncClient) -> None:
+    """POST /integrations/abr/lookup → 404 when ABR has no record for the ABN."""
+    from saebooks.services.abr import AbrError
+
+    with patch(
+        "saebooks.api.v1.integrations.lookup_abn",
+        new_callable=AsyncMock,
+        side_effect=AbrError("ABR: No record found"),
+    ):
+        resp = await client.post(
+            "/api/v1/integrations/abr/lookup",
+            json={"abn": "00000000000"},
+            headers=_auth_headers(),
+        )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_abr_lookup_400_malformed_abn(client: AsyncClient) -> None:
+    """POST /integrations/abr/lookup → 400 when the ABN isn't 11 digits."""
+    from saebooks.services.abr import AbrError
+
+    with patch(
+        "saebooks.api.v1.integrations.lookup_abn",
+        new_callable=AsyncMock,
+        side_effect=AbrError("ABN must be 11 digits, got 3: '123'"),
+    ):
+        resp = await client.post(
+            "/api/v1/integrations/abr/lookup",
+            json={"abn": "123"},
+            headers=_auth_headers(),
+        )
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_abr_lookup_503_not_configured(client: AsyncClient) -> None:
+    """POST /integrations/abr/lookup → 503 when ABR_API_GUID isn't set."""
+    from saebooks.services.abr import AbrNotConfiguredError
+
+    with patch(
+        "saebooks.api.v1.integrations.lookup_abn",
+        new_callable=AsyncMock,
+        side_effect=AbrNotConfiguredError("ABR_API_GUID is not configured"),
+    ):
+        resp = await client.post(
+            "/api/v1/integrations/abr/lookup",
+            json={"abn": "51824753556"},
+            headers=_auth_headers(),
+        )
+    assert resp.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_abr_lookup_applies_to_empty_contact_fields(
+    client: AsyncClient,
+) -> None:
+    """contact_id given, contact has blank state/postcode/abn → fields fill in."""
+    name = f"ABR Test Contact {uuid.uuid4().hex[:8]}"
+    create_resp = await client.post(
+        "/api/v1/contacts",
+        json={"name": name, "contact_type": "SUPPLIER"},
+        headers=_auth_headers(),
+    )
+    assert create_resp.status_code == 201, create_resp.text
+    contact = create_resp.json()
+    assert contact["abn"] in (None, "")
+    assert contact["state"] in (None, "")
+
+    with patch(
+        "saebooks.api.v1.integrations.lookup_abn",
+        new_callable=AsyncMock,
+        return_value=_abr_lookup_result(),
+    ):
+        resp = await client.post(
+            "/api/v1/integrations/abr/lookup",
+            json={"abn": "51824753556", "contact_id": contact["id"]},
+            headers=_auth_headers(),
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["contact_id"] == contact["id"]
+    assert set(body["contact_changed_fields"]) >= {"abn", "state", "postcode"}
+    # Name was already set on create — not overwritten without overwrite=true.
+    assert "name" not in body["contact_changed_fields"]
+
+    get_resp = await client.get(
+        f"/api/v1/contacts/{contact['id']}", headers=_auth_headers()
+    )
+    updated = get_resp.json()
+    assert updated["abn"] == "51824753556"
+    assert updated["state"] == "QLD"
+    assert updated["postcode"] == "4350"
+    assert updated["name"] == name
+    assert updated["version"] == 2
+
+
+@pytest.mark.asyncio
+async def test_abr_lookup_no_overwrite_skips_populated_fields(
+    client: AsyncClient,
+) -> None:
+    """contact already has state/postcode set → left alone without overwrite=true."""
+    name = f"ABR Test Contact {uuid.uuid4().hex[:8]}"
+    create_resp = await client.post(
+        "/api/v1/contacts",
+        json={
+            "name": name,
+            "contact_type": "SUPPLIER",
+            "state": "NSW",
+            "postcode": "2000",
+        },
+        headers=_auth_headers(),
+    )
+    assert create_resp.status_code == 201, create_resp.text
+    contact = create_resp.json()
+
+    with patch(
+        "saebooks.api.v1.integrations.lookup_abn",
+        new_callable=AsyncMock,
+        return_value=_abr_lookup_result(),
+    ):
+        resp = await client.post(
+            "/api/v1/integrations/abr/lookup",
+            json={"abn": "51824753556", "contact_id": contact["id"]},
+            headers=_auth_headers(),
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    # state/postcode already populated -> untouched; abn was empty -> filled.
+    assert "state" not in body["contact_changed_fields"]
+    assert "postcode" not in body["contact_changed_fields"]
+    assert "abn" in body["contact_changed_fields"]
+
+    get_resp = await client.get(
+        f"/api/v1/contacts/{contact['id']}", headers=_auth_headers()
+    )
+    updated = get_resp.json()
+    assert updated["state"] == "NSW"
+    assert updated["postcode"] == "2000"
+    assert updated["abn"] == "51824753556"
+
+
+@pytest.mark.asyncio
+async def test_abr_lookup_overwrite_true_replaces_populated_fields(
+    client: AsyncClient,
+) -> None:
+    """overwrite=true replaces already-populated fields too."""
+    name = f"ABR Test Contact {uuid.uuid4().hex[:8]}"
+    create_resp = await client.post(
+        "/api/v1/contacts",
+        json={
+            "name": name,
+            "contact_type": "SUPPLIER",
+            "state": "NSW",
+            "postcode": "2000",
+        },
+        headers=_auth_headers(),
+    )
+    contact = create_resp.json()
+
+    with patch(
+        "saebooks.api.v1.integrations.lookup_abn",
+        new_callable=AsyncMock,
+        return_value=_abr_lookup_result(),
+    ):
+        resp = await client.post(
+            "/api/v1/integrations/abr/lookup",
+            json={
+                "abn": "51824753556",
+                "contact_id": contact["id"],
+                "overwrite": True,
+            },
+            headers=_auth_headers(),
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "state" in body["contact_changed_fields"]
+    assert "postcode" in body["contact_changed_fields"]
+
+    get_resp = await client.get(
+        f"/api/v1/contacts/{contact['id']}", headers=_auth_headers()
+    )
+    updated = get_resp.json()
+    assert updated["state"] == "QLD"
+    assert updated["postcode"] == "4350"
+
+
+@pytest.mark.asyncio
+async def test_abr_lookup_unknown_contact_id_404(client: AsyncClient) -> None:
+    """contact_id that doesn't resolve for this tenant/company → 404."""
+    with patch(
+        "saebooks.api.v1.integrations.lookup_abn",
+        new_callable=AsyncMock,
+        return_value=_abr_lookup_result(),
+    ):
+        resp = await client.post(
+            "/api/v1/integrations/abr/lookup",
+            json={"abn": "51824753556", "contact_id": str(uuid.uuid4())},
+            headers=_auth_headers(),
+        )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_abr_lookup_version_conflict_409(client: AsyncClient) -> None:
+    """Stale expected_version on the contact update → 409, matching If-Match semantics."""
+    name = f"ABR Test Contact {uuid.uuid4().hex[:8]}"
+    create_resp = await client.post(
+        "/api/v1/contacts",
+        json={"name": name, "contact_type": "SUPPLIER"},
+        headers=_auth_headers(),
+    )
+    contact = create_resp.json()
+
+    with patch(
+        "saebooks.api.v1.integrations.lookup_abn",
+        new_callable=AsyncMock,
+        return_value=_abr_lookup_result(),
+    ):
+        resp = await client.post(
+            "/api/v1/integrations/abr/lookup",
+            json={
+                "abn": "51824753556",
+                "contact_id": contact["id"],
+                "expected_version": 999,
+            },
+            headers=_auth_headers(),
+        )
+    assert resp.status_code == 409
+
+
+# ---------------------------------------------------------------------------
 # ATO prefill (stub)
 # ---------------------------------------------------------------------------
 

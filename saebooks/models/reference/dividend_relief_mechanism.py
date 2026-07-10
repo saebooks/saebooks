@@ -13,7 +13,7 @@ brand-new table, so adding it is additive and keeps this table consistent
 with every other reference table in this package. See the M1.5 build
 notes for this call-out).
 
-See docs/multi-jurisdiction.md (M1.5) (theme T11,
+See ~/records/saebooks/global-reference-audit-2026-07-09.md (theme T11,
 domain "Income, corporate & capital taxes").
 """
 import enum

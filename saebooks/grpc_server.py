@@ -888,7 +888,7 @@ class SAEBooksServicer(saebooks_pb2_grpc.SAEBooksServicer):
 # Mirrors ``saebooks.connect_app.BearerAuthInterceptor`` for the grpcio
 # transport. Without this, the :50051 server (and the grpc-web proxy
 # in front of it) accept every request — fine when :50051 was internal
-# to the internal network, not fine once a grpc-web port is exposed.
+# to the server network, not fine once a grpc-web port is exposed.
 #
 # Heartbeat is exempt so uptime probes don't need a token. Everything
 # else requires either a valid JWT, a ``saebk_*`` token, or the

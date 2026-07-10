@@ -11,6 +11,18 @@ Key design decisions:
 - ``void`` (DELETE in the REST API) is a soft-delete via ``archived_at``.
 - Lines are always replaced in bulk on update (simpler than line-level diffs).
 - ``tenant_id`` is required on every mutating call; extracted from auth.
+
+Wave C (extended_audit_modes): ``update()`` is the ACTUALLY-REACHABLE
+implementation behind ``PATCH /api/v1/journal_entries/{id}`` — before
+this wave it had NO status-based gate at all (a POSTED entry's
+narration and every line could be silently rewritten by anyone, at
+every edition, including Community, which CHARTER §6.1 promises
+"immutable ledger only"). ``services.journal.update_draft`` — the
+module whose name and docstring suggested it was the enforcement point
+— has zero live callers and was never wired to this route. Both now
+call the same ``journal_svc.enforce_posted_edit_gate`` so there is one
+source of truth for the audit-mode check regardless of which surface
+is used. See the Wave C build report for the full history.
 """
 from __future__ import annotations
 
@@ -20,11 +32,13 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from saebooks.models.account import Account
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
+from saebooks.services import audit as audit_svc
 from saebooks.services import change_log as change_log_svc
 
 # ---------------------------------------------------------------------------
@@ -461,13 +475,109 @@ async def update(
     reference: str | None = None,
     status: str | None = None,
     lines: list[dict[str, Any]] | None = None,
+    override_reason: str | None = None,
+    actor_role: str | None = None,
+    extended_audit_modes_entitled: bool = False,
+    performed_by: str | None = None,
 ) -> JournalEntry:
-    """Update a journal entry with optimistic locking + change_log."""
+    """Update a journal entry with optimistic locking + change_log.
+
+    Wave C: this is the reachable ``PATCH /api/v1/journal_entries/{id}``
+    implementation and is the SINGLE enforcement point for the CHARTER
+    §7.2 audit-mode gate on this surface (see module docstring — this
+    function previously had none).
+
+    ``extended_audit_modes_entitled`` defaults to ``False`` — matching
+    ``journal.effective_audit_mode``'s own fail-safe default, this
+    function is safe to call with no kwargs at all (every internal/test
+    caller that doesn't pass it gets Community's immutable-only
+    behaviour, never accidentally open/hybrid).
+
+    ``force`` (from ``edit_force_admin_gate`` — FLAG_EDIT_FROZEN_STATE,
+    developer-tier only) bypasses the audit-mode gate entirely, exactly
+    matching what "edit frozen state" is documented to mean; it was
+    accepted by this function's signature but silently unused before
+    this wave.
+
+    ``status`` transitions are refused outright (Wave C fix, unrelated
+    to audit modes but found while fixing this function): posting must
+    go through ``api_post`` (balance/GST/period-lock checks) and
+    reversal through ``api_reverse`` (creates the mirror entry) — this
+    generic field let a caller flip ``POSTED`` straight to ``DRAFT`` (or
+    vice versa) with none of those guards. A no-op "set it to what it
+    already is" is allowed so existing callers that always echo the
+    current status back don't break.
+    """
     entry = await _get_with_lines(session, entry_id)
     if entry is None:
         raise JournalEntryError(f"Journal entry {entry_id} not found")
     if entry.version != expected_version:
         raise VersionConflict(entry)
+
+    if status is not None and EntryStatus(status) != entry.status:
+        raise JournalEntryError(
+            f"Cannot change status via PATCH ({entry.status} -> {status}); "
+            "use POST /{id}/post to post a draft or POST /{id}/reverse to "
+            "reverse a posted entry"
+        )
+
+    was_posted = entry.status != EntryStatus.DRAFT
+    if was_posted:
+        # migration 0161's je_engine_guard trigger unconditionally refuses
+        # to change entry_date/ref/company_id/tenant_id on a POSTED/
+        # REVERSED row, for EVERY role including force's dev-tier bypass
+        # (that trigger only respects the separate app.db_rebuild GUC, not
+        # FLAG_EDIT_FROZEN_STATE) — so this is NOT an audit-mode question,
+        # it's a harder DB-layer invariant that applies in immutable, open,
+        # AND hybrid mode alike. Checked here, BEFORE touching the DB, so a
+        # caller gets a clean 422 instead of an uncaught IntegrityError/500
+        # from the trigger's RAISE EXCEPTION.
+        #
+        # FLAGGED for Richard: CHARTER's "open: posted entries editable" /
+        # "hybrid: editable pre-period-close" language plausibly means a
+        # posted entry's date should be movable within an open period
+        # (redating is exactly what hybrid mode sounds like it's for) —
+        # but making that true would mean teaching 0161's trigger about
+        # audit mode, a change to a security-critical anti-bypass guard
+        # that's out of scope for this wave. Landed conservative: identity
+        # fields (entry_date, reference) stay frozen post-post in every
+        # mode; only narration/lines are editable. If the intent was
+        # broader, that's a follow-up wave, not a silent 500.
+        if entry_date is not None and entry_date != entry.entry_date:
+            raise JournalEntryError(
+                "entry_date cannot be changed on a POSTED/REVERSED entry in "
+                "any audit mode (enforced at the database layer, migration "
+                "0161) — reverse and re-post with the corrected date instead"
+            )
+        if reference is not None and reference != entry.ref:
+            raise JournalEntryError(
+                "reference cannot be changed on a POSTED/REVERSED entry in "
+                "any audit mode (enforced at the database layer, migration "
+                "0161) — reverse and re-post with the corrected reference "
+                "instead"
+            )
+
+    if was_posted and not force:
+        from saebooks.services import journal as journal_svc  # avoid circular at module level
+
+        try:
+            await journal_svc.enforce_posted_edit_gate(
+                session,
+                entry,
+                extended_audit_modes_entitled=extended_audit_modes_entitled,
+                override_reason=override_reason,
+                actor_role=actor_role,
+            )
+        except journal_svc.PostingError as exc:
+            raise JournalEntryError(str(exc)) from exc
+
+    # CHARTER §7.2 "every edit is logged" (open/hybrid modes) — a full
+    # before/after row-state snapshot, on top of change_log's after-only
+    # header row below. Only for a posted/reversed edit: DRAFT edits keep
+    # their pre-existing change_log-only trail (unchanged behaviour, and
+    # drafts are freely editable in every mode so there's no compliance
+    # promise being made about them here).
+    before_snapshot = audit_svc.capture(entry) if was_posted else None
 
     if entry_date is not None:
         entry.entry_date = entry_date
@@ -475,8 +585,6 @@ async def update(
         entry.description = narration
     if reference is not None:
         entry.ref = reference
-    if status is not None:
-        entry.status = EntryStatus(status)
 
     if lines is not None:
         _assert_lines_balanced(lines, entry.ref)
@@ -489,12 +597,38 @@ async def update(
             session.add(line)
 
     entry.version = entry.version + 1
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        # Belt-and-braces: the entry_date/reference pre-check above should
+        # make this unreachable via this API (company_id/tenant_id aren't
+        # even settable through JournalEntryUpdate), but ANY other
+        # unanticipated migration-0161-style DB guard must surface as a
+        # clean 422, never an uncaught 500. Roll back so the session isn't
+        # left in a failed-transaction state for the caller.
+        await session.rollback()
+        raise JournalEntryError(
+            f"Update rejected by a database integrity guard: {exc.orig if exc.orig else exc}"
+        ) from exc
     await session.refresh(entry)
 
     # Re-fetch with lines
     entry = await _get_with_lines(session, entry_id)
     assert entry is not None
+
+    if before_snapshot is not None:
+        # NOTE: like the pre-existing update_draft snapshot this mirrors,
+        # this captures the JournalEntry header row only — per-line
+        # before/after detail isn't captured on this path either (flagged
+        # in the Wave C report as a pre-existing limitation, not a
+        # regression this change introduces).
+        await audit_svc.snapshot_row(
+            session, entry,
+            action="update",
+            before_data=before_snapshot,
+            performed_by=performed_by or actor,
+            reason=override_reason,
+        )
 
     await change_log_svc.append(
         session,

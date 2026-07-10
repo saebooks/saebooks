@@ -41,7 +41,7 @@ Source documents
     see verification report for the design decision outstanding.
 
 Verification report
-  See an internal verification note (2026-05-23).
+  ~/.claude/plans/payg-verification-2026-05-23.md
   All payg_tax_scales a/b values are transcribed verbatim from the
   ATO NAT 1004 HTML coefficient table (fetched 2026-05-23).
   stsl_coefficients a/b values: ATO-verified 2026-05-23 against NAT 3539
@@ -130,7 +130,7 @@ depends_on: str | Sequence[str] | None = None
 
 _SRC_NAT1004 = (
     "NAT 1004 FY25-26 ATO Schedule 1 — verbatim from ATO HTML table "
-    "fetched 2026-05-23; verification: internal verification note, 2026-05-23"
+    "fetched 2026-05-23; verification: ~/.claude/plans/payg-verification-2026-05-23.md"
 )
 _SRC_NAT1004_WHM = (
     "NAT 75331 Schedule 15 FY25-26 — a values match ATO; b values are "

@@ -13,7 +13,7 @@ Purely additive and non-breaking: nullable, no default, existing rows
 stay NULL ("not yet classified"). No RLS change — this is a new column on
 an existing tenant-scoped table, not a new table.
 
-See docs/multi-jurisdiction.md (M1.5) (theme T4).
+See ~/records/saebooks/global-reference-audit-2026-07-09.md (theme T4).
 
 Revision ID: 0177_company_entity_structure
 Revises: 0176_inbox_email

@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_active_company_id, get_session
+from saebooks.services.authz import require_permission_or_role_inline, require_user
 
 router = APIRouter(
     prefix="/tax_returns",
@@ -276,6 +277,24 @@ async def lodge_tax_return(
         raise HTTPException(422, f"Cannot lodge return in status '{row[4]}'")
 
     return_type = row[1]
+
+    # Permission gate, inline (not a static Depends()) because the
+    # correct catalogue code depends on return_type, only known after
+    # this row lookup. Conservative default (tax_return.lodge) for any
+    # type not explicitly mapped below.
+    _LODGE_CODE_BY_TYPE = {
+        "BAS": "bas.lodge",
+        "IAS": "bas.lodge",
+        "STP_PAYEVENT": "payroll.run",
+        "TPAR": "tpar.finalise",
+        "SUPERSTREAM": "super_lodgement.finalise",
+    }
+    await require_permission_or_role_inline(
+        _LODGE_CODE_BY_TYPE.get(return_type, "tax_return.lodge"),
+        require_user(),
+        request,
+    )
+
     figures = row[5] if isinstance(row[5], dict) else {}
     envelope_b64 = payload.get("envelope_b64")
     if envelope_b64:

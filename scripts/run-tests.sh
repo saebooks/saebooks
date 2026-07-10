@@ -25,7 +25,7 @@ COMPOSE_FILE="$REPO_DIR/docker-compose.test.yml"
 # Default project name picks a per-worktree suffix from the repo path so
 # saebooks-fix-A/B/C/... do not clash. Override with SAEBOOKS_TEST_PROJECT
 # for fully-explicit naming (preserves the original "saebooks-test" name
-# when running from a checkout named "saebooks" itself).
+# when running from /home/youruser/projects/saebooks itself).
 if [ -n "${SAEBOOKS_TEST_PROJECT:-}" ]; then
     PROJECT="$SAEBOOKS_TEST_PROJECT"
 elif [ "$(basename "$REPO_DIR")" = "saebooks" ]; then

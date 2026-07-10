@@ -34,7 +34,7 @@ enum — the same choice ``BusinessIdentifier.scheme`` made, so adding
 a new routing scheme (or, eventually, a new ownable table) is a
 code-only change instead of an enum-altering migration.
 
-See docs/multi-jurisdiction.md (M1.5) (theme T10).
+See ~/records/saebooks/global-reference-audit-2026-07-09.md (theme T10).
 """
 from __future__ import annotations
 

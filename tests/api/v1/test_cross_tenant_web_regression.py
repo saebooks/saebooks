@@ -41,7 +41,7 @@ Coverage:
   - recurring_invoices  /{id}  /{id}/edit
 
 DB availability: tests skip cleanly when Postgres / saebooks_app role is
-unavailable (e.g. a laptop dev environment).  Full suite runs in CI.
+unavailable (e.g. ci-host).  Full suite runs on ci-host.
 """
 from __future__ import annotations
 

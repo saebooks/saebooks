@@ -796,6 +796,15 @@ async def convert_to_inventory(
 
 # ---------------------------------------------------------------------- #
 # Partial disposal (Batch MM/3)                                          #
+#                                                                          #
+# Wave A note (2026-07-10): this is the FLAG_ASSET_V2 v2 action per the  #
+# planned-modules build plan, but it has ZERO API/web/MCP callers today  #
+# -- confirmed by grep across saebooks/ (see the Wave A build report).   #
+# Nothing to attach require_feature to yet. When a route is added, gate  #
+# it unconditionally with require_feature(FLAG_ASSET_V2) -- any partial  #
+# disposal is v2 by definition, unlike the conditional per-field gate in #
+# saebooks.services.assets_v2_gate (which only applies to the create/    #
+# update routes' diminishing-value-model / tax-split fields).            #
 # ---------------------------------------------------------------------- #
 
 

@@ -1,10 +1,9 @@
 """HTTP client for ``feeds.saebooks.com.au`` — the bank-feeds relay.
 
-Talks to the relay per an internal API contract (private — the feeds
-relay is a commercial server, not part of this repository). The
-contract locks the request shape, the response shape, and the
-status-code semantics. Change either side without changing the other
-and you break production.
+Talks to the relay per
+``~/.claude/plans/saebooks-feeds-server-contract.md``. The contract locks
+the request shape, the response shape, and the status-code semantics.
+Change either side without changing the other and you break production.
 
 This is the bank-feeds analogue of ``saebooks.services.lodgement.remote``;
 the two were deliberately built with byte-identical structure so a

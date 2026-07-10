@@ -50,6 +50,7 @@ _COMPANY_COLUMNS: tuple[str, ...] = (
     "writeoff_threshold_days",
     "recovery_mode",
     "bad_debt_recovery_account",
+    "costing_method",
     "phone",
     "email",
     "website",
@@ -211,6 +212,7 @@ async def update(
     writeoff_threshold_days: int | None = None,
     recovery_mode: str | None = None,
     bad_debt_recovery_account: str | None = None,
+    costing_method: str | None = None,
     phone: str | None = None,
     email: str | None = None,
     website: str | None = None,
@@ -250,7 +252,21 @@ async def update(
             raise ValueError("fin_year_start_month must be 1–12")
         company.fin_year_start_month = fin_year_start_month
     if audit_mode is not None:
-        valid_modes = {"immutable", "mutable", "draft"}
+        # CHARTER §7.2 vocabulary (Wave C, migration 0185 relabelled the
+        # legacy {immutable, mutable, draft} column values onto this set:
+        # mutable->open, draft->hybrid, see that migration's docstring for
+        # the mapping rationale). Non-immutable values are the
+        # extended_audit_modes paid feature (Offline+, CHARTER §12.1) — the
+        # tier gate lives in the API route (api/v1/companies.py, via
+        # require_feature_inline), not here, so this service function stays
+        # usable from tests/CLI/seed scripts without a Request. Enforcement
+        # of what mode actually governs a posted-entry EDIT is a separate,
+        # fail-safe check in services/journal.py's effective_audit_mode() —
+        # writing a non-immutable value onto a below-tier company is
+        # harmless because that check re-derives entitlement itself and
+        # ignores the stored value when the caller's tier lacks
+        # FLAG_EXTENDED_AUDIT_MODES.
+        valid_modes = {"immutable", "open", "hybrid"}
         if audit_mode not in valid_modes:
             raise ValueError(f"audit_mode must be one of: {', '.join(sorted(valid_modes))}")
         company.audit_mode = audit_mode
@@ -281,6 +297,13 @@ async def update(
         company.bad_debt_recovery_account = (
             bad_debt_recovery_account.strip() or None
         )
+    if costing_method is not None:
+        valid_cm = {"weighted_average", "fifo", "quantity_only"}
+        if costing_method not in valid_cm:
+            raise ValueError(
+                f"costing_method must be one of: {sorted(valid_cm)}"
+            )
+        company.costing_method = costing_method
     # Letterhead contact details + default payment terms (0171); remittance
     # fields (0168). PATCHing an empty string clears the column to NULL.
     if phone is not None:

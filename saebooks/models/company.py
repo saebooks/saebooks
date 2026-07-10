@@ -1,3 +1,4 @@
+import enum
 import uuid
 from datetime import date, datetime
 from typing import Any
@@ -7,6 +8,32 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from saebooks.db import Base
+
+
+class CostingMethod(enum.StrEnum):
+    """Per-company inventory costing policy (Wave D, 2026-07-10).
+
+    Richard's decision (2): costing method is a per-company SETTING —
+    the client chooses; the engine never forces one method. Stored as a
+    scalar column on ``companies`` alongside the other per-company
+    policy switches (``bookkeeping_mode`` / ``audit_mode`` /
+    ``writeoff_mode``) because it is a company-wide policy, not a
+    per-item attribute.
+
+    * ``WEIGHTED_AVERAGE`` — the pre-Wave-D behaviour (WAC blend on
+      receive, COGS at the running average on issue). DEFAULT so every
+      existing company and all existing WAC tests are unaffected.
+    * ``FIFO`` — perpetual first-in-first-out cost layers: a receipt
+      creates a layer; an issue consumes layers oldest-first and posts
+      COGS from the consumed layers.
+    * ``QUANTITY_ONLY`` — track on-hand quantity + movements only; NO
+      automatic COGS / stock-valuation journal is posted (cost stays
+      whatever the bills recorded).
+    """
+
+    WEIGHTED_AVERAGE = "weighted_average"
+    FIFO = "fifo"
+    QUANTITY_ONLY = "quantity_only"
 
 
 class Company(Base):
@@ -117,6 +144,20 @@ class Company(Base):
         nullable=True,
     )
     cashbook_categories: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
+    # Inventory costing policy (Wave D, 2026-07-10). Per-company setting —
+    # the client chooses; the engine never forces a method. Values are
+    # ``CostingMethod`` (weighted_average | fifo | quantity_only). Default
+    # ``weighted_average`` preserves the pre-Wave-D behaviour for every
+    # existing company (the FLAG_INVENTORY module was WAC-locked before).
+    # A DB CHECK constraint (migration 0185) is the second line of defence
+    # behind this Python-validated column.
+    costing_method: Mapped[str] = mapped_column(
+        String(24),
+        nullable=False,
+        default=CostingMethod.WEIGHTED_AVERAGE,
+        server_default=CostingMethod.WEIGHTED_AVERAGE.value,
+    )
 
     # Legal-entity model (migration 0133, 2026-05-24).
     # entity_type: COMPANY | TRUST | INDIVIDUAL | PARTNERSHIP | SUPER_FUND

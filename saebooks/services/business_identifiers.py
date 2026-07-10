@@ -11,7 +11,7 @@ which mirrors to the child table. The migration backfills existing
 ``companies.abn`` rows so reads through this service are immediately
 consistent on existing installs.
 
-M1.5 · T9 additions (see docs/multi-jurisdiction.md (M1.5)):
+M1.5 · T9 additions (see ~/records/saebooks/global-reference-audit-2026-07-09.md):
 jurisdiction / check_digit_valid / valid_from / valid_to / issuing_authority
 columns, plus a per-scheme validator registry (``register_validator`` /
 ``validate``). A validator is a light, non-raising format-and/or-check-digit

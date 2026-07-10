@@ -31,6 +31,16 @@ POST /api/v1/integrations/companies-house/search
     Body ``{query: str}`` → Companies House results. Gated
     ``FLAG_COMPANIES_HOUSE`` (Pro+).
 
+POST /api/v1/integrations/abr/lookup
+    Body ``{abn: str, contact_id?: uuid, overwrite?: bool,
+    expected_version?: int}`` → parsed Australian Business Register
+    envelope for ``abn``. Without ``contact_id``, lookup-only. With
+    ``contact_id``, additionally merges matched fields (name, state,
+    postcode, formatted ABN) onto that contact — empty fields only
+    unless ``overwrite=true`` — persisted via the existing
+    ``contacts`` service (versioned + audited). Gated
+    ``FLAG_ABR_LOOKUP`` (Business+).
+
 POST /api/v1/integrations/ato/prefill
     Stub — returns 501 until Batch KK lands. No flag gate (the stub is
     harmless in any tier; the live implementation will gate on
@@ -55,6 +65,7 @@ import hmac
 import json
 import logging
 import uuid
+from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse
@@ -63,11 +74,19 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
-from saebooks.api.v1.deps import get_session
+from saebooks.api.v1.deps import get_active_company_id, get_session
 from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
+from saebooks.services import contacts as contacts_svc
+from saebooks.services.abr import (
+    AbrError,
+    AbrNotConfiguredError,
+    apply_to_contact,
+    lookup_abn,
+)
 from saebooks.services.crypto import FieldEncryptionNotConfiguredError, decrypt_field
 from saebooks.services.features import (
+    FLAG_ABR_LOOKUP,
     FLAG_COMPANIES_HOUSE,
     FLAG_LEI_LOOKUP,
     FLAG_PAPERLESS_INTEGRATION,
@@ -129,6 +148,13 @@ class LeiLookupRequest(BaseModel):
 
 class CompaniesHouseSearchRequest(BaseModel):
     query: str
+
+
+class AbrLookupRequest(BaseModel):
+    abn: str
+    contact_id: uuid.UUID | None = None
+    overwrite: bool = False
+    expected_version: int | None = None
 
 
 class AtoPrefillRequest(BaseModel):
@@ -343,8 +369,8 @@ async def paperless_webhook(
     # Load the per-tenant secret from the DB. The table has FORCE ROW
     # LEVEL SECURITY + a tenant_isolation policy keyed on
     # app.current_tenant — under the runtime saebooks_app role
-    # (NOSUPERUSER + NOBYPASSRLS, see migration 0056_split_db_role) the
-    # policy is enforced, so we MUST set
+    # (NOSUPERUSER + NOBYPASSRLS, see migration 0056_split_db_role and
+    # docs/db-role-split.md) the policy is enforced, so we MUST set
     # the GUC before the SELECT or every webhook 404s.
     #
     # The webhook has no JWT/Bearer (it's authenticated by HMAC after
@@ -676,6 +702,122 @@ async def companies_house_search(
 
     import dataclasses
     return JSONResponse(dataclasses.asdict(result) if dataclasses.is_dataclass(result) else dict(result))  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# ABR (Australian Business Register) lookup
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/abr/lookup",
+    summary="Look up an ABN from the Australian Business Register",
+    dependencies=[Depends(require_feature(FLAG_ABR_LOOKUP))],
+)
+async def abr_lookup(
+    body: AbrLookupRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    company_id: uuid.UUID = Depends(get_active_company_id),
+) -> JSONResponse:
+    """Look up an ABN (Australian Business Number) via the ABR.
+
+    Body: ``{abn: "<11-digit ABN>", contact_id?: <uuid>,
+    overwrite?: bool, expected_version?: int}``
+
+    Without ``contact_id``, returns the parsed ABR envelope only
+    (entity name, ABN status, GST registration, address state /
+    postcode).
+
+    With ``contact_id``, additionally merges matched fields (name,
+    state, postcode, canonically-formatted ABN) onto that contact.
+    Empty contact fields are filled in by default; pass
+    ``overwrite=true`` to replace non-empty fields too. The merge is
+    computed by the same ``apply_to_contact`` logic used everywhere
+    else ABR enrichment happens, then persisted through the existing
+    versioned/audited ``contacts`` service — this endpoint does not
+    write to the contact row directly.
+
+    Raises:
+        404 when the ABN has no ABR record (or is well-formed but
+        unknown), or when ``contact_id`` doesn't resolve for this
+        tenant/company.
+        400 on a malformed ABN (not 11 digits) or another upstream
+        ABR error.
+        503 when ``ABR_API_GUID`` is not configured.
+        409 when ``expected_version`` doesn't match the contact's
+        current version (If-Match semantics).
+    """
+    try:
+        lookup = await lookup_abn(body.abn, settings=settings)
+    except AbrNotConfiguredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+    except AbrError as exc:
+        detail = str(exc)
+        # The ABR API itself reports "unknown ABN" as a 200 response
+        # carrying Message="No record found" / "Invalid ABN" (see
+        # services/abr/client.py docstring) — client.py re-raises both
+        # as a plain AbrError, so we distinguish by message content.
+        # Everything else (malformed-length guard, transport/JSON
+        # errors) is a 400.
+        if "No record found" in detail or "Invalid ABN" in detail:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=detail,
+            ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=detail,
+        ) from exc
+
+    import dataclasses
+    result: dict[str, object] = dataclasses.asdict(lookup)
+
+    if body.contact_id is not None:
+        tenant_id = resolve_tenant_id(request)
+        contact = await contacts_svc.get(
+            session, body.contact_id, tenant_id=tenant_id, company_id=company_id,
+        )
+        if contact is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Contact not found")
+
+        # apply_to_contact mutates its argument in place — run it
+        # against a scratch shadow (not the live ORM object) so we can
+        # compute the diff and persist it through contacts_svc.update
+        # (versioned + audit-logged) rather than committing a raw
+        # mutation outside that service's change-log path.
+        shadow = SimpleNamespace(
+            abn=contact.abn,
+            name=contact.name,
+            state=contact.state,
+            postcode=contact.postcode,
+        )
+        changed_fields = apply_to_contact(shadow, lookup, overwrite=body.overwrite)
+
+        if changed_fields:
+            update_kwargs = {field: getattr(shadow, field) for field in changed_fields}
+            try:
+                contact = await contacts_svc.update(
+                    session,
+                    body.contact_id,
+                    tenant_id=tenant_id,
+                    expected_version=body.expected_version,
+                    actor="abr_lookup",
+                    **update_kwargs,
+                )
+            except contacts_svc.VersionConflict as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=str(exc),
+                ) from exc
+
+        result["contact_id"] = str(contact.id)
+        result["contact_changed_fields"] = changed_fields
+
+    return JSONResponse(result)
 
 
 # ---------------------------------------------------------------------------

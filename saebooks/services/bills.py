@@ -33,7 +33,17 @@ from saebooks.models.tax_code import TaxCode
 from saebooks.services import items as items_svc
 from saebooks.services import journal as journal_svc
 from saebooks.services import numbering
+from saebooks.services import settings as settings_svc
 from saebooks.services import terms as terms_svc
+from saebooks.services.tax_engine.ee import RC_DUAL_REPORTING_TYPES
+
+# Settings key naming the "VAT self-assessed (reverse charge) payable"
+# liability account a reverse-charge EU-acquisition bill credits for its
+# self-assessed output VAT (see _post_rc_gl / post_bill). Distinct from
+# the input-side GST Paid account (which auto_post_gst_lines books off
+# the expense line's gst_amount) — an RC posting books BOTH: an
+# output-role liability here and an input-role receivable via GST Paid.
+RC_PAYABLE_ACCOUNT_SETTING_KEY = "gst_reverse_charge_payable_account_code"
 
 _TWOPLACES = Decimal("0.01")
 _FOURPLACES = Decimal("0.0001")
@@ -107,6 +117,68 @@ def _as_uuid(value: object) -> uuid.UUID:
     if isinstance(value, uuid.UUID):
         return value
     return uuid.UUID(str(value))
+
+
+async def _rc_tax_code_ids(
+    session: AsyncSession, lines: list[BillLine]
+) -> set[uuid.UUID]:
+    """The subset of a bill's ``tax_code_id``s whose company-side
+    ``TaxCode.reporting_type`` is an EU-acquisition reverse-charge tag
+    (``RC_DUAL_REPORTING_TYPES`` — ``rc_eu_acq_goods`` /
+    ``rc_eu_acq_services``). Empty for an ordinary (domestic) bill, so
+    the RC branch in ``post_bill`` is a no-op and the posting is
+    byte-identical to the pre-RC path.
+
+    Finding 2/8 fix (was ``_reject_unsupported_reverse_charge``, a
+    critic-round-4 HARD BLOCK): ``post_bill`` now posts the economically
+    correct reverse-charge GL instead of rejecting the bill — Accounts
+    Payable is credited for the NET invoice only (the foreign supplier
+    charges no VAT), the self-assessed OUTPUT VAT is booked as a
+    liability on the ``RC_PAYABLE_ACCOUNT_SETTING_KEY`` account, and the
+    deductible INPUT VAT is booked as a receivable by the existing
+    ``auto_post_gst_lines`` off the expense line's ``gst_amount`` (the
+    two normally net to zero cash effect). See ``post_bill``.
+    """
+    tc_ids = {line.tax_code_id for line in lines if line.tax_code_id is not None}
+    if not tc_ids:
+        return set()
+    result = await session.execute(
+        select(TaxCode.id, TaxCode.reporting_type).where(TaxCode.id.in_(tc_ids))
+    )
+    return {tid for (tid, rt) in result.all() if rt in RC_DUAL_REPORTING_TYPES}
+
+
+async def _get_rc_payable_account(
+    session: AsyncSession, company_id: uuid.UUID
+) -> Account:
+    """Resolve the reverse-charge self-assessed OUTPUT-VAT payable
+    liability account for an RC bill, via the
+    ``RC_PAYABLE_ACCOUNT_SETTING_KEY`` setting. Raises ``BillError`` (a
+    config error, loud — never a silently-unbalanced posting) when an RC
+    bill is posted but the account is unset or does not resolve, mirroring
+    ``auto_post_gst_lines``'s treatment of a missing GST account code."""
+    code = await settings_svc.get(session, RC_PAYABLE_ACCOUNT_SETTING_KEY, "")
+    code = (str(code) if code is not None else "").strip()
+    acct = None
+    if code:
+        acct = (
+            await session.execute(
+                select(Account).where(
+                    Account.company_id == company_id,
+                    Account.code == code,
+                )
+            )
+        ).scalar_one_or_none()
+    if acct is None:
+        raise BillError(
+            "Cannot post a reverse-charge EU-acquisition bill: the "
+            f"self-assessed VAT payable account setting "
+            f"{RC_PAYABLE_ACCOUNT_SETTING_KEY!r} ({code!r}) does not "
+            "resolve to an account in this company's chart. Set it to a "
+            "real liability account so the output-side self-assessed VAT "
+            "can be booked (AP is credited for the net invoice only)."
+        )
+    return acct
 
 
 # ---------------------------------------------------------------------- #
@@ -430,6 +502,7 @@ async def post_bill(
         raise BillError("Cannot post a bill with no lines")
     if bill.total <= Decimal("0"):
         raise BillError(f"Cannot post bill with non-positive total {bill.total}")
+    rc_tc_ids = await _rc_tax_code_ids(session, bill.lines)
 
     # Mint the internal bill number now (DRAFT never burns a number).
     if not bill.number:
@@ -454,6 +527,15 @@ async def post_bill(
     )
 
     journal_lines: list[dict[str, object]] = []
+    # Self-assessed OUTPUT VAT on reverse-charge EU-acquisition lines
+    # (finding 2/8). This is the VAT the foreign supplier did NOT charge:
+    # it must NOT inflate Accounts Payable (nothing extra is owed to the
+    # supplier), and it must be booked as an output-side liability. We
+    # strip it out of the AP credit below and post it to the RC-payable
+    # account instead; the matching deductible INPUT VAT is booked by
+    # auto_post_gst_lines off the expense line's gst_amount (the two
+    # normally net to a zero cash effect — scope §6's "output == input").
+    rc_vat_base_total = Decimal("0")
     # One Dr line per expense/asset account per bill line; GST
     # auto-poster appends the matching Dr GST Paid. project_id rides
     # through so P&L-by-project can pick up cost-side postings.
@@ -462,6 +544,8 @@ async def post_bill(
         line_base_tax = (
             _q2(line.line_tax * rate) if line.line_tax > 0 else None
         )
+        if line.tax_code_id in rc_tc_ids and line_base_tax:
+            rc_vat_base_total += line_base_tax
         journal_lines.append(
             {
                 "account_id": line.account_id,
@@ -473,12 +557,18 @@ async def post_bill(
                 "project_id": line.project_id,
             }
         )
+
+    # AP is credited for the invoice value LESS the self-assessed RC VAT
+    # (which the supplier never charged). For an ordinary bill
+    # rc_vat_base_total is 0, so ap_credit == bill.base_total exactly —
+    # the pre-RC posting is byte-identical.
+    ap_credit_full = _q2(bill.base_total - rc_vat_base_total)
     if total_retention_base > Decimal("0"):
         # Split Cr AP: Trade Creditors receives only the net-payable
         # portion; Retentions Payable receives the withheld amount.
         # Expense and GST are recognised in full (Dr side unchanged).
         retention_acct = await _get_retentions_payable_account(session, bill.company_id)
-        net_ap = _q2(bill.base_total - total_retention_base)
+        net_ap = _q2(ap_credit_full - total_retention_base)
         journal_lines.append(
             {
                 "account_id": ap_account.id,
@@ -502,7 +592,19 @@ async def post_bill(
                 "account_id": ap_account.id,
                 "description": f"Bill {bill.number} ({ref})",
                 "debit": Decimal("0"),
-                "credit": bill.base_total,
+                "credit": ap_credit_full,
+            }
+        )
+
+    # Output-side self-assessed VAT liability for reverse-charge lines.
+    if rc_vat_base_total > Decimal("0"):
+        rc_payable_acct = await _get_rc_payable_account(session, bill.company_id)
+        journal_lines.append(
+            {
+                "account_id": rc_payable_acct.id,
+                "description": f"Bill {bill.number}: reverse-charge VAT self-assessed",
+                "debit": Decimal("0"),
+                "credit": rc_vat_base_total,
             }
         )
 
@@ -525,11 +627,16 @@ async def post_bill(
     )
 
     # Inventory stock movement: for every line with item_id, bump
-    # on_hand_qty and re-blend WAC. Unit cost is the base-currency
-    # line subtotal divided by quantity — GST is excluded (stays on
-    # the Dr GST Paid asset line), FX is already applied at _recalc.
-    # Runs AFTER the journal posts so a failed journal doesn't mutate
-    # stock.
+    # on_hand_qty per the company's costing method. Unit cost is the
+    # base-currency line subtotal divided by quantity — GST is excluded
+    # (stays on the Dr GST Paid asset line), FX is already applied at
+    # _recalc. Runs AFTER the journal posts so a failed journal doesn't
+    # mutate stock. WAC blends the average; FIFO creates a cost layer;
+    # quantity_only just tracks the on-hand count. Resolve the method
+    # once per bill.
+    costing_method = await items_svc.get_company_costing_method(
+        session, bill.company_id
+    )
     for line in bill.lines:
         if line.item_id is None:
             continue
@@ -542,6 +649,8 @@ async def post_bill(
             line.item_id,
             qty=line.quantity,
             unit_cost=unit_cost,
+            method=costing_method,
+            received_date=bill.issue_date,
         )
 
     bill.status = BillStatus.POSTED

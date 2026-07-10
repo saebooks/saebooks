@@ -38,7 +38,7 @@ class TaxFamily(enum.StrEnum):
     sales-&-use tax is a *different* family (single-stage, no input credit).
     Regional names resolve to one of these; ``input_credit_recoverable``
     captures the credit consequence that distinguishes the families.
-    See docs/multi-jurisdiction.md (M1.5) (theme T1).
+    See ~/records/saebooks/global-reference-audit-2026-07-09.md (theme T1).
     """
 
     VAT_GST = "vat_gst"            # GST / VAT / TVA / IVA / MwSt — input-creditable

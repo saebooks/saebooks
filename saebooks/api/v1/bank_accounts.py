@@ -37,6 +37,7 @@ from saebooks.api.v1.schemas import (
 from saebooks.models.bank_statement import BankStatementLine
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
 from saebooks.services import bank_accounts as svc
+from saebooks.services.authz import no_additional_gate, require_permission_or_role
 from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 
@@ -244,7 +245,14 @@ async def get_bank_account(
 # ---------------------------------------------------------------------------
 
 
-@router.post("", response_model=BankAccountOut, status_code=201)
+@router.post(
+    "",
+    response_model=BankAccountOut,
+    status_code=201,
+    dependencies=[
+        Depends(require_permission_or_role("bank_account.manage", no_additional_gate))
+    ],
+)
 async def create_bank_account(
     request: Request,
     payload: BankAccountCreate,
@@ -317,6 +325,9 @@ async def create_bank_account(
         200: {"model": BankAccountOut},
         409: {"model": BankAccountConflictBody, "description": "Version mismatch"},
     },
+    dependencies=[
+        Depends(require_permission_or_role("bank_account.manage", no_additional_gate))
+    ],
 )
 async def update_bank_account(
     request: Request,
@@ -402,6 +413,9 @@ async def update_bank_account(
         204: {"description": "Archived"},
         409: {"model": BankAccountConflictBody, "description": "Version mismatch"},
     },
+    dependencies=[
+        Depends(require_permission_or_role("bank_account.manage", no_additional_gate))
+    ],
 )
 async def delete_bank_account(
     request: Request,

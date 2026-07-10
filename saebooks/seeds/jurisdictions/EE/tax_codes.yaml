@@ -20,6 +20,51 @@
 # (mirrors AU's mandatory_contribution_rules.yaml au_super_guarantee
 # pattern) — the natural key is (jurisdiction, code, effective_from).
 #
+# KMD-formula support Packet 2 (see
+# ~/.claude/plans/kmd-formula-support-scope.md §2/§7) — company-side
+# TaxCode.reporting_type convention this seed's box definitions
+# (tax_return_box_definitions.yaml) key their feeder_tax_codes off:
+#   standard / standard_legacy_20 / standard_legacy_22 / reduced_13 /
+#   reduced_9 / reduced_5_legacy / exempt / capital (unchanged from
+#   Packet 1) PLUS, as of Packet 2:
+#   zero_ic_goods / zero_ic_services / zero_export / zero_traveller
+#     — the old single "zero_rated" tag, split into the four KMD box-3.1/
+#       3.1.1/3.2/3.2.1 sub-total leaves (see the split ZERO_* rows
+#       below). Box 3 itself feeds off the union of all four.
+#   input_import
+#     — new leaf feeding KMD box 5.1 (see the new INPUT_IMPORT row
+#       below).
+# Not yet added (deferred — see tax_return_box_definitions.yaml's box
+# 5.3/5.4 comments): input_car_100 / input_car_50.
+#
+# KMD-formula support Packet 3 (RC-FANOUT, scope §3.4) landed the
+# prerequisite this file used to flag as missing: the EE posting
+# dispatcher (services.journal._apply_tax_treatment now resolves
+# Company.jurisdiction instead of hardcoding AU; services.tax_engine.ee
+# .EETaxEngine is the real, no-longer-stub EE engine). Two of the
+# reporting_type tags below are now GENUINELY POSTABLE and produce a
+# two-component (output + input) fan-out via that engine:
+#   rc_eu_acq_goods / rc_eu_acq_services
+#     — company-side TaxCode rows with these reporting_type values now
+#       post as EU-acquisition reverse charge: one line yields BOTH an
+#       output-role component (KMD box 1, via tax_return_box_definitions
+#       .yaml's new "1_RC" role-based ledger box) and an input-role
+#       component (KMD box 5, via "5_RC") — see EETaxEngine's own
+#       docstring for the two-component design and this packet's scope
+#       narrowing (current standard rate 24% only; full deduction only).
+# The remaining tags this header previously flagged as "not yet
+# postable" are STILL not fanned out by any engine (single-component,
+# informative-box-only, unchanged from Packet 2):
+#   ic_acq_exempt / rc_domestic_acq / ee_acq_foreign / rc_domestic_supply /
+#   install_other_ms
+# — these feed KMD box 6/6.1/7/7.1/9 (informative/seller-side boxes)
+# through the ordinary account-type bucket, which has never required a
+# posting dispatcher or multi-component fan-out; they were already
+# postable in the sense that any company-side TaxCode with one of these
+# reporting_type values would aggregate correctly, just via the plain
+# single-component path every engine (including the pre-Packet-3
+# AU-hardcoded dispatcher) already supported.
+#
 # UNVERIFIED DATES: the supplied research confirmed rate *values* and the
 # *end* dates of superseded rates (e.g. "20% until 2023-12-31") but did
 # not confirm the historical *start* dates of the 20%, 5%, and 0%-rate
@@ -38,6 +83,41 @@
 # seeded there as a deliberate stub only), not at an Estonian domestic
 # rate. These two codes exist so a company's chart/tax-code UI can flag a
 # supply as OSS/IOSS-reportable; they are not a rate to apply.
+#
+# ⚠ CRITIC-ROUND-3 FINDING (stated, not silently buried — surfaced per
+# scope §3.4's own bar): this reference catalog (RefTaxCode,
+# ``saebooks/models/reference/tax_code.py``) has NO ``reporting_type``
+# column at all — the field the *company-side* ``TaxCode`` model uses,
+# and the exact field ``tax_return_box_definitions.yaml``'s
+# ``feeder_tax_codes`` key their aggregation off. A company provisioning
+# its own tax codes by copying rows from this file has no seed-supplied
+# way to learn which ``reporting_type`` string to set — this file only
+# carries ``report_box_keys`` (an informational KMD-box hint, a SEPARATE
+# mechanism, read by nothing in the engine). Adding a
+# ``reporting_type`` column to ``RefTaxCode`` needs a reference-DB
+# migration; this build's mandate permits exactly ONE additive
+# reference-DB migration (0009, already spent on the ``formula`` column)
+# — so that real fix is DEFERRED, not done here. Concretely, until then:
+#   * The single ``RC_EU_ACQ`` code (below) covers BOTH
+#     ``rc_eu_acq_goods`` and ``rc_eu_acq_services`` — a company must
+#     manually pick the correct one of the two company-side
+#     ``reporting_type`` tags depending on whether the acquisition is of
+#     goods or services; nothing here discriminates them.
+#   * ``ic_acq_exempt`` / ``rc_domestic_acq`` / ``ee_acq_foreign`` /
+#     ``install_other_ms`` (the tags KMD boxes 6/6.1/7/7.1/9 also read —
+#     see ``tax_return_box_definitions.yaml``) have NO backing row in
+#     this file at all today.
+# Blast radius is limited in practice: there is no automated
+# provisioning path from this reference catalog into a company's
+# ``TaxCode`` rows today anyway — the live provisioning code
+# (``services/tax_codes.py``'s ``INTERNATIONAL_SEED``) is a wholly
+# separate, hand-maintained dict with generic "EU" (not EST-specific)
+# rows and none of these tags either. So no live pipeline silently files
+# a wrong return off this gap; it is a reference-catalog
+# completeness/discoverability gap for a FUTURE EE-specific provisioning
+# UI, not a currently-exploitable one. Tracked as a follow-up: add
+# ``RefTaxCode.reporting_type`` (its own migration) + split ``RC_EU_ACQ``
+# into goods/services rows + add rows for the four missing tags.
 table: tax_codes
 key: [jurisdiction, code, effective_from]
 rows:
@@ -119,17 +199,61 @@ rows:
     report_box_keys: ["KMD:2-1"]
 
   # --- Zero rate + exempt -------------------------------------------------
+  # Packet 2 (KMD-formula support): the single ZERO code is split into its
+  # four KMD box-3.1/3.1.1/3.2/3.2.1 sub-total leaves (report_box_keys
+  # updated to name the finer box each feeds, alongside the box-3 union
+  # every one of them still belongs to) — mirrors the company-side
+  # reporting_type convention tax_return_box_definitions.yaml now uses
+  # (zero_ic_goods / zero_ic_services / zero_export / zero_traveller; see
+  # this file's header). Same 0% rate, same KMS §15(3)-(4) UNVERIFIED
+  # placeholder start date as the row this replaces.
   - jurisdiction: EST
-    code: ZERO
-    name: "Käibemaks — 0% määr (eksport, ühendusesisene käive)"
+    code: ZERO_IC_GOODS
+    name: "Käibemaks — 0% määr (kauba ühendusesisene käive)"
     rate_percent: 0.0000
     direction: sale
     is_inclusive: false
     reverse_charge: false
     tax_family: vat_gst
     gl_account_hint: "Käibemaks (VAT) Payable"
-    effective_from: 1991-01-01  # UNVERIFIED — placeholder start date; 0%-rating for exports/intra-EU is a long-standing KMS §15(3)-(4) feature, not separately dated in supplied research.
-    report_box_keys: ["KMD:3"]
+    effective_from: 1991-01-01  # UNVERIFIED — placeholder start date; 0%-rating for intra-EU goods supply is a long-standing KMS §15(3)-(4) feature, not separately dated in supplied research.
+    report_box_keys: ["KMD:3", "KMD:3.1", "KMD:3.1.1"]
+
+  - jurisdiction: EST
+    code: ZERO_IC_SERVICES
+    name: "Käibemaks — 0% määr (KMS § 10 lg 4 p 9 teenuste käive teise liikmesriigi maksukohustuslasele)"
+    rate_percent: 0.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "Käibemaks (VAT) Payable"
+    effective_from: 1991-01-01  # UNVERIFIED — placeholder start date; mirrors ZERO_IC_GOODS's identical caveat.
+    report_box_keys: ["KMD:3", "KMD:3.1"]
+
+  - jurisdiction: EST
+    code: ZERO_EXPORT
+    name: "Käibemaks — 0% määr (kauba eksport)"
+    rate_percent: 0.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "Käibemaks (VAT) Payable"
+    effective_from: 1991-01-01  # UNVERIFIED — placeholder start date; 0%-rating for exports is a long-standing KMS §15(3)-(4) feature, not separately dated in supplied research.
+    report_box_keys: ["KMD:3", "KMD:3.2"]
+
+  - jurisdiction: EST
+    code: ZERO_TRAVELLER
+    name: "Käibemaks — 0% määr (käibemaksutagastusega müük reisijale, tax-free)"
+    rate_percent: 0.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "Käibemaks (VAT) Payable"
+    effective_from: 1991-01-01  # UNVERIFIED — placeholder start date; mirrors ZERO_EXPORT's identical caveat (tax-free traveller sales are a sub-case of export).
+    report_box_keys: ["KMD:3", "KMD:3.2", "KMD:3.2.1"]
 
   - jurisdiction: EST
     code: EXEMPT
@@ -216,7 +340,52 @@ rows:
 
   - jurisdiction: EST
     code: RC_EU_ACQ
-    name: "Pöördmaksustamine — ühendusesisene soetamine / imporditud teenused"
+    name: "Pöördmaksustamine — kauba ühendusesisene soetamine (goods)"
+    rate_percent: 24.0000
+    direction: purchase
+    is_inclusive: false
+    reverse_charge: true
+    tax_family: vat_gst
+    gl_account_hint: "Käibemaks (VAT) Receivable"
+    effective_from: 2025-07-01
+    # goods → also KMD box 6.1 (of-which intra-Community goods acquisition)
+    report_box_keys: ["KMD:1", "KMD:4", "KMD:5", "KMD:6", "KMD:6.1"]
+
+  # Finding 4: the SERVICES half of the previously-ambiguous RC_EU_ACQ.
+  # A company tags a services acquisition (KMS §10(4)(9) main-rule
+  # services from another-MS taxable person) with company-side
+  # reporting_type "rc_eu_acq_services"; this catalog row is its backing
+  # reference code. Services are NOT in KMD box 6.1 (goods-only), so
+  # report_box_keys omits it. Dated series mirrors the goods variant.
+  - jurisdiction: EST
+    code: RC_EU_ACQ_SERVICES
+    name: "Pöördmaksustamine — teise liikmesriigi maksukohustuslaselt saadud teenused (services, 20% legacy)"
+    rate_percent: 20.0000
+    direction: purchase
+    is_inclusive: false
+    reverse_charge: true
+    tax_family: vat_gst
+    gl_account_hint: "Käibemaks (VAT) Receivable"
+    effective_from: 1991-01-01  # UNVERIFIED — placeholder; see RC_EU_ACQ.
+    effective_to: 2023-12-31
+    report_box_keys: ["KMD:1", "KMD:4", "KMD:5", "KMD:6"]
+
+  - jurisdiction: EST
+    code: RC_EU_ACQ_SERVICES
+    name: "Pöördmaksustamine — teise liikmesriigi maksukohustuslaselt saadud teenused (services, 22% legacy)"
+    rate_percent: 22.0000
+    direction: purchase
+    is_inclusive: false
+    reverse_charge: true
+    tax_family: vat_gst
+    gl_account_hint: "Käibemaks (VAT) Receivable"
+    effective_from: 2024-01-01
+    effective_to: 2025-06-30
+    report_box_keys: ["KMD:1", "KMD:4", "KMD:5", "KMD:6"]
+
+  - jurisdiction: EST
+    code: RC_EU_ACQ_SERVICES
+    name: "Pöördmaksustamine — teise liikmesriigi maksukohustuslaselt saadud teenused (services)"
     rate_percent: 24.0000
     direction: purchase
     is_inclusive: false
@@ -225,6 +394,60 @@ rows:
     gl_account_hint: "Käibemaks (VAT) Receivable"
     effective_from: 2025-07-01
     report_box_keys: ["KMD:1", "KMD:4", "KMD:5", "KMD:6"]
+
+  # Finding 4: informative-box backing codes that had NO reference row —
+  # boxes 6/6.1 (ic_acq_exempt), 7/7.1 (rc_domestic_acq), 7 (ee_acq_foreign)
+  # and 9 (install_other_ms). rate_percent is informational for these
+  # (the base, not a rate, feeds the informative box); a company tags the
+  # line with the matching company-side reporting_type. Placeholder
+  # effective_from where the regime's commencement is UNVERIFIED.
+  - jurisdiction: EST
+    code: IC_ACQ_EXEMPT
+    name: "Maksuvaba ühendusesisene soetamine (informatiivne, KMD lahter 6/6.1)"
+    rate_percent: 0.0000
+    direction: purchase
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "Käibemaks (VAT) Receivable"
+    effective_from: 2004-05-01  # EU accession — intra-Community regime start.
+    report_box_keys: ["KMD:6", "KMD:6.1"]
+
+  - jurisdiction: EST
+    code: RC_DOMESTIC_ACQ
+    name: "Pöördmaksustatav soetamine — kinnisasi/metallijäätmed/väärismetall (KMS §41^1, ostja pool)"
+    rate_percent: 24.0000
+    direction: purchase
+    is_inclusive: false
+    reverse_charge: true
+    tax_family: vat_gst
+    gl_account_hint: "Käibemaks (VAT) Receivable"
+    effective_from: 1991-01-01  # UNVERIFIED — placeholder; KMS §41^1 buyer self-assessment.
+    report_box_keys: ["KMD:7", "KMD:7.1"]
+
+  - jurisdiction: EST
+    code: EE_ACQ_FOREIGN
+    name: "Muu Eestis maksustatav soetamine välismaalt (paigaldus, kolmnurktehing, KMS §41^1 v.a, informatiivne)"
+    rate_percent: 24.0000
+    direction: purchase
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "Käibemaks (VAT) Receivable"
+    effective_from: 1991-01-01  # UNVERIFIED — placeholder.
+    report_box_keys: ["KMD:7"]
+
+  - jurisdiction: EST
+    code: INSTALL_OTHER_MS
+    name: "Teises liikmesriigis paigaldatava/kokkupandava kauba käive (müüja pool, KMD lahter 9)"
+    rate_percent: 0.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "Käibemaks (VAT) Payable"
+    effective_from: 2004-05-01  # EU accession.
+    report_box_keys: ["KMD:9"]
 
   # --- Input VAT (purchase side, dated series matching the standard rate) --
   - jurisdiction: EST
@@ -302,6 +525,29 @@ rows:
     gl_account_hint: "Käibemaks (VAT) Receivable"
     effective_from: 2025-07-01
     report_box_keys: ["KMD:5.2"]
+
+  # --- Input VAT — import (Packet 2: new leaf feeding KMD box 5.1) --------
+  # Single current-rate row only (unlike STD/INPUT_STD/INPUT_CAP's
+  # dated 20%/22%/24% legacy series) — box 5.1's golden-file test target
+  # is current-period import VAT tracking, not pre-2025-07 historical
+  # correctness; a legacy-rate dated series can be added the same way
+  # STD/INPUT_STD/INPUT_CAP were, if/when a historical-period import KMD
+  # is needed. rate_percent here is informational only (import VAT is
+  # assessed on customs value at the standard rate in force on the
+  # import date, not a separate rate regime) — the reporting_type tag
+  # (see tax_return_box_definitions.yaml box 5.1) is what actually
+  # routes a posted line into this box, not this row's rate.
+  - jurisdiction: EST
+    code: INPUT_IMPORT
+    name: "Sisendkäibemaks — impordilt tasutud või tasumisele kuuluv käibemaks"
+    rate_percent: 24.0000
+    direction: purchase
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "Käibemaks (VAT) Receivable"
+    effective_from: 2025-07-01
+    report_box_keys: ["KMD:5", "KMD:5.1"]
 
   # --- OSS / IOSS marker codes (see file header) ---------------------------
   - jurisdiction: EST

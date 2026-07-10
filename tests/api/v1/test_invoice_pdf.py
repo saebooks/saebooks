@@ -89,10 +89,10 @@ class _FakeCompany:
     def __init__(self):
         self.legal_name = "Example Pty Ltd"
         self.name = "Example Pty Ltd"
-        self.abn = "12 345 678 901"
+        self.abn = "51 824 753 556"
         # Letterhead contact details (0171)
         self.phone = "07 4000 0000"
-        self.email = "accounts@example.com.au"
+        self.email = "accounts@example.com"
         self.website = "https://saebooks.com.au"
         # Remittance fallback columns (0168) + standing terms
         self.bank_name = "Westpac"
@@ -130,7 +130,7 @@ def test_build_invoice_ctx_letterhead_fields() -> None:
     assert ctx["terms_url"] == "https://saebooks.com.au/terms"
     assert ctx["company"]["name"] == "Example Pty Ltd"
     assert ctx["company"]["phone"] == "07 4000 0000"
-    assert ctx["company"]["email"] == "accounts@example.com.au"
+    assert ctx["company"]["email"] == "accounts@example.com"
     assert ctx["company"]["website"] == "https://saebooks.com.au"
     assert ctx["contact"]["name"] == "Acme & Partners"
 

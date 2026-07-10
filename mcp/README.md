@@ -18,7 +18,7 @@
 >
 > This standalone container is **retained as a shim only**, for
 > air-gapped operator workstations or compose stacks that prefer a
-> separate process boundary. Our own reference deployment retired
+> separate process boundary. The Sauer reference deployment retired
 > its `saebooks-mcp` + `saebooks-mcp-community` containers on
 > 2026-05-23 in favour of the in-tree mount.
 
@@ -95,21 +95,21 @@ your MCP client at the other URL.
 
 ## Register in Claude Code
 
-Add to your Claude Code `settings.json`:
+Add to `~/.claude/settings.json`:
 
 ```json
 {
   "mcpServers": {
     "saebooks": {
       "transport": "sse",
-      "url": "http://<host>:18314/sse",
+      "url": "http://127.0.0.1:18314/sse",
       "headers": {
         "Authorization": "Bearer saebk_..."
       }
     },
     "saebooks-community": {
       "transport": "sse",
-      "url": "http://<host>:18316/sse",
+      "url": "http://127.0.0.1:18316/sse",
       "headers": {
         "Authorization": "Bearer saebk_..."
       }

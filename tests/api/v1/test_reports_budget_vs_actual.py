@@ -41,6 +41,19 @@ async def api_client() -> AsyncClient:
         yield ac
 
 
+@pytest.fixture(autouse=True)
+def _set_edition_enterprise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run this file's tests at enterprise (all flags on) by default.
+
+    FLAG_PROJECTS_BUDGETS (Wave A, 2026-07-10) now gates
+    GET /api/v1/reports/budget_vs_actual. The gate-specific tests
+    below override this per-test.
+    """
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "enterprise")
+
+
 @pytest.fixture
 async def expense_account_id() -> str:
     """Return an EXPENSE account ID from seeded data."""
@@ -145,7 +158,7 @@ async def _create_and_post_je(
     entry_date: str,
     lines: list[dict],
 ) -> dict:
-    """Create a DRAFT JE then PATCH to POSTED. Return posted body."""
+    """Create a DRAFT JE then POST it to POSTED via /{id}/post. Return posted body."""
     r = await client.post(
         "/api/v1/journal_entries",
         json={
@@ -159,9 +172,8 @@ async def _create_and_post_je(
     je_id = body["id"]
     version = body["version"]
 
-    r2 = await client.patch(
-        f"/api/v1/journal_entries/{je_id}",
-        json={"status": "POSTED"},
+    r2 = await client.post(
+        f"/api/v1/journal_entries/{je_id}/post",
         headers={"If-Match": str(version)},
     )
     assert r2.status_code == 200, r2.text
@@ -307,3 +319,34 @@ async def test_budget_vs_actual_year_month_filter(
     jul_matching = [l for l in body_jul["lines"] if l["account_id"] == expense_account_id]
     assert jul_matching, "Account not found in month=7 query"
     assert jul_matching[0]["budget"] == pytest.approx(800.0)
+
+
+# ---------------------------------------------------------------------------
+# FLAG_PROJECTS_BUDGETS gate — Wave A (2026-07-10)
+# ---------------------------------------------------------------------------
+
+
+async def test_budget_vs_actual_gate_community(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FLAG_PROJECTS_BUDGETS gate: community → 404."""
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "community")
+    r = await api_client.get(
+        "/api/v1/reports/budget_vs_actual", params={"year": 2089}
+    )
+    assert r.status_code == 404
+
+
+async def test_budget_vs_actual_gate_offline_succeeds(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FLAG_PROJECTS_BUDGETS gate: offline → 200 (this is where it turns on)."""
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "offline")
+    r = await api_client.get(
+        "/api/v1/reports/budget_vs_actual", params={"year": 2089}
+    )
+    assert r.status_code == 200, r.text

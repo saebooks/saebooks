@@ -95,7 +95,8 @@ def _app_role_url() -> str:
 
     The test stack only sets ``DATABASE_URL`` (owner). We mirror the
     host/port/db parts and substitute the role + password — same
-    pattern a production owner/runtime-role deployment split uses.
+    pattern the production deploy plan uses (see
+    ``docs/db-role-split.md``).
     """
     base = settings.database_url
     from sqlalchemy.engine.url import make_url

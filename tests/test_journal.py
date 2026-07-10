@@ -723,7 +723,7 @@ async def test_trust_debit_to_revenue_blocked() -> None:
                 {"account_id": rev_id, "debit": 0, "credit": 2400},
             ],
         )
-        with pytest.raises(PostingError, match="RLES-2"):
+        with pytest.raises(PostingError, match="not agency income"):
             await svc.post(session, entry.id, posted_by="test")
 
 

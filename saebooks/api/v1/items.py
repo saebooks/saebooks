@@ -37,12 +37,21 @@ from saebooks.api.v1.schemas import (
 )
 from saebooks.models.item import Item, ItemType
 from saebooks.services import items as svc
+from saebooks.services.features import FLAG_INVENTORY, require_feature
 from saebooks.services.hard_delete import hard_delete_with_audit
 
 router = APIRouter(
     prefix="/items",
     tags=["items"],
-    dependencies=[Depends(require_bearer)],
+    # Inventory module gate (Wave D, 2026-07-10). Below Offline the whole
+    # /api/v1/items surface (CRUD + stock) 404s — require_bearer is listed
+    # first so an anonymous request still gets 401, not a 404 that would
+    # leak the route's tier. Same combined pattern as projects/budgets
+    # (Wave A). FLAG_INVENTORY moves out of PLANNED_FLAGS with this commit.
+    dependencies=[
+        Depends(require_bearer),
+        Depends(require_feature(FLAG_INVENTORY)),
+    ],
 )
 
 

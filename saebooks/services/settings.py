@@ -42,6 +42,15 @@ async def set(
                 before_data=before,
                 after_data={"key": key, "value": value},
                 performed_by=updated_by,
+                # tenant_id intentionally omitted (stays NULL): Setting is
+                # architecturally global, not tenant-scoped (this is the
+                # same "global, not per-company" property that was Wave
+                # C's extended_audit_modes root bug for audit_mode — see
+                # services/journal.py's module docstring). A NULL row here
+                # is the genuinely-underivable case documented in migration
+                # 0186 — insertable (the asymmetric WITH CHECK there
+                # exists specifically so this INSERT keeps working under
+                # FORCE RLS), never SELECT-visible to any tenant.
             )
         )
 

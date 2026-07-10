@@ -52,6 +52,7 @@ from saebooks.api.v1.auth import require_bearer
 from saebooks.api.v1.deps import get_active_company_id, get_session
 from saebooks.models.bank_statement import BankStatementLine, StatementLineStatus
 from saebooks.services import reconciliation as svc
+from saebooks.services.authz import no_additional_gate, require_permission_or_role
 
 router = APIRouter(
     prefix="/reconciliation",
@@ -209,7 +210,12 @@ async def suggest_matches(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/match")
+@router.post(
+    "/match",
+    dependencies=[
+        Depends(require_permission_or_role("reconciliation.match", no_additional_gate))
+    ],
+)
 async def match_line(
     payload: MatchRequest,
     session: AsyncSession = Depends(get_session),
@@ -242,7 +248,12 @@ async def match_line(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/unmatch/{bsl_id}")
+@router.post(
+    "/unmatch/{bsl_id}",
+    dependencies=[
+        Depends(require_permission_or_role("reconciliation.unmatch", no_additional_gate))
+    ],
+)
 async def unmatch_line(
     bsl_id: UUID,
     session: AsyncSession = Depends(get_session),
@@ -272,7 +283,12 @@ async def unmatch_line(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/auto_match")
+@router.post(
+    "/auto_match",
+    dependencies=[
+        Depends(require_permission_or_role("reconciliation.match", no_additional_gate))
+    ],
+)
 async def auto_match(
     account_id: UUID = Query(..., description="Bank account UUID to auto-match"),
     session: AsyncSession = Depends(get_session),

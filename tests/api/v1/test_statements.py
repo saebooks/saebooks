@@ -1034,12 +1034,71 @@ async def _cleanup_e2e(contact_id: uuid.UUID, bill_id: uuid.UUID, doc_id: int) -
         await session.commit()
 
 
+async def _seed_e2e_company() -> tuple[uuid.UUID, uuid.UUID]:
+    """Provision a dedicated company (+ one Account) under DEFAULT_TENANT_ID
+    for the hermetic E2E recon test below.
+
+    ``_default_company_id()`` picks "the first active company for the
+    tenant" with no ``ORDER BY`` — nondeterministic once the full suite
+    has created other companies under the same DEFAULT_TENANT_ID (e.g.
+    ``tests/api/v1/test_cross_company_isolation.py``'s ``other_company_id``
+    fixture). ``_seed_e2e_orphan_bill`` only persists its orphan Bill when
+    an Account already exists in the target company (``if acct is not
+    None``) — if the shared "first company" picked under full-suite
+    ordering happens to have zero accounts, the orphan bill silently never
+    gets created and the NOT_ON_STATEMENT synthetic line this test asserts
+    on never appears. Own company + own account removes the dependency on
+    which company any other test happens to have created first.
+    Returns (company_id, account_id) for cleanup.
+    """
+    from saebooks.models.account import Account, AccountType
+
+    company_id = uuid.uuid4()
+    account_id = uuid.uuid4()
+    suffix = uuid.uuid4().hex[:8]
+    async with AsyncSessionLocal() as session:
+        session.add(
+            Company(
+                id=company_id,
+                tenant_id=DEFAULT_TENANT_ID,
+                name=f"stmt-e2e-co-{suffix}",
+                base_currency="AUD",
+                fin_year_start_month=7,
+            )
+        )
+        await session.flush()
+        session.add(
+            Account(
+                id=account_id,
+                tenant_id=DEFAULT_TENANT_ID,
+                company_id=company_id,
+                code=f"E2E{suffix[:5].upper()}",
+                name=f"stmt-e2e account {suffix}",
+                account_type=AccountType.EXPENSE,
+            )
+        )
+        await session.commit()
+    return company_id, account_id
+
+
+async def _cleanup_e2e_company(company_id: uuid.UUID, account_id: uuid.UUID) -> None:
+    async with AsyncSessionLocal() as session:
+        await session.execute(text("DELETE FROM accounts WHERE id = :id").bindparams(id=account_id))
+        await session.execute(text("DELETE FROM companies WHERE id = :id").bindparams(id=company_id))
+        await session.commit()
+
+
 @pytest.mark.postgres_only
 async def test_ingest_e2e_real_pipeline_returns_lines(api_client: AsyncClient) -> None:
     """#28 defect 7: drive the REAL ingest pipeline (no ingest_statement mock);
     patch only PaperlessClient + extract._call_llm. Assert 201, lines present,
-    and recon_counts populated — exercising the post-reconcile re-SELECT."""
-    company_id = await _default_company_id()
+    and recon_counts populated — exercising the post-reconcile re-SELECT.
+
+    Hermetic: uses its own company (``_seed_e2e_company``), not the
+    suite-shared ``_default_company_id()`` — see that helper's docstring
+    for why the shared lookup made this test order-dependent.
+    """
+    company_id, account_id = await _seed_e2e_company()
     doc_id = 24301
     contact_id, bill_id = await _seed_e2e_orphan_bill(company_id)
 
@@ -1066,6 +1125,7 @@ async def test_ingest_e2e_real_pipeline_returns_lines(api_client: AsyncClient) -
         assert body["extraction_meta"].get("recon_counts"), body["extraction_meta"]
     finally:
         await _cleanup_e2e(contact_id, bill_id, doc_id)
+        await _cleanup_e2e_company(company_id, account_id)
 
 
 @pytest.mark.postgres_only

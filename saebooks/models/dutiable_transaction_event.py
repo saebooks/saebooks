@@ -30,7 +30,7 @@ cross-DB reason. ``computed_duty`` is caller-supplied or derived via
 ``stamp_duty_rate`` reference table for AU real-property duty; this table
 does not own or require reference-DB rate data to exist.
 
-See docs/multi-jurisdiction.md (M1.5) (theme T5).
+See ~/records/saebooks/global-reference-audit-2026-07-09.md (theme T5).
 """
 from __future__ import annotations
 

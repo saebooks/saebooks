@@ -8,8 +8,8 @@ references these tables without creating them — fresh installs fail at
 
 This migration creates the three missing tables as a backfill, slotted
 between 0132 and 0133. It is fully idempotent (CREATE TABLE IF NOT
-EXISTS + DO blocks for enum/policy/RLS) so existing prod DBs (our four
-live production tenant stacks) which already have these tables
+EXISTS + DO blocks for enum/policy/RLS) so existing prod DBs (primary,
+acme, app-preview, cashbook-demo) which already have these tables
 from the dropped branch will see this as a no-op.
 
 The branch_id column on expenses is INTENTIONALLY NOT added here —

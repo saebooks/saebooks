@@ -16,7 +16,7 @@ snapshot point) — one component per line for now (the AU engine returns a
 single treatment); the schema is ready for jurisdiction engines that
 return several.
 
-See docs/multi-jurisdiction.md (M1.5) (theme T2).
+See ~/records/saebooks/global-reference-audit-2026-07-09.md (theme T2).
 """
 from __future__ import annotations
 

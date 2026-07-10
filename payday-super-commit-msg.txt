@@ -1,0 +1,72 @@
+feat(payroll): Payday Super Phase 1 — SAFF lodgement tracking
+
+Phase 1 of the Payday Super work (Treasury Laws Amendment (Payday
+Superannuation) Act 2025; from 1 July 2026, SG must reach the fund
+within seven days of payday). Scope locked to SAFF v1 generation +
+lodgement state-machine — clearing-house API submission, ACK polling,
+and bank reconciliation land in Phase 2.
+
+Schema (0141_super_lodgements):
+  * super_lodgement_runs — one row per pay-run that has super due.
+    Status DRAFT → FINALISED → SUBMITTED → ACCEPTED / FAILED, with
+    VOIDED for cancelled flows. Unique (company_id, pay_run_id).
+  * super_lodgement_lines — one row per (run, employee, fund) with a
+    full snapshot of employee + fund details at lodgement time so
+    member-data changes don't rewrite history.
+  * FORCE RLS + tenant_isolation policy + saebooks_app grants on both
+    tables, matching the TPAR migration shape.
+
+Service (saebooks/services/super_stream.py):
+  * build_super_lodgement_run — refuses to overwrite FINALISED+, drops
+    DRAFT and re-aggregates; default fund fallback mirrors the pay-run
+    super JE behaviour.
+  * finalise_super_lodgement_run — DRAFT → FINALISED.
+  * mark_super_lodgement_submitted — FINALISED → SUBMITTED with
+    clearing-house receipt id.
+  * lines_to_saff_csv — SAFF v1, bookkeeper-facing column set sized to
+    the manual portal-upload workflow. Every blank column carries an
+    inline `# TODO` naming what Phase 2 needs to supply (employer
+    ABN/name, TFN/SMSF bank fields behind encryption gate, DOB,
+    gender, APRA fund ABN, SS/additional split). Docstring is explicit
+    that the format is ATO-aligned as of 2024 and must be re-verified
+    against the live spec before Phase 2.
+  * maybe_build_after_finalize — env-gated fire-and-forget helper.
+
+Router (saebooks/api/v1/super_lodgements.py):
+  * GET    /api/v1/super_lodgements                  list (+ filters)
+  * POST   /api/v1/super_lodgements                  create from pay_run_id
+  * GET    /api/v1/super_lodgements/{id}             header
+  * GET    /api/v1/super_lodgements/{id}/lines       per-employee detail
+  * GET    /api/v1/super_lodgements/{id}/lines.csv   SAFF v1 download
+  * POST   /api/v1/super_lodgements/{id}/finalise
+  * POST   /api/v1/super_lodgements/{id}/mark-submitted
+  Router-level Depends(require_bearer); wired into the v1 umbrella.
+
+Pay-run integration:
+  Both pay_runs.finalize and pay_runs_v2.finalize_with_je call
+  maybe_build_after_finalize after the JE post + commit. Failures are
+  logged and swallowed — super lodgement generation must NOT roll back
+  payroll finalisation.
+
+Feature gate:
+  SAEBOOKS_PAYDAY_SUPER env var (1/true/on/yes) explicit override;
+  otherwise falls back to SAEBOOKS_ENV — ON for dev/test/ci, OFF
+  everywhere else (production) until Phase 2 lands. The flag does not
+  belong in services/features.py: that module gates by edition tier,
+  this is a release-gate not a tier-gate.
+
+Skipped (documented in docs/payday-super-phase1-blockers.md):
+  * Payslip template "Super contributions" section — the HTML
+    template lives in saebooks-web (out of scope per the build
+    constraints), so this would have left dead fields in the payslip
+    dict with no consumer. Phase 2 should extend build_payslip() to
+    accept an optional super_lodgement dict and update the saebooks-web
+    template in the same change.
+  * Migration smoke-test against ephemeral postgres — the build
+    sandbox blocked `docker run` and `python3 -c …`, so the migration
+    has been written following the TPAR/0138 pattern exactly but has
+    not been executed against a live DB in this session. Run
+    `make migrate` (or the wrapper's CI smoke step) before merge.
+
+Alembic chain:
+  0140 → 0141. Single head — no merge revision required.

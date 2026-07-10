@@ -36,6 +36,7 @@ from saebooks.models.tax_code import TaxCode
 from saebooks.services import change_log as change_log_svc
 from saebooks.services import journal as journal_svc
 from saebooks.services import numbering
+from saebooks.services.tax_engine.ee import RC_DUAL_REPORTING_TYPES
 
 _TWOPLACES = Decimal("0.01")
 _DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
@@ -77,6 +78,41 @@ def _as_uuid(value: object) -> uuid.UUID:
     if isinstance(value, uuid.UUID):
         return value
     return uuid.UUID(str(value))
+
+
+async def _reject_unsupported_reverse_charge(
+    session: AsyncSession, lines: list[ExpenseLine]
+) -> None:
+    """Critic-round-4 fix — same gap and same remedy as
+    ``services/bills.py``'s ``_reject_unsupported_reverse_charge``
+    (see that docstring for the full analysis): this module's
+    ``post_expense`` credits the payment account for
+    ``expense.base_total`` (subtotal + tax), which is wrong for an
+    EU-acquisition reverse-charge tax code — the "payment" side never
+    actually pays the self-assessed VAT to the foreign supplier, and no
+    output-side VAT-payable liability is booked. Fail loud instead of
+    silently overstating the payment-account credit.
+    """
+    tc_ids = {line.tax_code_id for line in lines if line.tax_code_id is not None}
+    if not tc_ids:
+        return
+    result = await session.execute(
+        select(TaxCode.reporting_type).where(TaxCode.id.in_(tc_ids))
+    )
+    reporting_types = {rt for (rt,) in result.all() if rt is not None}
+    hit = reporting_types & RC_DUAL_REPORTING_TYPES
+    if hit:
+        raise ExpenseError(
+            "Cannot post: reverse-charge EU-acquisition tax code(s) "
+            f"{sorted(hit)} are not yet supported by post_expense — the "
+            "correct GL posting (payment account for the net amount "
+            "actually paid + a separate VAT self-assessed payable "
+            "liability line) is not implemented. Posting this expense "
+            "as-is would overstate the payment-account credit by the "
+            "self-assessed VAT and never book the liability. This is a "
+            "known, tracked gap — see "
+            "_reject_unsupported_reverse_charge's docstring."
+        )
 
 
 @dataclass(frozen=True)
@@ -440,6 +476,7 @@ async def post_expense(
         raise ExpenseError(
             f"Cannot post expense with non-positive total {expense.total}"
         )
+    await _reject_unsupported_reverse_charge(session, expense.lines)
 
     # Sanity-check the payment account still exists + has a sane type.
     # (Catches a CoA edit between draft + post.)

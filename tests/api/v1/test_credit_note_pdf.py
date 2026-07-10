@@ -202,10 +202,10 @@ class _FakeCompany:
     def __init__(self):
         self.legal_name = "Example Pty Ltd"
         self.name = "Example Pty Ltd"
-        self.abn = "12 345 678 901"
+        self.abn = "51 824 753 556"
         # Letterhead contact details (0171)
         self.phone = "07 4000 0000"
-        self.email = "accounts@example.com.au"
+        self.email = "accounts@example.com"
         self.website = "https://saebooks.com.au"
         # Remittance fallback columns (0168)
         self.bank_name = "Westpac"
@@ -248,7 +248,7 @@ def test_build_credit_note_ctx_fields() -> None:
     assert ctx["tax_total"] == "10.00"
     assert ctx["total"] == "110.00"
     assert ctx["amount_paid"] == "0.00"
-    assert ctx["company"]["abn"] == "12 345 678 901"
+    assert ctx["company"]["abn"] == "51 824 753 556"
     assert ctx["contact"]["name"] == "Acme & Partners"
     assert len(ctx["lines"]) == 1
     line = ctx["lines"][0]
@@ -257,7 +257,7 @@ def test_build_credit_note_ctx_fields() -> None:
     # 0171 — per-document payment terms + letterhead contact fields
     assert ctx["payment_terms"] == "Strictly 14 days"
     assert ctx["company"]["phone"] == "07 4000 0000"
-    assert ctx["company"]["email"] == "accounts@example.com.au"
+    assert ctx["company"]["email"] == "accounts@example.com"
     assert ctx["company"]["website"] == "https://saebooks.com.au"
     # No flagged bank account → falls back to the company's bank_* columns
     assert ctx["bank_details"] == {

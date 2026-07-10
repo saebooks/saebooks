@@ -1,0 +1,31 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<kmd:KmdDeklaratsioon xmlns:kmd="urn:emta:PLACEHOLDER:kmd" schemaRef="urn:emta:PLACEHOLDER:kmd.xsd" regkood="10123456" perioodAlgus="2026-05-01" perioodLopp="2026-05-31">
+  <kmd:Lahter1_Maksustatav24>4000.00</kmd:Lahter1_Maksustatav24>
+  <kmd:Lahter1a_Maksustatav20Legacy>0.00</kmd:Lahter1a_Maksustatav20Legacy>
+  <kmd:Lahter1b_Maksustatav22Legacy>0.00</kmd:Lahter1b_Maksustatav22Legacy>
+  <kmd:Lahter2_Maksustatav9>0.00</kmd:Lahter2_Maksustatav9>
+  <kmd:Lahter2a_Maksustatav5Legacy>0.00</kmd:Lahter2a_Maksustatav5Legacy>
+  <kmd:Lahter2b_Maksustatav13>0.00</kmd:Lahter2b_Maksustatav13>
+  <kmd:Lahter3_Maksustatav0>0.00</kmd:Lahter3_Maksustatav0>
+  <kmd:Lahter3_1_UhendusesiseneKaibeKokku>0.00</kmd:Lahter3_1_UhendusesiseneKaibeKokku>
+  <kmd:Lahter3_1_1_KaubaUhendusesineKaive>0.00</kmd:Lahter3_1_1_KaubaUhendusesineKaive>
+  <kmd:Lahter3_2_KaubaEksport>0.00</kmd:Lahter3_2_KaubaEksport>
+  <kmd:Lahter3_2_1_TaxFreeReisijaMuuk>0.00</kmd:Lahter3_2_1_TaxFreeReisijaMuuk>
+  <kmd:Lahter4_KaibemaksKokku>960.00</kmd:Lahter4_KaibemaksKokku>
+  <kmd:Lahter4a_ImpordiKaibemaks>0.00</kmd:Lahter4a_ImpordiKaibemaks>
+  <kmd:Lahter5_SisendkaibemaksKokku>960.00</kmd:Lahter5_SisendkaibemaksKokku>
+  <kmd:Lahter5_1_ImpordiSisendkaibemaks>0.00</kmd:Lahter5_1_ImpordiSisendkaibemaks>
+  <kmd:Lahter5_2_PohivaraSisendkaibemaks>0.00</kmd:Lahter5_2_PohivaraSisendkaibemaks>
+  <kmd:Lahter5_3_SoiduautoSisendkaibemaks100>0.00</kmd:Lahter5_3_SoiduautoSisendkaibemaks100>
+  <kmd:Lahter5_4_SoiduautoSisendkaibemaks50>0.00</kmd:Lahter5_4_SoiduautoSisendkaibemaks50>
+  <kmd:Lahter6_UhendusesineSoetamineKokku>4000.00</kmd:Lahter6_UhendusesineSoetamineKokku>
+  <kmd:Lahter6_1_KaubaUhendusesineSoetamine>4000.00</kmd:Lahter6_1_KaubaUhendusesineSoetamine>
+  <kmd:Lahter7_MuuSoetamine>0.00</kmd:Lahter7_MuuSoetamine>
+  <kmd:Lahter7_1_ErikordSoetamine>0.00</kmd:Lahter7_1_ErikordSoetamine>
+  <kmd:Lahter8_MaksuvabaKaive>0.00</kmd:Lahter8_MaksuvabaKaive>
+  <kmd:Lahter9_ErikordKaive>0.00</kmd:Lahter9_ErikordKaive>
+  <kmd:Lahter10_TapsustusedPlus>0.00</kmd:Lahter10_TapsustusedPlus>
+  <kmd:Lahter11_TapsustusedMiinus>0.00</kmd:Lahter11_TapsustusedMiinus>
+  <kmd:Lahter12_TasumiseleKuuluv>0.00</kmd:Lahter12_TasumiseleKuuluv>
+  <kmd:Lahter13_Enammakstud>0.00</kmd:Lahter13_Enammakstud>
+</kmd:KmdDeklaratsioon>

@@ -46,9 +46,9 @@ async def find_or_create_user(
     # oauth-handoff path there is no request-scoped JWT yet, so we
     # bind app.current_tenant ourselves. ``SAEBOOKS_DEFAULT_TENANT_ID``
     # lets a private deploy point first-logins at its non-seed tenant
-    # (e.g. a hosted instance can route them at its own company tenant
-    # rather than the seed); fallback to the legacy default keeps the
-    # public / community single-tenant build working.
+    # (e.g. books.primary routes them to the Example Pty Ltd tenant rather
+    # than the seed); fallback to the legacy default keeps the public
+    # / community single-tenant build working.
     import os
     DEFAULT_TENANT_ID = os.environ.get(
         "SAEBOOKS_DEFAULT_TENANT_ID",

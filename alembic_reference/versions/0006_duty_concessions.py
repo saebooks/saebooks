@@ -8,7 +8,7 @@ references a concession by id
 (``applied_concession_id`` — opaque, no cross-DB FK, validated at the
 service layer — no cross-DB FK).
 
-See docs/multi-jurisdiction.md (M1.5) (theme T5).
+See ~/records/saebooks/global-reference-audit-2026-07-09.md (theme T5).
 
 Revision ID: 0006_duty_concessions
 Revises: 0005_ref_tax_code_tax_family

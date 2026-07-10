@@ -152,7 +152,7 @@ engine ships in the AGPL community tier.
 
 ## M1.5 — global reference completeness (2026-07)
 
-Driven by an internal reference-data completeness audit (2026-07):
+Driven by the reference-data audit (`~/records/saebooks/global-reference-audit-2026-07-09.md`):
 the v0.1.4 scaffold was jurisdiction-parameterised but the *concepts* through it were
 Australia-shaped, and several tax families plus the whole business-structure dimension
 could not be represented. M1.5 generalises the concepts the **engine** must be able to

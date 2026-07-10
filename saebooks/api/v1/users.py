@@ -48,7 +48,10 @@ from saebooks.models.permission import Permission, UserPermission
 from saebooks.models.user import VALID_ROLES, User, UserRole, has_at_least
 from saebooks.services import permissions as perm_svc
 from saebooks.services import users as svc
+from saebooks.services.authz import current_user, require_permission_or_role
+from saebooks.services.features import FLAG_THEMES, require_feature_inline
 from saebooks.services.hard_delete import hard_delete_with_audit
+from saebooks.services.theme import DEFAULT_THEME_ID
 
 router = APIRouter(
     prefix="/users",
@@ -88,6 +91,21 @@ async def _require_admin(
         raise HTTPException(403, "Admin privileges required")
 
 
+async def _admin_fallback(request: Request) -> User | None:
+    """Adapter: ``_require_admin``'s exact check, shaped for
+    ``require_permission_or_role``'s ``fallback`` signature.
+
+    ``_require_admin`` is a plain FastAPI dependency (extra
+    ``Header``-injected param, returns ``None``) — this calls it
+    directly with the header read straight off ``request.headers``
+    (what FastAPI's ``Header(...)`` injection does under the hood
+    anyway) so the below-tier path is BYTE-IDENTICAL to the coarse
+    admin gate every one of these routes carried before this module.
+    """
+    await _require_admin(request, x_admin=request.headers.get("X-Admin"))
+    return current_user(request)
+
+
 def _parse_if_match(header: str | None) -> int | None:
     if header is None:
         return None
@@ -102,12 +120,61 @@ def _dump(user: User) -> dict[str, Any]:
     return json.loads(UserOut.model_validate(user).model_dump_json())
 
 
+def _gate_non_default_theme(request: Request, preferred_theme: str | None) -> None:
+    """404 (not 403) a request that sets a non-default theme below Offline.
+
+    ``preferred_theme`` allow-list membership is validated separately
+    (schema + ``services/users.py`` write-time check) — this only
+    enforces the TIER boundary: CHARTER §12.1 "All themes (MYOB
+    Classic, SS, TT, etc.)" is Offline+, but the single ``"default"``
+    stock theme (and clearing the override with ``None``/``""``) must
+    keep working at every tier, including Community, so a lower-tier
+    install is never left broken by this gate. Mirrors the
+    multi_currency pattern of gating only the specific request that
+    crosses the tier boundary rather than the whole route (see
+    ``require_feature_inline``'s docstring).
+    """
+    if preferred_theme and preferred_theme != DEFAULT_THEME_ID:
+        require_feature_inline(FLAG_THEMES, request)
+
+
+async def _gate_and_validate_role_id(
+    session: AsyncSession, request: Request, tenant_id: UUID, role_id: UUID | None
+) -> None:
+    """404 below FLAG_GRANULAR_PERMISSIONS; 422 for a foreign/unknown role.
+
+    Same conditional-gate shape as ``_gate_non_default_theme`` — NULL
+    always works at every tier (falls back to the legacy ``role``
+    string), only an explicit assignment crosses the tier boundary.
+    The tenant-ownership check is defence-in-depth on top of the FK
+    (a role id from another tenant would 422 here rather than silently
+    succeeding and then failing to resolve anything at permission-
+    check time).
+    """
+    if role_id is None:
+        return
+    from saebooks.services.features import FLAG_GRANULAR_PERMISSIONS
+
+    require_feature_inline(FLAG_GRANULAR_PERMISSIONS, request)
+    from saebooks.models.role import Role
+
+    role = await session.get(Role, role_id)
+    if role is None or role.tenant_id != tenant_id:
+        raise HTTPException(422, f"Unknown role_id {role_id!r} for this tenant")
+
+
 # ---------------------------------------------------------------------------
 # List users (admin only)
 # ---------------------------------------------------------------------------
 
 
-@router.get("", response_model=UserListOut, dependencies=[Depends(_require_admin)])
+@router.get(
+    "",
+    response_model=UserListOut,
+    dependencies=[
+        Depends(require_permission_or_role("user.admin", _admin_fallback))
+    ],
+)
 async def list_users(
     request: Request,
     role: str | None = Query(default=None),
@@ -152,8 +219,14 @@ async def get_user(
 # ---------------------------------------------------------------------------
 
 
-@router.post("", response_model=UserOut, status_code=201,
-             dependencies=[Depends(_require_admin)])
+@router.post(
+    "",
+    response_model=UserOut,
+    status_code=201,
+    dependencies=[
+        Depends(require_permission_or_role("user.admin", _admin_fallback))
+    ],
+)
 async def create_user(
     request: Request,
     payload: UserCreate,
@@ -163,22 +236,32 @@ async def create_user(
     if payload.role not in VALID_ROLES:
         raise HTTPException(422, f"Invalid role '{payload.role}'")
 
+    # Themes (Wave B / FLAG_THEMES): allow-list membership already ran in
+    # the pydantic schema; this is the TIER check — a non-default theme
+    # is Offline+, "default" always works.
+    _gate_non_default_theme(request, payload.preferred_theme)
+
     tenant_id = resolve_tenant_id(request)
+    await _gate_and_validate_role_id(session, request, tenant_id, payload.role_id)
     # Reject duplicate username
     existing = await svc.get_by_username(session, payload.username)
     if existing is not None:
         raise HTTPException(409, "Username already exists")
 
-    user = await svc.create_for_api(
-        session,
-        username=payload.username,
-        display_name=payload.display_name,
-        email=payload.email,
-        role=payload.role,
-        preferred_theme=payload.preferred_theme,
-        actor=f"api:{bearer[:8]}…",
-        tenant_id=tenant_id,
-    )
+    try:
+        user = await svc.create_for_api(
+            session,
+            username=payload.username,
+            display_name=payload.display_name,
+            email=payload.email,
+            role=payload.role,
+            role_id=payload.role_id,
+            preferred_theme=payload.preferred_theme,
+            actor=f"api:{bearer[:8]}…",
+            tenant_id=tenant_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     await session.refresh(user)
     body = _dump(user)
     return JSONResponse(body, status_code=201)
@@ -221,13 +304,26 @@ async def update_user(
         is_admin = x_admin is not None and x_admin.lower() == "true"
     updates = payload.model_dump(exclude_unset=True)
 
-    # Non-admin may only update non-privileged fields (not role)
-    if not is_admin and "role" in updates:
+    # Non-admin may only update non-privileged fields (not role/role_id)
+    if not is_admin and ("role" in updates or "role_id" in updates):
         raise HTTPException(403, "Admin privileges required to change role")
 
     # Validate role value if being changed
     if "role" in updates and updates["role"] not in VALID_ROLES:
         raise HTTPException(422, f"Invalid role '{updates['role']}'")
+
+    # Themes (Wave B / FLAG_THEMES): only fires when preferred_theme is
+    # actually being SET to a non-default value — see
+    # _gate_non_default_theme's docstring.
+    if "preferred_theme" in updates:
+        _gate_non_default_theme(request, updates["preferred_theme"])
+
+    # Granular permissions (D2): only fires when role_id is actually
+    # being SET — see _gate_and_validate_role_id's docstring.
+    if "role_id" in updates:
+        await _gate_and_validate_role_id(
+            session, request, tenant_id, updates["role_id"]
+        )
 
     # Verify user belongs to this tenant before updating
     existing = await svc.get(session, user_id, tenant_id=tenant_id)
@@ -271,7 +367,9 @@ async def update_user(
         204: {"description": "Archived"},
         409: {"model": UserConflictBody, "description": "Version mismatch"},
     },
-    dependencies=[Depends(_require_admin)],
+    dependencies=[
+        Depends(require_permission_or_role("user.admin", _admin_fallback))
+    ],
 )
 async def archive_user(
     request: Request,
@@ -385,7 +483,13 @@ async def get_user_permissions(
     "/{user_id}/permissions",
     status_code=204,
     response_class=Response,
-    dependencies=[Depends(_require_admin)],
+    # D4: permission.manage split from user.admin — granting/revoking
+    # what a user/role can do is a higher-privilege action than
+    # creating/deactivating a user. Below-tier fallback is unchanged
+    # (still plain admin-only, same as every other route here).
+    dependencies=[
+        Depends(require_permission_or_role("permission.manage", _admin_fallback))
+    ],
 )
 async def replace_user_permissions(
     request: Request,
@@ -422,11 +526,21 @@ async def replace_user_permissions(
     )
     for code in payload.grants:
         session.add(
-            UserPermission(user_id=user_id, permission_code=code, granted=True)
+            UserPermission(
+                user_id=user_id,
+                tenant_id=tenant_id,
+                permission_code=code,
+                granted=True,
+            )
         )
     for code in payload.revokes:
         session.add(
-            UserPermission(user_id=user_id, permission_code=code, granted=False)
+            UserPermission(
+                user_id=user_id,
+                tenant_id=tenant_id,
+                permission_code=code,
+                granted=False,
+            )
         )
     await session.commit()
 

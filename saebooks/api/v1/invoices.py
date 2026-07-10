@@ -54,7 +54,14 @@ from saebooks.models.invoice import InvoiceStatus
 from saebooks.services import bad_debt as bad_debt_svc
 from saebooks.services import invoices as svc
 from saebooks.services import review_flags as review_flags_svc
-from saebooks.services.features import FLAG_STRIPE_INTEGRATION, require_feature
+from saebooks.services.authz import no_additional_gate, require_permission_or_role
+from saebooks.services.features import (
+    FLAG_SMTP_RELAY,
+    FLAG_STRIPE_INTEGRATION,
+    feature_enabled_for_request,
+    require_feature,
+)
+from saebooks.services.fx import gate_non_base_currency
 from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 from saebooks.services.integrations import StripeError, StripeNotConfiguredError
@@ -208,6 +215,7 @@ async def create_invoice(
     company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
+    await gate_non_base_currency(session, request, company_id, payload.currency)
     key = _parse_idempotency_key(idempotency_key)
 
     if key is not None:
@@ -405,6 +413,9 @@ async def append_invoice_line(
         204: {"description": "Voided"},
         409: {"model": InvoiceConflictBody, "description": "Version mismatch"},
     },
+    dependencies=[
+        Depends(require_permission_or_role("invoice.void", no_additional_gate))
+    ],
 )
 async def void_invoice(
     invoice_id: UUID,
@@ -476,6 +487,9 @@ async def void_invoice(
         200: {"model": InvoiceOut},
         409: {"model": InvoiceConflictBody, "description": "Version mismatch"},
     },
+    dependencies=[
+        Depends(require_permission_or_role("invoice.post", no_additional_gate))
+    ],
 )
 async def post_invoice(
     invoice_id: UUID,
@@ -560,6 +574,9 @@ async def post_invoice(
         200: {"model": InvoiceOut},
         409: {"model": InvoiceConflictBody, "description": "Version mismatch"},
     },
+    dependencies=[
+        Depends(require_permission_or_role("invoice.void", no_additional_gate))
+    ],
 )
 async def void_invoice_transition(
     invoice_id: UUID,
@@ -641,6 +658,9 @@ async def void_invoice_transition(
 @router.post(
     "/{invoice_id}/write-off",
     responses={200: {"model": InvoiceOut}},
+    dependencies=[
+        Depends(require_permission_or_role("invoice.write_off", no_additional_gate))
+    ],
 )
 async def write_off_invoice_endpoint(
     invoice_id: UUID,
@@ -695,6 +715,9 @@ async def write_off_invoice_endpoint(
 @router.post(
     "/{invoice_id}/record-recovery",
     status_code=201,
+    dependencies=[
+        Depends(require_permission_or_role("invoice.recovery", no_additional_gate))
+    ],
 )
 async def record_recovery_endpoint(
     invoice_id: UUID,
@@ -1068,6 +1091,7 @@ async def post_invoice_send_email(
             attachments=[CustomerEmailAttachment(
                 filename=pdf_filename, content=pdf_bytes, content_type="application/pdf",
             )],
+            sae_relay_entitled=feature_enabled_for_request(FLAG_SMTP_RELAY, request),
         )
     except CustomerEmailError as exc:
         raise HTTPException(422, str(exc)) from exc

@@ -2723,6 +2723,45 @@ async def lei_lookup(ctx: Context, search: str) -> dict[str, Any]:
     return await _post(ctx, "/api/v1/integrations/lei/lookup", {"search": search})
 
 
+@_gated_tool(safety="mutation")
+async def abr_lookup(
+    ctx: Context,
+    abn: str,
+    contact_id: str | None = None,
+    overwrite: bool = False,
+    expected_version: int | None = None,
+) -> dict[str, Any]:
+    """Australian Business Register lookup by ABN.
+
+    Without ``contact_id``, returns the parsed ABR envelope only
+    (entity name, ABN status, GST registration, address state/postcode).
+    With ``contact_id``, additionally merges matched fields onto that
+    contact — empty fields only, unless ``overwrite=True`` — persisted
+    through the same versioned/audited path every other contact update
+    uses.
+
+    Args:
+        abn: 11-digit Australian Business Number (spaces allowed).
+        contact_id: optional contact UUID to enrich with the lookup
+            result.
+        overwrite: when True, replace non-empty contact fields too
+            (default only fills empty ones).
+        expected_version: optimistic-locking version for the contact
+            (If-Match semantics) — fetch the contact first if you need
+            a 409 on a stale write instead of a last-writer-wins merge.
+    """
+    return await _post(
+        ctx,
+        "/api/v1/integrations/abr/lookup",
+        {
+            "abn": abn,
+            "contact_id": contact_id,
+            "overwrite": overwrite,
+            "expected_version": expected_version,
+        },
+    )
+
+
 @_gated_tool(safety="safe")
 async def stripe_customer_info(ctx: Context) -> dict[str, Any]:
     """Get the tenant-level Stripe Connect status (connected/account_id/

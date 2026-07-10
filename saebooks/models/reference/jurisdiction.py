@@ -9,7 +9,7 @@ from saebooks.db import ReferenceBase
 # Queensland, "USC" = California) that levy their own taxes/duties. This is
 # what lets the engine represent US federal + state + local sales tax, CA
 # federal GST + provincial PST/HST, sub-national VAT, and state stamp duty.
-# See docs/multi-jurisdiction.md (M1.5) (T3).
+# See ~/records/saebooks/global-reference-audit-2026-07-09.md (T3).
 JURISDICTION_LEVELS = ("country", "state", "province", "county", "city")
 
 

@@ -100,6 +100,11 @@ from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import assets as assets_svc
 from saebooks.services import reports as reports_svc
+from saebooks.services.features import (
+    FLAG_MULTI_CURRENCY,
+    FLAG_PROJECTS_BUDGETS,
+    require_feature,
+)
 
 router = APIRouter(
     prefix="/reports",
@@ -1475,7 +1480,11 @@ _FX_RATE_UNAVAILABLE_NOTE = "FX rate not available — manual revaluation requir
 _FX_REPORT_NOTE = "Live FX rates not configured. Amounts shown in original currency."
 
 
-@router.get("/fx_revaluation", response_model=FXRevaluationReport)
+@router.get(
+    "/fx_revaluation",
+    response_model=FXRevaluationReport,
+    dependencies=[Depends(require_feature(FLAG_MULTI_CURRENCY))],
+)
 async def fx_revaluation(
     request: Request,
     as_of_date: date = Query(...),
@@ -1672,7 +1681,11 @@ async def trial_balance(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/budget_vs_actual", response_model=BudgetVsActualReport)
+@router.get(
+    "/budget_vs_actual",
+    response_model=BudgetVsActualReport,
+    dependencies=[Depends(require_feature(FLAG_PROJECTS_BUDGETS))],
+)
 async def budget_vs_actual(
     request: Request,
     year: int = Query(...),

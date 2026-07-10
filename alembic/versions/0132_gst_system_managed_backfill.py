@@ -16,8 +16,9 @@ strings and were written correctly by 0009.
 
 This migration re-runs the intended UPDATE with the correct hyphenated
 codes. Idempotent — manual data-fix already applied 2026-05-24 across
-the five live tenant stacks (21 rows total). For those DBs this is a
-no-op; for any fresh-seed stack it does the work 0009 should have done.
+the five live stacks (primary/acme/app-preview/sandbox/cashbook-demo,
+21 rows total). For those DBs this is a no-op; for any fresh-seed stack
+it does the work 0009 should have done.
 """
 from collections.abc import Sequence
 

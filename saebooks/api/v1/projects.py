@@ -33,13 +33,17 @@ from saebooks.api.v1.schemas import (
     ProjectUpdate,
 )
 from saebooks.services import projects as svc
+from saebooks.services.features import FLAG_PROJECTS_BUDGETS, require_feature
 from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 
 router = APIRouter(
     prefix="/projects",
     tags=["projects"],
-    dependencies=[Depends(require_bearer)],
+    dependencies=[
+        Depends(require_bearer),
+        Depends(require_feature(FLAG_PROJECTS_BUDGETS)),
+    ],
 )
 
 

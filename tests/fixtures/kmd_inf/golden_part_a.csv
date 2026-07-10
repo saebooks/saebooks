@@ -1,0 +1,5 @@
+regkood;periood_algus;periood_lopp;JrkNr;PartneriKood;PartneriNimi;ArveNumber;ArveKuupaev;ArveSummaKm;MaksustatavVaartus;Maksumaar;KmdLahter;ErisuseKood;KreeditArve
+10123456;2026-02-01;2026-02-28;1;10111111;P1 Straddles Both Ways;INV-000001;2026-02-05;700.00;700.00;24.00;1;;false
+10123456;2026-02-01;2026-02-28;2;10111111;P1 Straddles Both Ways;INV-000002;2026-02-10;500.00;500.00;24.00;1;;false
+10123456;2026-02-01;2026-02-28;3;10111111;P1 Straddles Both Ways;CN-000001;2026-02-15;-300.00;-300.00;24.00;1;;true
+10123456;2026-02-01;2026-02-28;1;10333333;P3 Boundary;INV-000004;2026-02-07;1000.00;1000.00;24.00;1;;false

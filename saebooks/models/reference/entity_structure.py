@@ -16,7 +16,7 @@ of these by ``companies.entity_structure_code`` (validated at the service
 layer against the company's own jurisdiction — no cross-DB FK, same pattern
 as ``companies.jurisdiction``).
 
-See docs/multi-jurisdiction.md (M1.5) (theme T4).
+See ~/records/saebooks/global-reference-audit-2026-07-09.md (theme T4).
 """
 import enum
 import uuid

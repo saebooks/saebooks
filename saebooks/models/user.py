@@ -175,3 +175,24 @@ class User(Base):
     launch_promo_jwt: Mapped[str | None] = mapped_column(
         sa.Text(), nullable=True
     )
+
+    # ----- 0193_users_role_id — granular_permissions custom roles ---- #
+    # NULL (the default, and the only value below FLAG_GRANULAR_
+    # PERMISSIONS tier) means "resolve permissions via the tenant's
+    # roles row whose base_role matches this user's legacy `role`
+    # string" — see services/permissions.py:resolve_permissions. A
+    # non-NULL value is an explicit assignment to a specific
+    # models.role.Role row (a renamed starter role, or a genuinely
+    # custom one) and WINS over the legacy string for fine-grained
+    # resolution. `role` (the rank-based string above) keeps driving
+    # `require_role()`'s coarse gate unconditionally either way — this
+    # column only affects `resolve_permissions`/`require_permission`.
+    # Setting it to a role with no `base_role` equivalent (Payroll-only,
+    # or any custom role) is the ONLY way to reach that role; it is
+    # gated behind FLAG_GRANULAR_PERMISSIONS at the API layer (see
+    # api/v1/users.py), never enforced by the column itself.
+    role_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("roles.id", ondelete="SET NULL"),
+        nullable=True,
+    )

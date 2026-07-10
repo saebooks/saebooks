@@ -44,7 +44,7 @@ Account resolution (per Chart of Accounts seed):
     Net pay clearing:     2-1150 "Payments — pending" (existing).
 
 Missing accounts raise ``PayRunError`` — operator must seed before
-running payroll. The codes mirror the CoA seed for our reference tenant.
+running payroll. The codes mirror the CoA seed for ``books.primary``.
 The brief calls for "Cr Bank" but in practice the bank credit doesn't
 happen until reconciliation — the v1 service already credits
 ``2-1150 Payments - Pending`` (cleared by ABA processing), so we
@@ -64,11 +64,12 @@ from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
-from sqlalchemy import delete, func, insert, select
+from sqlalchemy import delete, extract, func, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.models.account import Account
-from saebooks.models.employee import Employee
+from saebooks.models.company import Company
+from saebooks.models.employee import Employee, PayFrequency
 from saebooks.models.journal import JournalOrigin
 from saebooks.models.pay_run import PayRun, PayRunLine, PayRunStatus
 from saebooks.services import change_log as cl_svc
@@ -78,6 +79,7 @@ from saebooks.services.payg import (
     WithholdingResult,
     compute_withholding,
 )
+from saebooks.services.payroll_ee import EEPayrollResult, compute_ee_payroll
 from saebooks.services.super_calc import SuperResult, compute_super
 
 
@@ -193,6 +195,15 @@ class ComputedPayLine:
     ote: Decimal
     payg_breakdown: str
     super_breakdown: str
+    # --- EE payroll compute (Packet 3) — None on every AU-jurisdiction
+    # line; ``payg``/``super_amount`` above stay explicitly 0 (not
+    # left holding a stale AU number) when this branch is populated,
+    # to avoid the "wrong return filed" footgun (scope §1.2). ---
+    ee_income_tax: Decimal | None = None
+    ee_unemployment_employee: Decimal | None = None
+    ee_unemployment_employer: Decimal | None = None
+    ee_social_tax: Decimal | None = None
+    ee_pillar_ii: Decimal | None = None
 
 
 # --------------------------------------------------------------------- #
@@ -243,14 +254,218 @@ def _resolve_ordinary_rate(emp: Employee, override: Decimal | None) -> Decimal:
     return Decimal(str(emp.base_rate))
 
 
+async def _ee_same_month_conflict(
+    session: AsyncSession,
+    *,
+    employee_id: uuid.UUID,
+    company_id: uuid.UUID,
+    period_start: date,
+    exclude_pay_run_id: uuid.UUID,
+) -> bool:
+    """True if this employee already has a pay-run line in ANOTHER pay
+    run (any status, not archived) whose own period falls in the same
+    calendar month as ``period_start`` — critic round 4 finding, see
+    ``_compute_ee``'s "same-month floor" guard. Mirrors
+    ``_ytd_for_employee``'s join shape (``PayRunLine`` -> ``PayRun``,
+    scoped by ``company_id``/``employee_id``, excluding this pay run,
+    excluding archived runs)."""
+    stmt = (
+        select(func.count())
+        .select_from(PayRunLine)
+        .join(PayRun, PayRun.id == PayRunLine.pay_run_id)
+        .where(
+            PayRun.company_id == company_id,
+            PayRunLine.employee_id == employee_id,
+            PayRun.archived_at.is_(None),
+            PayRun.id != exclude_pay_run_id,
+            extract("year", PayRun.period_start) == period_start.year,
+            extract("month", PayRun.period_start) == period_start.month,
+        )
+    )
+    result = await session.execute(stmt)
+    return (result.scalar_one() or 0) > 0
+
+
+async def _compute_ee(
+    session: AsyncSession,
+    *,
+    employee: Employee,
+    line_input: PayLineInput,
+    effective_date: date,
+    period_start: date,
+    period_end: date,
+    pay_run_id: uuid.UUID,
+) -> ComputedPayLine:
+    """EE payroll compute path (Packet 3) — parallel to ``_compute``'s
+    AU path, dispatched by ``Company.jurisdiction`` in ``upsert_line``.
+    Ordinary gross-wage payments only (scope §2.2's board-member-fee /
+    allowance flag — not modelled here). Pure (no writes); rate lookup
+    happens inside ``services.payroll_ee.compute_ee_payroll``.
+
+    ⚠ **MONTHLY-only guard (critic round 2 finding).** Unlike the AU
+    branch two lines below (which reads ``employee.pay_frequency`` and
+    scales via ``services.payg``'s period tables), this function never
+    read ``pay_frequency`` at all — the EUR 700/776 basic exemption and
+    the EUR 886/mo social-tax floor
+    (``services.payroll_ee.compute_ee_payroll``) are ``[SEED-EE]``
+    MONTHLY figures, applied in full to every call regardless of period
+    length. Against the model's own default (``pay_frequency`` =
+    WEEKLY, ``employee.py``), that silently overstated social tax up to
+    ~4x for a weekly-paid EE employee. Refusing loudly for any
+    non-MONTHLY frequency is the tax-safe fix: a wrong-but-plausible
+    number filed with EMTA is worse than a blocked pay run.
+
+    ⚠ **Same-month multi-pay-run guard (critic round 4 fix — closes the
+    gap this docstring used to flag as unfixed).** Even at MONTHLY
+    frequency, two pay runs for one employee inside the same calendar
+    month would each get the EUR 886 floor / EUR 700-776 exemption
+    applied independently (this compute is per-line, not
+    per-employee-per-calendar-month), overstating the aggregate. TRUE
+    monthly aggregation (computing tax on the combined gross and
+    crediting what earlier pay runs already withheld) is a bigger,
+    UNVERIFIED-ordering change — see the module docstring's own "No
+    partial-period proration" flag for the same class of gap. Rather
+    than build that, this refuses loudly the moment a SECOND pay-run
+    line for the same employee lands in the same calendar month
+    (``_ee_same_month_conflict``) — same tax-safe posture as the two
+    guards below: a blocked pay run beats a silently doubled floor.
+
+    ⚠ **Full-period-employment guard (critic round 3 finding).**
+    ``payroll_ee.compute_ee_payroll`` takes no employment-start/-end
+    input and applies the full EUR 700/776 exemption + EUR 886 floor
+    regardless — correct for an employee who worked the WHOLE
+    ``period_start..period_end`` span, wrong (unverified which
+    direction) for a mid-period hire/termination. Rather than guess a
+    proration rule (same UNVERIFIED-citation problem as the module
+    docstring's existing flag), refuse loudly whenever
+    ``employee.start_date``/``end_date`` falls inside the pay run's own
+    period — same tax-safe posture as the MONTHLY-only guard above: a
+    blocked pay run beats a wrong-but-plausible EMTA filing.
+    """
+    if employee.pay_frequency != PayFrequency.MONTHLY.value:
+        raise PayRunV2Error(
+            "EE payroll compute only supports pay_frequency=MONTHLY "
+            f"today — employee {employee.id} is {employee.pay_frequency!r}. "
+            "The EUR 700/776 basic exemption and EUR 886 social-tax "
+            "floor (services.payroll_ee) are monthly figures with no "
+            "period-scaling implemented; applying them per-line at a "
+            "shorter period would misstate income tax and social tax "
+            "(critic round 2 finding). Set the employee to MONTHLY, or "
+            "wait for period-scaling to be built."
+        )
+    if employee.start_date > period_start or (
+        employee.end_date is not None and employee.end_date < period_end
+    ):
+        raise PayRunV2Error(
+            f"EE payroll compute refuses a partial-period line for "
+            f"employee {employee.id}: employment span "
+            f"({employee.start_date}..{employee.end_date or 'open'}) does "
+            f"not fully cover the pay run's period "
+            f"({period_start}..{period_end}). The EUR 700/776 exemption "
+            "and EUR 886 social-tax floor are monthly figures applied in "
+            "full with no mid-period proration implemented (correct "
+            "proration is UNVERIFIED against Tulumaksuseadus/EMTA — "
+            "critic round 3 finding); filing a wrong-but-plausible "
+            "figure is worse than a blocked pay run. Adjust the pay "
+            "run's period to match the employment span, or wait for "
+            "proration to be built."
+        )
+    if await _ee_same_month_conflict(
+        session, employee_id=employee.id, company_id=employee.company_id,
+        period_start=period_start, exclude_pay_run_id=pay_run_id,
+    ):
+        raise PayRunV2Error(
+            f"EE payroll compute refuses a second pay-run line for "
+            f"employee {employee.id} within the same calendar month as "
+            f"this pay run's period ({period_start:%Y-%m}) — critic round "
+            "4 finding: the EUR 886 social-tax floor and EUR 700/776 "
+            "exemption are per-CALENDAR-MONTH figures but this compute "
+            "runs per pay-run-line, so a second pay run for the same "
+            "employee in the same month would apply the floor/exemption "
+            "independently and overstate the aggregate month (true "
+            "cross-pay-run aggregation is a bigger, UNVERIFIED-ordering "
+            "change — see this function's own docstring). Void or "
+            "combine the other pay run's line for this employee into a "
+            "single pay run for the month instead."
+        )
+    ordinary_rate = _resolve_ordinary_rate(employee, line_input.ordinary_rate)
+    ordinary_pay = _q(line_input.ordinary_hours * ordinary_rate)
+    ot_rate = _q(ordinary_rate * line_input.overtime_multiplier)
+    overtime_pay = _q(line_input.overtime_hours * ot_rate)
+    gross = _q(ordinary_pay + overtime_pay)
+
+    result: EEPayrollResult = await compute_ee_payroll(
+        gross=gross,
+        effective_date=effective_date,
+        pillar_ii_rate_percent=employee.ee_pillar_ii_rate_percent,
+        basic_exemption_elected=employee.ee_basic_exemption_elected,
+        pensionable_age=employee.ee_pensionable_age,
+    )
+
+    deductions_total = sum(
+        (Decimal(str(d.amount)) for d in line_input.deductions),
+        start=Decimal("0"),
+    )
+    # Net pay deducts the EMPLOYEE-side components only (income tax,
+    # employee unemployment, pillar II) — social tax and employer
+    # unemployment are pure employer costs, never withheld from net pay.
+    net = _q(
+        gross - result.income_tax - result.unemployment_employee
+        - result.pillar_ii - deductions_total
+    )
+
+    return ComputedPayLine(
+        employee_id=employee.id,
+        gross=gross,
+        # AU columns explicitly zeroed, not left stale — see
+        # ComputedPayLine's EE-block comment.
+        payg=Decimal("0"),
+        super_amount=Decimal("0"),
+        net=net,
+        ordinary_hours=Decimal(str(line_input.ordinary_hours)),
+        overtime_hours=Decimal(str(line_input.overtime_hours)),
+        allowances=[dataclasses.asdict(a) for a in line_input.allowances],
+        deductions=[dataclasses.asdict(d) for d in line_input.deductions],
+        paid_leave=[],
+        lump_sums=[],
+        ote=Decimal("0"),
+        payg_breakdown="EE path — see ee_income_tax (services.payroll_ee).",
+        super_breakdown="EE path — see ee_social_tax/ee_pillar_ii (services.payroll_ee).",
+        ee_income_tax=result.income_tax,
+        ee_unemployment_employee=result.unemployment_employee,
+        ee_unemployment_employer=result.unemployment_employer,
+        ee_social_tax=result.social_tax,
+        ee_pillar_ii=result.pillar_ii,
+    )
+
+
 async def _compute(
     session: AsyncSession,
     *,
     employee: Employee,
     line_input: PayLineInput,
     effective_date: date,
+    period_start: date,
+    period_end: date,
+    pay_run_id: uuid.UUID,
+    company_jurisdiction: str = "AU",
 ) -> ComputedPayLine:
-    """Run PAYG + super for one employee line. Pure (no writes)."""
+    """Run PAYG + super for one employee line. Pure (no writes).
+
+    Dispatches on ``company_jurisdiction`` (Packet 3 — mirrors the
+    precedent in ``services.journal._apply_tax_treatment``): every
+    EXISTING caller passes the default ``"AU"`` (or omits it), so this
+    resolves to the exact same AU branch as before Packet 3 —
+    byte-identical AU behaviour. ``"EE"`` is the only other jurisdiction
+    wired; anything else still runs the AU branch (matches
+    ``Company.jurisdiction``'s own "AU is the only jurisdiction wired
+    end-to-end" default note).
+    """
+    if company_jurisdiction == "EE":
+        return await _compute_ee(
+            session, employee=employee, line_input=line_input, effective_date=effective_date,
+            period_start=period_start, period_end=period_end, pay_run_id=pay_run_id,
+        )
     period = employee.pay_frequency
 
     ordinary_rate = _resolve_ordinary_rate(employee, line_input.ordinary_rate)
@@ -413,11 +628,21 @@ async def upsert_line(
             f"Employee {line_input.employee_id} not found for this company"
         )
 
+    company_jurisdiction = (
+        await session.execute(
+            select(Company.jurisdiction).where(Company.id == pay_run.company_id)
+        )
+    ).scalar_one_or_none() or "AU"
+
     computed = await _compute(
         session,
         employee=employee,
         line_input=line_input,
         effective_date=pay_run.payment_date,
+        period_start=pay_run.period_start,
+        period_end=pay_run.period_end,
+        pay_run_id=pay_run.id,
+        company_jurisdiction=company_jurisdiction,
     )
 
     # Delete any existing line for this (pay_run, employee).
@@ -448,6 +673,10 @@ async def upsert_line(
     insert_stmt = insert(PayRunLine.__table__).values(
         id=uuid.uuid4(),
         pay_run_id=pay_run_id,
+        # 0129_pay_runs_rls added tenant_id NOT NULL + RLS to this table
+        # after this INSERT was written; pre-existing gap, fixed forward
+        # here (see PayRunLine.tenant_id's docstring in models/pay_run.py).
+        tenant_id=pay_run.tenant_id,
         employee_id=line_input.employee_id,
         gross=computed.gross,
         tax=computed.payg,
@@ -467,6 +696,14 @@ async def upsert_line(
         "ytd_gross": ytd_gross,
         "ytd_tax": ytd_tax,
         "ytd_super": ytd_super,
+        # EE payroll compute (Packet 3) — None on every AU line, so this
+        # is a no-op INSERT of NULL for AU (present_cols gate below still
+        # applies pre-migration/pre-Packet-3).
+        "ee_income_tax": computed.ee_income_tax,
+        "ee_unemployment_employee": computed.ee_unemployment_employee,
+        "ee_unemployment_employer": computed.ee_unemployment_employer,
+        "ee_social_tax": computed.ee_social_tax,
+        "ee_pillar_ii": computed.ee_pillar_ii,
     }
     present_cols = set(PayRunLine.__table__.columns.keys())
     extras_to_apply = {
@@ -552,6 +789,31 @@ async def finalize_with_je(
 
     # Resolve accounts once.
     co_id = pay_run.company_id
+
+    # EE JE posting is NOT built (Packet 3 scope-narrowing, flagged —
+    # not a silent gap): the 5-leg shape below is AU-account-coded
+    # (_ACCT_*) and Dr-Wages/Cr-Net-only, which for an EE line would
+    # both use the wrong chart-of-accounts convention AND omit the
+    # employer-borne legs (social tax, employer unemployment) entirely
+    # — Dr gross / Cr net would not even balance, since EE net pay
+    # deducts only income tax + employee unemployment + pillar II, not
+    # the full gross-minus-net gap the AU shape assumes. Refuse loudly
+    # rather than post a broken or AU-shaped JE for an EE company. The
+    # EE compute path (``upsert_line``) is unaffected — this guard is
+    # finalize-only.
+    company_jurisdiction = (
+        await session.execute(
+            select(Company.jurisdiction).where(Company.id == co_id)
+        )
+    ).scalar_one_or_none() or "AU"
+    if company_jurisdiction != "AU":
+        raise PayRunV2Error(
+            f"finalize_with_je does not support jurisdiction "
+            f"{company_jurisdiction!r} yet — only AU's Dr-Wages/"
+            "Dr-Super/Cr-PAYG/Cr-Super/Cr-Net JE shape is implemented. "
+            "EE payroll compute (services.payroll_ee via upsert_line) "
+            "is available; EE journal posting is a follow-up packet."
+        )
     wages = await _account_by_code(session, company_id=co_id, code=_ACCT_WAGES_EXPENSE)
     super_exp = await _account_by_code(session, company_id=co_id, code=_ACCT_SUPER_EXPENSE)
     payg_liab = await _account_by_code(session, company_id=co_id, code=_ACCT_PAYG_LIABILITY)
@@ -669,6 +931,82 @@ async def finalize_with_je(
     return pay_run
 
 
+async def finalize_ee_status_only(
+    session: AsyncSession,
+    pay_run_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID,
+    actor: str,
+) -> PayRun:
+    """Lock an EE pay run's lines without posting a journal entry.
+
+    kmd-inf-tsd scope Packet 4 fix-forward, flagged prominently: the
+    scope's own §1.2/§2.2 premise is TSD generation "from posted EE
+    pay runs", but ``finalize_with_je`` (Packet 3, unmodified above)
+    hard-refuses any non-AU jurisdiction — its 5-leg JE shape is
+    AU-account-coded and explicitly deferred EE journal posting to "a
+    follow-up packet". That leaves **no path at all** for an EE pay
+    run to reach ``FINALIZED`` — i.e. the scope's own stated TSD data
+    source was unreachable. This is the minimal fix: mirror the
+    existing DRAFT->FINALIZED lock semantics (``upsert_line`` already
+    refuses further line writes once status leaves DRAFT — see its own
+    guard) WITHOUT building the AU-shaped ledger posting, so EE pay
+    run lines can become immutable ("posted" in this codebase's sense)
+    for the TSD generator to read. Ledger posting for EE payroll
+    remains a real, separate gap (no JE, no ``journal_id`` set here) —
+    this function does not close it, only unblocks TSD sourcing.
+    """
+    pay_run = await _get_pay_run(session, pay_run_id, tenant_id=tenant_id)
+    if pay_run is None:
+        raise PayRunV2Error(f"Pay run {pay_run_id} not found")
+    if pay_run.status == PayRunStatus.FINALIZED:
+        return pay_run
+    if pay_run.status != PayRunStatus.DRAFT:
+        raise PayRunV2Error(f"Cannot finalize from status {pay_run.status!r}")
+
+    company_jurisdiction = (
+        await session.execute(
+            select(Company.jurisdiction).where(Company.id == pay_run.company_id)
+        )
+    ).scalar_one_or_none() or "AU"
+    if company_jurisdiction != "EE":
+        raise PayRunV2Error(
+            "finalize_ee_status_only is for EE-jurisdiction companies only "
+            f"— got {company_jurisdiction!r}. AU pay runs use "
+            "finalize_with_je."
+        )
+
+    lines_result = await session.execute(
+        select(PayRunLine).where(PayRunLine.pay_run_id == pay_run_id)
+    )
+    lines = list(lines_result.scalars().all())
+    if not lines:
+        raise PayRunV2Error("Pay run has no lines — add at least one before finalize.")
+
+    pay_run.status = PayRunStatus.FINALIZED
+    pay_run.version += 1
+    pay_run.updated_at = datetime.utcnow()
+
+    await cl_svc.append(
+        session,
+        entity="pay_run",
+        entity_id=pay_run.id,
+        op="update",
+        actor=actor,
+        payload={
+            "journal_id": None,
+            "line_count": len(lines),
+            "note": (
+                "EE status-only finalize — no journal entry posted "
+                "(EE ledger posting is a separate, unclosed gap)."
+            ),
+        },
+        version=pay_run.version,
+    )
+    await session.commit()
+    return pay_run
+
+
 __all__ = [
     "AllowanceLine",
     "ComputedPayLine",
@@ -677,6 +1015,7 @@ __all__ = [
     "PaidLeaveLine",
     "PayLineInput",
     "PayRunV2Error",
+    "finalize_ee_status_only",
     "finalize_with_je",
     "upsert_line",
 ]

@@ -40,7 +40,7 @@ class TaxConfigError(PostingError):
     company chart. A taxable line with nowhere to post its GST is a
     configuration error — NOT a no-op. Silently dropping the GST line
     produces an unbalanced journal entry that then fails with a
-    misleading 'unbalanced' error (a real production incident, 2026-06-10). Surfacing
+    misleading 'unbalanced' error (the 2026-06-10 primary bug). Surfacing
     a clear config error here points the operator straight at the bad
     setting instead.
     """
@@ -181,9 +181,9 @@ async def auto_post_gst_lines(
 
     # A taxable line whose GST account code does not resolve is a config
     # error — raise loudly instead of silently emitting no GST line and
-    # producing an unbalanced JE (root cause of a real production incident,
-    # 2026-06-10: gst_paid_account_code was '2-1330', which did not exist in
-    # that tenant's chart, so this returned [] and the JE failed as 'unbalanced').
+    # producing an unbalanced JE (root cause of the 2026-06-10 primary bug:
+    # gst_paid_account_code was '2-1330', which did not exist in that
+    # tenant's chart, so this returned [] and the JE failed as 'unbalanced').
     if needs_output and collected_acct is None:
         raw = await settings_svc.get(session, "gst_collected_account_code", "")
         raise TaxConfigError(
@@ -290,7 +290,7 @@ async def validate_gst_account_settings(
     ``require_set=True`` to also flag blanks. This helper is the
     configuration-time counterpart to the post-time guard in
     ``auto_post_gst_lines``: call it on settings save to reject a bad code
-    (e.g. the '2-1330' that did not exist in that tenant's chart) up-front
+    (e.g. the '2-1330' that did not exist in the primary chart) up-front
     instead of letting it sit dormant until the first taxable expense.
     """
     problems: dict[str, str] = {}
@@ -424,7 +424,7 @@ async def bas_report(
     ``tax_return_generator`` imports this module's account-type sets at
     import time, so this module cannot import it back at import time
     too — only at call time, once both modules have finished loading.
-    See docs/multi-jurisdiction.md (M1.5)
+    See ~/records/saebooks/global-reference-audit-2026-07-09.md
     (theme T8).
     """
     from saebooks.services.tax_return_generator import generate_return
@@ -524,6 +524,23 @@ class AUTaxEngine:
             reporting_type=reporting_type,
             direction=direction,
         )
+
+    def compute_components(self, ctx: PostingContext) -> list[TaxTreatment]:
+        """Multi-component hook (KMD-formula support Packet 3, scope
+        §3.4) — the per-jurisdiction posting dispatcher in
+        ``services.journal._apply_tax_treatment`` always calls this
+        method, never ``compute`` directly, so every engine must
+        implement it. AU has no jurisdiction-side need for a stacked/
+        split tax treatment on one line (no reverse-charge fan-out, no
+        CGST+SGST-style stack) — returns exactly the one ``compute()``
+        treatment, wrapped in a list. This is what makes "dispatch
+        through the generic per-jurisdiction path" byte-identical to
+        the old hardcoded ``get_engine("AU")`` + ``engine.compute(ctx)``
+        call: same treatment object, same single
+        ``JournalLineTaxComponent`` row shape (component_role='standard',
+        sequence=0) the caller derives from a length-1 list.
+        """
+        return [self.compute(ctx)]
 
     def boxes(self, period: Any) -> dict[str, Decimal]:
         """Return BAS labels for a period.

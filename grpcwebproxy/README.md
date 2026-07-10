@@ -14,17 +14,17 @@ no Go toolchain required.
 
 ## Deployment
 
-Add to your deployment's `docker-compose.yml` (host-local, not
+Add to `server/compose/saebooks/docker-compose.yml` (host-local, not
 committed):
 
 ```yaml
 grpcwebproxy:
   build:
-    context: ./grpcwebproxy
+    context: /home/youruser/projects/saebooks/grpcwebproxy
   image: saebooks-grpcwebproxy:0.15.0
   restart: unless-stopped
   ports:
-  - <lan-ip>:18315:8080
+  - 127.0.0.1:18315:8080
   command:
   - --backend_addr=api:50051
   - --backend_tls=false

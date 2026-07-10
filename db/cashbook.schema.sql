@@ -34,6 +34,7 @@ CREATE TABLE accounts (
 	reconcile BOOLEAN NOT NULL, 
 	system_managed BOOLEAN NOT NULL, 
 	is_trust_account BOOLEAN NOT NULL, 
+	show_on_invoice BOOLEAN DEFAULT false NOT NULL, 
 	bsb VARCHAR(7), 
 	bank_account_number VARCHAR(9), 
 	bank_account_title VARCHAR(32), 
@@ -132,6 +133,7 @@ CREATE TABLE audit_log (
 
 CREATE TABLE audit_snapshots (
 	id CHAR(32) NOT NULL, 
+	tenant_id CHAR(32), 
 	table_name VARCHAR(64) NOT NULL, 
 	row_id VARCHAR(64) NOT NULL, 
 	action VARCHAR(16) NOT NULL, 
@@ -140,7 +142,8 @@ CREATE TABLE audit_snapshots (
 	reason TEXT, 
 	performed_by VARCHAR, 
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
-	PRIMARY KEY (id)
+	PRIMARY KEY (id), 
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT
 );
 
 CREATE TABLE bank_feed_accounts (
@@ -207,6 +210,24 @@ CREATE TABLE bank_feed_issues (
 	fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
 	PRIMARY KEY (id), 
 	UNIQUE (sds_feed_issue_id)
+);
+
+CREATE TABLE bank_routing_identifiers (
+	id CHAR(32) NOT NULL, 
+	company_id CHAR(32) NOT NULL, 
+	tenant_id CHAR(32) NOT NULL, 
+	owner_type VARCHAR(16) NOT NULL, 
+	owner_id CHAR(32) NOT NULL, 
+	routing_scheme VARCHAR(32) NOT NULL, 
+	scheme_value VARCHAR(64) NOT NULL, 
+	bic VARCHAR(11), 
+	account_number VARCHAR(64), 
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_bank_routing_identifiers_owner_scheme UNIQUE (company_id, owner_type, owner_id, routing_scheme), 
+	FOREIGN KEY(company_id) REFERENCES companies (id) ON DELETE CASCADE, 
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT
 );
 
 CREATE TABLE bank_rules (
@@ -413,6 +434,11 @@ CREATE TABLE business_identifiers (
 	scheme VARCHAR(32) NOT NULL, 
 	value VARCHAR(64) NOT NULL, 
 	verified_at DATETIME, 
+	jurisdiction VARCHAR(3), 
+	check_digit_valid BOOLEAN, 
+	valid_from DATE, 
+	valid_to DATE, 
+	issuing_authority VARCHAR(128), 
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
 	updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
 	PRIMARY KEY (id), 
@@ -443,10 +469,21 @@ CREATE TABLE companies (
 	trading_name VARCHAR, 
 	abn VARCHAR(20), 
 	acn VARCHAR(20), 
+	bank_name VARCHAR, 
+	bank_bsb VARCHAR, 
+	bank_account_number VARCHAR, 
+	bank_account_name VARCHAR, 
+	payment_terms_text VARCHAR, 
+	terms_url VARCHAR, 
+	phone VARCHAR, 
+	email VARCHAR, 
+	website VARCHAR, 
+	default_payment_terms TEXT, 
 	address JSON, 
 	base_currency VARCHAR(3) NOT NULL, 
 	coa_template_key VARCHAR(64) NOT NULL, 
 	jurisdiction VARCHAR(3) NOT NULL, 
+	entity_structure_code VARCHAR(32), 
 	fin_year_start_month INTEGER NOT NULL, 
 	audit_mode VARCHAR NOT NULL, 
 	siss_client_id VARCHAR(128), 
@@ -456,9 +493,14 @@ CREATE TABLE companies (
 	gst_registered BOOLEAN NOT NULL, 
 	gst_effective_date DATE, 
 	psi_status VARCHAR(16) NOT NULL, 
+	writeoff_mode VARCHAR(16) DEFAULT 'review' NOT NULL, 
+	writeoff_threshold_days INTEGER DEFAULT '90' NOT NULL, 
+	recovery_mode VARCHAR(16) DEFAULT 'smart_prompt' NOT NULL, 
+	bad_debt_recovery_account VARCHAR(64), 
 	bookkeeping_mode VARCHAR(16) NOT NULL, 
 	cashbook_default_bank_account_id CHAR(32), 
 	cashbook_categories JSON, 
+	costing_method VARCHAR(24) DEFAULT 'weighted_average' NOT NULL, 
 	entity_type VARCHAR(11) DEFAULT 'COMPANY' NOT NULL, 
 	trades BOOLEAN DEFAULT true NOT NULL, 
 	trustee_company_id CHAR(32), 
@@ -500,6 +542,9 @@ CREATE TABLE contacts (
 	currency_code VARCHAR(3), 
 	archived_at DATETIME, 
 	is_tpar_supplier BOOLEAN NOT NULL, 
+	is_one_off BOOLEAN NOT NULL, 
+	payment_terms_basis VARCHAR(4), 
+	payment_terms_days INTEGER, 
 	version INTEGER NOT NULL, 
 	PRIMARY KEY (id), 
 	FOREIGN KEY(company_id) REFERENCES companies (id) ON DELETE CASCADE, 
@@ -557,6 +602,7 @@ CREATE TABLE credit_notes (
 	amount_allocated NUMERIC(18, 2) NOT NULL, 
 	reason TEXT, 
 	notes TEXT, 
+	payment_terms TEXT, 
 	posted_at DATETIME, 
 	posted_by VARCHAR, 
 	journal_entry_id CHAR(32), 
@@ -622,6 +668,33 @@ CREATE TABLE document_counters (
 	FOREIGN KEY(company_id) REFERENCES companies (id) ON DELETE CASCADE
 );
 
+CREATE TABLE dutiable_transaction_events (
+	id CHAR(32) DEFAULT (gen_random_uuid()) NOT NULL, 
+	tenant_id CHAR(32) NOT NULL, 
+	company_id CHAR(32) NOT NULL, 
+	event_date DATE NOT NULL, 
+	duty_type VARCHAR(32) NOT NULL, 
+	jurisdiction VARCHAR(3) NOT NULL, 
+	sub_jurisdiction VARCHAR(3), 
+	dutiable_value NUMERIC(14, 2) NOT NULL, 
+	computed_duty NUMERIC(14, 2) NOT NULL, 
+	applied_concession_id CHAR(32), 
+	description TEXT, 
+	reference VARCHAR(64), 
+	status VARCHAR(16) DEFAULT 'POSTED' NOT NULL, 
+	debit_account_id CHAR(32) NOT NULL, 
+	credit_account_id CHAR(32) NOT NULL, 
+	journal_entry_id CHAR(32), 
+	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	PRIMARY KEY (id), 
+	CONSTRAINT fk_dutiable_txn_events_debit_account_company FOREIGN KEY(debit_account_id, company_id) REFERENCES accounts (id, company_id) ON DELETE RESTRICT, 
+	CONSTRAINT fk_dutiable_txn_events_credit_account_company FOREIGN KEY(credit_account_id, company_id) REFERENCES accounts (id, company_id) ON DELETE RESTRICT, 
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT, 
+	FOREIGN KEY(company_id) REFERENCES companies (id) ON DELETE CASCADE, 
+	FOREIGN KEY(journal_entry_id) REFERENCES journal_entries (id) ON DELETE RESTRICT
+);
+
 CREATE TABLE employees (
 	id CHAR(32) NOT NULL, 
 	company_id CHAR(32) NOT NULL, 
@@ -682,6 +755,16 @@ CREATE TABLE employees (
 	FOREIGN KEY(super_fund_id) REFERENCES super_funds (id) ON DELETE RESTRICT
 );
 
+CREATE TABLE ephemeral_demo_tenants (
+	company_id CHAR(32) NOT NULL, 
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	last_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	source_ip VARCHAR, 
+	request_count INTEGER DEFAULT '0' NOT NULL, 
+	PRIMARY KEY (company_id), 
+	FOREIGN KEY(company_id) REFERENCES companies (id) ON DELETE CASCADE
+);
+
 CREATE TABLE expense_lines (
 	id CHAR(32) NOT NULL, 
 	expense_id CHAR(32) NOT NULL, 
@@ -725,6 +808,8 @@ CREATE TABLE expenses (
 	posted_at DATETIME, 
 	posted_by VARCHAR, 
 	version INTEGER NOT NULL, 
+	flagged_for_review BOOLEAN DEFAULT false NOT NULL, 
+	review_note TEXT, 
 	tenant_id CHAR(32) NOT NULL, 
 	journal_entry_id CHAR(32), 
 	void_journal_entry_id CHAR(32), 
@@ -805,6 +890,111 @@ CREATE TABLE fx_rate_snapshots (
 	CONSTRAINT uq_fx_rate_snapshots_key UNIQUE (rate_date, source, from_ccy, to_ccy)
 );
 
+CREATE TABLE ic_edges (
+	id CHAR(32) DEFAULT (gen_random_uuid()) NOT NULL, 
+	tenant_id CHAR(32) NOT NULL, 
+	company_id CHAR(32) NOT NULL, 
+	partner_company_id CHAR(32), 
+	control_account_id CHAR(32) NOT NULL, 
+	direction VARCHAR(16) NOT NULL, 
+	topology VARCHAR(16) DEFAULT 'LOCAL' NOT NULL, 
+	partner_tenant_id CHAR(32), 
+	partner_endpoint TEXT, 
+	relay_pubkey BLOB, 
+	relay_privkey_ciphertext BLOB, 
+	relay_token_prefix VARCHAR(16), 
+	relay_token_hash TEXT, 
+	relay_status VARCHAR(16) DEFAULT 'INACTIVE' NOT NULL, 
+	authorised_by_principal_id CHAR(32), 
+	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_ic_edges_company_partner_direction UNIQUE (company_id, partner_company_id, direction), 
+	CONSTRAINT fk_ic_edges_control_account_company FOREIGN KEY(control_account_id, company_id) REFERENCES accounts (id, company_id) ON DELETE RESTRICT, 
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT, 
+	FOREIGN KEY(company_id) REFERENCES companies (id) ON DELETE CASCADE, 
+	FOREIGN KEY(partner_company_id) REFERENCES companies (id) ON DELETE RESTRICT, 
+	FOREIGN KEY(authorised_by_principal_id) REFERENCES principals (id) ON DELETE SET NULL
+);
+
+CREATE TABLE ic_inbox (
+	id CHAR(32) DEFAULT (gen_random_uuid()) NOT NULL, 
+	tenant_id CHAR(32) NOT NULL, 
+	company_id CHAR(32) NOT NULL, 
+	ic_txn_id CHAR(32) NOT NULL, 
+	edge_id CHAR(32) NOT NULL, 
+	nonce CHAR(32) NOT NULL, 
+	payload_json JSON NOT NULL, 
+	signature BLOB NOT NULL, 
+	journal_entry_id CHAR(32), 
+	status VARCHAR(16) DEFAULT 'RECEIVED' NOT NULL, 
+	reject_reason TEXT, 
+	received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	posted_at TIMESTAMP, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_ic_inbox_tenant_ic_txn_id UNIQUE (tenant_id, ic_txn_id), 
+	CONSTRAINT uq_ic_inbox_tenant_nonce UNIQUE (tenant_id, nonce), 
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT, 
+	FOREIGN KEY(company_id) REFERENCES companies (id) ON DELETE CASCADE, 
+	FOREIGN KEY(edge_id) REFERENCES ic_edges (id) ON DELETE RESTRICT, 
+	FOREIGN KEY(journal_entry_id) REFERENCES journal_entries (id) ON DELETE RESTRICT
+);
+
+CREATE TABLE ic_legs (
+	id CHAR(32) DEFAULT (gen_random_uuid()) NOT NULL, 
+	tenant_id CHAR(32) NOT NULL, 
+	company_id CHAR(32) NOT NULL, 
+	ic_txn_id CHAR(32) NOT NULL, 
+	journal_entry_id CHAR(32) NOT NULL, 
+	side VARCHAR(16) NOT NULL, 
+	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_ic_legs_company_txn_side UNIQUE (company_id, ic_txn_id, side), 
+	CONSTRAINT uq_ic_legs_company_journal_entry UNIQUE (company_id, journal_entry_id), 
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT, 
+	FOREIGN KEY(company_id) REFERENCES companies (id) ON DELETE CASCADE, 
+	FOREIGN KEY(ic_txn_id) REFERENCES ic_txn (id) ON DELETE CASCADE, 
+	FOREIGN KEY(journal_entry_id) REFERENCES journal_entries (id) ON DELETE RESTRICT
+);
+
+CREATE TABLE ic_outbox (
+	id CHAR(32) DEFAULT (gen_random_uuid()) NOT NULL, 
+	tenant_id CHAR(32) NOT NULL, 
+	company_id CHAR(32) NOT NULL, 
+	ic_txn_id CHAR(32) NOT NULL, 
+	edge_id CHAR(32) NOT NULL, 
+	idempotency_key CHAR(32) NOT NULL, 
+	nonce CHAR(32) NOT NULL, 
+	payload_json JSON NOT NULL, 
+	signature BLOB NOT NULL, 
+	status VARCHAR(16) DEFAULT 'PENDING' NOT NULL, 
+	attempts INTEGER DEFAULT '0' NOT NULL, 
+	next_attempt_at TIMESTAMP, 
+	last_error TEXT, 
+	issued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_ic_outbox_tenant_idempotency_key UNIQUE (tenant_id, idempotency_key), 
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT, 
+	FOREIGN KEY(company_id) REFERENCES companies (id) ON DELETE CASCADE, 
+	FOREIGN KEY(ic_txn_id) REFERENCES ic_txn (id) ON DELETE CASCADE, 
+	FOREIGN KEY(edge_id) REFERENCES ic_edges (id) ON DELETE RESTRICT
+);
+
+CREATE TABLE ic_txn (
+	id CHAR(32) DEFAULT (gen_random_uuid()) NOT NULL, 
+	tenant_id CHAR(32) NOT NULL, 
+	company_id CHAR(32) NOT NULL, 
+	description TEXT, 
+	status VARCHAR(16) DEFAULT 'ACTIVE' NOT NULL, 
+	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT, 
+	FOREIGN KEY(company_id) REFERENCES companies (id) ON DELETE CASCADE
+);
+
 CREATE TABLE idempotency_keys (
 	"key" CHAR(32) NOT NULL, 
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
@@ -821,6 +1011,105 @@ CREATE TABLE idempotency_records (
 	response_body BLOB NOT NULL, 
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
 	PRIMARY KEY (idempotency_key)
+);
+
+CREATE TABLE inbox_documents (
+	id CHAR(32) NOT NULL, 
+	tenant_id CHAR(32) NOT NULL, 
+	company_id CHAR(32), 
+	vault_file_id CHAR(32) NOT NULL, 
+	sha256 CHAR(64) NOT NULL, 
+	filename VARCHAR(255) NOT NULL, 
+	mime VARCHAR(100) NOT NULL, 
+	size_bytes BIGINT NOT NULL, 
+	source TEXT NOT NULL, 
+	source_ref TEXT, 
+	status TEXT DEFAULT 'RECEIVED' NOT NULL, 
+	extract JSON, 
+	extraction_override JSON, 
+	extract_model VARCHAR(80), 
+	extraction_confidence TEXT, 
+	extraction_error TEXT, 
+	extracted_at DATETIME, 
+	attempt_count SMALLINT DEFAULT '0' NOT NULL, 
+	next_attempt_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	claimed_at DATETIME, 
+	last_error TEXT, 
+	duplicate_of_id CHAR(32), 
+	suggested_contact_id CHAR(32), 
+	suggested_account_id CHAR(32), 
+	suggested_tax_code_id CHAR(32), 
+	supplier_rule_id CHAR(32), 
+	published_record_kind TEXT, 
+	published_record_id CHAR(32), 
+	published_by CHAR(32), 
+	published_at DATETIME, 
+	reject_reason TEXT, 
+	reject_note TEXT, 
+	version INTEGER DEFAULT '1' NOT NULL, 
+	created_by CHAR(32), 
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT, 
+	FOREIGN KEY(company_id) REFERENCES companies (id) ON DELETE SET NULL, 
+	FOREIGN KEY(duplicate_of_id) REFERENCES inbox_documents (id) ON DELETE SET NULL, 
+	FOREIGN KEY(suggested_contact_id) REFERENCES contacts (id) ON DELETE SET NULL, 
+	FOREIGN KEY(suggested_account_id) REFERENCES accounts (id) ON DELETE SET NULL, 
+	FOREIGN KEY(suggested_tax_code_id) REFERENCES tax_codes (id) ON DELETE SET NULL, 
+	FOREIGN KEY(supplier_rule_id) REFERENCES supplier_rules (id) ON DELETE SET NULL, 
+	FOREIGN KEY(published_by) REFERENCES users (id) ON DELETE SET NULL, 
+	FOREIGN KEY(created_by) REFERENCES users (id) ON DELETE SET NULL
+);
+
+CREATE TABLE inbox_email_addresses (
+	id CHAR(32) NOT NULL, 
+	tenant_id CHAR(32) NOT NULL, 
+	company_id CHAR(32), 
+	token VARCHAR(20) NOT NULL, 
+	active BOOLEAN DEFAULT 'true' NOT NULL, 
+	revoked_at DATETIME, 
+	created_by CHAR(32), 
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT, 
+	FOREIGN KEY(company_id) REFERENCES companies (id) ON DELETE SET NULL, 
+	UNIQUE (token), 
+	FOREIGN KEY(created_by) REFERENCES users (id) ON DELETE SET NULL
+);
+
+CREATE TABLE inbox_email_messages (
+	id CHAR(32) NOT NULL, 
+	tenant_id CHAR(32) NOT NULL, 
+	mailbox TEXT NOT NULL, 
+	message_id TEXT NOT NULL, 
+	from_addr TEXT, 
+	subject TEXT, 
+	received_at DATETIME, 
+	processed_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	document_count INTEGER DEFAULT '0' NOT NULL, 
+	skipped_count INTEGER DEFAULT '0' NOT NULL, 
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_inbox_email_messages_msg UNIQUE (tenant_id, mailbox, message_id), 
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT
+);
+
+CREATE TABLE inventory_cost_layers (
+	id CHAR(32) NOT NULL, 
+	tenant_id CHAR(32) NOT NULL, 
+	company_id CHAR(32) NOT NULL, 
+	item_id CHAR(32) NOT NULL, 
+	received_date DATE NOT NULL, 
+	original_qty NUMERIC(18, 4) NOT NULL, 
+	remaining_qty NUMERIC(18, 4) NOT NULL, 
+	unit_cost NUMERIC(18, 4) NOT NULL, 
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	PRIMARY KEY (id), 
+	CONSTRAINT fk_inventory_cost_layers_item_company FOREIGN KEY(item_id, company_id) REFERENCES items (id, company_id) ON DELETE CASCADE, 
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT, 
+	FOREIGN KEY(company_id) REFERENCES companies (id) ON DELETE CASCADE
 );
 
 CREATE TABLE invoice_lines (
@@ -887,6 +1176,8 @@ CREATE TABLE invoices (
 	external_etag VARCHAR(255), 
 	external_payload JSON, 
 	version INTEGER NOT NULL, 
+	flagged_for_review BOOLEAN DEFAULT false NOT NULL, 
+	review_note TEXT, 
 	tenant_id CHAR(32) NOT NULL, 
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
 	updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
@@ -948,7 +1239,12 @@ CREATE TABLE journal_entries (
 	posted_by VARCHAR, 
 	reversal_of_id CHAR(32), 
 	override_reason TEXT, 
+	origin VARCHAR(32) NOT NULL, 
+	source_type VARCHAR(64), 
+	source_id CHAR(32), 
 	attachments JSON, 
+	flagged_for_review BOOLEAN DEFAULT false NOT NULL, 
+	review_note TEXT, 
 	version INTEGER NOT NULL, 
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
 	updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
@@ -960,9 +1256,31 @@ CREATE TABLE journal_entries (
 	FOREIGN KEY(reversal_of_id) REFERENCES journal_entries (id) ON DELETE SET NULL
 );
 
+CREATE TABLE journal_line_tax_components (
+	id CHAR(32) NOT NULL, 
+	journal_line_id CHAR(32) NOT NULL, 
+	company_id CHAR(32) NOT NULL, 
+	tenant_id CHAR(32) NOT NULL, 
+	tax_family VARCHAR(16) NOT NULL, 
+	component_role VARCHAR(32) NOT NULL, 
+	ref_tax_code VARCHAR(32), 
+	rate_applied NUMERIC(9, 4) NOT NULL, 
+	base_amount NUMERIC(14, 2) NOT NULL, 
+	tax_amount NUMERIC(14, 2) NOT NULL, 
+	direction VARCHAR(8) NOT NULL, 
+	sequence INTEGER NOT NULL, 
+	notes TEXT, 
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(journal_line_id) REFERENCES journal_lines (id) ON DELETE CASCADE, 
+	FOREIGN KEY(company_id) REFERENCES companies (id) ON DELETE CASCADE, 
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT
+);
+
 CREATE TABLE journal_lines (
 	id CHAR(32) NOT NULL, 
 	entry_id CHAR(32) NOT NULL, 
+	company_id CHAR(32), 
 	line_no INTEGER NOT NULL, 
 	account_id CHAR(32) NOT NULL, 
 	description TEXT, 
@@ -977,6 +1295,7 @@ CREATE TABLE journal_lines (
 	tax_treatment JSON, 
 	PRIMARY KEY (id), 
 	FOREIGN KEY(entry_id) REFERENCES journal_entries (id) ON DELETE CASCADE, 
+	FOREIGN KEY(company_id) REFERENCES companies (id) ON DELETE CASCADE, 
 	FOREIGN KEY(account_id) REFERENCES accounts (id) ON DELETE RESTRICT, 
 	FOREIGN KEY(tax_code_id) REFERENCES tax_codes (id) ON DELETE SET NULL, 
 	FOREIGN KEY(project_id) REFERENCES projects (id) ON DELETE SET NULL, 
@@ -1277,6 +1596,53 @@ CREATE TABLE permissions (
 	PRIMARY KEY (code)
 );
 
+CREATE TABLE principal_fido2_credentials (
+	id CHAR(32) NOT NULL, 
+	principal_id CHAR(32) NOT NULL, 
+	credential_id BLOB NOT NULL, 
+	public_key BLOB NOT NULL, 
+	sign_count BIGINT DEFAULT '0' NOT NULL, 
+	transports JSON NOT NULL, 
+	friendly_name VARCHAR(64) DEFAULT 'Security key' NOT NULL, 
+	last_used_at DATETIME, 
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_principal_fido2_credential_id UNIQUE (credential_id), 
+	FOREIGN KEY(principal_id) REFERENCES principals (id) ON DELETE CASCADE
+);
+
+CREATE TABLE principal_tenant_grants (
+	id CHAR(32) NOT NULL, 
+	principal_id CHAR(32) NOT NULL, 
+	tenant_id CHAR(32) NOT NULL, 
+	role VARCHAR(16) NOT NULL, 
+	status VARCHAR(16) DEFAULT 'active' NOT NULL, 
+	granted_by_user_id CHAR(32), 
+	granted_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	revoked_at DATETIME, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_principal_tenant_grant_principal_tenant_status UNIQUE (principal_id, tenant_id, status), 
+	FOREIGN KEY(principal_id) REFERENCES principals (id) ON DELETE CASCADE, 
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE CASCADE, 
+	FOREIGN KEY(granted_by_user_id) REFERENCES users (id) ON DELETE SET NULL
+);
+
+CREATE TABLE principals (
+	id CHAR(32) NOT NULL, 
+	kind VARCHAR(16) DEFAULT 'accountant' NOT NULL, 
+	display_name VARCHAR(128) NOT NULL, 
+	username VARCHAR(64) NOT NULL, 
+	email VARCHAR(255), 
+	owned_tenant_id CHAR(32), 
+	requires_fido2 BOOLEAN DEFAULT true NOT NULL, 
+	archived_at DATETIME, 
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	PRIMARY KEY (id), 
+	UNIQUE (username), 
+	FOREIGN KEY(owned_tenant_id) REFERENCES tenants (id) ON DELETE SET NULL
+);
+
 CREATE TABLE projects (
 	id CHAR(32) NOT NULL, 
 	company_id CHAR(32) NOT NULL, 
@@ -1415,6 +1781,79 @@ CREATE TABLE quotes (
 	FOREIGN KEY(invoice_id) REFERENCES invoices (id) ON DELETE SET NULL
 );
 
+CREATE TABLE receipt_lines (
+	id CHAR(32) NOT NULL, 
+	receipt_id CHAR(32) NOT NULL, 
+	line_no INTEGER NOT NULL, 
+	description TEXT NOT NULL, 
+	account_id CHAR(32) NOT NULL, 
+	tax_code_id CHAR(32), 
+	amount NUMERIC(18, 2) NOT NULL, 
+	tax_amount NUMERIC(18, 2) NOT NULL, 
+	line_total NUMERIC(18, 2) NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(receipt_id) REFERENCES receipts (id) ON DELETE CASCADE, 
+	FOREIGN KEY(account_id) REFERENCES accounts (id) ON DELETE RESTRICT, 
+	FOREIGN KEY(tax_code_id) REFERENCES tax_codes (id) ON DELETE SET NULL
+);
+
+CREATE TABLE receipts (
+	id CHAR(32) NOT NULL, 
+	tenant_id CHAR(32) NOT NULL, 
+	company_id CHAR(32) NOT NULL, 
+	bank_account_id CHAR(32) NOT NULL, 
+	contact_id CHAR(32), 
+	number VARCHAR(32), 
+	receipt_date DATE NOT NULL, 
+	status VARCHAR(16) NOT NULL, 
+	reference VARCHAR(255), 
+	subtotal NUMERIC(18, 2) NOT NULL, 
+	tax_total NUMERIC(18, 2) NOT NULL, 
+	total NUMERIC(18, 2) NOT NULL, 
+	reason TEXT, 
+	notes TEXT, 
+	posted_at DATETIME, 
+	posted_by VARCHAR, 
+	journal_entry_id CHAR(32), 
+	void_journal_entry_id CHAR(32), 
+	version INTEGER NOT NULL, 
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	archived_at DATETIME, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_receipts_company_number UNIQUE (company_id, number), 
+	CONSTRAINT fk_receipts_bank_account_company FOREIGN KEY(bank_account_id, company_id) REFERENCES accounts (id, company_id) ON DELETE RESTRICT, 
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT, 
+	FOREIGN KEY(company_id) REFERENCES companies (id) ON DELETE CASCADE, 
+	FOREIGN KEY(contact_id) REFERENCES contacts (id) ON DELETE RESTRICT, 
+	FOREIGN KEY(journal_entry_id) REFERENCES journal_entries (id) ON DELETE SET NULL, 
+	FOREIGN KEY(void_journal_entry_id) REFERENCES journal_entries (id) ON DELETE SET NULL
+);
+
+CREATE TABLE reclassifications (
+	id CHAR(32) DEFAULT (gen_random_uuid()) NOT NULL, 
+	tenant_id CHAR(32) NOT NULL, 
+	company_id CHAR(32) NOT NULL, 
+	from_account_id CHAR(32) NOT NULL, 
+	to_account_id CHAR(32) NOT NULL, 
+	amount NUMERIC(14, 2) NOT NULL, 
+	reclass_date DATE NOT NULL, 
+	reason TEXT, 
+	source_entry_id CHAR(32), 
+	journal_entry_id CHAR(32), 
+	status VARCHAR(16) DEFAULT 'POSTED' NOT NULL, 
+	created_by VARCHAR, 
+	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	PRIMARY KEY (id), 
+	CONSTRAINT fk_reclassifications_from_account_company FOREIGN KEY(from_account_id, company_id) REFERENCES accounts (id, company_id) ON DELETE RESTRICT, 
+	CONSTRAINT fk_reclassifications_to_account_company FOREIGN KEY(to_account_id, company_id) REFERENCES accounts (id, company_id) ON DELETE RESTRICT, 
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT, 
+	FOREIGN KEY(company_id) REFERENCES companies (id) ON DELETE CASCADE, 
+	FOREIGN KEY(source_entry_id) REFERENCES journal_entries (id) ON DELETE SET NULL, 
+	FOREIGN KEY(journal_entry_id) REFERENCES journal_entries (id) ON DELETE RESTRICT
+);
+
 CREATE TABLE recurring_invoice_lines (
 	id CHAR(32) NOT NULL, 
 	recurring_invoice_id CHAR(32) NOT NULL, 
@@ -1459,11 +1898,67 @@ CREATE TABLE recurring_invoices (
 );
 
 CREATE TABLE role_permissions (
-	role VARCHAR(16) NOT NULL, 
+	role_id CHAR(32) NOT NULL, 
+	tenant_id CHAR(32) NOT NULL, 
 	permission_code VARCHAR(64) NOT NULL, 
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
-	PRIMARY KEY (role, permission_code), 
+	PRIMARY KEY (role_id, permission_code), 
+	FOREIGN KEY(role_id) REFERENCES roles (id) ON DELETE CASCADE, 
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT, 
 	FOREIGN KEY(permission_code) REFERENCES permissions (code) ON DELETE CASCADE
+);
+
+CREATE TABLE roles (
+	id CHAR(32) NOT NULL, 
+	tenant_id CHAR(32) NOT NULL, 
+	name VARCHAR(64) NOT NULL, 
+	base_role VARCHAR(16), 
+	is_system BOOLEAN DEFAULT 'false' NOT NULL, 
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT
+);
+
+CREATE TABLE scheduled_backup_configs (
+	id CHAR(32) NOT NULL, 
+	tenant_id CHAR(32) NOT NULL, 
+	enabled BOOLEAN DEFAULT 'true' NOT NULL, 
+	destination_type VARCHAR(32) DEFAULT 'local_path' NOT NULL, 
+	destination_params JSON DEFAULT '{}' NOT NULL, 
+	managed_by VARCHAR(16) DEFAULT 'client' NOT NULL, 
+	retention_keep_n INTEGER, 
+	retention_keep_days INTEGER, 
+	created_by CHAR(32), 
+	updated_by CHAR(32), 
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT, 
+	FOREIGN KEY(created_by) REFERENCES users (id) ON DELETE SET NULL, 
+	FOREIGN KEY(updated_by) REFERENCES users (id) ON DELETE SET NULL
+);
+
+CREATE TABLE scheduled_backup_runs (
+	id CHAR(32) NOT NULL, 
+	tenant_id CHAR(32) NOT NULL, 
+	config_id CHAR(32), 
+	status VARCHAR(16) DEFAULT 'PENDING' NOT NULL, 
+	destination_type VARCHAR(32) NOT NULL, 
+	artifact_path TEXT, 
+	artifact_size_bytes BIGINT, 
+	artifact_sha256 CHAR(64), 
+	table_counts JSON, 
+	remote_push_status VARCHAR(32) DEFAULT 'not_applicable' NOT NULL, 
+	error TEXT, 
+	requested_by CHAR(32), 
+	started_at DATETIME, 
+	completed_at DATETIME, 
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT, 
+	FOREIGN KEY(config_id) REFERENCES scheduled_backup_configs (id) ON DELETE SET NULL, 
+	FOREIGN KEY(requested_by) REFERENCES users (id) ON DELETE SET NULL
 );
 
 CREATE TABLE settings (
@@ -1553,6 +2048,148 @@ CREATE TABLE super_funds (
 	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT
 );
 
+CREATE TABLE supplier_credit_note_lines (
+	id CHAR(32) NOT NULL, 
+	supplier_credit_note_id CHAR(32) NOT NULL, 
+	line_no INTEGER NOT NULL, 
+	description TEXT NOT NULL, 
+	account_id CHAR(32) NOT NULL, 
+	tax_code_id CHAR(32), 
+	quantity NUMERIC(18, 4) NOT NULL, 
+	unit_price NUMERIC(18, 4) NOT NULL, 
+	discount_pct NUMERIC(6, 2) NOT NULL, 
+	line_subtotal NUMERIC(18, 2) NOT NULL, 
+	line_tax NUMERIC(18, 2) NOT NULL, 
+	line_total NUMERIC(18, 2) NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(supplier_credit_note_id) REFERENCES supplier_credit_notes (id) ON DELETE CASCADE, 
+	FOREIGN KEY(account_id) REFERENCES accounts (id) ON DELETE RESTRICT, 
+	FOREIGN KEY(tax_code_id) REFERENCES tax_codes (id) ON DELETE SET NULL
+);
+
+CREATE TABLE supplier_credit_notes (
+	id CHAR(32) NOT NULL, 
+	tenant_id CHAR(32) NOT NULL, 
+	company_id CHAR(32) NOT NULL, 
+	contact_id CHAR(32) NOT NULL, 
+	number VARCHAR(32), 
+	issue_date DATE NOT NULL, 
+	status VARCHAR(16) NOT NULL, 
+	original_bill_id CHAR(32), 
+	supplier_reference VARCHAR(255), 
+	subtotal NUMERIC(18, 2) NOT NULL, 
+	tax_total NUMERIC(18, 2) NOT NULL, 
+	total NUMERIC(18, 2) NOT NULL, 
+	reason TEXT, 
+	notes TEXT, 
+	posted_at DATETIME, 
+	posted_by VARCHAR, 
+	journal_entry_id CHAR(32), 
+	void_journal_entry_id CHAR(32), 
+	version INTEGER NOT NULL, 
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	archived_at DATETIME, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_supplier_credit_notes_company_number UNIQUE (company_id, number), 
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT, 
+	FOREIGN KEY(company_id) REFERENCES companies (id) ON DELETE CASCADE, 
+	FOREIGN KEY(contact_id) REFERENCES contacts (id) ON DELETE RESTRICT, 
+	FOREIGN KEY(original_bill_id) REFERENCES bills (id) ON DELETE SET NULL, 
+	FOREIGN KEY(journal_entry_id) REFERENCES journal_entries (id) ON DELETE SET NULL, 
+	FOREIGN KEY(void_journal_entry_id) REFERENCES journal_entries (id) ON DELETE SET NULL
+);
+
+CREATE TABLE supplier_rules (
+	id CHAR(32) NOT NULL, 
+	tenant_id CHAR(32) NOT NULL, 
+	company_id CHAR(32), 
+	vendor_key VARCHAR(255) NOT NULL, 
+	vendor_abn VARCHAR(11), 
+	contact_id CHAR(32) NOT NULL, 
+	account_id CHAR(32), 
+	tax_code_id CHAR(32), 
+	record_kind TEXT, 
+	origin TEXT DEFAULT 'MANUAL' NOT NULL, 
+	times_applied INTEGER DEFAULT '0' NOT NULL, 
+	times_overridden INTEGER DEFAULT '0' NOT NULL, 
+	last_applied_at DATETIME, 
+	created_from_document_id CHAR(32), 
+	active BOOLEAN DEFAULT 'true' NOT NULL, 
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT, 
+	FOREIGN KEY(company_id) REFERENCES companies (id) ON DELETE CASCADE, 
+	FOREIGN KEY(contact_id) REFERENCES contacts (id) ON DELETE CASCADE, 
+	FOREIGN KEY(account_id) REFERENCES accounts (id) ON DELETE SET NULL, 
+	FOREIGN KEY(tax_code_id) REFERENCES tax_codes (id) ON DELETE SET NULL, 
+	FOREIGN KEY(created_from_document_id) REFERENCES inbox_documents (id) ON DELETE SET NULL
+);
+
+CREATE TABLE supplier_statement_lines (
+	id CHAR(32) DEFAULT (gen_random_uuid()) NOT NULL, 
+	tenant_id CHAR(32) NOT NULL, 
+	statement_id CHAR(32) NOT NULL, 
+	line_date DATE, 
+	line_type VARCHAR(16) DEFAULT 'unknown' NOT NULL, 
+	reference TEXT, 
+	description TEXT, 
+	amount NUMERIC(18, 2) NOT NULL, 
+	match_status VARCHAR(24) DEFAULT 'unmatched' NOT NULL, 
+	matched_bill_id CHAR(32), 
+	note TEXT, 
+	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE CASCADE, 
+	FOREIGN KEY(statement_id) REFERENCES supplier_statements (id) ON DELETE CASCADE, 
+	FOREIGN KEY(matched_bill_id) REFERENCES bills (id) ON DELETE SET NULL
+);
+
+CREATE TABLE supplier_statement_templates (
+	id CHAR(32) DEFAULT (gen_random_uuid()) NOT NULL, 
+	tenant_id CHAR(32) NOT NULL, 
+	company_id CHAR(32) NOT NULL, 
+	contact_id CHAR(32), 
+	supplier_abn VARCHAR(20), 
+	supplier_name TEXT, 
+	prompt_hint TEXT NOT NULL, 
+	page_scope VARCHAR(32), 
+	active BOOLEAN DEFAULT 'true' NOT NULL, 
+	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE CASCADE, 
+	FOREIGN KEY(company_id) REFERENCES companies (id) ON DELETE CASCADE, 
+	FOREIGN KEY(contact_id) REFERENCES contacts (id) ON DELETE CASCADE
+);
+
+CREATE TABLE supplier_statements (
+	id CHAR(32) DEFAULT (gen_random_uuid()) NOT NULL, 
+	tenant_id CHAR(32) NOT NULL, 
+	company_id CHAR(32) NOT NULL, 
+	contact_id CHAR(32), 
+	source_document_id INTEGER, 
+	supplier_name TEXT, 
+	supplier_abn TEXT, 
+	customer_ref TEXT, 
+	statement_date DATE, 
+	terms TEXT, 
+	opening_balance NUMERIC(18, 2), 
+	closing_balance NUMERIC(18, 2), 
+	currency VARCHAR(3) DEFAULT 'AUD' NOT NULL, 
+	status VARCHAR(32) DEFAULT 'pending_extract' NOT NULL, 
+	our_ap_as_at NUMERIC(18, 2), 
+	balance_delta NUMERIC(18, 2), 
+	extraction_meta JSON, 
+	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE CASCADE, 
+	FOREIGN KEY(company_id) REFERENCES companies (id) ON DELETE CASCADE, 
+	FOREIGN KEY(contact_id) REFERENCES contacts (id) ON DELETE SET NULL
+);
+
 CREATE TABLE tax_codes (
 	id CHAR(32) NOT NULL, 
 	company_id CHAR(32) NOT NULL, 
@@ -1561,6 +2198,9 @@ CREATE TABLE tax_codes (
 	name VARCHAR NOT NULL, 
 	rate NUMERIC(6, 3) NOT NULL, 
 	tax_system VARCHAR(16) NOT NULL, 
+	tax_family VARCHAR(16) DEFAULT 'vat_gst' NOT NULL, 
+	input_credit_recoverable BOOLEAN DEFAULT 1 NOT NULL, 
+	jurisdiction VARCHAR(8) NOT NULL, 
 	reporting_type VARCHAR(32) NOT NULL, 
 	description VARCHAR, 
 	version INTEGER NOT NULL, 
@@ -1662,6 +2302,28 @@ CREATE TABLE time_entries (
 	FOREIGN KEY(approved_by) REFERENCES users (id) ON DELETE SET NULL
 );
 
+CREATE TABLE transfers (
+	id CHAR(32) DEFAULT (gen_random_uuid()) NOT NULL, 
+	tenant_id CHAR(32) NOT NULL, 
+	company_id CHAR(32) NOT NULL, 
+	from_account_id CHAR(32) NOT NULL, 
+	to_account_id CHAR(32) NOT NULL, 
+	amount NUMERIC(14, 2) NOT NULL, 
+	transfer_date DATE NOT NULL, 
+	description TEXT, 
+	reference VARCHAR(64), 
+	status VARCHAR(16) DEFAULT 'POSTED' NOT NULL, 
+	journal_entry_id CHAR(32), 
+	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	PRIMARY KEY (id), 
+	CONSTRAINT fk_transfers_from_account_company FOREIGN KEY(from_account_id, company_id) REFERENCES accounts (id, company_id) ON DELETE RESTRICT, 
+	CONSTRAINT fk_transfers_to_account_company FOREIGN KEY(to_account_id, company_id) REFERENCES accounts (id, company_id) ON DELETE RESTRICT, 
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT, 
+	FOREIGN KEY(company_id) REFERENCES companies (id) ON DELETE CASCADE, 
+	FOREIGN KEY(journal_entry_id) REFERENCES journal_entries (id) ON DELETE RESTRICT
+);
+
 CREATE TABLE trust_distributions (
 	id CHAR(32) NOT NULL, 
 	company_id CHAR(32) NOT NULL, 
@@ -1684,12 +2346,14 @@ CREATE TABLE trust_distributions (
 
 CREATE TABLE user_permissions (
 	user_id CHAR(32) NOT NULL, 
+	tenant_id CHAR(32) NOT NULL, 
 	permission_code VARCHAR(64) NOT NULL, 
 	granted BOOLEAN DEFAULT 'true' NOT NULL, 
 	granted_by VARCHAR(64), 
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
 	PRIMARY KEY (user_id, permission_code), 
 	FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE, 
+	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT, 
 	FOREIGN KEY(permission_code) REFERENCES permissions (code) ON DELETE CASCADE
 );
 
@@ -1737,9 +2401,11 @@ CREATE TABLE users (
 	fido2_registered_at DATETIME, 
 	fido2_credential_count INTEGER DEFAULT '0' NOT NULL, 
 	launch_promo_jwt TEXT, 
+	role_id CHAR(32), 
 	PRIMARY KEY (id), 
 	FOREIGN KEY(tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT, 
-	UNIQUE (username)
+	UNIQUE (username), 
+	FOREIGN KEY(role_id) REFERENCES roles (id) ON DELETE SET NULL
 );
 
 CREATE INDEX ix_api_tokens_active ON api_tokens (company_id, user_id);
@@ -1758,8 +2424,28 @@ CREATE INDEX ix_branches_company_id ON branches (company_id);
 
 CREATE INDEX ix_branches_tenant_id ON branches (tenant_id);
 
+CREATE INDEX ix_journal_line_tax_components_journal_line_id ON journal_line_tax_components (journal_line_id);
+
 CREATE INDEX ix_paperless_webhook_secrets_tenant_id ON paperless_webhook_secrets (tenant_id);
 
 CREATE INDEX ix_quotes_tenant_customer_status ON quotes (tenant_id, customer_id, status);
 
 CREATE INDEX ix_quotes_tenant_status_expiry ON quotes (tenant_id, status, expiry_date);
+
+CREATE INDEX ix_supplier_statement_lines_statement_id ON supplier_statement_lines (statement_id);
+
+CREATE INDEX ix_supplier_statement_lines_tenant_id ON supplier_statement_lines (tenant_id);
+
+CREATE INDEX ix_supplier_statement_templates_company_id ON supplier_statement_templates (company_id);
+
+CREATE INDEX ix_supplier_statement_templates_contact_id ON supplier_statement_templates (contact_id);
+
+CREATE INDEX ix_supplier_statement_templates_supplier_abn ON supplier_statement_templates (supplier_abn);
+
+CREATE INDEX ix_supplier_statement_templates_tenant_id ON supplier_statement_templates (tenant_id);
+
+CREATE INDEX ix_supplier_statements_company_id ON supplier_statements (company_id);
+
+CREATE INDEX ix_supplier_statements_source_document_id ON supplier_statements (source_document_id);
+
+CREATE INDEX ix_supplier_statements_tenant_id ON supplier_statements (tenant_id);

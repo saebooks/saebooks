@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.models.user import User, UserRole
 from saebooks.services import change_log as change_log_svc
+from saebooks.services.theme import is_valid_theme_id
 
 
 async def count_admin_seats(session: AsyncSession) -> int:
@@ -85,6 +86,7 @@ _USER_COLUMNS: tuple[str, ...] = (
     "display_name",
     "email",
     "role",
+    "role_id",
     "last_seen_at",
     "preferred_theme",
     "version",
@@ -188,17 +190,38 @@ async def create_for_api(
     display_name: str | None = None,
     email: str | None = None,
     role: str = UserRole.VIEWER.value,
+    role_id: uuid.UUID | None = None,
     preferred_theme: str | None = None,
     actor: str = "api",
     tenant_id: uuid.UUID = _DEFAULT_TENANT_ID,
 ) -> User:
-    """Create a new user and append a change_log row."""
+    """Create a new user and append a change_log row.
+
+    ``preferred_theme`` is validated against ``services.theme.
+    ACTIVE_THEMES`` here (write-time, per the intent documented in
+    ``alembic/versions/0029_user_preferred_theme.py``) — this is the
+    engine's single write path for a new user, so any caller (API
+    router, CLI, script) gets the same guard. The API router additionally
+    checks this BEFORE calling in, so a bad value there 422s with the
+    right HTTP shape; this raise is the defence-in-depth backstop for
+    every other caller.
+
+    ``role_id`` — explicit custom-role assignment (granular_permissions,
+    D2). The API router is responsible for the FLAG_GRANULAR_PERMISSIONS
+    tier gate + the tenant-ownership check on the target role (see
+    ``api/v1/users.py``); this layer trusts the caller and only
+    persists the value — the FK itself still rejects a genuinely
+    nonexistent role id.
+    """
+    if preferred_theme and not is_valid_theme_id(preferred_theme):
+        raise ValueError(f"Unknown theme id: {preferred_theme!r}")
     user = User(
         tenant_id=tenant_id,
         username=username.strip(),
         display_name=display_name,
         email=email,
         role=role,
+        role_id=role_id,
         preferred_theme=preferred_theme,
         version=1,
     )
@@ -225,12 +248,19 @@ async def update_with_version(
     display_name: str | None = None,
     email: str | None = None,
     role: str | None = None,
+    role_id: uuid.UUID | None = None,
     preferred_theme: str | None = None,
     expected_version: int | None = None,
     actor: str | None = None,
     **_ignored: Any,
 ) -> User:
-    """Update a user with optimistic locking + change_log."""
+    """Update a user with optimistic locking + change_log.
+
+    ``role_id`` follows the same "None means don't touch" convention
+    as ``role``/``email`` above — there is no explicit-clear sentinel
+    on this call today. See ``create_for_api``'s docstring for the
+    tier-gate/ownership-check division of responsibility.
+    """
     user = await session.get(User, user_id)
     if user is None:
         raise ValueError(f"User {user_id} not found")
@@ -238,12 +268,17 @@ async def update_with_version(
     if expected_version is not None and user.version != expected_version:
         raise VersionConflict(user)
 
+    if preferred_theme and not is_valid_theme_id(preferred_theme):
+        raise ValueError(f"Unknown theme id: {preferred_theme!r}")
+
     if display_name is not None:
         user.display_name = display_name or None
     if email is not None:
         user.email = email or None
     if role is not None:
         user.role = role
+    if role_id is not None:
+        user.role_id = role_id
     if preferred_theme is not None:
         user.preferred_theme = preferred_theme or None
 

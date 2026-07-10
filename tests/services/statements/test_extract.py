@@ -36,7 +36,7 @@ def test_settings() -> Settings:
 
 _SAMPLE_LLM_RESPONSE = json.dumps({
     "supplier_name": "Motion Australia Pty Ltd",
-    "supplier_abn": "32 000 143 608",
+    "supplier_abn": "83 914 571 673",
     "customer_ref": "SAE-0042",
     "statement_date": "2026-05-31",
     "terms": "30 Days",
@@ -67,7 +67,7 @@ _SAMPLE_LLM_RESPONSE = json.dumps({
     ],
 })
 
-_SAMPLE_OCR = "Motion Australia Pty Ltd\nABN: 32 000 143 608\n..."
+_SAMPLE_OCR = "Motion Australia Pty Ltd\nABN: 83 914 571 673\n..."
 
 
 # ---------------------------------------------------------------------------
@@ -84,7 +84,7 @@ async def test_extract_parses_sample_ocr(test_settings):
 
     assert isinstance(result, ExtractedStatement)
     assert result.supplier_name == "Motion Australia Pty Ltd"
-    assert result.supplier_abn == "32 000 143 608"
+    assert result.supplier_abn == "83 914 571 673"
     assert result.customer_ref == "SAE-0042"
     assert result.statement_date == date(2026, 5, 31)
     assert result.terms == "30 Days"

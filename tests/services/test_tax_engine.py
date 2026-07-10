@@ -62,9 +62,19 @@ def test_get_engine_uk_raises_not_implemented() -> None:
         get_engine("UK")
 
 
-def test_get_engine_ee_raises_not_implemented() -> None:
-    with pytest.raises(NotImplementedError, match="M3"):
-        get_engine("EE")
+def test_get_engine_ee_returns_eetaxengine() -> None:
+    """Behaviour change (KMD-formula support Packet 3, flagged): EE used
+    to be an unbuilt stub (raised NotImplementedError, "M3") — Packet 3
+    landed the real engine (services.tax_engine.ee.EETaxEngine), the
+    prerequisite for the reverse-charge fan-out. No seed/caller ever
+    relied on EE raising, so this is a safe tightening, not a behaviour
+    change for real data (mirrors Packet 1's own flagged change to the
+    legacy inline formula-prefix test)."""
+    from saebooks.services.tax_engine.ee import EETaxEngine
+
+    engine = get_engine("EE")
+    assert isinstance(engine, EETaxEngine)
+    assert engine.jurisdiction == "EE"
 
 
 def test_compute_income_line_with_gst_amount_supplied() -> None:

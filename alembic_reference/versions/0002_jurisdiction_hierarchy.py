@@ -6,7 +6,7 @@ tax jurisdictions (state / province / county / city). This is the
 foundation that lets the engine represent US federal + state + local
 sales tax, Canada federal GST + provincial PST/HST, sub-national VAT,
 and state-levied stamp duty. See
-``docs/multi-jurisdiction.md`` (M1.5) (theme T3).
+``~/records/saebooks/global-reference-audit-2026-07-09.md`` (theme T3).
 
 Purely additive and non-breaking:
   - ``parent_code``  — nullable self-FK to jurisdictions.code (top-level

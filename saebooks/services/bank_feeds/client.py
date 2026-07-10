@@ -46,10 +46,9 @@ _BACKOFF_MAX_SECONDS = 30.0
 _CDR_X_V = "1"
 
 # TODO: Replace SISS_SUBSCRIPTION_KEY env var with the 200-call/min sandbox key
-# when received from SISS. The current sandbox keys (stashed in the
-# operator's local secrets store, not this repo) are rate-limit testing
-# keys (heavily throttled, only suitable for triggering 429 responses).
-# Do NOT use them for functional sandbox testing — all tests must use
+# when received from SISS. The current sandbox keys (in ~/.claude/secrets/acsiss.env)
+# are rate-limit testing keys (heavily throttled, only suitable for triggering 429
+# responses). Do NOT use them for functional sandbox testing — all tests must use
 # respx mocks until the real sandbox key arrives.
 
 

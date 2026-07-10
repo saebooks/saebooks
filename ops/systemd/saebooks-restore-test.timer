@@ -1,6 +1,6 @@
 [Unit]
 Description=SAE Books weekly restore test (Sunday 03:15)
-Documentation=file:///opt/saebooks/scripts/restore-test.sh
+Documentation=file:///home/youruser/projects/saebooks/scripts/restore-test.sh
 
 [Timer]
 # Sunday 03:15 local — after the fresh daily dump but early enough that

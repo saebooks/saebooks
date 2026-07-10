@@ -25,11 +25,22 @@ import respx
 from saebooks.api.v1.schemas import QuoteOut
 from saebooks.services import preaccounting_client as pac
 from saebooks.services import quotes as quotes_svc
+from saebooks.services.circuit_breaker import CircuitBreaker
 
 _BASE = "http://preacct-module:8080"
 _SVC_TOKEN = "svc-token-xyz"
 _TENANT = uuid.UUID("00000000-0000-0000-0000-000000000001")
 _COMPANY = uuid.uuid4()
+
+
+@pytest.fixture(autouse=True)
+def _reset_preaccounting_breaker() -> None:
+    """Isolate the module-level runtime breaker between tests (M2 wave 2a) —
+    it is a singleton, so a failure recorded by one test must not carry over
+    into the next."""
+    pac._reset_breaker_for_tests()
+    yield
+    pac._reset_breaker_for_tests()
 
 
 @pytest.fixture
@@ -192,3 +203,100 @@ async def test_transport_failure_raises_service_error(flag_on: None) -> None:
     )
     with pytest.raises(pac.PreAccountingServiceError):
         await quotes_svc.api_get(object(), uuid.uuid4(), tenant_id=_TENANT)
+
+
+@respx.mock
+async def test_application_5xx_does_not_trip_breaker(flag_on: None) -> None:
+    """A 500 the module deliberately RETURNS (not a transport failure) must
+    NOT count against the breaker — only unreachability should. The module
+    answered; that's a breaker success even though ``ensure_ok()`` still
+    raises for the caller."""
+    respx.post(f"{_BASE}/module/preaccounting/quotes/get").mock(
+        return_value=httpx.Response(500, text="boom")
+    )
+    for _ in range(10):  # far more than any reasonable failure_threshold
+        with pytest.raises(pac.PreAccountingServiceError):
+            await quotes_svc.api_get(object(), uuid.uuid4(), tenant_id=_TENANT)
+    assert pac._breaker.state.value == "closed"
+    assert pac.delegating() is True
+
+
+# --------------------------------------------------------------------------- #
+# Runtime circuit breaker (M2 wave 2a, P0a) — degrade, don't hammer             #
+# --------------------------------------------------------------------------- #
+class _FakeClock:
+    def __init__(self, start: float = 0.0) -> None:
+        self.now = start
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def _small_breaker(monkeypatch: pytest.MonkeyPatch, *, threshold: int, cooldown: float) -> _FakeClock:
+    clock = _FakeClock()
+    breaker = CircuitBreaker(
+        "preaccounting-test", failure_threshold=threshold, cooldown_seconds=cooldown, clock=clock
+    )
+    monkeypatch.setattr(pac, "_breaker", breaker)
+    return clock
+
+
+@respx.mock
+async def test_breaker_trips_open_and_falls_back_without_hammering(
+    flag_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _small_breaker(monkeypatch, threshold=2, cooldown=30.0)
+    route = respx.post(f"{_BASE}/module/preaccounting/quotes/get").mock(
+        side_effect=httpx.ConnectError("no route")
+    )
+
+    for _ in range(2):
+        with pytest.raises(pac.PreAccountingServiceError):
+            await quotes_svc.api_get(object(), uuid.uuid4(), tenant_id=_TENANT)
+
+    assert route.call_count == 2
+    assert pac._breaker.state.value == "open"
+    assert pac.delegating() is False
+    assert route.call_count == 2, "breaker-open must not attempt another request"
+
+
+@respx.mock
+async def test_breaker_half_open_probe_success_closes_and_resumes_delegation(
+    flag_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unlike the capture facades (which don't gate on ``delegating()``
+    themselves), ``quotes_svc.api_get`` calls ``pac.delegating()`` internally
+    exactly once per invocation — the real production call shape. So this
+    test does NOT pre-check ``delegating()`` separately (that would consume
+    the single half-open probe slot itself, starving the real call and
+    silently falling through to the in-process branch with a bogus
+    ``session``) — it only reads the non-mutating ``.state`` property for
+    assertions and lets ``api_get()``'s own internal check be the sole
+    consumer of the probe."""
+    clock = _small_breaker(monkeypatch, threshold=1, cooldown=10.0)
+    route = respx.post(f"{_BASE}/module/preaccounting/quotes/get")
+    route.side_effect = httpx.ConnectError("no route")
+
+    with pytest.raises(pac.PreAccountingServiceError):
+        await quotes_svc.api_get(object(), uuid.uuid4(), tenant_id=_TENANT)
+    assert pac._breaker.state.value == "open"
+    assert route.call_count == 1
+
+    clock.advance(10.0)  # cooldown elapsed
+    route.side_effect = None
+    route.mock(
+        return_value=httpx.Response(
+            200, content=b"null", headers={"content-type": "application/json"}
+        )
+    )
+
+    # The single delegating() check inside api_get() both grants the
+    # half-open probe AND makes the actual call in one step.
+    result = await quotes_svc.api_get(object(), uuid.uuid4(), tenant_id=_TENANT)
+    assert result is None
+    assert route.call_count == 2  # exactly one probe request, no extras
+    assert pac._breaker.state.value == "closed"
+    assert pac.delegating() is True  # CLOSED: safe, non-consuming

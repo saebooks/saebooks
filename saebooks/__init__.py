@@ -1,1 +1,1 @@
-__version__ = "0.4"  # alpha — three-segment decimal versioning
+__version__ = "0.5"  # alpha — three-segment decimal versioning

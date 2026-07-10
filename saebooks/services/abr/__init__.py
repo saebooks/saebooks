@@ -8,7 +8,7 @@ Public surface::
 
     from saebooks.services.abr import AbrLookup, lookup_abn, AbrNotConfiguredError
 
-    result = await lookup_abn("12 345 678 901", settings=settings)
+    result = await lookup_abn("51 824 753 556", settings=settings)
     # result.business_name, result.state, result.gst_registered, ...
 
 All network I/O lives in ``client.py``; parsing/enrichment mapping

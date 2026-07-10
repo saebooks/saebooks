@@ -87,10 +87,10 @@ Classification (verified against the JournalOrigin enum in
 
 Empirical false-positive check (read-only, all five tenants, 2026-06-07):
 EVERY existing POSTED/REVERSED row either carries source (src_null=0) or is
-EXEMPT. The ONLY origin with src_null>0 is UNKNOWN (1162 in the primary
-production tenant, 1168 in sandbox; all exempt). The other three tenant
-stacks have zero POSTED/REVERSED rows. So FIX 2 false-positives nothing
-live. Full breakdown recorded in the PR body.
+EXEMPT. The ONLY origin with src_null>0 is UNKNOWN (1162 in primary_books,
+1168 in sandbox; all exempt). app_preview / personal / acme have zero
+POSTED/REVERSED rows. So FIX 2 false-positives nothing live. Full breakdown
+recorded in the PR body.
 
 The MANUAL default at the posting chokepoint (``post_in_txn`` defaults
 ``origin=MANUAL`` + ``source_*=None``) is covered: MANUAL is EXEMPT from the

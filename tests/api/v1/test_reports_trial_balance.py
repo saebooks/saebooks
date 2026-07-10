@@ -74,7 +74,7 @@ async def _create_and_post_je(
     entry_date: str,
     lines: list[dict],
 ) -> dict:
-    """Create a DRAFT JE then PATCH to POSTED. Return posted body."""
+    """Create a DRAFT JE then POST it to POSTED via /{id}/post. Return posted body."""
     r = await client.post(
         "/api/v1/journal_entries",
         json={
@@ -88,9 +88,8 @@ async def _create_and_post_je(
     je_id = body["id"]
     version = body["version"]
 
-    r2 = await client.patch(
-        f"/api/v1/journal_entries/{je_id}",
-        json={"status": "POSTED"},
+    r2 = await client.post(
+        f"/api/v1/journal_entries/{je_id}/post",
         headers={"If-Match": str(version)},
     )
     assert r2.status_code == 200, r2.text

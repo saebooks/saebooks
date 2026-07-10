@@ -7,7 +7,7 @@ Public surface
   implementation satisfies.
 * ``get_engine(jurisdiction)`` — registry dispatcher; returns the
   engine for the named jurisdiction or raises ``NotImplementedError``
-  for stubs (NZ/UK/EE in M0).
+  for stubs (NZ/UK in M0; EE landed KMD-formula support Packet 3).
 * ``PostingContext`` / ``TaxTreatment`` / ``ValidationError`` — shared
   data classes (re-exported from ``types``).
 
@@ -21,6 +21,16 @@ The protocol is duck-typed at runtime via ``isinstance`` — but
 practically every engine subclasses or composes from a base helper
 class to get sensible defaults for ``validate`` (returns ``[]``) and
 ``boxes`` (returns ``{}``).
+
+Per-jurisdiction posting dispatcher (KMD-formula support Packet 3)
+--------------------------------------------------------------------
+``services.journal._apply_tax_treatment`` used to hardcode
+``get_engine("AU")`` for every post (the M0 docstring's "until then
+every post is AU"). It now resolves ``Company.jurisdiction`` and calls
+``get_engine(...)`` here — this module was already the intended seam
+(the registry + stub pattern existed since M0), so the prerequisite the
+KMD-formula-support scope's §3.4 point 1 describes was "plumb the
+caller", not "build the dispatcher" — this module already was one.
 """
 from __future__ import annotations
 
@@ -58,6 +68,29 @@ class TaxEngine(Protocol):
         """
         ...
 
+    def compute_components(self, ctx: PostingContext) -> list[TaxTreatment]:
+        """Determine EVERY tax component for one journal line (Packet 3,
+        KMD-formula support scope §3.4 point 2).
+
+        Most lines produce exactly one component — the same
+        ``TaxTreatment`` ``compute()`` returns, wrapped in a
+        single-element list; every engine implements this trivially as
+        ``[self.compute(ctx)]`` unless it has a genuine multi-component
+        need (e.g. EE's reverse-charge output+input fan-out — one
+        EU-acquisition purchase line self-assesses BOTH an output-role
+        component, feeding the sale-side box, and an input-role
+        component, feeding the deductible-input box).
+
+        ``services.journal._apply_tax_treatment`` calls this method
+        (never ``compute`` directly) and materialises one
+        ``JournalLineTaxComponent`` row per returned treatment, in list
+        order (``sequence``). The FIRST element is also what gets
+        snapshotted onto ``journal_lines.tax_treatment`` (the JSONB
+        column stays single-valued — for a reverse-charge line that is
+        the output-role component).
+        """
+        ...
+
     def boxes(self, period: Any) -> dict[str, Decimal]:
         """Return the form-box mapping for a closed period.
 
@@ -80,6 +113,14 @@ def _au_factory() -> TaxEngine:
     return AUTaxEngine()
 
 
+def _ee_factory() -> TaxEngine:
+    # KMD-formula support Packet 3 — EE is no longer a stub. Local
+    # import for the same reason as AU above.
+    from saebooks.services.tax_engine.ee import EETaxEngine
+
+    return EETaxEngine()
+
+
 def _stub(jurisdiction: str, milestone: str):
     def _factory() -> TaxEngine:
         raise NotImplementedError(
@@ -93,7 +134,7 @@ _REGISTRY: dict[str, Any] = {
     "AU": _au_factory,
     "NZ": _stub("NZ", "M1"),
     "UK": _stub("UK", "M2"),
-    "EE": _stub("EE", "M3"),
+    "EE": _ee_factory,
 }
 
 
@@ -102,7 +143,8 @@ def get_engine(jurisdiction: str) -> TaxEngine:
 
     Raises ``KeyError`` for an unknown jurisdiction code, and
     ``NotImplementedError`` for stub jurisdictions registered but not
-    yet built (NZ in M1, UK in M2, EE in M3).
+    yet built (NZ in M1, UK in M2). EE landed KMD-formula support
+    Packet 3 — no longer a stub.
     """
     factory = _REGISTRY.get(jurisdiction)
     if factory is None:

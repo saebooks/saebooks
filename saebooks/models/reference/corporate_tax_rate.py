@@ -13,7 +13,7 @@ date range. Full turnover-threshold/marginal-relief/Pillar-Two modelling
 (the audit's fuller proposal) is deferred — this is the M1.5 Wave 2 slice:
 a rate lookup by scope, not yet a formula engine.
 
-See docs/multi-jurisdiction.md (M1.5) (theme T11,
+See ~/records/saebooks/global-reference-audit-2026-07-09.md (theme T11,
 domain "Income, corporate & capital taxes").
 """
 import uuid

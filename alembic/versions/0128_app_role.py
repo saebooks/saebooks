@@ -1,7 +1,8 @@
 """Finalise saebooks_app role: password from env + grant refresh.
 
-Lane 4 P0-1 follow-up. See an internal RLS-multi-tenant audit note (P0-1)
-and an internal deployment plan for the 5 production tenant stacks.
+Lane 4 P0-1 follow-up. See:
+- ``audit-trail/2026-05-23-overnight/04-rls-multi-tenant.md`` (P0-1)
+- ``docs/db-role-split.md`` (deployment plan for the 5 stacks)
 
 Background
 ----------
@@ -26,9 +27,7 @@ Two things stopped 0056 from closing P0-1 on its own:
    file flips to ``SAEBOOKS_APP_DATABASE_URL=…saebooks_app…``.
 
 This migration closes step 1 (the DB-side piece). Step 2 is operator
-work — an internal deployment plan documents it for our own stacks, but
-in general it is just flipping each deployment's compose/.env to point
-``DATABASE_URL`` at the ``saebooks_app`` role once its password is set.
+work documented in ``docs/db-role-split.md``.
 
 What it does
 ------------
@@ -117,7 +116,8 @@ def _get_password_from_env() -> str:
         raise RuntimeError(
             "SAEBOOKS_APP_DB_PASSWORD must be set in the migration "
             "environment so 0128_app_role can set the saebooks_app "
-            "password before the migration exec's into each compose stack."
+            "password. See docs/db-role-split.md for how this slots "
+            "into each compose stack."
         )
     if not _PASSWORD_RE.fullmatch(pw):
         raise RuntimeError(

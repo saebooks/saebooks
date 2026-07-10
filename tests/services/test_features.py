@@ -86,11 +86,15 @@ EXPECTED_OFFLINE = frozenset({
     FLAG_ASSET_V2,
     FLAG_GRANULAR_PERMISSIONS,
     FLAG_THEMES,
-    FLAG_SMTP_RELAY,
     # Document Inbox (issue #33) — inbox plumbing / review / manual-keyed
     # publish is pure code with zero marginal cost, so Offline and up.
     # AI extraction inside it stays gated by FLAG_AI_EXTRACTION (Business+).
     FLAG_DOCUMENT_INBOX,
+    # NOTE: FLAG_SMTP_RELAY is NOT here — Wave B (2026-07-10) / Richard's
+    # decision 7 moved it to Business (see EXPECTED_BUSINESS below). It
+    # was mis-placed here at the v1.1 rollout: Offline is explicitly
+    # no-phone-home (CHARTER §6.2), which contradicts using SAE's own
+    # hosted comms relay.
 })
 
 EXPECTED_BUSINESS = EXPECTED_OFFLINE | frozenset({
@@ -104,6 +108,9 @@ EXPECTED_BUSINESS = EXPECTED_OFFLINE | frozenset({
     # Document Inbox email-in (issue #33 phase 3) — an SAE-run mailbox
     # costs real money per customer, so Business and up.
     FLAG_INBOX_EMAIL,
+    # Wave B (2026-07-10) / Richard's decision 7 — CHARTER §12.1
+    # "SAE-hosted SMTP for invoice delivery" is a Business-line item.
+    FLAG_SMTP_RELAY,
 })
 
 EXPECTED_PRO = EXPECTED_BUSINESS | frozenset({
@@ -476,6 +483,62 @@ async def test_require_feature_consults_per_user_promo_jwt(
     assert resp.status_code == want_status, (
         f"flag={flag} user_edition={user_edition} → {resp.status_code}"
     )
+
+
+# ---------------------------------------------------------------------- #
+# feature_enabled_for_request (Wave B) — non-raising per-request check   #
+# ---------------------------------------------------------------------- #
+# Added for services/customer_email.py's ``sae_relay_entitled`` gate: a
+# below-Business tenant's /send-email attempt is legitimate at every
+# tier (only the SAE-hosted transport isn't), so the call site needs a
+# bool to branch on rather than a 404. Same resolution as
+# require_feature/require_feature_inline, minus the raise.
+
+
+def test_feature_enabled_for_request_rejects_unknown_flag() -> None:
+    from starlette.requests import Request
+
+    from saebooks.services.features import feature_enabled_for_request
+
+    scope = {"type": "http", "method": "GET", "path": "/", "headers": []}
+    request = Request(scope)
+    with pytest.raises(ValueError, match="Unknown feature flag"):
+        feature_enabled_for_request("bogus_flag", request)
+
+
+@pytest.mark.parametrize(
+    "edition,want",
+    [("community", False), ("offline", False), ("business", True), ("pro", True)],
+)
+async def test_feature_enabled_for_request_resolves_singleton_edition(
+    edition: str, want: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No ``request.state.user`` (unauthenticated / no promo JWT) falls
+    back to the process-wide singleton edition — same as require_feature."""
+    from saebooks.config import settings as module_settings
+    from saebooks.services.features import feature_enabled_for_request
+
+    monkeypatch.setattr(module_settings, "edition", edition)
+
+    from starlette.requests import Request as StarletteRequest
+
+    # A bare request with no ``state.user`` — _effective_edition_for_request
+    # reads it via getattr(request.state, "user", None) and falls back to the
+    # process-wide singleton edition (monkeypatched above). Construct the
+    # Request directly rather than through a throwaway FastAPI app, so the
+    # test exercises the helper deterministically without depending on
+    # FastAPI's request-parameter injection.
+    request = StarletteRequest(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/",
+            "headers": [],
+            "query_string": b"",
+            "state": {},
+        }
+    )
+    assert feature_enabled_for_request(FLAG_SMTP_RELAY, request) is want
 
 
 # NOTE: /admin/license HTML page tests removed in Cat-C rollup; replace with

@@ -40,6 +40,8 @@ from saebooks.api.v1.schemas import (
 )
 from saebooks.models.payment import PaymentDirection, PaymentMethod
 from saebooks.services import payments as svc
+from saebooks.services.authz import no_additional_gate, require_permission_or_role
+from saebooks.services.fx import gate_non_base_currency
 from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 from saebooks.services.journal import PostingError
@@ -156,6 +158,7 @@ async def create_payment(
     company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
+    await gate_non_base_currency(session, request, company_id, payload.currency)
     key = _parse_idempotency_key(idempotency_key)
 
     if key is not None:
@@ -309,6 +312,16 @@ async def update_payment(
         204: {"description": "Voided"},
         409: {"model": PaymentConflictBody, "description": "Version mismatch"},
     },
+    # This one route covers both the "delete a draft" and "void a
+    # posted" cases (svc.api_void handles both) — gated on the
+    # STRICTER of the two catalogue codes (payment.void) rather than
+    # payment.delete, since a static route-level dependency can't
+    # inspect the payment's current status before the handler runs.
+    # Conservative direction only: at worst a Bookkeeper needs Approver
+    # to delete their own draft payment via this endpoint, never a
+    # security gap. Follow-up: split into a status-aware gate if this
+    # proves too restrictive in practice.
+    dependencies=[Depends(require_permission_or_role("payment.void", no_additional_gate))],
 )
 async def void_payment(
     payment_id: UUID,
@@ -369,6 +382,7 @@ async def void_payment(
         200: {"model": PaymentOut},
         409: {"model": PaymentConflictBody, "description": "Version mismatch"},
     },
+    dependencies=[Depends(require_permission_or_role("payment.post", no_additional_gate))],
 )
 async def post_payment_endpoint(
     payment_id: UUID,

@@ -12,7 +12,7 @@ which silently excluded credit cards, loans, and cash accounts.
 
 Idempotency
 -----------
-On several production tenant stacks the
+On several stacks (primary, acme, app-preview, cashbook-demo) the
 ``account_kind`` column was hand-rolled before this migration was
 authored — as an enum (``account_kind_enum``) with rows already
 classified.  This migration therefore creates the type + column only

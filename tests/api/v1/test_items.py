@@ -55,6 +55,21 @@ async def unauth_client() -> AsyncClient:
         yield ac
 
 
+@pytest.fixture(autouse=True)
+def _set_edition_enterprise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run this file's tests at enterprise (all flags on) by default.
+
+    FLAG_INVENTORY (Wave D, 2026-07-10) now gates the whole /api/v1/items
+    router (CRUD + stock). The contract tests below exercise router
+    behaviour, not the gate — pin a tier that has the flag. The
+    gate-boundary tests at the bottom override this per-test to exercise
+    the below-tier / at-tier boundary.
+    """
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "enterprise")
+
+
 @pytest.fixture
 async def account_ids() -> dict[str, str]:
     """Return one ASSET, one EXPENSE, and one INCOME account ID as strings.
@@ -474,3 +489,67 @@ async def test_items_stock_404_for_unknown(api_client: AsyncClient) -> None:
     """Non-existent item returns 404 from stock endpoint."""
     r = await api_client.get(f"/api/v1/items/{uuid.uuid4()}/stock")
     assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Inventory module gate (Wave D) — FLAG_INVENTORY is Offline+
+# ---------------------------------------------------------------------------
+
+
+async def test_items_gate_community_list_404(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Below Offline the whole /api/v1/items surface 404s (not 403)."""
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "community")
+    r = await api_client.get("/api/v1/items")
+    assert r.status_code == 404, r.text
+
+
+async def test_items_gate_community_create_404(
+    api_client: AsyncClient,
+    account_ids: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "community")
+    r = await api_client.post("/api/v1/items", json=_item_payload(account_ids))
+    assert r.status_code == 404, r.text
+
+
+async def test_items_gate_community_stock_404(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "community")
+    r = await api_client.get(f"/api/v1/items/{uuid.uuid4()}/stock")
+    assert r.status_code == 404, r.text
+
+
+async def test_items_gate_offline_list_200(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """At Offline (the first tier with FLAG_INVENTORY) the router is live."""
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "offline")
+    r = await api_client.get("/api/v1/items")
+    assert r.status_code == 200, r.text
+
+
+async def test_items_gate_anon_still_401(unauth_client: AsyncClient) -> None:
+    """require_bearer is listed first, so anon → 401 even at community
+    (the gate never gets the chance to leak a 404)."""
+    from saebooks.config import settings as _s
+
+    # Even at a tier without the flag, missing bearer wins.
+    _s_edition = _s.edition
+    try:
+        _s.edition = "community"
+        r = await unauth_client.get("/api/v1/items")
+        assert r.status_code == 401, r.text
+    finally:
+        _s.edition = _s_edition

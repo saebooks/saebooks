@@ -16,7 +16,7 @@ Class-A RLS: time_entries carries tenant_id directly so the
 tenant_isolation policy from 0055 applies verbatim, same shape
 as expenses.
 
-Note on down_revision: a dev-branch WIP had this as 0108_expenses because
+Note on down_revision: the ci-host WIP had this as 0108_expenses because
 the feat/cashbook-persistence branch had intermediate migrations
 (0105-0108) that never landed on main/fix-E. Here we bridge directly
 from 0104_journal_lines_tax_treatment, which is the actual predecessor

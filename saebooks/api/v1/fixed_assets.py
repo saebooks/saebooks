@@ -51,6 +51,7 @@ from saebooks.api.v1.schemas import (
 from saebooks.models.fixed_asset import FixedAsset
 from saebooks.services import assets as legacy_assets_svc
 from saebooks.services import fixed_assets as svc
+from saebooks.services.assets_v2_gate import gate_asset_v2_fields
 from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 
@@ -238,6 +239,12 @@ async def create_fixed_asset(
 ) -> Any:
     key = _parse_idempotency_key(idempotency_key)
     tenant_id = resolve_tenant_id(request)
+    await gate_asset_v2_fields(
+        session,
+        request,
+        depreciation_model_id=payload.depreciation_model_id,
+        tax_model_id=payload.tax_model_id,
+    )
 
     if key is not None:
         raw_body = await request.body()
@@ -328,6 +335,14 @@ async def update_fixed_asset(
     if await svc.get(session, asset_id, tenant_id=tenant_id, company_id=company_id) is None:
         raise HTTPException(404, "Fixed asset not found")
 
+    update_fields = payload.model_dump(exclude_unset=True)
+    await gate_asset_v2_fields(
+        session,
+        request,
+        depreciation_model_id=update_fields.get("depreciation_model_id"),
+        tax_model_id=update_fields.get("tax_model_id"),
+    )
+
     if key is not None:
         raw_body = await request.body()
         body_sha256 = hashlib.sha256(raw_body).hexdigest()
@@ -355,7 +370,7 @@ async def update_fixed_asset(
             asset_id,
             actor=f"api:{bearer[:8]}…",
             expected_version=expected,
-            **payload.model_dump(exclude_unset=True),
+            **update_fields,
         )
     except svc.VersionConflict as exc:
         body = FixedAssetConflictBody(

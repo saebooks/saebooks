@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -20,6 +20,22 @@ class AuditSnapshot(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    # Wave C RLS remediation (migration 0186) — audit_snapshots was a
+    # cross-tenant table with no tenant scoping at all (0055 explicitly
+    # deferred it as "row-id-keyed and only reachable via a tenant-scoped
+    # parent lookup", which stopped being true the moment a direct browse
+    # API existed). NULLABLE: a handful of legitimately tenant-less
+    # captures exist (the global `settings` table has no tenant column to
+    # derive from) and some historical rows' owning parent may be
+    # unrecoverable — see 0186's docstring for the backfill approach and
+    # exactly which rows stay NULL. A NULL row is insertable but never
+    # SELECT-visible to any tenant under the table's RLS policy (fail
+    # closed), so nullability here does not reopen the cross-tenant gap.
+    tenant_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=True,
     )
     table_name: Mapped[str] = mapped_column(String(64), nullable=False)
     row_id: Mapped[str] = mapped_column(

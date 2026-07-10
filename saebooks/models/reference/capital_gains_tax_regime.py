@@ -12,7 +12,7 @@ Wiring this into ``dispose_asset()`` / a company-DB ``capital_gain_events``
 table is a separate, later change — this table only makes the *reference
 data* representable.
 
-See docs/multi-jurisdiction.md (M1.5) (theme T11,
+See ~/records/saebooks/global-reference-audit-2026-07-09.md (theme T11,
 domain "Income, corporate & capital taxes").
 """
 import enum

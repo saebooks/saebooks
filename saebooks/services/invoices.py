@@ -619,6 +619,14 @@ async def post_invoice(
     unearned_acct = await _get_unearned_income_account(session, inv.company_id)
     gst_collected_acct = await _get_gst_collected_account(session, inv.company_id)
 
+    # Inventory costing policy for this company (Wave D) — resolved once
+    # and passed to issue_stock per item line. WAC returns COGS at the
+    # running average, FIFO consumes cost layers oldest-first, and
+    # quantity_only returns 0 so NO COGS/valuation journal is posted.
+    costing_method = await items_svc.get_company_costing_method(
+        session, inv.company_id
+    )
+
     # Post the journal in base currency. For AUD-only installs
     # ``fx_rate`` is 1 and base_* equal their unscaled counterparts, so
     # the math is identical to the pre-FX shape. For foreign-currency
@@ -729,7 +737,7 @@ async def post_invoice(
             if item is None:  # pragma: no cover — FK guarantees exists
                 raise InvoiceError(f"Invoice line item {line.item_id} not found")
             cogs_value = await items_svc.issue_stock(
-                session, line.item_id, qty=line.quantity
+                session, line.item_id, qty=line.quantity, method=costing_method
             )
             if cogs_value > Decimal("0"):
                 cogs_value_2dp = _q2(cogs_value)

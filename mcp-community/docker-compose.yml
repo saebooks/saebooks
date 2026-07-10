@@ -17,15 +17,15 @@ services:
     container_name: saebooks-mcp-community
     restart: unless-stopped
     ports:
-      - "<lan-ip>:18316:8000"
+      - "127.0.0.1:18316:8000"
     environment:
-      SAEBOOKS_API_URL: http://saebooks-example-api-1:8000
+      SAEBOOKS_API_URL: http://saebooks-primary-api-1:8000
       SAEBOOKS_MCP_TRANSPORT: sse
       SAEBOOKS_MCP_LOG_LEVEL: INFO
       SAEBOOKS_MCP_MAX_SAFETY: void
       SAEBOOKS_API_TOKEN: ${SAEBOOKS_API_TOKEN:-}
     networks:
-      - saebooks-example_default
+      - saebooks-primary_default
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/sse', timeout=2).status < 500 else 1)\" || exit 1"]
       interval: 30s
@@ -33,6 +33,6 @@ services:
       retries: 3
 
 networks:
-  saebooks-example_default:
+  saebooks-primary_default:
     external: true
-    name: saebooks-example_default
+    name: saebooks-primary_default

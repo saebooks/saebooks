@@ -43,7 +43,7 @@ pytestmark = pytest.mark.postgres_only
 
 _STRIPE_SESSION_ID = "cs_test_b48_abc123"
 _STRIPE_URL = "https://checkout.stripe.com/pay/cs_test_b48_abc123"
-_FAKE_SECRET_KEY = "sk_test_fakekeyforb48testing"
+_FAKE_SECRET_KEY = "sk_test_REDACTED"
 
 
 # ---------------------------------------------------------------------------

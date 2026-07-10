@@ -42,8 +42,8 @@ Test 3 — replay returns cached response
 
 NOTE: these tests connect directly to Postgres (``DATABASE_URL``
 or the default dev URL).  They will be skipped if the DB is
-unreachable — that is expected in a plain GitHub-hosted CI runner;
-they run in a self-hosted CI environment which has Postgres available.
+unreachable — that is expected in GitHub CI on ci-host; they run in the
+ci-host CI environment which has Postgres available.
 """
 from __future__ import annotations
 

@@ -35,7 +35,7 @@ options were:
    of production use). Translates grpc-web HTTP/1.1 ↔ gRPC HTTP/2.
    Zero code. Zero ongoing maintenance.
 
-We went with option 2. The sidecar adds one container to the deployment
+We went with option 2. The sidecar adds one container to the server
 stack; in exchange we drop a non-trivial chunk of protocol-translation
 code that we'd otherwise own. The CLI already works over Connect
 HTTP+proto so the grpc-web port exists primarily for browser clients
@@ -73,9 +73,9 @@ unchanged.
                   └───────────────────────┘
 ```
 
-The proxy listens on container port 8080 (host-bound to a
-LAN-only address on port `18315`) and forwards every request to
-`api:50051` on the shared `saebooks_default` docker network.
+The proxy listens on container port 8080 (host-bound to
+`127.0.0.1:18315`) and forwards every request to `api:50051` on the
+shared `saebooks_default` docker network.
 
 ---
 
@@ -223,18 +223,18 @@ Expected outputs:
 
 ## Deployment
 
-The proxy lives in the host-local compose stack (deployment-specific
-config, not part of this repo). Add this service block to your
-`docker-compose.yml`:
+The proxy lives in the server compose stack (host-local config — server
+isn't a git repo). Add this service block to
+`server/compose/saebooks/docker-compose.yml`:
 
 ```yaml
 grpcwebproxy:
   build:
-    context: ./grpcwebproxy
+    context: /home/youruser/projects/saebooks/grpcwebproxy
   image: saebooks-grpcwebproxy:0.15.0
   restart: unless-stopped
   ports:
-  - <lan-ip>:18315:8080
+  - 127.0.0.1:18315:8080
   command:
   - --backend_addr=api:50051
   - --backend_tls=false
@@ -248,10 +248,10 @@ grpcwebproxy:
   - default
 ```
 
-Then, on the deployment host:
+Then:
 
 ```bash
-cd /path/to/saebooks && sudo docker compose up -d grpcwebproxy
+ssh ci-host 'cd /home/youruser/server/compose/saebooks && sudo docker compose up -d grpcwebproxy'
 ```
 
 The image build pulls the `v0.15.0` linux-x86_64 binary from the

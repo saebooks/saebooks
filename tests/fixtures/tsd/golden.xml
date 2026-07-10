@@ -1,0 +1,38 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<tsd:TsdDeklaratsioon xmlns:tsd="urn:emta:PLACEHOLDER:tsd" schemaRef="urn:emta:PLACEHOLDER:tsd.xsd" regkood="10123456" perioodAlgus="2026-04-01" perioodLopp="2026-04-30">
+  <tsd:Pealdeklaratsioon>
+    <tsd:TootajateArv>2</tsd:TootajateArv>
+    <tsd:BruttoKokku>2500.00</tsd:BruttoKokku>
+    <tsd:TulumaksKokku>252.56</tsd:TulumaksKokku>
+    <tsd:TootuskindlustusTootajaKokku>40.00</tsd:TootuskindlustusTootajaKokku>
+    <tsd:TootuskindlustusTooandjaKokku>20.00</tsd:TootuskindlustusTooandjaKokku>
+    <tsd:SotsiaalmaksKokku>952.38</tsd:SotsiaalmaksKokku>
+    <tsd:KogumispensionKokku>130.00</tsd:KogumispensionKokku>
+  </tsd:Pealdeklaratsioon>
+  <tsd:Lisa1>
+    <tsd:Lisa1Kirje>
+      <tsd:Isikukood>38001010000</tsd:Isikukood>
+      <tsd:ValjamakseLiik>PLACEHOLDER_PAYMENT_TYPE_WAGES</tsd:ValjamakseLiik>
+      <tsd:BruttoSumma>500.00</tsd:BruttoSumma>
+      <tsd:MaksuvabaTulu>700.00</tsd:MaksuvabaTulu>
+      <tsd:TulumaksKinnipeetud>0.00</tsd:TulumaksKinnipeetud>
+      <tsd:TootuskindlustusTootajaOsa>8.00</tsd:TootuskindlustusTootajaOsa>
+      <tsd:Kogumispension>10.00</tsd:Kogumispension>
+      <tsd:Sotsiaalmaks>292.38</tsd:Sotsiaalmaks>
+      <tsd:TootuskindlustusTooandjaOsa>4.00</tsd:TootuskindlustusTooandjaOsa>
+      <tsd:ValjamakseKuupaev>2026-04-30</tsd:ValjamakseKuupaev>
+    </tsd:Lisa1Kirje>
+    <tsd:Lisa1Kirje>
+      <tsd:Isikukood>48505010001</tsd:Isikukood>
+      <tsd:ValjamakseLiik>PLACEHOLDER_PAYMENT_TYPE_WAGES</tsd:ValjamakseLiik>
+      <tsd:BruttoSumma>2000.00</tsd:BruttoSumma>
+      <tsd:MaksuvabaTulu>700.00</tsd:MaksuvabaTulu>
+      <tsd:TulumaksKinnipeetud>252.56</tsd:TulumaksKinnipeetud>
+      <tsd:TootuskindlustusTootajaOsa>32.00</tsd:TootuskindlustusTootajaOsa>
+      <tsd:Kogumispension>120.00</tsd:Kogumispension>
+      <tsd:Sotsiaalmaks>660.00</tsd:Sotsiaalmaks>
+      <tsd:TootuskindlustusTooandjaOsa>16.00</tsd:TootuskindlustusTooandjaOsa>
+      <tsd:ValjamakseKuupaev>2026-04-30</tsd:ValjamakseKuupaev>
+    </tsd:Lisa1Kirje>
+  </tsd:Lisa1>
+</tsd:TsdDeklaratsioon>

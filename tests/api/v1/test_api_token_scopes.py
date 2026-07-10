@@ -1,10 +1,10 @@
 """API-token scope enforcement (A2 privilege-escalation fix).
 
 `ApiToken.scopes` was stored, echoed, and shown in the admin UI but
-NEVER read for an authz decision (a deferred "per-scope authorization"
-item from the original build brief). A token a consumer believed was
-"read-only" could POST/PUT/PATCH/DELETE. These tests pin the new
-``require_scope`` enforcement layer:
+NEVER read for an authz decision (DEFERRED.md "Per-scope
+authorization"). A token a consumer believed was "read-only" could
+POST/PUT/PATCH/DELETE. These tests pin the new ``require_scope``
+enforcement layer:
 
 * A ``["read"]``-scoped token is denied (403) on a mutating request
   but allowed on a GET.

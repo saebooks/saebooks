@@ -300,7 +300,7 @@ async def test_companies_patch_letterhead_and_terms_fields(api_client: AsyncClie
         f"/api/v1/companies/{company_id}",
         json={
             "phone": "07 4000 0000",
-            "email": "accounts@example.com.au",
+            "email": "accounts@example.com",
             "website": "https://saebooks.com.au",
             "default_payment_terms": "Payment within 14 days of invoice date.",
         },
@@ -309,7 +309,7 @@ async def test_companies_patch_letterhead_and_terms_fields(api_client: AsyncClie
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["phone"] == "07 4000 0000"
-    assert body["email"] == "accounts@example.com.au"
+    assert body["email"] == "accounts@example.com"
     assert body["website"] == "https://saebooks.com.au"
     assert body["default_payment_terms"] == "Payment within 14 days of invoice date."
     assert body["version"] == version + 1

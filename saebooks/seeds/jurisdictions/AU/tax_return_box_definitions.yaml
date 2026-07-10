@@ -6,7 +6,7 @@
 # services/tax_engine/au.py::bas_report — this table is now the single
 # authoritative source for which company TaxCode.reporting_type values
 # feed which BAS label, and how. See
-# docs/multi-jurisdiction.md (M1.5) (theme T8).
+# ~/records/saebooks/global-reference-audit-2026-07-09.md (theme T8).
 #
 # ``aggregation`` grammar (parsed by tax_return_generator._parse_box_definition):
 #
@@ -22,6 +22,19 @@
 #   sum_tax_amount_for_codes:<bucket>
 #     Sums just the tax amount (same component-preferring/gst_amount-
 #     fallback source) for lines matching <bucket> + feeder_tax_codes.
+#
+# <bucket> is "income" or "purchase" (account-type-keyed, as above) OR,
+# as of KMD-formula support Packet 3, "output"/"input" — a ROLE-keyed
+# bucket that matches a line's JournalLineTaxComponent.direction
+# directly, regardless of the owning account's type. This is what lets
+# a purchase-account reverse-charge line feed an output-role box (EE's
+# KMD box 1 needs its EU-acquisition base even though the posting
+# account is an expense/purchase account) — see
+# tax_return_generator._aggregate_ledger_by_box's second query and the
+# EE KMD seed (saebooks/seeds/jurisdictions/EE/tax_return_box_definitions.yaml)
+# for the only current user of this bucket kind. AU has no
+# reverse-charge fan-out and uses only "income"/"purchase" here,
+# unchanged.
 #
 # feeder_tax_codes here are TaxCode.reporting_type values (taxable /
 # export / gst_free / capital) — NOT RefTaxCode.code strings — because

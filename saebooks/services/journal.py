@@ -9,6 +9,7 @@ Business rules:
 """
 import re
 import uuid
+from collections import defaultdict
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
@@ -19,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from saebooks.models.account import Account, AccountType
+from saebooks.models.company import Company
 from saebooks.models.journal import (
     EntryStatus,
     JournalEntry,
@@ -30,8 +32,8 @@ from saebooks.models.journal_line_tax_component import JournalLineTaxComponent
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import audit as audit_svc
 from saebooks.services import audit_log as audit_log_svc
+from saebooks.services import features as features_svc
 from saebooks.services import gst as gst_svc
-from saebooks.services import settings as settings_svc
 from saebooks.services.tax_engine import get_engine
 from saebooks.services.tax_engine.types import PostingContext, PostingError
 
@@ -47,6 +49,127 @@ from saebooks.services.tax_engine.types import PostingContext, PostingError
 # the role hierarchy so they are included here too — excluding them would
 # leave a tenant's primary owner unable to override their own lock.
 _OVERRIDE_ROLES: frozenset[str] = frozenset({"admin", "accountant", "owner"})
+
+
+# ---------------------------------------------------------------------- #
+# Extended audit modes (Wave C, CHARTER §7.2 / §12.1)                    #
+# ---------------------------------------------------------------------- #
+# Three modes govern whether a POSTED (or REVERSED) entry may be edited:
+#
+#   immutable — posted entries can only be reversed, never edited. The
+#       Community-only default (CHARTER §6.1) and the fail-safe fallback
+#       used whenever entitlement or the stored value can't be trusted.
+#   open      — posted entries are freely editable; every edit is logged
+#       (caller's responsibility — see journal_entries.update()).
+#   hybrid    — editable up to period-close, immutable after. Reuses the
+#       F-04 period-lock mechanism (_check_period_lock) so a closed
+#       period behaves identically for edits as it does for new posts,
+#       including the admin/accountant/owner + reason override path.
+#
+# ``company.audit_mode`` (CompanyScoped) is the SINGLE source of truth —
+# NOT the global, non-tenant-scoped ``Setting`` key of the same name this
+# module used to read (orphaned: no route ever wrote it, so it sat
+# permanently pinned at its 'immutable' default — see 0185's migration
+# docstring for the full history). That Setting row is left in place
+# (harmless, unread) rather than dropped, to avoid an unrelated data
+# migration in this wave.
+AUDIT_MODE_IMMUTABLE = "immutable"
+AUDIT_MODE_OPEN = "open"
+AUDIT_MODE_HYBRID = "hybrid"
+VALID_AUDIT_MODES: frozenset[str] = frozenset(
+    {AUDIT_MODE_IMMUTABLE, AUDIT_MODE_OPEN, AUDIT_MODE_HYBRID}
+)
+
+
+async def effective_audit_mode(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    *,
+    extended_audit_modes_entitled: bool | None = None,
+) -> str:
+    """Resolve the audit mode that governs posted-entry edits for a company.
+
+    Fails CLOSED to ``AUDIT_MODE_IMMUTABLE`` — the only mode Community is
+    entitled to (CHARTER §6.1: "immutable ledger only. Not configurable")
+    — in every one of these cases:
+
+    * the company row can't be found (defensive; should not happen for a
+      real ``entry.company_id``);
+    * the stored ``audit_mode`` value isn't one of the three CHARTER
+      strings (corrupt data, or a pre-0185 value that somehow survived
+      the vocabulary migration);
+    * the caller is not entitled to ``FLAG_EXTENDED_AUDIT_MODES`` at
+      their effective edition — this is the belt-and-braces half of the
+      gate: a below-tier install that already has a non-immutable value
+      sitting in the column (e.g. from before this wave shipped, when
+      the old validator accepted ``mutable``/``draft`` with no tier
+      check at all) must NOT get open/hybrid behaviour just because the
+      column says so.
+
+    ``extended_audit_modes_entitled`` should be the caller's per-request
+    resolution via ``features.feature_enabled_for_request`` — the same
+    "resolve at the API layer, pass a bool down" pattern Wave B used for
+    ``sae_relay_entitled`` (see ``services/customer_email.py``). Passing
+    ``None`` (no request context — e.g. a CLI/system caller) falls back
+    to the process-wide singleton edition via ``features.is_enabled``.
+    """
+    company = await session.get(Company, company_id)
+    stored = company.audit_mode if company is not None else AUDIT_MODE_IMMUTABLE
+    if stored not in VALID_AUDIT_MODES:
+        return AUDIT_MODE_IMMUTABLE
+    if stored == AUDIT_MODE_IMMUTABLE:
+        return AUDIT_MODE_IMMUTABLE
+
+    entitled = (
+        extended_audit_modes_entitled
+        if extended_audit_modes_entitled is not None
+        else features_svc.is_enabled(features_svc.FLAG_EXTENDED_AUDIT_MODES)
+    )
+    return stored if entitled else AUDIT_MODE_IMMUTABLE
+
+
+async def enforce_posted_edit_gate(
+    session: AsyncSession,
+    entry: JournalEntry,
+    *,
+    extended_audit_modes_entitled: bool | None = None,
+    override_reason: str | None = None,
+    actor_role: str | None = None,
+) -> None:
+    """Raise ``PostingError`` if editing ``entry`` isn't allowed right now.
+
+    No-op for a DRAFT entry — every mode permits editing a draft freely;
+    this only fires once an entry has left DRAFT (POSTED or REVERSED),
+    matching the pre-existing ``entry.status != EntryStatus.DRAFT`` check
+    this replaces.
+
+    This is the SINGLE enforcement point for both callers: the legacy
+    ``update_draft`` below, and ``services.journal_entries.update`` (the
+    actually-reachable ``PATCH /api/v1/journal_entries/{id}`` path) —
+    see that module for why both need to call it, not just one.
+    """
+    if entry.status == EntryStatus.DRAFT:
+        return
+
+    mode = await effective_audit_mode(
+        session,
+        entry.company_id,
+        extended_audit_modes_entitled=extended_audit_modes_entitled,
+    )
+    if mode == AUDIT_MODE_IMMUTABLE:
+        raise PostingError(
+            "Cannot edit a posted entry in immutable mode — reverse instead"
+        )
+    if mode == AUDIT_MODE_HYBRID:
+        # Editable only pre-period-close. Reuses the F-04 override path
+        # (admin/accountant/owner + a real reason can still edit a closed
+        # period) — see effective_audit_mode's docstring / module report
+        # for why that's a deliberate, flagged design choice rather than
+        # an unconditional "immutable after close".
+        await _check_period_lock(
+            session, entry.company_id, entry.entry_date, override_reason, actor_role
+        )
+    # AUDIT_MODE_OPEN: no further gate — editable unconditionally.
 
 
 async def _validate_line_accounts(
@@ -239,12 +362,32 @@ async def update_draft(
     lines: list[dict[str, object]] | None = None,
     performed_by: str | None = None,
     tenant_id: uuid.UUID | None = None,
+    override_reason: str | None = None,
+    actor_role: str | None = None,
+    extended_audit_modes_entitled: bool | None = None,
 ) -> JournalEntry:
+    """Update a journal entry (draft or, per its company's audit mode,
+    posted/reversed). Despite the name, this is no longer draft-only —
+    see ``enforce_posted_edit_gate`` for the per-company/per-mode gate
+    that replaced the old blanket-``immutable`` check.
+
+    NOTE: this function has zero live callers in the API/MCP surface as
+    of Wave C — ``services.journal_entries.update`` is the actually
+    reachable ``PATCH /api/v1/journal_entries/{id}`` implementation and
+    has its own call to the same ``enforce_posted_edit_gate``. This
+    function is kept working (and its Setting-read bug fixed, per the
+    Wave C brief) because tests reference it directly, not because
+    anything in production calls it today — flagged in the Wave C
+    report.
+    """
     entry = await get(session, entry_id, tenant_id=tenant_id)
-    if entry.status != EntryStatus.DRAFT:
-        audit_mode = await settings_svc.get(session, "audit_mode", "immutable")
-        if audit_mode == "immutable":
-            raise PostingError("Cannot edit a posted entry in immutable mode — reverse instead")
+    await enforce_posted_edit_gate(
+        session,
+        entry,
+        extended_audit_modes_entitled=extended_audit_modes_entitled,
+        override_reason=override_reason,
+        actor_role=actor_role,
+    )
 
     before = audit_svc.capture(entry)
 
@@ -505,17 +648,34 @@ async def _check_period_lock(
 async def _apply_tax_treatment(
     session: AsyncSession, entry: JournalEntry
 ) -> None:
-    """Snapshot a TaxTreatment onto every line via the AU tax engine.
+    """Snapshot a TaxTreatment onto every line via the company's
+    per-jurisdiction tax engine.
 
-    M0 ships AU only; the per-jurisdiction dispatcher will be plumbed
-    in once company.jurisdiction lands. Until then every post is AU.
+    KMD-formula support Packet 3 (scope §3.4 point 1, the RC-FANOUT
+    prerequisite): this used to hardcode ``get_engine("AU")`` for every
+    post (the M0 docstring's "until then every post is AU"). It now
+    resolves ``Company.jurisdiction`` for ``entry.company_id`` and
+    dispatches through ``get_engine(...)`` — the registry/stub pattern
+    already existed in ``tax_engine.__init__`` since M0, so this is
+    "plumb the one caller", not "build a dispatcher". Every EXISTING
+    company defaults to ``jurisdiction="AU"`` (``Company.jurisdiction``'s
+    column default) and no production path sets it otherwise yet, so
+    this resolves to the exact same ``AUTaxEngine`` for every AU post —
+    byte-identical behaviour, just reached generically instead of
+    hardcoded. NZ/UK remain unbuilt stubs (``NotImplementedError``,
+    unchanged); EE is now a real engine (``tax_engine.ee.EETaxEngine``).
 
     Runs AFTER ``gst_svc.auto_post_gst_lines`` so the auto-added GST
     Collected/Paid line gets its own snapshot too (direction='none'
     because GST liability/asset accounts aren't in the input/output
     sets — they're plumbing, not BAS-reportable themselves).
     """
-    engine = get_engine("AU")
+    company_jurisdiction = (
+        await session.execute(
+            select(Company.jurisdiction).where(Company.id == entry.company_id)
+        )
+    ).scalar_one_or_none() or "AU"
+    engine = get_engine(company_jurisdiction)
     # Pre-load account types + tax-code attrs for every distinct id on
     # the entry — avoids an N+1 lookup per line.
     acct_ids = {ln.account_id for ln in entry.lines}
@@ -549,9 +709,18 @@ async def _apply_tax_treatment(
     )
     tc_meta = {row[0]: (row[1], row[2], row[3], row[4]) for row in tc_rows}
 
-    # (line, TaxTreatment, tax_family) tuples to materialise as component
-    # rows after the compute loop + a flush (so every line has an id).
-    _pending_components: list[tuple[JournalLine, Any, str | None]] = []
+    # (line, treatments-list, tax_family) tuples to materialise as
+    # component rows after the compute loop + a flush (so every line has
+    # an id). Packet 3: a line may now yield MORE than one treatment
+    # (EE reverse-charge fan-out) — was a single ``treatment`` before.
+    _pending_components: list[tuple[JournalLine, list[Any], str | None]] = []
+    # Critic-round-3 fix: a reversal entry is identified structurally
+    # (``reversal_of_id`` is set on construction in ``reverse()``, before
+    # this function ever runs on it) rather than inferred from
+    # ``gst_amount is None`` — see the gate comment below for why the two
+    # signals must be told apart now that a RC line can legitimately have
+    # gst_amount=None on a FRESH post too.
+    is_reversal_entry = entry.reversal_of_id is not None
     for ln in entry.lines:
         # debit + credit captures whichever side is non-zero (exactly
         # one is > 0 on a balanced line) — gives the line amount
@@ -562,7 +731,7 @@ async def _apply_tax_treatment(
             tc_code, tc_rate, tc_reporting, tc_family = tc_meta[ln.tax_code_id]
         ctx = PostingContext(
             company_id=entry.company_id,
-            jurisdiction="AU",
+            jurisdiction=company_jurisdiction,
             posting_date=entry.entry_date,
             account_id=ln.account_id,
             account_type=acct_type.get(ln.account_id, AccountType.ASSET),
@@ -573,49 +742,172 @@ async def _apply_tax_treatment(
             rate=tc_rate,
             reporting_type=tc_reporting,
         )
-        treatment = engine.compute(ctx)
-        ln.tax_treatment = treatment.to_jsonable()
+        # Packet 3 — every engine implements compute_components (most
+        # trivially as [self.compute(ctx)]); the dispatcher always calls
+        # this, never .compute() directly, so a jurisdiction that needs
+        # 2+ components on one line (EE's reverse-charge output+input
+        # fan-out) needs no separate post-time code path. The FIRST
+        # treatment is what gets snapshotted onto the JSONB column —
+        # matches the pre-Packet-3 single-treatment shape exactly for
+        # every engine that returns a length-1 list (AU, and EE outside
+        # reverse-charge).
+        treatments = engine.compute_components(ctx)
+        ln.tax_treatment = treatments[0].to_jsonable()
 
-        # M1.5 · T2 — also record the treatment as a normalised tax-component
-        # row (1:many-ready) alongside the JSONB snapshot. One component per
-        # line for now (the AU engine returns a single treatment); skip lines
-        # with no tax dimension to avoid zero-rows on every plain GL line.
-        # Collected here and inserted by FK after a flush (below) — async
-        # SQLAlchemy can't append to the unloaded (lazy="raise") collection.
+        # M1.5 · T2 — also record each treatment as a normalised
+        # tax-component row (1:many-ready) alongside the JSONB snapshot;
+        # skip lines with no tax dimension to avoid zero-rows on every
+        # plain GL line. Collected here and inserted by FK after a flush
+        # (below) — async SQLAlchemy can't append to the unloaded
+        # (lazy="raise") collection.
         #
-        # ``ln.gst_amount`` is the AUTHORITATIVE per-line GST that BAS has
-        # always read; the component MUST mirror it (not treatment.tax, which
-        # for a line with tax_code_id but no supplied gst_amount falls back to
-        # base*rate — wrong for reversal lines, which journal.reverse() posts
-        # with tax_code_id copied but gst_amount=None precisely so they
-        # contribute NO GST). So: only emit a component when gst_amount is not
-        # None, and use gst_amount as the tax amount. A reversal line (None)
-        # gets no component and stays 0 in the return calculator, matching the
-        # long-standing behaviour the void-netting tests pin.
-        if ln.tax_code_id is not None and ln.gst_amount is not None:
-            _pending_components.append((ln, treatment, tc_family))
+        # Gate: emit component(s) when gst_amount is not None (unchanged
+        # single-component behaviour from pre-Packet-3) OR — critic-
+        # round-3 fix — when the engine returned a genuine reverse-charge
+        # fan-out (len(treatments) > 1) on a NON-reversal entry.
+        #
+        # Why the OR is needed: a fresh EU-acquisition reverse-charge
+        # line's natural shape has gst_amount=None — the foreign
+        # supplier's invoice carries no VAT to copy in; self-assessment
+        # is exactly what reverse charge means, and
+        # EETaxEngine._compute_reverse_charge's ``_derive_tax`` already
+        # falls back to ``base*rate/100`` for this case. The OLD gate
+        # (gst_amount-only) silently dropped ALL components for that
+        # line — the JSONB ``tax_treatment`` snapshot above still showed
+        # the derived non-zero tax, but no JournalLineTaxComponent rows
+        # were ever inserted, so KMD boxes 1_RC/5_RC (role-keyed,
+        # component-only — no gst_amount fallback, unlike the account-
+        # type-keyed boxes) silently read 0 for a posting that should
+        # have moved them. Box 6 (account-type "purchase" bucket) still
+        # picked up the base, producing a filable-but-wrong return (an
+        # EU acquisition with no self-assessed VAT anywhere).
+        #
+        # Why NOT is_reversal_entry guards the OR: ``journal.reverse()``
+        # posts reversal lines with tax_code_id copied but gst_amount=
+        # None precisely so a plain line contributes NO GST (long-
+        # standing behaviour the void-netting tests pin) — that part of
+        # the gate is UNCHANGED. Without excluding reversals here, a
+        # reversed RC line would ALSO satisfy ``len(treatments) > 1`` and
+        # get its own components — but the role-keyed aggregation query
+        # sums every matching component with no debit/credit netting, so
+        # that would DOUBLE the RC contribution instead of zeroing it.
+        # Reversing/voiding a posted RC line already relies on excluding
+        # the entry from the aggregation window, not a symmetric negative
+        # component — documented, accepted, unchanged (see
+        # ``tax_engine.ee``'s module docstring, "Void/reversal caveat").
+        if ln.tax_code_id is not None and not is_reversal_entry and (
+            ln.gst_amount is not None or len(treatments) > 1
+        ):
+            _pending_components.append((ln, treatments, tc_family))
+
+    # Finding 3 — a reversal entry MIRRORS the original entry's tax
+    # components onto its own (debit/credit-swapped) lines, matched by
+    # ``line_no`` (``reverse()`` copies each line's ``line_no`` verbatim).
+    # The mirror carries the SAME positive base/tax as the original; the
+    # aggregator (``tax_return_generator._aggregate_ledger_by_box``) signs
+    # a reversal entry's contribution negative, so the original (+tax) and
+    # its reversal (-tax) cancel. Both the REVERSED original and the
+    # POSTED reversal are in REPORTABLE_STATUSES, so without this the base
+    # cancelled (via its debit/credit sign) but the tax did not — the bug
+    # findings 3/11 catch. We mirror rather than re-derive because the
+    # reversal line carries ``gst_amount=None`` and the engine's
+    # base*rate fallback would recompute the wrong figure; copying the
+    # original component is exact. Supersedes the earlier "reversal emits
+    # NO components" rule (which left tax un-netted).
+    if is_reversal_entry and entry.reversal_of_id is not None:
+        orig_rows = (
+            await session.execute(
+                select(JournalLine.line_no, JournalLineTaxComponent)
+                .join(
+                    JournalLineTaxComponent,
+                    JournalLineTaxComponent.journal_line_id == JournalLine.id,
+                )
+                .where(JournalLine.entry_id == entry.reversal_of_id)
+            )
+        ).all()
+        if orig_rows:
+            by_line_no: dict[int, list[JournalLineTaxComponent]] = defaultdict(list)
+            for line_no, comp in orig_rows:
+                by_line_no[line_no].append(comp)
+            await session.flush()
+            for ln in entry.lines:
+                for comp in by_line_no.get(ln.line_no, ()):
+                    session.add(
+                        JournalLineTaxComponent(
+                            journal_line_id=ln.id,
+                            company_id=entry.company_id,
+                            tenant_id=entry.tenant_id,
+                            tax_family=comp.tax_family,
+                            component_role=comp.component_role,
+                            ref_tax_code=comp.ref_tax_code,
+                            rate_applied=comp.rate_applied,
+                            base_amount=comp.base_amount,
+                            tax_amount=comp.tax_amount,
+                            direction=comp.direction,
+                            sequence=comp.sequence,
+                        )
+                    )
 
     # Ensure every line has an id, then insert components directly by FK
     # (never touching the lazy="raise" JournalLine.tax_components collection).
     if _pending_components:
         await session.flush()
-        for ln, treatment, tc_family in _pending_components:
-            session.add(
-                JournalLineTaxComponent(
-                    journal_line_id=ln.id,
-                    company_id=entry.company_id,
-                    tenant_id=entry.tenant_id,
-                    tax_family=tc_family or "vat_gst",
-                    component_role="standard",
-                    ref_tax_code=treatment.code,
-                    rate_applied=treatment.rate,
-                    base_amount=treatment.base,
-                    # Authoritative per-line GST (never the base*rate fallback).
-                    tax_amount=ln.gst_amount,
-                    direction=treatment.direction,
-                    sequence=0,
+        for ln, treatments, tc_family in _pending_components:
+            n = len(treatments)
+            for seq, treatment in enumerate(treatments):
+                session.add(
+                    JournalLineTaxComponent(
+                        journal_line_id=ln.id,
+                        company_id=entry.company_id,
+                        tenant_id=entry.tenant_id,
+                        tax_family=tc_family or "vat_gst",
+                        component_role=_component_role(seq, n, treatment),
+                        ref_tax_code=treatment.code,
+                        rate_applied=treatment.rate,
+                        base_amount=treatment.base,
+                        # Packet 3: per-COMPONENT tax, not the line's raw
+                        # gst_amount — required for a reverse-charge line's
+                        # two components to carry independently-correct
+                        # amounts (a future partial-deduction input
+                        # component would differ from its output sibling).
+                        # For the single-component case (n == 1, every
+                        # AU/EE non-reverse-charge line) this is IDENTICAL
+                        # to ln.gst_amount by construction: both engines'
+                        # compute() sets treatment.tax = ctx.gst_amount
+                        # whenever gst_amount is not None (and this branch
+                        # only runs when it is not None) — so the
+                        # pre-Packet-3 "mirror ln.gst_amount, never the
+                        # base*rate fallback" guarantee still holds for
+                        # every existing single-component line.
+                        tax_amount=treatment.tax,
+                        direction=treatment.direction,
+                        sequence=seq,
+                    )
                 )
-            )
+
+
+def _component_role(seq: int, n: int, treatment: Any) -> str:
+    """Map a (position, treatment) pair to a
+    ``JournalLineTaxComponent.component_role`` string (Packet 3).
+
+    The single-component case (``n == 1`` — every line today except an
+    EE reverse-charge acquisition) is always ``"standard"``, matching
+    pre-Packet-3 behaviour exactly. A multi-component line names each
+    role from the treatment's own ``direction`` — ``"reverse_charge_output"``
+    / ``"reverse_charge_input"`` are the two roles
+    ``journal_line_tax_component.py``'s docstring already documents as
+    the model's intended reverse-charge vocabulary; a hypothetical
+    future stacked-tax engine (CGST/SGST-style) with a direction-less
+    multi-component split falls back to a positional
+    ``"component_<n>"`` label rather than guessing.
+    """
+    if n == 1:
+        return "standard"
+    if treatment.direction == "output":
+        return "reverse_charge_output"
+    if treatment.direction == "input":
+        return "reverse_charge_input"
+    return f"component_{seq}"
 
 
 async def post_in_txn(
@@ -914,11 +1206,18 @@ async def delete(
         reason=f"cascade-parent-of journal_entry {entry.id}",
     )
     for line in list(entry.lines):
+        # JournalLine has no tenant_id column of its own (0055's "line/child
+        # tables" carve-out), so audit_svc.snapshot_row's default
+        # getattr(obj, "tenant_id", None) auto-detection can't see it here —
+        # pass the parent entry's tenant_id explicitly so the audit_snapshots
+        # row is tenant-stamped at capture time (Wave C / audit_snapshots
+        # RLS remediation) instead of relying on the migration-time backfill.
         await audit_svc.snapshot_row(
             session, line,
             action="delete",
             performed_by=performed_by,
             reason=f"cascade-from journal_entry {entry.id}",
+            tenant_id=entry.tenant_id,
         )
     await session.delete(entry)
     await session.commit()

@@ -11,7 +11,7 @@ on:
       - main
 
 env:
-  # TODO: configure REGISTRY_URL — e.g. ghcr.io/your-org/saebooks-api
+  # TODO: configure REGISTRY_URL — e.g. ghcr.io/primary/saebooks-api
   # or a self-hosted registry at registry.example.com/saebooks/api
   IMAGE_NAME: saebooks-api
 

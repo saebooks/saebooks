@@ -39,7 +39,16 @@ rows:
   - {jurisdiction: EST, account_code: "4100", account_name: "Müügitulu — teenused (Sales — Services)", account_type: INCOME, default_tax_code: STD, display_order: 300}
   - {jurisdiction: EST, account_code: "4200", account_name: "Müügitulu — kaubad (Sales — Goods)", account_type: INCOME, default_tax_code: STD, display_order: 310}
   - {jurisdiction: EST, account_code: "4300", account_name: "Muud äritulud (Other Operating Income)", account_type: OTHER_INCOME, default_tax_code: STD, display_order: 320}
-  - {jurisdiction: EST, account_code: "4400", account_name: "Eksport ja ühendusesisene käive (Export & Intra-Community Supply)", account_type: INCOME, default_tax_code: ZERO, display_order: 325}
+  # KMD-formula support Packet 2: the single ZERO code this row used to
+  # default to was split into four leaves (tax_codes.yaml header) — this
+  # account's name spans two of them (export + intra-Community goods),
+  # so no single leaf is fully correct as a default; ZERO_EXPORT is
+  # picked as the more general/common case for a domestic SME's default
+  # chart. default_tax_code is a free-text prefill hint (String(32), not
+  # FK-enforced) — a bookkeeper overrides per-transaction for the
+  # intra-Community case (ZERO_IC_GOODS/ZERO_IC_SERVICES), same as any
+  # other default-code account.
+  - {jurisdiction: EST, account_code: "4400", account_name: "Eksport ja ühendusesisene käive (Export & Intra-Community Supply)", account_type: INCOME, default_tax_code: ZERO_EXPORT, display_order: 325}
   - {jurisdiction: EST, account_code: "4900", account_name: "Intressitulu (Interest Income)", account_type: OTHER_INCOME, default_tax_code: NTR, display_order: 330}
   - {jurisdiction: EST, account_code: "5100", account_name: "Müüdud kaupade kulu (Cost of Goods Sold)", account_type: COST_OF_SALES, default_tax_code: INPUT_STD, display_order: 400}
   - {jurisdiction: EST, account_code: "6100", account_name: "Palgakulu (Wages & Salaries)", account_type: EXPENSE, default_tax_code: NTR, display_order: 500}

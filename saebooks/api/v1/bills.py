@@ -45,6 +45,8 @@ from saebooks.api.v1.schemas import (
 )
 from saebooks.models.bill import BillStatus
 from saebooks.services import bills as svc
+from saebooks.services.authz import no_additional_gate, require_permission_or_role
+from saebooks.services.fx import gate_non_base_currency
 from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 
@@ -160,6 +162,7 @@ async def create_bill(
     company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
+    await gate_non_base_currency(session, request, company_id, payload.currency)
     key = _parse_idempotency_key(idempotency_key)
 
     if key is not None:
@@ -291,6 +294,7 @@ async def update_bill(
         204: {"description": "Voided"},
         409: {"model": BillConflictBody, "description": "Version mismatch"},
     },
+    dependencies=[Depends(require_permission_or_role("bill.void", no_additional_gate))],
 )
 async def void_bill(
     bill_id: UUID,
@@ -362,6 +366,7 @@ async def void_bill(
         200: {"model": BillOut},
         409: {"model": BillConflictBody, "description": "Version mismatch"},
     },
+    dependencies=[Depends(require_permission_or_role("bill.post", no_additional_gate))],
 )
 async def post_bill(
     bill_id: UUID,
@@ -446,6 +451,7 @@ async def post_bill(
         200: {"model": BillOut},
         409: {"model": BillConflictBody, "description": "Version mismatch"},
     },
+    dependencies=[Depends(require_permission_or_role("bill.void", no_additional_gate))],
 )
 async def void_bill_transition(
     bill_id: UUID,
@@ -672,6 +678,7 @@ async def post_bill_send_email(
         CustomerEmailError,
         send_customer_email,
     )
+    from saebooks.services.features import FLAG_SMTP_RELAY, feature_enabled_for_request
     from saebooks.services.latex_pdf import render_latex
 
     tenant_id = resolve_tenant_id(request)
@@ -730,6 +737,7 @@ async def post_bill_send_email(
             attachments=[CustomerEmailAttachment(
                 filename=pdf_filename, content=pdf_bytes, content_type="application/pdf",
             )],
+            sae_relay_entitled=feature_enabled_for_request(FLAG_SMTP_RELAY, request),
         )
     except CustomerEmailError as exc:
         raise HTTPException(422, str(exc)) from exc

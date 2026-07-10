@@ -8,7 +8,7 @@ pipeline build. Two flags must BOTH be true for a real network send:
 
 Default for both is false. If either is false, the customer_email service
 falls through to outbox mode (write .eml + Resend payload preview to
-/opt/data/saebooks-example/mail-outbox) and logs the would-be send to
+/opt/data/saebooks-primary/mail-outbox) and logs the would-be send to
 email_send_log with resend_status='blocked'.
 
 email_send_log captures every attempted send (blocked or actual) for audit.

@@ -9,6 +9,12 @@ TFN is stored Fernet-encrypted (saebooks.services.crypto). The API
 layer masks the TFN in responses unless the caller has
 ``employee.tfn_view``. Decryption is audit-logged at the route layer.
 
+EE isikukood (``isikukood_encrypted``, kmd-inf-tsd scope Packet 4) is
+encrypted/decrypted via the identical ``_encrypt_opt``/``_decrypt_opt``
+pair and ``decrypt_isikukood`` — see that function's docstring for its
+access contract. No API route exposes it yet (out of this packet's
+scope); the TSD Lisa-1 generator is the only caller today.
+
 Workflow notes:
 - ``create()`` mints an employee_number via ``services.numbering`` if
   the caller doesn't pass one.
@@ -91,6 +97,7 @@ async def create(
     employee_number: str | None = None,
     tfn: str | None = None,
     tfn_status: TfnStatus | str = TfnStatus.NOT_PROVIDED,
+    isikukood: str | None = None,
     dob: date | None = None,
     address_line1: str | None = None,
     address_line2: str | None = None,
@@ -157,6 +164,7 @@ async def create(
         employee_number=employee_number,
         tfn_encrypted=_encrypt_opt(tfn),
         tfn_status=(tfn_status.value if hasattr(tfn_status, "value") else str(tfn_status)),
+        isikukood_encrypted=_encrypt_opt(isikukood),
         dob=dob,
         start_date=start_date,
         address_line1=address_line1,
@@ -293,6 +301,7 @@ async def update(
         "bsb": "bsb_encrypted",
         "account_number": "account_number_encrypted",
         "account_name": "account_name_encrypted",
+        "isikukood": "isikukood_encrypted",
     }
 
     for name, value in fields.items():
@@ -358,6 +367,14 @@ def masked_tfn(employee: Employee) -> str | None:
     """
     plain = decrypt_tfn(employee)
     return _mask_tfn(plain)
+
+
+def decrypt_isikukood(employee: Employee) -> str | None:
+    """Return plaintext isikukood. Caller MUST audit-log this access
+    and MUST NOT log the return value — mirrors ``decrypt_tfn``'s
+    contract (kmd-inf-tsd scope Packet 4). The TSD Lisa-1 generator is
+    the intended caller."""
+    return _decrypt_opt(employee.isikukood_encrypted)
 
 
 def decrypt_bank(employee: Employee) -> EmployeeBankDecrypted:

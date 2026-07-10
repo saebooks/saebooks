@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from saebooks.models.account import AccountType
 from saebooks.models.contact import ContactType, PaymentTermsBasis
 from saebooks.models.recurring_invoice import RecurrenceFrequency, RecurrenceStatus
+from saebooks.services.theme import ACTIVE_THEMES
 
 
 class ContactBase(BaseModel):
@@ -251,6 +252,9 @@ class CompanyOut(BaseModel):
     # See docs/cashbook-edition-design.md §7.
     bookkeeping_mode: str = "full"
     cashbook_default_bank_account_id: uuid.UUID | None = None
+    # Inventory costing policy (Wave D, 2026-07-10). Per-company setting —
+    # weighted_average (default) | fifo | quantity_only.
+    costing_method: str = "weighted_average"
     # Legal-entity model (migration 0133, 2026-05-24)
     entity_type: str = "COMPANY"
     trades: bool = True
@@ -300,10 +304,22 @@ class CompanyUpdate(BaseModel):
     payment_terms_text: str | None = None
     terms_url: str | None = None
     address: dict[str, Any] | None = None
+    # Inventory costing policy (Wave D, 2026-07-10).
+    costing_method: str | None = None
     # Legal-entity model
     entity_type: str | None = None
     trades: bool | None = None
     trustee_company_id: uuid.UUID | None = None
+
+    @field_validator("costing_method")
+    @classmethod
+    def costing_method_valid(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        valid = {"weighted_average", "fifo", "quantity_only"}
+        if v not in valid:
+            raise ValueError(f"costing_method must be one of: {sorted(valid)}")
+        return v
 
     @field_validator("psi_status")
     @classmethod
@@ -445,6 +461,24 @@ class TaxCodeConflictBody(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+def _validate_theme_id(value: str | None) -> str | None:
+    """Shared ``preferred_theme`` allow-list check (Wave B / themes).
+
+    Format-only — this is NOT the FLAG_THEMES tier gate (that's a
+    request-time, per-user check with no place in a pure schema
+    validator; see ``api/v1/users.py``'s ``require_feature_inline``
+    call). This just rejects an id that isn't a real theme at all,
+    same as the ``services/users.py`` write-time backstop. Empty
+    string / ``None`` both mean "no explicit value" (inherit /
+    clear) and are left alone.
+    """
+    if value and value not in ACTIVE_THEMES:
+        raise ValueError(
+            f"Unknown theme id: {value!r}. Valid ids: {sorted(ACTIVE_THEMES)}"
+        )
+    return value
+
+
 class UserBase(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -452,7 +486,18 @@ class UserBase(BaseModel):
     display_name: str | None = None
     email: str | None = None
     role: str = Field(default="viewer", min_length=1, max_length=16)
+    # Explicit custom-role assignment (granular_permissions, D2) — gated
+    # behind FLAG_GRANULAR_PERMISSIONS at the router (require_feature_
+    # inline), same conditional-gate shape as preferred_theme/FLAG_THEMES
+    # below. NULL (the default) means "resolve via `role` above" — see
+    # models/user.py's role_id docstring.
+    role_id: uuid.UUID | None = None
     preferred_theme: str | None = None
+
+    @field_validator("preferred_theme")
+    @classmethod
+    def _check_preferred_theme(cls, v: str | None) -> str | None:
+        return _validate_theme_id(v)
 
 
 class UserCreate(UserBase):
@@ -467,7 +512,13 @@ class UserUpdate(BaseModel):
     display_name: str | None = None
     email: str | None = None
     role: str | None = Field(default=None, min_length=1, max_length=16)
+    role_id: uuid.UUID | None = None
     preferred_theme: str | None = None
+
+    @field_validator("preferred_theme")
+    @classmethod
+    def _check_preferred_theme(cls, v: str | None) -> str | None:
+        return _validate_theme_id(v)
 
 
 class UserOut(BaseModel):
@@ -481,6 +532,7 @@ class UserOut(BaseModel):
     display_name: str | None = None
     email: str | None = None
     role: str
+    role_id: uuid.UUID | None = None
     preferred_theme: str | None = None
     last_seen_at: datetime | None = None
     version: int
@@ -682,6 +734,13 @@ class JournalEntryUpdate(BaseModel):
     reference: str | None = Field(default=None, max_length=32)
     status: str | None = None
     lines: list[JournalLineCreate] | None = None
+    # Wave C (extended_audit_modes, hybrid mode): carries the F-04
+    # period-lock override reason when editing a posted entry whose
+    # entry_date falls in an already-closed period, under hybrid mode —
+    # same field/semantics as JournalEntryPostBody.override_reason.
+    # Ignored (harmless) on any request that isn't a hybrid-mode edit
+    # into a locked period.
+    override_reason: str | None = None
 
     @model_validator(mode="after")
     def _lines_must_balance(self) -> JournalEntryUpdate:

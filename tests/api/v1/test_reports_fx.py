@@ -5,6 +5,9 @@ Covers:
 * test_fx_revaluation_foreign_invoice — USD invoice appears in report
 * test_fx_revaluation_foreign_bill — USD bill appears in report
 * test_fx_revaluation_base_currency_excluded — AUD invoice not in report
+* FLAG_MULTI_CURRENCY gate (Wave A, 2026-07-10) — the report route and
+  foreign-currency invoice/bill creation are gated; base-currency (AUD)
+  creation stays ungated at every tier.
 """
 from __future__ import annotations
 
@@ -35,6 +38,22 @@ async def api_client() -> AsyncClient:
         headers={"Authorization": f"Bearer {token}"},
     ) as ac:
         yield ac
+
+
+@pytest.fixture(autouse=True)
+def _set_edition_enterprise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run this file's tests at enterprise (all flags on) by default.
+
+    FLAG_MULTI_CURRENCY (Wave A, 2026-07-10) now gates the
+    fx_revaluation report AND foreign-currency invoice/bill creation —
+    every test in this file that creates a USD/foreign-currency
+    document, or reads the report, needs a tier that carries the flag.
+    The gate-specific tests below override this per-test to exercise
+    the below-tier / at-tier boundary explicitly.
+    """
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "enterprise")
 
 
 @pytest.fixture
@@ -237,3 +256,101 @@ async def test_fx_revaluation_base_currency_excluded(
     assert inv_id not in item_ids, (
         f"AUD invoice {inv_id} should be excluded from FX report"
     )
+
+
+# ---------------------------------------------------------------------------
+# FLAG_MULTI_CURRENCY gate — Wave A (2026-07-10)
+# ---------------------------------------------------------------------------
+
+
+async def test_fx_revaluation_gate_community(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FLAG_MULTI_CURRENCY gate: community → 404 on the report route."""
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "community")
+    r = await api_client.get(
+        "/api/v1/reports/fx_revaluation",
+        params={"as_of_date": "2026-12-31", "base_currency": "AUD"},
+    )
+    assert r.status_code == 404
+
+
+async def test_fx_revaluation_gate_offline_succeeds(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FLAG_MULTI_CURRENCY gate: offline → 200 (this is where it turns on)."""
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "offline")
+    r = await api_client.get(
+        "/api/v1/reports/fx_revaluation",
+        params={"as_of_date": "1990-01-01", "base_currency": "AUD"},
+    )
+    assert r.status_code == 200, r.text
+
+
+async def test_create_foreign_currency_invoice_gate_community_404(
+    api_client: AsyncClient, fx_deps: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Community → 404 creating a USD invoice (foreign currency, gated)."""
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "community")
+    r = await api_client.post(
+        "/api/v1/invoices", json=_invoice_payload(fx_deps, currency="USD")
+    )
+    assert r.status_code == 404, r.text
+
+
+async def test_create_base_currency_invoice_ungated_at_community(
+    api_client: AsyncClient, fx_deps: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Community → 201 creating an AUD invoice (base currency, never gated)."""
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "community")
+    r = await api_client.post(
+        "/api/v1/invoices", json=_invoice_payload(fx_deps, currency="AUD")
+    )
+    assert r.status_code == 201, r.text
+
+
+async def test_create_foreign_currency_bill_gate_community_404(
+    api_client: AsyncClient, fx_deps: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Community → 404 creating a USD bill (foreign currency, gated)."""
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "community")
+    r = await api_client.post(
+        "/api/v1/bills", json=_bill_payload(fx_deps, currency="USD")
+    )
+    assert r.status_code == 404, r.text
+
+
+async def test_create_base_currency_bill_ungated_at_community(
+    api_client: AsyncClient, fx_deps: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Community → 201 creating an AUD bill (base currency, never gated)."""
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "community")
+    r = await api_client.post(
+        "/api/v1/bills", json=_bill_payload(fx_deps, currency="AUD")
+    )
+    assert r.status_code == 201, r.text
+
+
+async def test_create_foreign_currency_invoice_gate_offline_succeeds(
+    api_client: AsyncClient, fx_deps: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Offline → 201 creating a USD invoice (FLAG_MULTI_CURRENCY turns on here)."""
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "offline")
+    r = await api_client.post(
+        "/api/v1/invoices", json=_invoice_payload(fx_deps, currency="USD")
+    )
+    assert r.status_code == 201, r.text

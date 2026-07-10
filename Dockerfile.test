@@ -111,6 +111,12 @@ COPY --from=builder /opt/venv /opt/venv
 # Application source
 COPY --chown=saebooks:saebooks saebooks/ ./saebooks/
 COPY --from=builder --chown=saebooks:saebooks /build/saebooks/grpc_gen/ ./saebooks/grpc_gen/
+# Pre-accounting module app (#32 step 4) — imported from the source tree at
+# /app (not pip-installed; setuptools only packages ``saebooks*``).
+COPY --chown=saebooks:saebooks preaccounting_app/ ./preaccounting_app/
+# Capture module app (#32 step 5) — same rationale: imported from the source
+# tree, not pip-installed. tests/capture_app import ``capture_app.*``.
+COPY --chown=saebooks:saebooks capture_app/ ./capture_app/
 COPY --chown=saebooks:saebooks pyproject.toml ./
 COPY --chown=saebooks:saebooks alembic.ini ./
 COPY --chown=saebooks:saebooks alembic/ ./alembic/

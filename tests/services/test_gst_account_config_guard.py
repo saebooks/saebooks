@@ -1,6 +1,6 @@
 """Regression tests for the GST account-config silent-failure hardening.
 
-Root cause (a production tenant, 2026-06-10): ``gst_paid_account_code`` was set to
+Root cause (primary, 2026-06-10): ``gst_paid_account_code`` was set to
 ``"2-1330"``, which did not exist in that tenant's chart. ``_get_gst_account``
 returned ``None`` and ``auto_post_gst_lines`` hit ``if not paid_acct: return []``
 — so a taxable expense's Dr GST-Paid line was silently dropped, the journal
@@ -165,7 +165,7 @@ async def test_taxable_expense_with_good_gst_account_balances() -> None:
 
 async def test_taxable_expense_with_bad_gst_account_raises_config_error() -> None:
     # "9-9999" does not exist in the seeded AU chart — same failure mode as
-    # the production "2-1330" on that tenant.
+    # the production "2-1330" on the primary tenant.
     tenant_id, company_id = await _seed_cashbook_gst_registered(
         gst_paid_code="9-9999"
     )

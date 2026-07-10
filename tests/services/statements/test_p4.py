@@ -264,7 +264,7 @@ class _FakePaperlessClientWithOCR:
         return {
             "id": document_id,
             "title": f"Statement {document_id}.pdf",
-            "content": "Motion Australia Pty Ltd\nABN: 32 000 143 608\nStatement Date: 31/05/2026\n...",
+            "content": "Motion Australia Pty Ltd\nABN: 83 914 571 673\nStatement Date: 31/05/2026\n...",
         }
 
     async def download_content(self, document_id: int) -> tuple[bytes, str | None]:
@@ -543,7 +543,18 @@ async def test_ingest_applies_template_hint_on_reingest():
 @pytest.mark.postgres_only
 @pytest.mark.asyncio
 async def test_template_contact_id_wins_over_abn():
-    """contact_id match takes priority over supplier_abn match."""
+    """contact_id match takes priority over supplier_abn match.
+
+    Hermetic fix: the shared "first active company" picked here is not
+    guaranteed to belong to the hardcoded ``_TENANT`` — under full-suite
+    ordering the seed company for tenant ``000...001`` may not sort first,
+    and the query has no tenant filter. Inserting a ``Contact`` with
+    ``tenant_id=_TENANT`` against a company whose REAL tenant_id differs
+    trips the ``tenant_coherence`` trigger. Read the company's actual
+    ``tenant_id`` and use it consistently instead of assuming ``_TENANT``
+    — same pattern as ``tests/services/test_business_identifiers.py``'s
+    hermetic fix.
+    """
     from sqlalchemy import select
 
     from saebooks.db import AsyncSessionLocal
@@ -559,15 +570,16 @@ async def test_template_contact_id_wins_over_abn():
         )).scalars().first()
         assert co is not None
         company_id = co.id
+        tenant_id = co.tenant_id
 
     abn = "99 888 777 666"
 
     async with AsyncSessionLocal() as s:
-        s.info["tenant_id"] = _TENANT
+        s.info["tenant_id"] = tenant_id
         s.info["company_id"] = company_id
 
         contact = Contact(
-            tenant_id=_TENANT,
+            tenant_id=tenant_id,
             company_id=company_id,
             name="Priority Test Supplier",
             contact_type=ContactType.SUPPLIER,
@@ -577,7 +589,7 @@ async def test_template_contact_id_wins_over_abn():
 
         # Template matched by contact_id (highest priority)
         tmpl_contact = SupplierStatementTemplate(
-            tenant_id=_TENANT,
+            tenant_id=tenant_id,
             company_id=company_id,
             contact_id=contact.id,
             supplier_abn=abn,
@@ -588,7 +600,7 @@ async def test_template_contact_id_wins_over_abn():
 
         # Template matched by ABN only (lower priority)
         tmpl_abn = SupplierStatementTemplate(
-            tenant_id=_TENANT,
+            tenant_id=tenant_id,
             company_id=company_id,
             contact_id=None,
             supplier_abn=abn,
@@ -602,7 +614,7 @@ async def test_template_contact_id_wins_over_abn():
 
     # Lookup with contact_id set should return the contact-level template
     async with AsyncSessionLocal() as s:
-        s.info["tenant_id"] = _TENANT
+        s.info["tenant_id"] = tenant_id
         s.info["company_id"] = company_id
         result = await _lookup_template(
             s,

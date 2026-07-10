@@ -39,7 +39,7 @@ def _make_contact(**overrides: object) -> Contact:
 
 
 def test_format_abn_canonical_form() -> None:
-    assert _format_abn("12345678901") == "12 345 678 901"
+    assert _format_abn("51824753556") == "51 824 753 556"
 
 
 def test_format_abn_returns_input_when_not_11_digits() -> None:
@@ -49,33 +49,33 @@ def test_format_abn_returns_input_when_not_11_digits() -> None:
 def test_parse_handles_string_business_name() -> None:
     """ABR sometimes returns a single string instead of a list."""
     result = parse_abr_response(
-        {"Abn": "12345678901", "BusinessName": "SAE Engineering"}
+        {"Abn": "51824753556", "BusinessName": "SAE Engineering"}
     )
     assert result.business_names == ("SAE Engineering",)
 
 
 def test_parse_handles_list_business_names() -> None:
     result = parse_abr_response(
-        {"Abn": "12345678901", "BusinessName": ["A", "B"]}
+        {"Abn": "51824753556", "BusinessName": ["A", "B"]}
     )
     assert result.business_names == ("A", "B")
 
 
 def test_parse_handles_empty_business_name() -> None:
-    result = parse_abr_response({"Abn": "12345678901", "BusinessName": []})
+    result = parse_abr_response({"Abn": "51824753556", "BusinessName": []})
     assert result.business_names == ()
 
 
 def test_parse_marks_gst_registered_when_date_present() -> None:
     result = parse_abr_response(
-        {"Abn": "12345678901", "Gst": "2024-02-15"}
+        {"Abn": "51824753556", "Gst": "2024-02-15"}
     )
     assert result.gst_registered is True
     assert result.gst_from == "2024-02-15"
 
 
 def test_parse_unregistered_when_gst_empty() -> None:
-    result = parse_abr_response({"Abn": "12345678901", "Gst": ""})
+    result = parse_abr_response({"Abn": "51824753556", "Gst": ""})
     assert result.gst_registered is False
 
 
@@ -98,7 +98,7 @@ def test_preferred_name_prefers_trading_then_business_then_entity() -> None:
 def test_apply_to_contact_only_fills_empty_fields_by_default() -> None:
     contact = _make_contact(name="Existing", state=None, postcode=None)
     lookup = AbrLookup(
-        abn="12345678901",
+        abn="51824753556",
         entity_name="From ABR",
         address_state="QLD",
         address_postcode="4350",
@@ -111,13 +111,13 @@ def test_apply_to_contact_only_fills_empty_fields_by_default() -> None:
     assert "abn" in changed
     assert contact.state == "QLD"
     assert contact.postcode == "4350"
-    assert contact.abn == "12 345 678 901"
+    assert contact.abn == "51 824 753 556"
 
 
 def test_apply_to_contact_overwrite_replaces_populated_fields() -> None:
     contact = _make_contact(name="Existing", state="NSW")
     lookup = AbrLookup(
-        abn="12345678901",
+        abn="51824753556",
         entity_name="From ABR",
         address_state="QLD",
     )
@@ -129,8 +129,8 @@ def test_apply_to_contact_overwrite_replaces_populated_fields() -> None:
 
 
 def test_apply_to_contact_preserves_canonical_abn_when_unchanged() -> None:
-    contact = _make_contact(abn="12 345 678 901")
-    lookup = AbrLookup(abn="12345678901")
+    contact = _make_contact(abn="51 824 753 556")
+    lookup = AbrLookup(abn="51824753556")
     changed = apply_to_contact(contact, lookup)
     # already in canonical form -> no change
     assert "abn" not in changed
@@ -140,7 +140,7 @@ def test_apply_to_contact_preserves_canonical_abn_when_unchanged() -> None:
 async def test_lookup_abn_end_to_end() -> None:
     payload = (
         'callback({'
-        '"Abn":"12345678901",'
+        '"Abn":"51824753556",'
         '"AbnStatus":"Active",'
         '"EntityName":"Example Pty Ltd",'
         '"BusinessName":["SAE Engineering"],'
@@ -152,8 +152,8 @@ async def test_lookup_abn_end_to_end() -> None:
     respx.get(f"{ABR_BASE}/AbnDetails.aspx").mock(
         return_value=httpx.Response(200, text=payload)
     )
-    result = await lookup_abn("12 345 678 901", settings=_settings())
-    assert result.abn == "12345678901"
+    result = await lookup_abn("51 824 753 556", settings=_settings())
+    assert result.abn == "51824753556"
     assert result.preferred_name == "SAE Engineering"
     assert result.gst_registered is True
     assert result.address_state == "QLD"

@@ -3,15 +3,13 @@
 # (Medicare levy) shape — general wage-based social insurance, collected
 # alongside payroll via TSD.
 #
-# SCHEMA LIMITATION (flag, not fixed here — seed data only): EE social
-# tax has a statutory MONTHLY MINIMUM BASE (EUR 886 for 2026, giving a
-# minimum monthly employer liability of EUR 292.38 = 886 x 33%) that
-# applies regardless of actual wages paid. SocialContributionScheme only
-# has a wage_base_cap (an upper bound the rate stops applying above) —
-# there is no floor/minimum-base field, so this floor cannot be
-# faithfully represented here. Recorded in this comment and in the final
-# report; would need a schema change (out of scope — SEED DATA ONLY) to
-# seed properly.
+# SCHEMA GAP CLOSED (kmd-inf-tsd scope Packet 3): EE social tax has a
+# statutory MONTHLY MINIMUM BASE (EUR 886 for 2026, giving a minimum
+# monthly employer liability of EUR 292.38 = 886 x 33%) that applies
+# regardless of actual wages paid. SocialContributionScheme previously
+# only had a wage_base_cap (an upper bound the rate stops applying
+# above); ``wage_base_floor`` (reference-DB migration
+# 0010_social_tax_floor) now represents this. Seeded below.
 table: social_contribution_schemes
 key: [jurisdiction, code, effective_from]
 rows:
@@ -21,6 +19,7 @@ rows:
     payer: employer
     rate_percent: 33.0000
     wage_base_cap: null
+    wage_base_floor: 886.00
     collection_mechanism: payroll_withholding
     effective_from: 2026-01-01
 

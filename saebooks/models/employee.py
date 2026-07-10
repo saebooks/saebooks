@@ -302,6 +302,28 @@ class Employee(CompanyScoped, Base):
         default=Decimal("38.00"), server_default="38.00",
     )
 
+    # --- EE payroll compute (0191_ee_payroll_compute_cols,
+    # 0192_ee_pensionable_age_flag) --- #
+    # ee_pillar_ii_rate_percent: NULL -> the seeded statutory default (2%).
+    # ee_basic_exemption_elected: NULL/False -> NOT applied (tax-safe
+    # default — the EE basic exemption only applies where the employee
+    # has filed an avaldus electing THIS employer to apply it; an
+    # unset flag must not silently over-claim it and under-withhold).
+    # Only True applies it. See services.pay_runs_v2._compute_ee /
+    # services.payroll_ee.
+    ee_pillar_ii_rate_percent: Mapped[Decimal | None] = mapped_column(
+        Numeric(5, 2)
+    )
+    ee_basic_exemption_elected: Mapped[bool | None] = mapped_column(Boolean)
+    ee_pensionable_age: Mapped[bool | None] = mapped_column(Boolean)
+
+    # --- EE identity (0193_employee_isikukood) --- #
+    # The TSD Lisa-1 row key. Fernet ciphertext — mirrors
+    # tfn_encrypted's access pattern exactly (see services.employees
+    # decrypt_isikukood/masked_isikukood). Plaintext NEVER touches
+    # this column or a log line.
+    isikukood_encrypted: Mapped[str | None] = mapped_column(Text)
+
     # --- HR-only --- #
     notes: Mapped[str | None] = mapped_column(Text)
     extra: Mapped[dict[str, Any] | None] = mapped_column(JSONB)

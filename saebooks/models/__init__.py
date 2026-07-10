@@ -24,7 +24,7 @@ from saebooks.models.bsl_match import BslMatch
 from saebooks.models.budget import Budget
 from saebooks.models.business_identifier import BusinessIdentifier
 from saebooks.models.change_log import ChangeLog
-from saebooks.models.company import Company
+from saebooks.models.company import Company, CostingMethod
 from saebooks.models.contact import Contact, ContactType
 from saebooks.models.department import CostCentre, Department
 from saebooks.models.depreciation_model import DepreciationModel
@@ -64,6 +64,7 @@ from saebooks.models.inbox_document import (
     RejectReason,
 )
 from saebooks.models.inbox_email import InboxEmailAddress, InboxEmailMessage
+from saebooks.models.inventory_cost_layer import InventoryCostLayer
 from saebooks.models.item import CostMethod, Item
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine, PeriodLock
 from saebooks.models.journal_line_tax_component import JournalLineTaxComponent
@@ -73,6 +74,7 @@ from saebooks.models.one_off_customer import OneOffCustomer
 from saebooks.models.one_off_vendor import OneOffVendor
 from saebooks.models.pay_run import PayRun, PayRunLine, PayRunStatus
 from saebooks.models.payg import PaygTaxScale, StslCoefficient
+from saebooks.models.permission import Permission, RolePermission, UserPermission
 from saebooks.models.principal import (
     GrantStatus,
     Principal,
@@ -87,6 +89,7 @@ from saebooks.models.reclassification import (
     Reclassification,
     ReclassificationStatus,
 )
+from saebooks.models.role import Role
 from saebooks.models.settings import Setting
 from saebooks.models.sql_query import SqlQuery
 from saebooks.models.supplier_credit_note import (
@@ -138,6 +141,7 @@ __all__ = [
     "ContactType",
     "CostCentre",
     "CostMethod",
+    "CostingMethod",
     "Department",
     "DepreciationModel",
     "DistributionStatus",
@@ -168,6 +172,7 @@ __all__ = [
     "InboxDocumentStatus",
     "InboxEmailAddress",
     "InboxEmailMessage",
+    "InventoryCostLayer",
     "Item",
     "JournalEntry",
     "JournalLine",
@@ -183,6 +188,7 @@ __all__ = [
     "PayRunStatus",
     "PaygTaxScale",
     "PeriodLock",
+    "Permission",
     "Principal",
     "PrincipalFido2Credential",
     "PrincipalKind",
@@ -199,6 +205,8 @@ __all__ = [
     "Reclassification",
     "ReclassificationStatus",
     "RejectReason",
+    "Role",
+    "RolePermission",
     "Setting",
     "SqlQuery",
     "StatementLineStatus",
@@ -225,6 +233,7 @@ __all__ = [
     "TransferStatus",
     "TrustDistribution",
     "User",
+    "UserPermission",
     "UserRole",
 ]
 

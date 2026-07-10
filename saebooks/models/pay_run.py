@@ -95,6 +95,18 @@ class PayRunLine(Base):
         ForeignKey("pay_runs.id", ondelete="CASCADE"),
         nullable=False,
     )
+    # Added by 0129_pay_runs_rls (RLS hardening) — NOT NULL + FK +
+    # tenant_isolation policy on the live table, but the ORM class was
+    # never updated to declare it (pre-existing gap, found + fixed
+    # forward here, kmd-inf-tsd scope Packet 3 — nothing in this repo's
+    # test suite exercised ``services.pay_runs_v2.upsert_line`` end to
+    # end before this packet, so the resulting NOT-NULL-violation raw-
+    # INSERT bug in that service was latent/undetected until now).
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
     # FK retarget: from 0112_pay_run_lines_extension onwards this points
     # at employees.id (Phase 1A added the employees table). Old rows
     # were already empty across all 5 live stacks at migration time.
@@ -157,6 +169,17 @@ class PayRunLine(Base):
     )
     payg_scale_used: Mapped[str | None] = mapped_column(String(32))
     payg_breakdown: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # ---------------------------------------------------------------------- #
+
+    # --- EE payroll compute (0191_ee_payroll_compute_cols) ---------------- #
+    # ``tax``/``super_amount`` above are AU PAYG/super specifically and do
+    # NOT hold these — see services.pay_runs_v2._compute_ee. NULL for
+    # every AU-jurisdiction line.
+    ee_income_tax: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    ee_unemployment_employee: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    ee_unemployment_employer: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    ee_social_tax: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    ee_pillar_ii: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     # ---------------------------------------------------------------------- #
 
     created_at: Mapped[datetime] = mapped_column(

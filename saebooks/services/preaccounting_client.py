@@ -33,6 +33,23 @@ Errors
 * A 4xx with a ``{"code"/"message"}`` domain-error body is re-raised as the
   caller's domain error (``QuoteError`` / ``PurchaseOrderError`` /
   ``TimeEntryError``) — the caller passes its exception class.
+
+Runtime circuit breaker (M2 wave 2a, P0a)
+------------------------------------------
+``post()`` reports its outcome to a module-level ``CircuitBreaker``
+(``_breaker``): a transport failure (timeout / ``httpx.RequestError``)
+records a breaker failure; any response actually received (including a
+non-2xx one, e.g. the 409 version-conflict / 422 domain-error shapes
+``_check()`` maps above) records a breaker success — only *unreachability*
+should trip the breaker, not ordinary application-level errors the module
+deliberately returned. ``delegating()`` consults
+``_breaker.allow_request()`` in addition to the config flag: once the
+breaker trips OPEN, ``delegating()`` returns False for
+``_BREAKER_COOLDOWN_SECONDS`` and every one of this module's ~20 call sites
+(``quotes.py`` / ``purchase_orders.py`` / ``time_entries.py``, each already
+shaped ``if delegating(): ... else: <in-process>``) falls back to
+in-process transparently, with no network attempt, until a single
+half-open probe succeeds.
 """
 from __future__ import annotations
 
@@ -43,19 +60,44 @@ from typing import Any
 
 import httpx
 
+from saebooks.services.circuit_breaker import CircuitBreaker, DelegatedServiceError
+
 _TIMEOUT_SECONDS = 30.0
 _BASE_PATH = "/module/preaccounting"
 
+_BREAKER_FAILURE_THRESHOLD = 5
+_BREAKER_COOLDOWN_SECONDS = 30.0
 
-class PreAccountingServiceError(RuntimeError):
+_breaker = CircuitBreaker(
+    "preaccounting",
+    failure_threshold=_BREAKER_FAILURE_THRESHOLD,
+    cooldown_seconds=_BREAKER_COOLDOWN_SECONDS,
+)
+
+
+class PreAccountingServiceError(DelegatedServiceError):
     """The pre-accounting module was unreachable or answered unexpectedly."""
+
+    module = "preaccounting"
+
+
+def _reset_breaker_for_tests() -> None:
+    """Testing hook — force the runtime breaker back to CLOSED."""
+    _breaker.reset()
 
 
 def delegating() -> bool:
-    """True when the engine should delegate pre-accounting work to the module."""
+    """True when the engine should delegate pre-accounting work to the module.
+
+    False when the flag is unset, OR when the runtime breaker is OPEN
+    (module unreachable) — either way the caller's existing in-process
+    fallback runs.
+    """
     from saebooks.config import settings
 
-    return bool(settings.preaccounting_base_url.strip())
+    if not settings.preaccounting_base_url.strip():
+        return False
+    return _breaker.allow_request()
 
 
 def jsonable(value: Any) -> Any:
@@ -118,15 +160,19 @@ async def post(
     body = jsonable(payload)
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
-            return await client.post(url, json=body, headers=_headers(tenant_id, company_id))
+            resp = await client.post(url, json=body, headers=_headers(tenant_id, company_id))
     except httpx.TimeoutException as exc:
+        _breaker.record_failure()
         raise PreAccountingServiceError(
             f"Timeout waiting for pre-accounting module at {url}: {exc}"
         ) from exc
     except httpx.RequestError as exc:
+        _breaker.record_failure()
         raise PreAccountingServiceError(
             f"Cannot reach pre-accounting module at {url}: {exc}"
         ) from exc
+    _breaker.record_success()
+    return resp
 
 
 def json_body(resp: httpx.Response, url_hint: str = "") -> Any:

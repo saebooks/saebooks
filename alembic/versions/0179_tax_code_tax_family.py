@@ -6,7 +6,7 @@ tax-family discriminator alongside the legacy free-text ``tax_system``
 input_credit_recoverable = true (backfilled from tax_system so any legacy
 'GST'/'VAT' explicitly lands on vat_gst).
 
-See docs/multi-jurisdiction.md (M1.5) (theme T1).
+See ~/records/saebooks/global-reference-audit-2026-07-09.md (theme T1).
 
 Revision ID: 0179_tax_code_tax_family
 Revises: 0178_bank_routing_identifiers

@@ -38,6 +38,19 @@ async def api_client() -> AsyncClient:
         yield ac
 
 
+@pytest.fixture(autouse=True)
+def _set_edition_enterprise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run this file's tests at enterprise (all flags on) by default.
+
+    ``_create_project`` below goes through the real
+    ``POST /api/v1/projects``, which FLAG_PROJECTS_BUDGETS (Wave A,
+    2026-07-10) now gates.
+    """
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "enterprise")
+
+
 @pytest.fixture
 async def gl_accounts() -> dict[str, str]:
     """Return one account ID per relevant AccountType for building JE payloads."""
@@ -86,7 +99,7 @@ async def _create_and_post_je(
     entry_date: str,
     lines: list[dict],
 ) -> dict:
-    """Create a DRAFT JE then PATCH to POSTED. Return posted body."""
+    """Create a DRAFT JE then POST it to POSTED via /{id}/post. Return posted body."""
     r = await client.post(
         "/api/v1/journal_entries",
         json={
@@ -100,9 +113,8 @@ async def _create_and_post_je(
     je_id = body["id"]
     version = body["version"]
 
-    r2 = await client.patch(
-        f"/api/v1/journal_entries/{je_id}",
-        json={"status": "POSTED"},
+    r2 = await client.post(
+        f"/api/v1/journal_entries/{je_id}/post",
         headers={"If-Match": str(version)},
     )
     assert r2.status_code == 200, r2.text

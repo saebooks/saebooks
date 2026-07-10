@@ -184,7 +184,7 @@ class Settings(BaseSettings):
     # Disabled by default because unattended auto-draft bills (one per
     # Paperless doc, incl. own outbound invoices/statements) created
     # “AUTO-INGESTED FROM PAPERLESS” junk that had to be purged from
-    # a production tenant (DB-rebuild handover Gap 4). Email→Paperless archiving
+    # primary_books (DB-rebuild handover Gap 4). Email→Paperless archiving
     # is unaffected (separate IMAP path). Statement reconciliation also
     # unaffected (routes via _STATEMENT_TYPES, not this gate). Set
     # PAPERLESS_AUTO_BILL_ENABLED=true to deliberately re-enable.
@@ -285,7 +285,7 @@ class Settings(BaseSettings):
     # The DiscourseConnect handshake itself runs in saebooks-web; the
     # API only sees the post-handshake handoff via /api/v1/auth/oauth-handoff.
     #
-    # Portal lockdown — app.saebooks.com.au is the maintainers' internal portal,
+    # Portal lockdown — app.saebooks.com.au is Richard's internal portal,
     # NOT a public SaaS. Only emails in this CSV allowlist may complete
     # SSO login (handoff returns 403 otherwise). Empty = open (dev).
     # Comma-separated; whitespace and case-insensitive.
@@ -701,6 +701,31 @@ class Settings(BaseSettings):
     # this, regenerating dates relative to today. Default 7 days; 0 disables.
     demo_template_max_age: int = Field(
         default=604800, alias="DEMO_TEMPLATE_MAX_AGE"
+    )
+
+    # ---------------------------------------------------------------- #
+    # Scheduled backups (planned-modules Wave E, FLAG_SCHEDULED_BACKUPS) #
+    # ---------------------------------------------------------------- #
+    # Per-tenant LOGICAL export (never the whole-DB pg_dump — see
+    # services/backups.py, which stays read-only status-view-only).
+    # Encrypted artifacts (ciphertext ONLY — the passphrase is never
+    # persisted, see services/backup_crypto.py) stage here pending
+    # download / a future real remote push. Deliberately a SEPARATE
+    # directory from SAEBOOKS_BACKUP_DIR_IN_CONTAINER (the infra
+    # pg_dump timer's output) — different writer, different retention
+    # policy, different (tenant-partitioned) layout.
+    scheduled_backup_export_dir: str = Field(
+        default="/app/scheduled-backups", alias="SAEBOOKS_SCHEDULED_BACKUP_EXPORT_DIR"
+    )
+    # Local-path destination pushes are only permitted under this root —
+    # a config-supplied absolute path outside it is rejected. Prevents a
+    # tenant admin's destination config from writing anywhere on the
+    # container filesystem. Rclone-remote destinations are a stubbed
+    # extension point (services/backup_destinations.py) and don't use
+    # this setting.
+    scheduled_backup_local_dest_root: str = Field(
+        default="/app/scheduled-backups-local-dest",
+        alias="SAEBOOKS_SCHEDULED_BACKUP_LOCAL_DEST_ROOT",
     )
 
     @property

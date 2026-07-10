@@ -11,7 +11,7 @@ This is the same architectural pattern as the bank-feeds relay:
 SAE Engineering bears the operational cost of the regulator
 relationship, and customer instances stay simple. See
 ``saebooks-infrastructure-plan`` (memory) and the contract document
-at the commercial lodge-server API contract.
+at ``~/.claude/plans/saebooks-lodge-server-contract.md``.
 
 Public surface
 --------------

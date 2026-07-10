@@ -28,8 +28,30 @@ Type compatibility rules (narrowing allowed, widening fails):
   SQLite TEXT        ↔  Postgres Text / String
   SQLite BOOLEAN     ↔  Postgres Boolean
   SQLite DATETIME    ↔  Postgres DateTime
+  SQLite TIMESTAMP   ↔  Postgres DateTime (incl. sa.TIMESTAMP(timezone=True),
+                        a DateTime subclass — SQLAlchemy's sqlite DDL
+                        compiler renders "TIMESTAMP" text for that specific
+                        subclass vs "DATETIME" for the plain sa.DateTime()
+                        columns most models use; both are the SAME SQLite
+                        storage affinity, so this is a naming difference,
+                        not a narrowing. Added 2026-07-10, granular_
+                        permissions module — this test hadn't been
+                        exercised against ic_legs/ic_outbox/ic_txn/
+                        dutiable_transaction_events/reclassifications/
+                        supplier_statement_*/transfers (migrations 0150-
+                        0182, all pre-existing and unrelated to this
+                        branch) since the dump was last regenerated on
+                        2026-06-07 — those tables' explicit TIMESTAMP(
+                        timezone=True) columns were simply never captured
+                        in db/cashbook.schema.sql until now.)
   SQLite DATE        ↔  Postgres Date
   SQLite BLOB        ↔  Postgres LargeBinary
+  SQLite VARCHAR     ↔  Postgres INET (SQLite has no native network-address
+                        type; SQLAlchemy's sqlite compiler renders an INET
+                        column as VARCHAR text — a lossless narrowing, same
+                        class as UUID → CHAR(32) above. Added 2026-07-10,
+                        same stale-dump discovery as TIMESTAMP above
+                        (ephemeral_demo_tenants.source_ip, migration 0170).)
 """
 from __future__ import annotations
 
@@ -206,6 +228,21 @@ def _types_compatible(sqlite_type: str, pg_type_name: str) -> bool:
 
     # UUID → CHAR(32)
     if p == "UUID" and s == "CHAR(32)":
+        return True
+
+    # DateTime bucket ("DATETIME") → TIMESTAMP: sa.TIMESTAMP(timezone=True)
+    # is a DateTime subclass, so _postgres_type_name buckets it the same as
+    # plain sa.DateTime() ("DATETIME"), but SQLAlchemy's sqlite DDL compiler
+    # renders the two subclasses with different literal type text ("TIMESTAMP"
+    # vs "DATETIME") — same underlying SQLite storage affinity either way, not
+    # a narrowing. See module docstring.
+    if p == "DATETIME" and s == "TIMESTAMP":
+        return True
+
+    # INET → VARCHAR: SQLite has no native network-address type; the sqlite
+    # compiler renders an INET column as VARCHAR text. Lossless narrowing,
+    # same class as UUID → CHAR(32) above. See module docstring.
+    if p == "INET" and s == "VARCHAR":
         return True
 
     # JSONB / ARRAY(*) → JSON

@@ -46,6 +46,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, PlainTextResponse
 from starlette.exceptions import HTTPException
 
+from saebooks.services.circuit_breaker import DelegatedServiceError
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -109,6 +111,13 @@ INVALID_CREDENTIALS = _reg("invalid_credentials", 401, "Invalid Credentials")
 
 # Server-side failure (catch-all for unhandled exceptions)
 INTERNAL_ERROR = _reg("internal_error", 500, "Internal Server Error")
+
+# Delegated modules (M2 wave 2a — capture / pre-accounting / platform, #32
+# P0a). Raised by ``saebooks.services.circuit_breaker.DelegatedServiceError``
+# subclasses when a delegated call fails at the transport boundary, or when
+# the runtime breaker fails fast rather than attempt a call to a module it
+# has already marked unreachable.
+MODULE_UNAVAILABLE = _reg("module_unavailable", 503, "Module Unavailable")
 
 
 # ---------------------------------------------------------------------------
@@ -307,15 +316,61 @@ async def unhandled_exception_handler(
     )
 
 
+async def delegated_service_error_handler(
+    request: Request,
+    exc: DelegatedServiceError,
+) -> JSONResponse | PlainTextResponse:
+    """Map a delegated-module failure to a structured 503 (M2 wave 2a, P0a).
+
+    ``CaptureServiceError`` / ``PreAccountingServiceError`` /
+    ``PlatformServiceError`` (``saebooks.services.circuit_breaker``) are
+    raised at the transport boundary of a delegated call — either a genuine
+    timeout/connection failure, or the runtime breaker failing fast rather
+    than attempt a call to a module it has already marked unreachable.
+    Without this handler the exception falls through to the generic 500
+    catch-all (``unhandled_exception_handler``); this normalises it instead
+    to a 503 carrying the SAME ``module`` id wave-1's guarded-import stub
+    uses (``saebooks/api/v1/__init__.py``'s ``{"module": ..., "status":
+    "unavailable"}``), wrapped in the RFC 7807 problem+json envelope for
+    JSON callers. Note: the ``extra`` payload deliberately carries only
+    ``module`` (not a duplicate ``status`` key) — RFC 7807's mandatory
+    ``status`` field already carries the numeric 503 at the top level, and
+    the "unavailable" meaning is fully conveyed by ``code:
+    module_unavailable`` + ``status: 503`` together; reusing the ``status``
+    key for a string would collide with and shadow the mandatory field.
+
+    Starlette resolves exception handlers by walking the exception's MRO, so
+    registering this ONE handler on the ``DelegatedServiceError`` base
+    covers all three concrete subclasses without a handler each.
+    """
+    logger.error(
+        "delegated module %r unavailable on %s %s: %s",
+        exc.module,
+        request.method,
+        request.url.path,
+        exc,
+    )
+    if not _wants_json(request):
+        return PlainTextResponse("Service Unavailable", status_code=503)
+    return _problem(
+        status=503,
+        code="module_unavailable",
+        detail=f"The {exc.module} module is temporarily unavailable.",
+        extra={"module": exc.module},
+    )
+
+
 def register_handlers(app: Any) -> None:
     """Install the problem+json exception handlers on a FastAPI ``app``.
 
     Order does not matter for type-keyed handlers, but the catch-all
     ``Exception`` handler is the broadest and only fires when no more
-    specific handler (HTTPException / RequestValidationError) matched.
+    specific handler (HTTPException / RequestValidationError /
+    DelegatedServiceError) matched.
     """
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    app.add_exception_handler(DelegatedServiceError, delegated_service_error_handler)
     # Catch-all: normalise any other unhandled exception to a 500
     # problem+json (D1). Starlette routes a registered ``Exception``
     # handler through ServerErrorMiddleware.

@@ -78,8 +78,20 @@ async def snapshot(
     after_data: dict[str, Any] | None = None,
     reason: str | None = None,
     performed_by: str | None = None,
+    tenant_id: uuid.UUID | None = None,
 ) -> AuditSnapshot:
-    """Create an audit snapshot record."""
+    """Create an audit snapshot record.
+
+    ``tenant_id`` (Wave C RLS remediation, migration 0186): stamp the
+    owning tenant at capture time so the row is visible under RLS to
+    that tenant's ``saebooks_app`` session. ``None`` is a legitimate
+    value for genuinely tenant-less captures (e.g. the global
+    ``settings`` table has no tenant column at all) — the table's RLS
+    policy treats a NULL ``tenant_id`` as "insertable, never
+    SELECT-visible to any tenant" (see migration 0186's docstring), not
+    an error. Prefer ``snapshot_row``'s auto-detection over passing this
+    explicitly where possible.
+    """
     snap = AuditSnapshot(
         table_name=table_name,
         row_id=row_id,
@@ -88,6 +100,7 @@ async def snapshot(
         after_data=after_data,
         reason=reason,
         performed_by=performed_by,
+        tenant_id=tenant_id,
     )
     session.add(snap)
     await session.flush()
@@ -103,6 +116,7 @@ async def snapshot_row(
     after_obj: Any | None = None,
     reason: str | None = None,
     performed_by: str | None = None,
+    tenant_id: uuid.UUID | None = None,
 ) -> AuditSnapshot:
     """Snapshot a SQLAlchemy model instance.
 
@@ -120,11 +134,25 @@ async def snapshot_row(
 
     The `after_obj` kwarg is retained for back-compat: if given, its state
     goes into `after_data` regardless of other args.
+
+    ``tenant_id`` (Wave C RLS remediation): every model captured by this
+    codebase's 7 real ``audit_svc`` call sites (accounts/contacts/
+    bank_rules/items/journal/projects/tax_codes) is a ``CompanyScoped``
+    row that carries its own ``tenant_id`` column — so the default here
+    auto-detects it via ``getattr(obj, "tenant_id", None)`` and callers
+    need change NOTHING. Pass ``tenant_id`` explicitly only when ``obj``
+    itself has no such column (e.g. ``JournalLine`` — a child table with
+    no tenant_id of its own, 0055's carve-out; the caller has the
+    parent entry's tenant_id in scope and should pass it through). A
+    resolved ``None`` (no attribute, no explicit override) is a
+    legitimate outcome for a genuinely tenant-less capture, not an
+    error — see ``snapshot``'s docstring.
     """
     mapper = inspect(type(obj))
     table_name = mapper.mapped_table.name
     pk_cols = [col.key for col in mapper.primary_key]
     row_id = str(getattr(obj, pk_cols[0]))
+    resolved_tenant_id = tenant_id if tenant_id is not None else getattr(obj, "tenant_id", None)
 
     if before_data is not None:
         # Caller captured before-state explicitly; obj is the after state.
@@ -144,6 +172,7 @@ async def snapshot_row(
         after_data=after,
         reason=reason,
         performed_by=performed_by,
+        tenant_id=resolved_tenant_id,
     )
 
 
@@ -153,17 +182,25 @@ async def list_snapshots(
     row_id: str,
     *,
     limit: int = 50,
+    tenant_id: uuid.UUID | None = None,
 ) -> list[AuditSnapshot]:
-    """Get snapshot history for a specific row."""
-    result = await session.execute(
-        select(AuditSnapshot)
-        .where(
-            AuditSnapshot.table_name == table_name,
-            AuditSnapshot.row_id == row_id,
-        )
-        .order_by(AuditSnapshot.created_at.desc())
-        .limit(limit)
+    """Get snapshot history for a specific row.
+
+    ``tenant_id`` (Wave C): application-level tenant filter, belt-and-
+    braces on top of FORCE RLS (migration 0186) — mirrors the pattern
+    ``api/v1/admin.py``'s ``get_audit_log`` uses for ``change_log``.
+    ``None`` (the default) preserves the pre-Wave-C unscoped behaviour
+    for internal/CLI callers that already run under a single-tenant
+    connection; the new gated browse API always passes it.
+    """
+    stmt = select(AuditSnapshot).where(
+        AuditSnapshot.table_name == table_name,
+        AuditSnapshot.row_id == row_id,
     )
+    if tenant_id is not None:
+        stmt = stmt.where(AuditSnapshot.tenant_id == tenant_id)
+    stmt = stmt.order_by(AuditSnapshot.created_at.desc()).limit(limit)
+    result = await session.execute(stmt)
     return list(result.scalars().all())
 
 
@@ -176,8 +213,14 @@ async def browse(
     performed_by: str | None = None,
     limit: int = 100,
     offset: int = 0,
+    tenant_id: uuid.UUID | None = None,
 ) -> list[AuditSnapshot]:
-    """Browse snapshots with optional filters — for the audit viewer."""
+    """Browse snapshots with optional filters — for the audit viewer.
+
+    ``tenant_id`` (Wave C): see ``list_snapshots``'s docstring — same
+    belt-and-braces app-level filter, ``None`` preserves prior
+    unscoped behaviour for internal callers.
+    """
     stmt = select(AuditSnapshot)
     if table_name:
         stmt = stmt.where(AuditSnapshot.table_name == table_name)
@@ -187,33 +230,84 @@ async def browse(
         stmt = stmt.where(AuditSnapshot.action == action)
     if performed_by:
         stmt = stmt.where(AuditSnapshot.performed_by == performed_by)
+    if tenant_id is not None:
+        stmt = stmt.where(AuditSnapshot.tenant_id == tenant_id)
     stmt = stmt.order_by(AuditSnapshot.created_at.desc()).limit(limit).offset(offset)
     result = await session.execute(stmt)
     return list(result.scalars().all())
 
 
+async def count_browse(
+    session: AsyncSession,
+    *,
+    table_name: str | None = None,
+    row_id: str | None = None,
+    action: str | None = None,
+    performed_by: str | None = None,
+    tenant_id: uuid.UUID | None = None,
+) -> int:
+    """Count rows matching ``browse``'s filters — for the browse API's
+    pagination total (same filter set, no limit/offset)."""
+    from sqlalchemy import func as _func
+
+    stmt = select(_func.count()).select_from(AuditSnapshot)
+    if table_name:
+        stmt = stmt.where(AuditSnapshot.table_name == table_name)
+    if row_id:
+        stmt = stmt.where(AuditSnapshot.row_id == row_id)
+    if action:
+        stmt = stmt.where(AuditSnapshot.action == action)
+    if performed_by:
+        stmt = stmt.where(AuditSnapshot.performed_by == performed_by)
+    if tenant_id is not None:
+        stmt = stmt.where(AuditSnapshot.tenant_id == tenant_id)
+    result = await session.execute(stmt)
+    return int(result.scalar_one())
+
+
 async def get_snapshot(
-    session: AsyncSession, snapshot_id: uuid.UUID
+    session: AsyncSession,
+    snapshot_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
 ) -> AuditSnapshot | None:
-    return await session.get(AuditSnapshot, snapshot_id)
+    """Fetch one snapshot by id.
+
+    ``tenant_id`` (Wave C): when supplied, a foreign-tenant id returns
+    ``None`` (treated as not-found) even if the row exists — same
+    belt-and-braces shape as ``journal.get``'s tenant-scoped lookup.
+    """
+    snap = await session.get(AuditSnapshot, snapshot_id)
+    if snap is None:
+        return None
+    if tenant_id is not None and snap.tenant_id != tenant_id:
+        return None
+    return snap
 
 
-async def distinct_tables(session: AsyncSession) -> list[str]:
+async def distinct_tables(
+    session: AsyncSession, *, tenant_id: uuid.UUID | None = None
+) -> list[str]:
     """Distinct table names that have any audit snapshots — for the filter dropdown."""
-    result = await session.execute(
-        select(AuditSnapshot.table_name).distinct().order_by(AuditSnapshot.table_name)
-    )
+    stmt = select(AuditSnapshot.table_name).distinct()
+    if tenant_id is not None:
+        stmt = stmt.where(AuditSnapshot.tenant_id == tenant_id)
+    stmt = stmt.order_by(AuditSnapshot.table_name)
+    result = await session.execute(stmt)
     return [row[0] for row in result.all()]
 
 
-async def distinct_actors(session: AsyncSession) -> list[str]:
+async def distinct_actors(
+    session: AsyncSession, *, tenant_id: uuid.UUID | None = None
+) -> list[str]:
     """Distinct `performed_by` values — for the filter dropdown."""
-    result = await session.execute(
-        select(AuditSnapshot.performed_by)
-        .where(AuditSnapshot.performed_by.is_not(None))
-        .distinct()
-        .order_by(AuditSnapshot.performed_by)
+    stmt = select(AuditSnapshot.performed_by).where(
+        AuditSnapshot.performed_by.is_not(None)
     )
+    if tenant_id is not None:
+        stmt = stmt.where(AuditSnapshot.tenant_id == tenant_id)
+    stmt = stmt.distinct().order_by(AuditSnapshot.performed_by)
+    result = await session.execute(stmt)
     return [row[0] for row in result.all()]
 
 

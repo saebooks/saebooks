@@ -43,6 +43,21 @@ async def api_client() -> AsyncClient:
         yield ac
 
 
+@pytest.fixture(autouse=True)
+def _set_edition_enterprise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run this file's tests at enterprise (all flags on) by default.
+
+    test_depreciation_schedule_declining_balance below creates a real
+    fixed asset on a diminishing-value model (``asset_dv_40``) over
+    HTTP — FLAG_ASSET_V2 (Wave A, 2026-07-10) now gates that selection
+    on create. The other tests use linear models, which stay ungated
+    at every tier, so this is a harmless no-op for them.
+    """
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "enterprise")
+
+
 async def _gl_accounts() -> dict:
     """Return the three GL account IDs every asset test needs."""
     async with AsyncSessionLocal() as session:

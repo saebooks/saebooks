@@ -31,7 +31,7 @@ checklist (same shape as 0155/0178):
 
 Reversible: ``downgrade`` drops the table and its trigger/policy.
 
-See docs/multi-jurisdiction.md (M1.5) (theme T5).
+See ~/records/saebooks/global-reference-audit-2026-07-09.md (theme T5).
 
 Revision ID: 0181_dutiable_transaction_events
 Revises:     0180_journal_line_tax_components

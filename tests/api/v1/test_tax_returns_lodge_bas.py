@@ -1,12 +1,7 @@
-"""Wiring test: lodge_tax_return BAS path's pre-flight guards.
+"""Wiring test: lodge_tax_return BAS path builds a real SBR XBRL envelope.
 
-Covers ``_build_bas_envelope``'s 422 guards (missing company ABN / missing
-tax period) — the figures JSONB + tax-period + company ABN resolution that
-happens *before* handing off to the (community-edition-stubbed) SBR XBRL
-document generator. The generator itself (``build_bas_document``) is a
-commercial SAE Books feature — see ``saebooks/services/lodgement/sbr/bas.py``
-and its own stub — so the "builds a real SBR XBRL envelope" happy-path test
-that used to live here was removed for the public tree.
+Covers ``_build_bas_envelope`` — figures JSONB + tax-period + company ABN ->
+XBRL business document, and the 422 guard when the company has no ABN.
 """
 from __future__ import annotations
 
@@ -15,14 +10,24 @@ from datetime import date
 
 import pytest
 from fastapi import HTTPException
+from lxml import etree
 from sqlalchemy import select
 
 from saebooks.api.v1.tax_returns import _build_bas_envelope
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 from saebooks.models.tax_period import TaxPeriod, TaxPeriodType
+from saebooks.services.lodgement.sbr import bas as _sbr_bas
 
 pytestmark = pytest.mark.postgres_only
+
+# The XBRL envelope generator is the certified ATO SBR transmission path; in the
+# open/AGPL build it is the PUBLIC SHIM (raises NotImplementedError). The real
+# private generator never sets this flag → no-op in the private tree, fires only
+# in the open tree. The 422 input-guard tests below stay real (open-engine surface).
+_SBR_STUBBED = getattr(_sbr_bas, "__OPEN_ENGINE_STUB__", False)
+
+XBRLI = "http://www.xbrl.org/2003/instance"
 
 
 async def _seed_company_and_period(
@@ -65,6 +70,27 @@ async def _seed_company_and_period(
             s.add(period)
         await s.commit()
         return co.id, period.id
+
+
+@pytest.mark.skipif(
+    _SBR_STUBBED,
+    reason="commercial ATO SBR XBRL envelope generation is stubbed in the open/AGPL engine",
+)
+async def test_build_bas_envelope_generates_xbrl_from_figures():
+    company_id, period_id = await _seed_company_and_period("51824753556")
+    figures = {"G1": 11000, "G3": 500, "G10": 2200, "G11": 3300, "1A": 1000, "1B": 500}
+
+    async with AsyncSessionLocal() as s:
+        doc = await _build_bas_envelope(
+            s, company_id=company_id, period_id=period_id, figures=figures
+        )
+
+    root = etree.fromstring(doc)
+    assert root.tag == f"{{{XBRLI}}}xbrl"
+    assert root.find(f".//{{{XBRLI}}}identifier").text == "51824753556"
+    assert root.find(f".//{{{XBRLI}}}startDate").text == "2026-01-01"
+    # G1 fact present with the supplied value (placeholder concept ns is fine here)
+    assert b"11000" in doc and b"500" in doc
 
 
 async def test_build_bas_envelope_422_without_company_abn():

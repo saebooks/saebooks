@@ -831,3 +831,153 @@ async def test_depreciation_run_all_no_active_assets_ok(
     body = r.json()
     assert body["total_assets"] == len(body["results"])
     assert isinstance(body["errors"], list)
+
+
+# ---------------------------------------------------------------------------
+# FLAG_ASSET_V2 gate — Wave A (2026-07-10)
+#
+# v1 baseline (linear/no-depreciation model, no tax split) stays
+# ungated at every tier — the router itself carries no require_feature
+# dependency. Only the two v2-specific fields are conditionally gated:
+# a diminishing-value depreciation_model_id/tax_model_id, and setting
+# tax_model_id at all (the book/tax split itself).
+# ---------------------------------------------------------------------------
+
+
+async def test_create_linear_asset_ungated_at_community(
+    api_client: AsyncClient, gl: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """v1 baseline: linear model, no tax split -> 201 even at community."""
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "community")
+    r = await api_client.post(
+        "/api/v1/fixed_assets", json=_asset_payload(gl)
+    )
+    assert r.status_code == 201, r.text
+
+
+async def test_create_dv_asset_gated_at_community(
+    api_client: AsyncClient, gl: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """v2: a diminishing-value book model -> 404 at community."""
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "community")
+    r = await api_client.post(
+        "/api/v1/fixed_assets",
+        json=_asset_payload(gl, depreciation_model_id="asset_dv_30"),
+    )
+    assert r.status_code == 404, r.text
+
+
+async def test_create_dv_asset_succeeds_at_offline(
+    api_client: AsyncClient, gl: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """v2: a diminishing-value book model -> 201 at offline (turns on here)."""
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "offline")
+    r = await api_client.post(
+        "/api/v1/fixed_assets",
+        json=_asset_payload(gl, depreciation_model_id="asset_dv_30"),
+    )
+    assert r.status_code == 201, r.text
+
+
+async def test_create_tax_split_gated_at_community(
+    api_client: AsyncClient, gl: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """v2: tax_model_id set at all (even a linear tax model) -> 404 at community."""
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "community")
+    r = await api_client.post(
+        "/api/v1/fixed_assets",
+        json=_asset_payload(
+            gl,
+            depreciation_model_id="asset_10_year_linear",
+            tax_model_id="asset_5_year_linear",
+        ),
+    )
+    assert r.status_code == 404, r.text
+
+
+async def test_create_tax_split_succeeds_at_offline(
+    api_client: AsyncClient, gl: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """v2: tax_model_id set -> 201 at offline (turns on here)."""
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "offline")
+    r = await api_client.post(
+        "/api/v1/fixed_assets",
+        json=_asset_payload(
+            gl,
+            depreciation_model_id="asset_10_year_linear",
+            tax_model_id="asset_5_year_linear",
+        ),
+    )
+    assert r.status_code == 201, r.text
+
+
+async def test_update_to_dv_model_gated_at_community(
+    api_client: AsyncClient, gl: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PATCH-ing an existing v1 asset's model to a DV model -> 404 at
+    community. Proves the gate isn't create-only (create then downgrade
+    tier then PATCH to DV is exactly the loophole this closes)."""
+    from saebooks.config import settings as _s
+
+    r = await api_client.post("/api/v1/fixed_assets", json=_asset_payload(gl))
+    assert r.status_code == 201, r.text
+    created = r.json()
+
+    monkeypatch.setattr(_s, "edition", "community")
+    r2 = await api_client.patch(
+        f"/api/v1/fixed_assets/{created['id']}",
+        json={"depreciation_model_id": "asset_dv_30"},
+        headers={"If-Match": str(created["version"])},
+    )
+    assert r2.status_code == 404, r2.text
+
+
+async def test_update_cosmetic_field_ungated_at_community(
+    api_client: AsyncClient, gl: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PATCH on a plain v1 asset that doesn't touch model/tax fields
+    stays ungated at community (proves the gate is scoped to the two
+    v2 fields, not the whole PATCH route)."""
+    from saebooks.config import settings as _s
+
+    r = await api_client.post("/api/v1/fixed_assets", json=_asset_payload(gl))
+    assert r.status_code == 201, r.text
+    created = r.json()
+
+    monkeypatch.setattr(_s, "edition", "community")
+    r2 = await api_client.patch(
+        f"/api/v1/fixed_assets/{created['id']}",
+        json={"description": "Updated description"},
+        headers={"If-Match": str(created["version"])},
+    )
+    assert r2.status_code == 200, r2.text
+
+
+async def test_dispose_stays_ungated_at_community(
+    api_client: AsyncClient, gl: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Full disposal (v1 baseline per CHARTER) is never gated by
+    FLAG_ASSET_V2, at any tier."""
+    from saebooks.config import settings as _s
+
+    r = await api_client.post("/api/v1/fixed_assets", json=_asset_payload(gl))
+    assert r.status_code == 201, r.text
+    created = r.json()
+
+    monkeypatch.setattr(_s, "edition", "community")
+    r2 = await api_client.post(
+        f"/api/v1/fixed_assets/{created['id']}/dispose",
+        json={"disposal_date": "2026-06-01", "proceeds": "500.00"},
+        headers={"If-Match": str(created["version"])},
+    )
+    assert r2.status_code == 200, r2.text

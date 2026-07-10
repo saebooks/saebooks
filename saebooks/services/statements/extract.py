@@ -84,7 +84,7 @@ statement and must return STRICT JSON — no markdown, no commentary, no code fe
 Return a single JSON object with these fields:
 {
   "supplier_name": string or null,
-  "supplier_abn": string or null,        // e.g. "32 000 143 608"
+  "supplier_abn": string or null,        // e.g. "83 914 571 673"
   "customer_ref": string or null,        // the supplier's account number FOR the buyer
   "statement_date": string or null,      // ISO 8601 YYYY-MM-DD
   "terms": string or null,               // e.g. "30 Days"
@@ -106,7 +106,7 @@ Rules:
   the buyer/recipient. Look for it near "ABN:" in the header block — it is typically the company
   name directly above or beside the ABN line. Examples: "Motion Australia Pty Ltd", "Bearing
   Supplies Co", etc.
-- supplier_abn: the ABN shown near the supplier's company name (e.g. "32 000 143 608").
+- supplier_abn: the ABN shown near the supplier's company name (e.g. "83 914 571 673").
 - customer_ref: the buyer's account number at the supplier — look for "Customer:" field.
 - statement_date: look for "Date:" or "Statement Date:" in the header.
 - Each line in the statement body (invoice, payment, credit, adjustment) becomes one entry in "lines".

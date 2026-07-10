@@ -13,7 +13,7 @@ proposed clawback state machine (post-settlement clawback on a
 concession that turns out not to have been met) is a company-scoped
 follow-on, deferred out of this theme.
 
-See docs/multi-jurisdiction.md (M1.5) (theme T5).
+See ~/records/saebooks/global-reference-audit-2026-07-09.md (theme T5).
 """
 import enum
 import uuid

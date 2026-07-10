@@ -14,7 +14,7 @@ rationale.
 All four are reference tables (jurisdiction-keyed, not tenant-scoped) —
 no RLS.
 
-See docs/multi-jurisdiction.md (M1.5) (theme T11,
+See ~/records/saebooks/global-reference-audit-2026-07-09.md (theme T11,
 domain "Income, corporate & capital taxes").
 
 Revision ID: 0007_income_corp_cap_bik

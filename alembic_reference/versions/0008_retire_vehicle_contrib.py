@@ -13,7 +13,7 @@ alongside the AU-only ``super_fund``/``super_guarantee_rates``:
 
 Both are reference tables (jurisdiction-keyed, not tenant-scoped) — no RLS.
 
-See docs/multi-jurisdiction.md (M1.5) (theme T6, gap K4).
+See ~/records/saebooks/global-reference-audit-2026-07-09.md (theme T6, gap K4).
 
 Revision ID: 0006_retirement_vehicle_and_contributions
 Revises: 0007_income_corp_cap_bik

@@ -8,10 +8,10 @@ as a strict superset:
   no paid-API integrations, stock theme only. No flags.
 * **Offline** (once-off USB-bound licence) — Community +
   multi-currency, inventory, projects/budgets, v2 asset register,
-  granular permissions, themes, SMTP relay, extended audit modes.
+  granular permissions, themes, extended audit modes.
 * **Business** (subscription) — Offline + multi-company (cap 2 per
   licence), AU bank feeds, ABR lookup, Stripe + Paperless
-  integrations.
+  integrations, SAE-hosted SMTP relay for invoice delivery.
 * **Pro** (subscription) — Business + international lookups (LEI,
   Companies House), ATO SBR e-lodgement, QBO import, SQL tool,
   scheduled backups, audit snapshots.
@@ -120,11 +120,10 @@ FLAG_DOCUMENT_INBOX = "document_inbox"
 FLAG_INBOX_EMAIL = "inbox_email"
 
 # --- Developer-only flags (not part of any published / billable tier) ----- #
-# These exist ONLY in the ``developer`` tier — the maintainers' own personal
-# instances (a handful of internal tenant stacks) where the codebase is
+# These exist ONLY in the ``developer`` tier — Richard's personal instances
+# (primary / acme / app-preview / cashbook-demo) where the codebase is
 # also the dev surface. They MUST NOT appear in any commercial tier — see
-# an internal design note on the rationale for keeping guardrails off
-# only on those instances.
+# memory feedback_primary-instance-no-guardrails for the rationale.
 #
 # FLAG_HARD_DELETE — admin can hard-delete rows directly from the ledger
 #   (skips the soft-archive / reverse-JE workflow that public editions
@@ -214,7 +213,6 @@ _OFFLINE_FLAGS: frozenset[str] = frozenset({
     FLAG_ASSET_V2,
     FLAG_GRANULAR_PERMISSIONS,
     FLAG_THEMES,
-    FLAG_SMTP_RELAY,
     FLAG_DOCUMENT_INBOX,
 })
 
@@ -227,6 +225,15 @@ _BUSINESS_FLAGS: frozenset[str] = _OFFLINE_FLAGS | frozenset({
     FLAG_AI_EXTRACTION,
     FLAG_ALLOCATION_RULES,
     FLAG_INBOX_EMAIL,
+    # Wave B (2026-07-10) / Richard's decision 7: SAE-hosted SMTP relay
+    # (CHARTER §12.1 "SAE-hosted SMTP for invoice delivery") was
+    # mis-placed in Offline at the v1.1 rollout -- Offline is explicitly
+    # no-phone-home (§6.2), which contradicts using SAE's own comms
+    # relay. Moved up to Business, where it belongs alongside the other
+    # live-API integrations (bank feeds / ABR / Stripe / Paperless).
+    # Superset-safe: this only ADDS the flag at a higher tier than
+    # before, never removes it from one a customer already had.
+    FLAG_SMTP_RELAY,
 })
 
 _PRO_FLAGS: frozenset[str] = _BUSINESS_FLAGS | frozenset({
@@ -246,8 +253,8 @@ _ENTERPRISE_FLAGS: frozenset[str] = _PRO_FLAGS | frozenset({
 # Developer tier — internal-only. Superset of enterprise + every dev-only
 # flag. NOT a billable subscription; never offered through Stripe checkout;
 # only activated via SAEBOOKS_EDITION=developer in the .env of an instance
-# the owner controls directly. Used by the maintainers for their own books
-# (a handful of internal tenant stacks) so test rows can be
+# the owner controls directly. Used by Richard for his personal books
+# (primary / acme / app-preview / cashbook-demo) so test rows can be
 # hard-deleted, frozen-state entities can be edited, etc., without the
 # ATO retention guardrails that ship to paying customers.
 _DEVELOPER_FLAGS: frozenset[str] = _ENTERPRISE_FLAGS | frozenset({
@@ -316,12 +323,27 @@ def is_enabled(
     return flag in _TIER_FLAGS.get(effective.edition, frozenset())
 
 
-def active_flags(*, settings: Settings | None = None) -> dict[str, bool]:
+def active_flags(
+    *, settings: Settings | None = None, edition: str | None = None
+) -> dict[str, bool]:
     """Return ``{flag_name: enabled}`` for every known flag.
 
-    Used by ``/admin/license`` to render the flag matrix.
+    Used by ``/admin/license`` to render the flag matrix, and by the
+    bearer-gated ``/api/v1/modules/usage`` (M2) to resolve per-request
+    entitlement off a *per-user effective edition* rather than the
+    process-wide singleton.
+
+    ``edition`` is forwarded verbatim to ``is_enabled`` — passing it
+    bypasses ``settings`` entirely (same precedence rule as
+    ``is_enabled``: when both are given, ``edition`` wins). Callers
+    that already resolved a per-request effective edition (e.g. via
+    ``_effective_edition_for_request``) should pass it here instead of
+    re-deriving a dict flag-by-flag.
     """
-    return {flag: is_enabled(flag, settings=settings) for flag in ALL_FLAGS}
+    return {
+        flag: is_enabled(flag, settings=settings, edition=edition)
+        for flag in ALL_FLAGS
+    }
 
 
 def tier_flags(tier: str) -> frozenset[str]:
@@ -404,3 +426,51 @@ def require_feature(flag: str) -> Callable[[Request], Awaitable[None]]:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
     return _dep
+
+
+def require_feature_inline(flag: str, request: Request) -> None:
+    """Non-dependency-injected form of :func:`require_feature`'s check.
+
+    ``require_feature`` gates a whole route unconditionally — attach it
+    via ``Depends``/router ``dependencies`` and every call to that route
+    404s below-tier. Some routes need a *conditional* gate instead: the
+    route itself is available at every tier, but a specific request
+    (e.g. one that names a non-base-currency document, or selects a v2
+    depreciation method) crosses a tier boundary and only *that* request
+    should 404. Call this inline, after inspecting the parsed request
+    body, wherever that condition is met.
+
+    Same semantics as ``require_feature``'s dependency (per-request
+    effective edition via ``_effective_edition_for_request``, 404 not
+    403, same "unknown flag raises loud" guard) — just invoked directly
+    instead of through FastAPI's dependency graph.
+    """
+    if flag not in _ALL_FLAGS_SET:
+        raise ValueError(f"Unknown feature flag: {flag!r}")
+    edition = _effective_edition_for_request(request)
+    if not is_enabled(flag, edition=edition):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+
+def feature_enabled_for_request(flag: str, request: Request) -> bool:
+    """Non-raising per-request entitlement check.
+
+    Same resolution as ``require_feature``/``require_feature_inline``
+    (per-user launch-promo JWT via ``_effective_edition_for_request``,
+    falling back to the process-wide singleton) but returns a plain
+    ``bool`` instead of 404ing.
+
+    Use this where a caller needs to *branch* on entitlement rather
+    than hard-gate the whole request — e.g. degrading an optional
+    SAE-hosted transport to a "not available at your tier" outcome
+    instead of blocking the request outright (see
+    ``services/customer_email.py``'s ``sae_relay_entitled`` — Wave B,
+    smtp_relay's tier move to Business). A 404 is right when the
+    *feature itself* shouldn't be advertised; a bool is right when the
+    request is legitimate at every tier and only a sub-capability
+    inside it is gated.
+    """
+    if flag not in _ALL_FLAGS_SET:
+        raise ValueError(f"Unknown feature flag: {flag!r}")
+    edition = _effective_edition_for_request(request)
+    return is_enabled(flag, edition=edition)

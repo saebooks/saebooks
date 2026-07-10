@@ -264,15 +264,19 @@ async def test_post_invoice_writes_normalised_tax_components() -> None:
 
 
 @pytest.mark.asyncio
-async def test_voiding_taxable_invoice_emits_no_reversal_tax_components() -> None:
-    """M1.5 · T2 regression (Wave-2 T8 critic): voiding a taxable invoice
-    must NOT create spurious tax components on the reversal lines.
+async def test_voiding_taxable_invoice_mirrors_offsetting_reversal_components() -> None:
+    """Finding 3 (supersedes the earlier "no reversal components" rule):
+    voiding a taxable invoice MIRRORS the original's tax components onto
+    the reversal lines so a component-aware BAS reader nets them.
 
-    journal.reverse() posts reversal lines with tax_code_id copied but
-    gst_amount=None so they contribute no GST. _apply_tax_treatment must
-    therefore skip them — otherwise a component-aware BAS reader double-counts
-    (and mis-scales) GST for the reversal period. Asserts the reversal entry
-    carries zero tax components.
+    Both the REVERSED original and the POSTED reversal are in
+    REPORTABLE_STATUSES, so the reversal must carry an offsetting tax
+    component or the tax boxes stay overstated after a void (the base
+    already nets via the swapped debit/credit). The aggregator signs a
+    reversal entry's contribution negative, so the mirrored component
+    (same positive tax as the original) cancels — it does NOT double-count.
+    Asserts the reversal carries a mirrored component equal to the
+    original's tax.
     """
     from saebooks.models.journal import JournalEntry, JournalLine
     from saebooks.models.journal_line_tax_component import (
@@ -333,7 +337,12 @@ async def test_voiding_taxable_invoice_emits_no_reversal_tax_components() -> Non
                 )
             )
         ).scalars().all()
-        assert rev_components == [], (
-            "reversal lines (gst_amount=None) must produce no tax components; "
-            f"got {[(c.ref_tax_code, str(c.tax_amount)) for c in rev_components]}"
+        assert rev_components, (
+            "reversal must mirror the original's tax component(s) so a "
+            "component-aware reader nets the void — got none"
         )
+        # €1000 @ 10% GST → one output component, tax 100.00, mirrored
+        # with the SAME positive sign (the aggregator negates the whole
+        # reversal entry, so this nets rather than double-counting).
+        assert [str(c.tax_amount) for c in rev_components] == ["100.00"]
+        assert all(c.direction == "output" for c in rev_components)

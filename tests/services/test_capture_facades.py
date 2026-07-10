@@ -25,11 +25,22 @@ import respx
 from saebooks.services import ai_extraction as ai_svc
 from saebooks.services import capture_client as cc
 from saebooks.services import capture_facades as cf
+from saebooks.services.circuit_breaker import CircuitBreaker
 
 _BASE = "http://capture-module:8080"
 _SVC_TOKEN = "capture-svc-token"
 _TENANT = uuid.UUID("00000000-0000-0000-0000-000000000001")
 _COMPANY = uuid.uuid4()
+
+
+@pytest.fixture(autouse=True)
+def _reset_capture_breaker() -> None:
+    """Isolate the module-level runtime breaker between tests (M2 wave 2a) —
+    it is a singleton, so a failure recorded by one test must not carry over
+    and unexpectedly trip the breaker in the next."""
+    cc._reset_breaker_for_tests()
+    yield
+    cc._reset_breaker_for_tests()
 
 
 @pytest.fixture
@@ -155,6 +166,27 @@ async def test_mirror_post_passes_through_error_status(flag_on: None) -> None:
 
 
 @respx.mock
+async def test_application_error_status_does_not_trip_breaker(flag_on: None) -> None:
+    """A non-2xx the module deliberately RETURNS (e.g. 422 period_locked) is
+    NOT a transport failure — the module answered. Repeated 422s must not
+    trip the breaker (only unreachability should)."""
+    respx.post(f"{_BASE}/module/capture/imports/wizards/w1/commit").mock(
+        return_value=httpx.Response(422, json={"code": "period_locked"})
+    )
+    for _ in range(10):  # far more than any reasonable failure_threshold
+        resp = await cf.mirror_post(
+            "imports/wizards/w1/commit",
+            b"{}",
+            content_type="application/json",
+            tenant_id=_TENANT,
+            company_id=_COMPANY,
+        )
+        assert resp.status_code == 422
+    assert cc._breaker.state.value == "closed"
+    assert cc.delegating() is True
+
+
+@respx.mock
 async def test_mirror_post_forwards_retry_after_header(flag_on: None) -> None:
     respx.post(f"{_BASE}/module/capture/imports/wizards").mock(
         return_value=httpx.Response(
@@ -211,3 +243,84 @@ async def test_transport_failure_raises_service_error(flag_on: None) -> None:
             content_type="application/json",
             tenant_id=_TENANT,
         )
+
+
+# --------------------------------------------------------------------------- #
+# Runtime circuit breaker (M2 wave 2a, P0a/P0b) — degrade, don't hammer          #
+# --------------------------------------------------------------------------- #
+class _FakeClock:
+    def __init__(self, start: float = 0.0) -> None:
+        self.now = start
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def _small_breaker(monkeypatch: pytest.MonkeyPatch, *, threshold: int, cooldown: float) -> _FakeClock:
+    """Swap the module's runtime breaker for one with a low threshold and an
+    injected clock, so trip/cooldown/half-open can be exercised without
+    5 real failures or real sleeps."""
+    clock = _FakeClock()
+    breaker = CircuitBreaker(
+        "capture-test", failure_threshold=threshold, cooldown_seconds=cooldown, clock=clock
+    )
+    monkeypatch.setattr(cc, "_breaker", breaker)
+    return clock
+
+
+@respx.mock
+async def test_breaker_trips_open_and_falls_back_without_hammering(
+    flag_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """After N consecutive transport failures the breaker opens; the
+    engine's existing capture-flag call sites fall back to in-process
+    automatically (``delegating()`` -> False) with NO further network
+    attempt — the "don't hammer a down service" requirement."""
+    _small_breaker(monkeypatch, threshold=2, cooldown=30.0)
+    route = respx.post(f"{_BASE}/module/capture/bank-feeds/sync").mock(
+        side_effect=httpx.ConnectError("no route")
+    )
+
+    for _ in range(2):
+        with pytest.raises(cc.CaptureServiceError):
+            await cf.mirror_post(
+                "bank-feeds/sync", b"{}", content_type="application/json", tenant_id=_TENANT
+            )
+
+    assert route.call_count == 2
+    assert cc._breaker.state.value == "open"
+    # delegating() now returns False without attempting the network — the
+    # ~15 in-process-capable call sites (bank_feeds.py, imports.py, ...)
+    # fall back to their existing in-process branch automatically.
+    assert cc.delegating() is False
+    assert route.call_count == 2, "breaker-open must not attempt another request"
+
+
+@respx.mock
+async def test_breaker_half_open_probe_success_closes_and_resumes_delegation(
+    flag_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = _small_breaker(monkeypatch, threshold=1, cooldown=10.0)
+    route = respx.post(f"{_BASE}/module/capture/bank-feeds/sync")
+    route.side_effect = httpx.ConnectError("no route")
+
+    with pytest.raises(cc.CaptureServiceError):
+        await cf.mirror_post(
+            "bank-feeds/sync", b"{}", content_type="application/json", tenant_id=_TENANT
+        )
+    assert cc.delegating() is False  # OPEN, within cooldown
+
+    clock.advance(10.0)
+    assert cc.delegating() is True  # cooldown elapsed -> half-open probe granted
+
+    route.side_effect = None
+    route.mock(return_value=httpx.Response(200, json={"synced": True}))
+    resp = await cf.mirror_post(
+        "bank-feeds/sync", b"{}", content_type="application/json", tenant_id=_TENANT
+    )
+    assert resp.status_code == 200
+    assert cc._breaker.state.value == "closed"
+    assert cc.delegating() is True

@@ -56,7 +56,7 @@ def _strip_jsonp(raw: str) -> str:
 
 
 def _normalise_abn(abn: str) -> str:
-    """Strip whitespace so '12 345 678 901' -> '12345678901'."""
+    """Strip whitespace so '51 824 753 556' -> '51824753556'."""
     return "".join(ch for ch in abn if ch.isdigit())
 
 

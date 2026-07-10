@@ -26,7 +26,7 @@ Configuration (per-instance env)
 --------------------------------
 
 * ``SAEBOOKS_WEBAUTHN_ENABLED``  (default ``"1"``)
-* ``SAEBOOKS_WEBAUTHN_RP_ID``    (e.g. ``books.example.com.au``)
+* ``SAEBOOKS_WEBAUTHN_RP_ID``    (e.g. ``books.example.com``)
 * ``SAEBOOKS_WEBAUTHN_RP_NAME``  (display name, default ``SAE Books``)
 * ``SAEBOOKS_WEBAUTHN_ORIGIN``   (comma-separated; must include https://RP_ID)
 

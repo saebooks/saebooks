@@ -33,6 +33,7 @@ from saebooks.api.v1.schemas import (
 )
 from saebooks.models.credit_note import CreditNoteStatus
 from saebooks.services import credit_notes as svc
+from saebooks.services.authz import no_additional_gate, require_permission_or_role
 from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 
@@ -274,6 +275,9 @@ async def update_credit_note(
         204: {"description": "Voided"},
         409: {"model": CreditNoteConflictBody, "description": "Version mismatch"},
     },
+    dependencies=[
+        Depends(require_permission_or_role("credit_note.void", no_additional_gate))
+    ],
 )
 async def void_credit_note(
     request: Request,
@@ -345,6 +349,9 @@ async def void_credit_note(
         200: {"model": CreditNoteOut},
         409: {"model": CreditNoteConflictBody, "description": "Version mismatch"},
     },
+    dependencies=[
+        Depends(require_permission_or_role("credit_note.post", no_additional_gate))
+    ],
 )
 async def post_credit_note(
     request: Request,
@@ -429,6 +436,9 @@ async def post_credit_note(
         204: {"description": "Voided"},
         409: {"model": CreditNoteConflictBody, "description": "Version mismatch"},
     },
+    dependencies=[
+        Depends(require_permission_or_role("credit_note.void", no_additional_gate))
+    ],
 )
 async def void_credit_note_transition(
     request: Request,

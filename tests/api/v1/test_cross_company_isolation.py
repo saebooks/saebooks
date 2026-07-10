@@ -90,6 +90,24 @@ async def api_client() -> AsyncClient:
         yield ac
 
 
+@pytest.fixture(autouse=True)
+def _set_edition_enterprise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run this file's tests at enterprise (all flags on) by default.
+
+    FLAG_PROJECTS_BUDGETS (Wave A, 2026-07-10) now gates the whole
+    /api/v1/projects and /api/v1/budgets routers. Without this, the
+    project/budget GET/PATCH/DELETE requests below 404 on the feature
+    gate before the cross-company check ever runs -- the "blocked"
+    assertions pass vacuously and the "allowed same company" assertion
+    fails outright. Pin enterprise so this file exercises the real
+    cross-company isolation logic, same pattern as
+    ``tests/api/v1/test_projects.py`` / ``tests/api/v1/test_budgets.py``.
+    """
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "enterprise")
+
+
 @pytest.fixture
 async def seed_company_id() -> uuid.UUID:
     """Return the id of the seed company (first by created_at)."""

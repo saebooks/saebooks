@@ -50,6 +50,8 @@ from saebooks.api.v1.schemas import (
 from saebooks.models.journal import EntryStatus
 from saebooks.services import journal_entries as svc
 from saebooks.services import review_flags as review_flags_svc
+from saebooks.services.authz import no_additional_gate, require_permission_or_role
+from saebooks.services.features import FLAG_EXTENDED_AUDIT_MODES, feature_enabled_for_request
 from saebooks.services.hard_delete import hard_delete_with_audit
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 
@@ -411,6 +413,12 @@ async def update_journal_entry(
             reference=payload.reference,
             status=payload.status,
             lines=lines_data,
+            override_reason=payload.override_reason or None,
+            actor_role=_resolve_actor_role(request),
+            extended_audit_modes_entitled=feature_enabled_for_request(
+                FLAG_EXTENDED_AUDIT_MODES, request
+            ),
+            performed_by=f"api:{bearer[:8]}…",
         )
     except svc.VersionConflict as exc:
         body = JournalEntryConflictBody(
@@ -439,6 +447,13 @@ async def update_journal_entry(
         204: {"description": "Voided"},
         409: {"model": JournalEntryConflictBody, "description": "Version mismatch"},
     },
+    # No dedicated "journal.void" catalogue code exists (the draft's
+    # journal section only covers view/draft/post/reverse) — mapped to
+    # the closest destructive-class code, journal.reverse, matching
+    # the conservative-not-permissive direction used across this pass.
+    dependencies=[
+        Depends(require_permission_or_role("journal.reverse", no_additional_gate))
+    ],
 )
 async def void_journal_entry(
     entry_id: UUID,
@@ -498,6 +513,9 @@ async def void_journal_entry(
         200: {"model": JournalEntryOut},
         409: {"model": JournalEntryConflictBody, "description": "Version mismatch"},
     },
+    dependencies=[
+        Depends(require_permission_or_role("journal.post", no_additional_gate))
+    ],
 )
 async def post_journal_entry(
     entry_id: UUID,
@@ -588,6 +606,9 @@ async def post_journal_entry(
         409: {"model": JournalEntryConflictBody, "description": "Version mismatch"},
     },
     status_code=201,
+    dependencies=[
+        Depends(require_permission_or_role("journal.reverse", no_additional_gate))
+    ],
 )
 async def reverse_journal_entry(
     entry_id: UUID,

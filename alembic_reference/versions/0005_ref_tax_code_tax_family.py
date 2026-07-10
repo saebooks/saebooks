@@ -8,7 +8,7 @@ are recoverable (the property that actually separates the families).
 Additive/defaulted: existing seeded codes (all AU GST to date) become
 vat_gst with input_credit_recoverable = true.
 
-See docs/multi-jurisdiction.md (M1.5) (theme T1).
+See ~/records/saebooks/global-reference-audit-2026-07-09.md (theme T1).
 
 Revision ID: 0005_ref_tax_code_tax_family
 Revises: 0004_payroll_canonical_tables

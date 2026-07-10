@@ -82,12 +82,33 @@ async def api_license() -> dict[str, object]:
     non-sensitive public metadata already shown on the /admin/license
     HTML page. The web frontend calls this to conditionally render
     multi-company UI elements without burning an auth'd call.
+
+    M2 §3 retrofit: the six developer-only flags (hard_delete,
+    dev_tools, edit_frozen_state, raw_json_inspector, tenant_switcher,
+    skip_audit_trail) and the internal "developer" tier are excluded
+    from ``flags``/``all_flags``/``tier_order`` — this endpoint used to
+    leak them unfiltered (confirmed in the M2 module-architecture audit
+    §2.1/§8.2), which the new GET /api/v1/modules deliberately does not
+    inherit. Reuses the same DEVELOPER_ONLY_FLAGS / PUBLIC_TIER_ORDER
+    the new registry endpoint filters on, so the two surfaces can't
+    drift apart.
     """
-    from saebooks.services.features import ALL_FLAGS, TIER_ORDER, active_flags
+    from saebooks.services.features import ALL_FLAGS, active_flags
+    from saebooks.services.module_registry import (
+        DEVELOPER_ONLY_FLAGS,
+        PUBLIC_TIER_ORDER,
+    )
+
+    all_flags = active_flags()
+    public_flags = {
+        flag: enabled
+        for flag, enabled in all_flags.items()
+        if flag not in DEVELOPER_ONLY_FLAGS
+    }
 
     return {
         "edition": settings.edition,
-        "flags": active_flags(),
-        "all_flags": list(ALL_FLAGS),
-        "tier_order": list(TIER_ORDER),
+        "flags": public_flags,
+        "all_flags": [f for f in ALL_FLAGS if f not in DEVELOPER_ONLY_FLAGS],
+        "tier_order": list(PUBLIC_TIER_ORDER),
     }

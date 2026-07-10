@@ -3,9 +3,8 @@
 ``ApiToken.scopes`` used to be stored, echoed, and shown in the admin
 UI but never read for an authorization decision — so a token a
 consumer believed was "read-only" could still POST/PUT/PATCH/DELETE
-(a deferred "per-scope authorization" item from the original build
-brief: *every token currently has the user's full role-level access*).
-This module is the decision layer
+(DEFERRED.md "Per-scope authorization": *every token currently has the
+user's full role-level access*). This module is the decision layer
 ``require_bearer`` now consults for ``saebk_*`` API-token auth ONLY.
 
 Design — minimum viable (read vs write)

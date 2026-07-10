@@ -39,8 +39,9 @@ from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_session
 from saebooks.api.v1.users import _require_admin
 from saebooks.models.change_log import ChangeLog
+from saebooks.services import audit as audit_svc
 from saebooks.services import sql_tool as sql_svc
-from saebooks.services.features import FLAG_SQL_TOOL, require_feature
+from saebooks.services.features import FLAG_AUDIT_SNAPSHOTS, FLAG_SQL_TOOL, require_feature
 from saebooks.services.idempotency import (
     ClaimStatus,
     claim_or_fetch,
@@ -98,6 +99,32 @@ class SqlExecuteResponse(BaseModel):
     role_used: str
     audit_id: int
     truncated: bool
+
+
+class AuditSnapshotEntry(BaseModel):
+    """One row from ``audit_snapshots`` — the FLAG_AUDIT_SNAPSHOTS browse API."""
+
+    id: uuid.UUID
+    table_name: str
+    row_id: str
+    action: str
+    before_data: dict[str, Any]
+    after_data: dict[str, Any] | None
+    reason: str | None
+    performed_by: str | None
+    created_at: datetime
+
+
+class AuditSnapshotPage(BaseModel):
+    items: list[AuditSnapshotEntry]
+    total: int
+    limit: int
+    offset: int
+
+
+class AuditSnapshotFilterOptions(BaseModel):
+    tables: list[str]
+    actors: list[str]
 
 
 # ---------------------------------------------------------------------------
@@ -315,3 +342,118 @@ async def post_sql_execute(
         await store_response(session, key, 200, json.dumps(response_body).encode())
         await session.commit()
     return JSONResponse(response_body, status_code=200)
+
+
+# ---------------------------------------------------------------------------
+# /admin/audit-snapshots — Wave C, gated by FLAG_AUDIT_SNAPSHOTS (Pro+)
+# ---------------------------------------------------------------------------
+# Capture itself (services/audit.py's snapshot()/snapshot_row(), called from
+# 7 services) is ALWAYS ON at every edition — it's the point-in-time
+# undo/recovery mechanism CHARTER §7.3 requires unconditionally. What's
+# gated here is the browse/point-in-time VIEW into that data (CHARTER
+# §12.1 "Audit snapshot service" row, Pro+) — per Richard's decision 8
+# ("keep existing row-level before/after as the point-in-time MVP + add
+# the tenant_id+FORCE-RLS+isolation-policy migration + backfill before
+# exposing the browse API, then gate"). Migration 0186 landed the RLS
+# remediation; these three routes are the first thing that could ever
+# read the table directly (previously nothing did — see that migration's
+# docstring for why 0055 originally left audit_snapshots unscoped).
+#
+# Tenant scoping is defence-in-depth: FORCE RLS (0186) is the real
+# boundary; the explicit ``tenant_id=`` filter on every call below
+# mirrors ``get_audit_log``'s belt-and-braces pattern above.
+
+
+@router.get(
+    "/audit-snapshots/_filter_options",
+    response_model=AuditSnapshotFilterOptions,
+    summary="Distinct table_name / performed_by values for the filter dropdowns",
+    dependencies=[Depends(require_feature(FLAG_AUDIT_SNAPSHOTS))],
+)
+async def get_audit_snapshot_filter_options(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> AuditSnapshotFilterOptions:
+    tenant_id = resolve_tenant_id(request)
+    tables = await audit_svc.distinct_tables(session, tenant_id=tenant_id)
+    actors = await audit_svc.distinct_actors(session, tenant_id=tenant_id)
+    return AuditSnapshotFilterOptions(tables=tables, actors=actors)
+
+
+@router.get(
+    "/audit-snapshots",
+    response_model=AuditSnapshotPage,
+    summary="Paginated, filterable browse of audit_snapshots (point-in-time recovery data)",
+    dependencies=[Depends(require_feature(FLAG_AUDIT_SNAPSHOTS))],
+)
+async def get_audit_snapshots(
+    request: Request,
+    table_name: str | None = Query(default=None),
+    row_id: str | None = Query(default=None),
+    action: str | None = Query(default=None),
+    performed_by: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_session),
+) -> AuditSnapshotPage:
+    tenant_id = resolve_tenant_id(request)
+    filters: dict[str, Any] = {
+        "table_name": table_name,
+        "row_id": row_id,
+        "action": action,
+        "performed_by": performed_by,
+        "tenant_id": tenant_id,
+    }
+    total = await audit_svc.count_browse(session, **filters)
+    rows = await audit_svc.browse(session, limit=limit, offset=offset, **filters)
+    return AuditSnapshotPage(
+        items=[
+            AuditSnapshotEntry(
+                id=r.id,
+                table_name=r.table_name,
+                row_id=r.row_id,
+                action=r.action,
+                before_data=r.before_data,
+                after_data=r.after_data,
+                reason=r.reason,
+                performed_by=r.performed_by,
+                created_at=r.created_at,
+            )
+            for r in rows
+        ],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get(
+    "/audit-snapshots/{snapshot_id}",
+    response_model=AuditSnapshotEntry,
+    summary="Fetch one audit_snapshots row by id",
+    dependencies=[Depends(require_feature(FLAG_AUDIT_SNAPSHOTS))],
+)
+async def get_audit_snapshot(
+    snapshot_id: uuid.UUID,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> AuditSnapshotEntry:
+    tenant_id = resolve_tenant_id(request)
+    snap = await audit_svc.get_snapshot(session, snapshot_id, tenant_id=tenant_id)
+    if snap is None:
+        # 404 for both "doesn't exist" and "exists but belongs to another
+        # tenant" — same not-403 posture as every other cross-tenant probe
+        # in this codebase (journal.get, etc.): don't confirm the row
+        # exists to a caller who can't see it.
+        raise HTTPException(404, "Audit snapshot not found")
+    return AuditSnapshotEntry(
+        id=snap.id,
+        table_name=snap.table_name,
+        row_id=snap.row_id,
+        action=snap.action,
+        before_data=snap.before_data,
+        after_data=snap.after_data,
+        reason=snap.reason,
+        performed_by=snap.performed_by,
+        created_at=snap.created_at,
+    )

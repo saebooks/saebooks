@@ -15,7 +15,7 @@ coordinated pass may generalise ``super_fund`` itself onto a
 jurisdiction-neutral ``retirement_accounts`` table (see K4 in the audit);
 that rename is deliberately out of scope here.
 
-See docs/multi-jurisdiction.md (M1.5) (theme T6, gap K4).
+See ~/records/saebooks/global-reference-audit-2026-07-09.md (theme T6, gap K4).
 """
 import enum
 import uuid

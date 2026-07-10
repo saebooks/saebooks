@@ -1,0 +1,118 @@
+# SAE Books — pre-accounting MODULE image (#32 step 4)
+#
+# Produces the ``saebooks-preaccounting`` image: a lean container that runs
+# ONLY the pre-accounting module app (quotes / purchase-orders / time-entries
+# CRUD + the three conversion hand-offs) in web mode:
+#
+#   MODE=web  → ``uvicorn preaccounting_app.main:app`` on port 8080, via the
+#               ``python -m preaccounting_app`` dispatcher (#32 wave 2b —
+#               matches capture's and platform's CMD form).
+#
+# It shares the engine's codebase (the module IS the engine service layer with
+# the PREACCOUNTING_BASE_URL flag off) and the same Postgres database, so it
+# needs the saebooks package + models + migrations. It does NOT run the gRPC
+# server and carries no LaTeX toolchain — the module is pure REST over the
+# shared DB.
+#
+# Build:  docker build -f Dockerfile.preaccounting -t saebooks-preaccounting .
+
+ARG PYTHON_VERSION=3.12
+
+# ---------------------------------------------------------------------------
+# Stage 1: builder — install deps + generate the (shared) gRPC stubs so the
+# saebooks package imports identically to the engine image. We do NOT run the
+# gRPC server; the stubs are only present so any transitive import resolves.
+# ---------------------------------------------------------------------------
+FROM python:${PYTHON_VERSION}-slim AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:$PATH"
+
+ARG CONNECPY_VERSION=2.3.0
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gcc g++ libpq-dev curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN ARCH="$(uname -m)" \
+    && case "$ARCH" in \
+         x86_64) PLUGIN_ARCH=amd64 ;; \
+         aarch64) PLUGIN_ARCH=arm64 ;; \
+         *) echo "unsupported arch: $ARCH" >&2; exit 1 ;; \
+       esac \
+    && curl -fsSL -o /tmp/protoc-gen-connecpy.tgz \
+        "https://github.com/i2y/connecpy/releases/download/v${CONNECPY_VERSION}/protoc-gen-connecpy_${CONNECPY_VERSION}_linux_${PLUGIN_ARCH}.tar.gz" \
+    && tar -C /usr/local/bin -xzf /tmp/protoc-gen-connecpy.tgz protoc-gen-connecpy \
+    && chmod +x /usr/local/bin/protoc-gen-connecpy \
+    && rm /tmp/protoc-gen-connecpy.tgz
+
+RUN python -m venv "${VIRTUAL_ENV}"
+
+WORKDIR /build
+
+COPY pyproject.toml README.md ./
+RUN pip install --upgrade pip setuptools wheel \
+    && pip install .
+
+COPY saebooks/ ./saebooks/
+COPY preaccounting_app/ ./preaccounting_app/
+COPY alembic.ini ./
+COPY alembic/ ./alembic/
+
+RUN mkdir -p saebooks/grpc_gen \
+    && touch saebooks/grpc_gen/__init__.py \
+    && python -m grpc_tools.protoc \
+        -I saebooks/proto \
+        --python_out=saebooks/grpc_gen \
+        --grpc_python_out=saebooks/grpc_gen \
+        --connecpy_out=saebooks/grpc_gen \
+        saebooks/proto/saebooks.proto \
+    && sed -i 's/^import saebooks_pb2/from saebooks.grpc_gen import saebooks_pb2/' \
+        saebooks/grpc_gen/saebooks_pb2_grpc.py \
+    && sed -i 's/^import saebooks_pb2/from saebooks.grpc_gen import saebooks_pb2/' \
+        saebooks/grpc_gen/saebooks_connecpy.py
+
+RUN pip install --no-deps .
+
+# ---------------------------------------------------------------------------
+# Stage 2: runtime — minimal, no compiler toolchain, no LaTeX, no gRPC server.
+# ---------------------------------------------------------------------------
+FROM python:${PYTHON_VERSION}-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:$PATH"
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libpq5 curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --system saebooks \
+    && useradd --system --gid saebooks --no-create-home saebooks
+
+WORKDIR /app
+
+COPY --from=builder /opt/venv /opt/venv
+COPY --chown=saebooks:saebooks saebooks/ ./saebooks/
+COPY --from=builder --chown=saebooks:saebooks /build/saebooks/grpc_gen/ ./saebooks/grpc_gen/
+COPY --chown=saebooks:saebooks preaccounting_app/ ./preaccounting_app/
+COPY --chown=saebooks:saebooks pyproject.toml ./
+
+USER saebooks
+
+EXPOSE 8080
+
+# MODE selects the role at runtime (web only, for now — matches capture's
+# and platform's single-image dispatcher ergonomics; #32 wave 2b). Default:
+# web.
+ENV MODE=web
+
+# Liveness probe hits the module's own unauthenticated /healthz.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -fsS http://localhost:8080/healthz || exit 1
+
+CMD ["python", "-m", "preaccounting_app"]

@@ -11,7 +11,12 @@ Public surface:
 * ``realised_gain_lines(inv_rate, pay_rate, alloc_amount, ...)`` —
   compute the Dr/Cr line pair that posts the realised FX difference
   between invoice-issue rate and payment-settle rate.
+* ``gate_non_base_currency(session, request, company_id, currency)`` —
+  Wave A (2026-07-10) ``FLAG_MULTI_CURRENCY`` enforcement: 404s a
+  create request that names a non-base currency below-tier; a no-op
+  for base-currency requests at any tier.
 """
+from saebooks.services.fx.gate import gate_non_base_currency
 from saebooks.services.fx.rates import (
     FxRateError,
     apply_document_fx,
@@ -29,5 +34,6 @@ __all__ = [
     "apply_document_fx",
     "compute_realised_fx",
     "fetch_and_cache",
+    "gate_non_base_currency",
     "get_rate",
 ]

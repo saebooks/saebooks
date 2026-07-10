@@ -24,8 +24,15 @@ from saebooks.main import app
 from saebooks.models.user import User
 from saebooks.services import launch_promo as _promo_mod
 from saebooks.services.jwt_tokens import _reset_secret_cache
+from saebooks.services.licence import resolver as _resolver_mod
 
 pytestmark = pytest.mark.postgres_only
+
+# In the open/AGPL build the licence control-plane (resolver + `api/v1/license`
+# router incl. the promo-stats endpoint) is the PUBLIC SHIM, so promo config is
+# inert (limit 0). The real private resolver never sets this flag → no-op in the
+# private tree, fires only in the open tree.
+_LICENCE_STUBBED = getattr(_resolver_mod, "__OPEN_ENGINE_STUB__", False)
 
 
 @pytest.fixture(autouse=True)
@@ -260,6 +267,10 @@ async def test_signup_promo_network_error_still_succeeds(client, monkeypatch):
 
 
 @pytest.mark.anyio
+@pytest.mark.skipif(
+    _LICENCE_STUBBED,
+    reason="commercial launch-promo/licence control-plane is stubbed in the open/AGPL engine (promo limit inert)",
+)
 async def test_promo_stats_endpoint_flag_off(client, monkeypatch):
     """Public promo-stats endpoint returns disabled shape when flag is off."""
     from saebooks.config import Settings as _Cfg

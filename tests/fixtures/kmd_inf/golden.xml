@@ -1,0 +1,70 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<kmdinf:KmdInfDeklaratsioon xmlns:kmdinf="urn:emta:PLACEHOLDER:kmdinf" schemaRef="urn:emta:PLACEHOLDER:kmdinf.xsd" regkood="10123456" perioodAlgus="2026-02-01" perioodLopp="2026-02-28">
+  <kmdinf:OsaA>
+    <kmdinf:OsaAKirje>
+      <kmdinf:JrkNr>1</kmdinf:JrkNr>
+      <kmdinf:PartneriKood>10111111</kmdinf:PartneriKood>
+      <kmdinf:PartneriNimi>P1 Straddles Both Ways</kmdinf:PartneriNimi>
+      <kmdinf:ArveNumber>INV-000001</kmdinf:ArveNumber>
+      <kmdinf:ArveKuupaev>2026-02-05</kmdinf:ArveKuupaev>
+      <kmdinf:ArveSummaKm>700.00</kmdinf:ArveSummaKm>
+      <kmdinf:MaksustatavVaartus>700.00</kmdinf:MaksustatavVaartus>
+      <kmdinf:Maksumaar>24.00</kmdinf:Maksumaar>
+      <kmdinf:KmdLahter>1</kmdinf:KmdLahter>
+      <kmdinf:ErisuseKood></kmdinf:ErisuseKood>
+      <kmdinf:KreeditArve>false</kmdinf:KreeditArve>
+    </kmdinf:OsaAKirje>
+    <kmdinf:OsaAKirje>
+      <kmdinf:JrkNr>2</kmdinf:JrkNr>
+      <kmdinf:PartneriKood>10111111</kmdinf:PartneriKood>
+      <kmdinf:PartneriNimi>P1 Straddles Both Ways</kmdinf:PartneriNimi>
+      <kmdinf:ArveNumber>INV-000002</kmdinf:ArveNumber>
+      <kmdinf:ArveKuupaev>2026-02-10</kmdinf:ArveKuupaev>
+      <kmdinf:ArveSummaKm>500.00</kmdinf:ArveSummaKm>
+      <kmdinf:MaksustatavVaartus>500.00</kmdinf:MaksustatavVaartus>
+      <kmdinf:Maksumaar>24.00</kmdinf:Maksumaar>
+      <kmdinf:KmdLahter>1</kmdinf:KmdLahter>
+      <kmdinf:ErisuseKood></kmdinf:ErisuseKood>
+      <kmdinf:KreeditArve>false</kmdinf:KreeditArve>
+    </kmdinf:OsaAKirje>
+    <kmdinf:OsaAKirje>
+      <kmdinf:JrkNr>3</kmdinf:JrkNr>
+      <kmdinf:PartneriKood>10111111</kmdinf:PartneriKood>
+      <kmdinf:PartneriNimi>P1 Straddles Both Ways</kmdinf:PartneriNimi>
+      <kmdinf:ArveNumber>CN-000001</kmdinf:ArveNumber>
+      <kmdinf:ArveKuupaev>2026-02-15</kmdinf:ArveKuupaev>
+      <kmdinf:ArveSummaKm>-300.00</kmdinf:ArveSummaKm>
+      <kmdinf:MaksustatavVaartus>-300.00</kmdinf:MaksustatavVaartus>
+      <kmdinf:Maksumaar>24.00</kmdinf:Maksumaar>
+      <kmdinf:KmdLahter>1</kmdinf:KmdLahter>
+      <kmdinf:ErisuseKood></kmdinf:ErisuseKood>
+      <kmdinf:KreeditArve>true</kmdinf:KreeditArve>
+    </kmdinf:OsaAKirje>
+    <kmdinf:OsaAKirje>
+      <kmdinf:JrkNr>1</kmdinf:JrkNr>
+      <kmdinf:PartneriKood>10333333</kmdinf:PartneriKood>
+      <kmdinf:PartneriNimi>P3 Boundary</kmdinf:PartneriNimi>
+      <kmdinf:ArveNumber>INV-000004</kmdinf:ArveNumber>
+      <kmdinf:ArveKuupaev>2026-02-07</kmdinf:ArveKuupaev>
+      <kmdinf:ArveSummaKm>1000.00</kmdinf:ArveSummaKm>
+      <kmdinf:MaksustatavVaartus>1000.00</kmdinf:MaksustatavVaartus>
+      <kmdinf:Maksumaar>24.00</kmdinf:Maksumaar>
+      <kmdinf:KmdLahter>1</kmdinf:KmdLahter>
+      <kmdinf:ErisuseKood></kmdinf:ErisuseKood>
+      <kmdinf:KreeditArve>false</kmdinf:KreeditArve>
+    </kmdinf:OsaAKirje>
+  </kmdinf:OsaA>
+  <kmdinf:OsaB>
+    <kmdinf:OsaBKirje>
+      <kmdinf:JrkNr>1</kmdinf:JrkNr>
+      <kmdinf:PartneriKood>10555555</kmdinf:PartneriKood>
+      <kmdinf:PartneriNimi>S1 Deductible Supplier</kmdinf:PartneriNimi>
+      <kmdinf:ArveNumber>BILL-000001</kmdinf:ArveNumber>
+      <kmdinf:ArveKuupaev>2026-02-09</kmdinf:ArveKuupaev>
+      <kmdinf:ArveSummaKoosKm>1364.00</kmdinf:ArveSummaKoosKm>
+      <kmdinf:SisendKaibemaks>264.00</kmdinf:SisendKaibemaks>
+      <kmdinf:Maksumaar>24.00</kmdinf:Maksumaar>
+      <kmdinf:ErisuseKood></kmdinf:ErisuseKood>
+    </kmdinf:OsaBKirje>
+  </kmdinf:OsaB>
+</kmdinf:KmdInfDeklaratsioon>

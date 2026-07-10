@@ -23,7 +23,7 @@ so neither's future evolution forces a change to the other.
 Additive only — ``super_guarantee_rates`` is untouched; a future,
 coordinated pass may migrate AU onto this table (see K4 in the audit).
 
-See docs/multi-jurisdiction.md (M1.5) (theme T6, gap K4).
+See ~/records/saebooks/global-reference-audit-2026-07-09.md (theme T6, gap K4).
 """
 import enum
 import uuid

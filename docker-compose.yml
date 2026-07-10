@@ -34,11 +34,115 @@ services:
       # Backup directory mounted read-only so the backups service can list
       # dumps + parse the status log. The host path is whatever pg_dump
       # writes to (defaults to $HOME/saebooks-backups in scripts/backup.sh).
-      - ${SAEBOOKS_BACKUP_DIR:-${HOME}/saebooks-backups}:/app/backups:ro
+      - ${SAEBOOKS_BACKUP_DIR:-/home/youruser/saebooks-backups}:/app/backups:ro
     environment:
       SAEBOOKS_BACKUP_DIR_IN_CONTAINER: /app/backups
     ports:
       - "8042:8000"
+
+  # ------------------------------------------------------------------- #
+  # Delegated module services (M2 wave 2b, #32 P0c).                    #
+  # ------------------------------------------------------------------- #
+  # NON-ACTIVATING BY DEFAULT. Gated behind the Compose "modules" profile,
+  # so a plain `docker compose up` (no --profile flag) does NOT start
+  # these — the default deploy is byte-for-byte unchanged.
+  #
+  # Even if started explicitly (`docker compose --profile modules up`),
+  # the engine (`app`, above) still does NOT delegate to them:
+  # CAPTURE_BASE_URL / PREACCOUNTING_BASE_URL / PLATFORM_BASE_URL are left
+  # UNSET on `app`, so every module stays in-process (see
+  # saebooks/config.py — empty base_url = in-process, the default). Each
+  # module's own inbound request-auth gate (CAPTURE_TOKEN /
+  # PREACCOUNTING_TOKEN / PLATFORM_TOKEN, wired below from the host env
+  # with an empty-string default) is ALSO unset by default, which
+  # fail-closes the module surface with 503 (capture_app/deps.py,
+  # preaccounting_app/deps.py, platform_app/deps.py). Turning delegation
+  # ON is a deliberate, separate, explicitly-gated action controlled by
+  # Richard — see docs/operations/module-delegation-activation.md for the
+  # exact steps. Do NOT set the *_BASE_URL vars on `app` as part of a
+  # routine deploy.
+  #
+  # Two DISTINCT secret mechanisms are involved, do not conflate them:
+  #   1. Per-module request-auth token pair (wired here): the engine's
+  #      X_SERVICE_TOKEN must equal the module's X_TOKEN. Gates inbound
+  #      calls to each module's /module/<name>/* routes.
+  #   2. SAEBOOKS_SECRET_KEY (platform only): the JWT signing key the
+  #      engine and the platform module must hold IDENTICALLY so tokens
+  #      the module mints verify at the engine
+  #      (saebooks/services/platform_client.py:verify_key_parity_or_disable
+  #      — an engine-startup preflight that auto-disables delegation, not
+  #      a Compose-level setting). Sharing one `.env` file across `app`
+  #      and `platform` (as below) satisfies this automatically once
+  #      delegation is activated.
+
+  capture:
+    profiles: ["modules"]
+    build:
+      context: .
+      dockerfile: Dockerfile.capture
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Module inbound gate — empty by default (fail-closed 503).
+      CAPTURE_TOKEN: ${CAPTURE_TOKEN:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  preaccounting:
+    profiles: ["modules"]
+    build:
+      context: .
+      dockerfile: Dockerfile.preaccounting
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Module inbound gate — empty by default (fail-closed 503).
+      PREACCOUNTING_TOKEN: ${PREACCOUNTING_TOKEN:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  platform:
+    profiles: ["modules"]
+    build:
+      context: .
+      dockerfile: Dockerfile.platform
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Module inbound gate — empty by default (fail-closed 503).
+      PLATFORM_TOKEN: ${PLATFORM_TOKEN:-}
+      # JWT mint/verify key-parity input (mechanism 2 above) — surfaced
+      # explicitly here (not just via env_file) so the requirement is
+      # visible on the service, not buried. Empty-safe: the preflight
+      # only runs when platform_base_url is set on `app`, which it is
+      # not by default.
+      SAEBOOKS_SECRET_KEY: ${SAEBOOKS_SECRET_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
 
 volumes:
   saebooks_db:

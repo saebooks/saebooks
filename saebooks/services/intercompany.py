@@ -17,7 +17,7 @@ COUNTERPARTY). The reciprocal "Due to/from" control accounts come from the two
 hits the declared control account on each side.
 
 Directors-loan-style example (the §3 personal -> SAE funding edge, modelled as
-a same-tenant pair for the LOCAL primitive — the REAL personal<->business edge is
+a same-tenant pair for the LOCAL primitive — the REAL personal<->primary edge is
 cross-DB / REMOTE and awaits Phase 3, see ``TODO(remote-relay)`` below)::
 
     # Originator = personal company; counterparty = SAE company.
@@ -49,8 +49,8 @@ no-op (balance-sheet movement, no GST — design §3).
 
 REMOTE relay
 ------------
-Cross-DB partners (a company in a *different* tenant stack — e.g. a real
-personal-tenant <-> business-tenant directors-loan edge) CANNOT use this primitive:
+Cross-DB partners (a company in a *different* tenant stack — e.g. Richard's real
+personal-tenant <-> primary-tenant directors-loan edge) CANNOT use this primitive:
 there is no shared transaction across two Postgres servers. That is the Phase-3
 broker relay (outbox/inbox, Ed25519 signing, per-edge tokens). The seam is
 marked with ``TODO(remote-relay)`` where a REMOTE edge would branch.
@@ -280,7 +280,7 @@ async def post_local_pair(
     )
 
     # TODO(remote-relay): if either edge were a REMOTE partner (partner in a
-    # different tenant stack / DB — e.g. the real personal<->business directors-
+    # different tenant stack / DB — e.g. the real personal<->primary directors-
     # loan edge), this single-transaction primitive CANNOT be used. Phase 3
     # branches here into the broker outbox path: post ONLY the originator leg +
     # an ic_outbox row in this local txn, then a dispatcher relays a signed

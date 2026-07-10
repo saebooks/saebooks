@@ -14,7 +14,7 @@ Additive only — ``medicare_levy`` is untouched; a future pass may migrate
 AU onto this table, but that is a deferred, coordinated rename, not part
 of this change.
 
-See docs/multi-jurisdiction.md (M1.5) (theme T7).
+See ~/records/saebooks/global-reference-audit-2026-07-09.md (theme T7).
 """
 import enum
 import uuid
@@ -81,6 +81,16 @@ class SocialContributionScheme(ReferenceBase):
     wage_base_cap: Mapped[Decimal | None] = mapped_column(
         Numeric(14, 2),
         comment="Annual wage base the rate stops applying above. NULL = uncapped.",
+    )
+    wage_base_floor: Mapped[Decimal | None] = mapped_column(
+        Numeric(14, 2),
+        comment=(
+            "Minimum wage base the rate is assessed against regardless of "
+            "actual wages paid (e.g. EE sotsiaalmaks EUR 886/mo). "
+            "NULL = no floor. Added kmd-inf-tsd scope Packet 3 — "
+            "closes the gap social_contribution_schemes.yaml's header "
+            "used to flag."
+        ),
     )
     collection_mechanism: Mapped[str] = mapped_column(
         String(24),

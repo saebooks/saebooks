@@ -5,8 +5,8 @@ the Ed25519 signing primitives (``signing``) and the per-edge key/token helpers
 (``keys``). Nothing in the running app imports these yet — the dispatcher, the
 broker, and the ``/ic/accept`` webhook that use them land in later phases. They
 are built and unit-tested first so the wire protocol + key envelope are pinned
-before any code relays a money-adjacent event. See an internal design note
-on the remote-relay plan (§4).
+before any code relays a money-adjacent event. See
+``~/.claude/plans/saebooks-remote-relay-plan.md`` §4.
 """
 from __future__ import annotations
 

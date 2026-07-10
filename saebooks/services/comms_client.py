@@ -1,51 +1,17 @@
-"""Comms-module HTTP client — the engine side of the #32 extraction.
+"""Comms-module client — PUBLIC SHIM (SAE-hosted transport off; BYO to enable).
 
-Email transport (SMTP/Resend), the customer-email kill switch + FROM
-allowlist, the Outlook/Graph draft handoff, and the Jinja email templates
-all live in the app "comms" module now (saebooks-web). The engine is the
-*accountant*: it produces facts (recipients, subject, assembled HTML,
-attachment bytes, the per-tenant outbound flag) and records audit rows. The
-module is the *bookkeeper*: it owns policy (send/draft/block) and transport.
+The private build POSTs assembled messages to a comms module that performs the
+actual transport (SMTP / Resend / Graph draft) — SAE runs a managed comms
+service for hosted customers. The open engine ships the facade + symbols but no
+managed transport: ``post_comms_send`` is an in-process no-op that returns a
+``drafted`` outcome (the message is assembled and audited but not transmitted).
+A self-hoster enables real delivery by wiring their own comms module / SMTP —
+see docs/operations. Email-dependent flows (magic-link, receipts) degrade to
+"drafted" rather than failing.
 
-This module is the single thin HTTP client both email facades
-(``services.customer_email`` and ``services.email``) route through. It does
-NOT interpret outcomes — it just performs the POST and hands back the
-module's decision, raising ``CommsServiceError`` on any transport-level
-failure or non-200 response.
-
-Contract
---------
-``POST {settings.comms_service_url}/internal/comms/send``
-
-Headers::
-
-    Content-Type: application/json
-    X-Comms-Token: {settings.comms_service_token}   (only when non-empty)
-
-Request body (JSON)::
-
-    {
-      "kind": "customer_doc" | "magic_link" | "billing_receipt" | "raw",
-      "to":         ["a@example.com", ...],          # always a list
-      "subject":    "…",
-      "body_html":  "<p>…</p>" | null,               # null for magic_link
-      "body_text":  "…" | null,
-      "attachments": [
-        {"filename": "INV-1.pdf",
-         "content_b64": "<base64>",
-         "content_type": "application/pdf"}
-      ],
-      "meta": { … kind-specific, see the two facades … }
-    }
-
-Response body (JSON, HTTP 200)::
-
-    {"outcome": "sent" | "drafted" | "blocked",
-     "provider_id": "<id>" | null,
-     "detail": "<human reason / error>" | null}
-
-Any connection error, timeout, or non-200 status raises
-``CommsServiceError``.
+Public symbols preserved exactly (``services.email`` + ``services.customer_email``
+import them): ``CommsServiceError``, ``CommsResult``, ``encode_attachment``,
+``post_comms_send``.
 """
 from __future__ import annotations
 
@@ -53,36 +19,24 @@ import base64
 import logging
 from dataclasses import dataclass
 
-import httpx
-
 logger = logging.getLogger(__name__)
-
-# Transport can be a real SMTP handshake or a Resend/Graph round-trip inside
-# the module, plus a Jinja render — allow a generous ceiling like the render
-# service client does.
-_COMMS_TIMEOUT_SECONDS = 60.0
 
 
 class CommsServiceError(RuntimeError):
-    """Raised when the comms module is unreachable or answers non-200.
-
-    Distinct from a *policy* outcome (blocked) or an *input* error
-    (CustomerEmailError / EmailError): this means the transport call to the
-    module itself failed, so the caller could not obtain a decision at all.
-    """
+    """Preserved for callers that catch it; not raised by the no-op transport."""
 
 
 @dataclass(frozen=True)
 class CommsResult:
-    """The module's decision for one send attempt."""
+    """The transport decision for one send attempt."""
 
-    outcome: str            # "sent" | "drafted" | "blocked" (module may extend)
-    provider_id: str | None  # Resend id / Graph draft id / None
-    detail: str | None       # human-readable reason or error, if any
+    outcome: str            # "sent" | "drafted" | "blocked"
+    provider_id: str | None
+    detail: str | None
 
 
 def encode_attachment(filename: str, content: bytes, content_type: str) -> dict[str, str]:
-    """Serialise one attachment to the wire shape the module expects."""
+    """Serialise one attachment to the wire shape (unchanged)."""
     return {
         "filename": filename,
         "content_b64": base64.b64encode(content).decode("ascii"),
@@ -91,56 +45,18 @@ def encode_attachment(filename: str, content: bytes, content_type: str) -> dict[
 
 
 async def post_comms_send(payload: dict) -> CommsResult:
-    """POST a message to the comms module and return its decision.
+    """In-process no-op transport for the open engine.
 
-    Raises
-    ------
-    CommsServiceError
-        On connection failure, timeout, or any non-200 status.
+    Returns a ``drafted`` outcome without transmitting. Configure a comms module
+    / SMTP transport to enable real delivery on a self-hosted install.
     """
-    from saebooks.config import settings
-
-    base_url = settings.comms_service_url.rstrip("/")
-    url = f"{base_url}/internal/comms/send"
-
-    headers: dict[str, str] = {"Content-Type": "application/json"}
-    token = settings.comms_service_token
-    if token:
-        headers["X-Comms-Token"] = token
-
-    try:
-        async with httpx.AsyncClient(timeout=_COMMS_TIMEOUT_SECONDS) as client:
-            resp = await client.post(url, json=payload, headers=headers)
-    except httpx.TimeoutException as exc:
-        raise CommsServiceError(
-            f"Timeout waiting for comms service at {url}: {exc}"
-        ) from exc
-    except httpx.RequestError as exc:
-        # httpx.ConnectError and every other transport-level failure.
-        raise CommsServiceError(
-            f"Cannot reach comms service at {url}: {exc}"
-        ) from exc
-
-    if resp.status_code != 200:
-        raise CommsServiceError(
-            f"comms service {url} returned HTTP {resp.status_code}: "
-            f"{resp.text[:500]}"
-        )
-
-    try:
-        body = resp.json()
-    except ValueError as exc:
-        raise CommsServiceError(
-            f"comms service {url} returned non-JSON body: {resp.text[:200]}"
-        ) from exc
-
-    outcome = body.get("outcome")
-    if not outcome:
-        raise CommsServiceError(
-            f"comms service {url} response missing 'outcome': {body!r}"
-        )
+    logger.info(
+        "comms transport not configured (open engine) — message drafted, "
+        "not sent (kind=%s)",
+        payload.get("kind"),
+    )
     return CommsResult(
-        outcome=str(outcome),
-        provider_id=body.get("provider_id"),
-        detail=body.get("detail"),
+        outcome="drafted",
+        provider_id=None,
+        detail="comms transport not configured in the open engine",
     )

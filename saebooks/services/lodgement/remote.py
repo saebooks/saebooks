@@ -1,7 +1,7 @@
 """HTTP client implementation of ``LodgementService``.
 
 Talks to ``lodge.saebooks.com.au`` per
-the commercial lodge-server API contract. The contract
+``~/.claude/plans/saebooks-lodge-server-contract.md``. The contract
 locks the request shape, the response shape, and the status-code
 semantics — change either side without changing the other and you
 break production.
@@ -215,15 +215,13 @@ class RemoteLodgementService(LodgementService):
         reconcile orchestration (``services/stp.reconcile_*``) is built and
         tested against a test double; only this transport seam is pending.
 
-        The lodge-server status/poll route is TODO, gated on the private
-        commercial API contract with that server (not part of this
-        repository).
+        See docs/contracts/lodge-server.md (status/poll route: TODO, gated).
         """
         raise NotImplementedError(
             "lodge-server status/poll route not yet contracted — gated on "
             "the ATO PVT pack. The ebMS3 response-retrieval transport and "
-            "its lodge-server route shape are deliberately not fabricated "
-            "until the private commercial API contract locks them."
+            "its lodge-server route shape are deliberately not fabricated; "
+            "see docs/contracts/lodge-server.md."
         )
 
     # ------------------------------------------------------------------ #

@@ -8,25 +8,25 @@
 # 1.  Set the password on the saebooks_app role and stash it where the
 #     compose env-file can pick it up:
 #
-#         ssh <deploy-host>
+#         ssh ci-host
 #         PASS=$(openssl rand -base64 32 | tr -d '=+/' | cut -c1-32)
-#         sudo docker exec -i <postgres-container> \
+#         sudo docker exec -i server-postgres \
 #             psql -U postgres -c "ALTER USER saebooks_app PASSWORD '$PASS';"
 #
-# 2.  Add to /opt/saebooks/.env (NEW LINE — keep
+# 2.  Add to /home/youruser/server/compose/saebooks/.env (NEW LINE — keep
 #     existing DATABASE_URL untouched):
 #
 #         SAEBOOKS_APP_DATABASE_URL=postgresql+asyncpg://saebooks_app:$PASS@db:5432/saebooks_prod
 #
 # 3.  Apply the SECDEF enumerator migration:
 #
-#         ssh <deploy-host> 'cd /opt/saebooks && \
+#         ssh ci-host 'cd /home/youruser/server/compose/saebooks && \
 #             sudo docker compose exec -T api alembic upgrade head'
 #
 # 4.  Verify the CLI runs end-to-end with the new role (dry run is
 #     fine — sync-feeds is idempotent):
 #
-#         ssh <deploy-host> 'cd /opt/saebooks && \
+#         ssh ci-host 'cd /home/youruser/server/compose/saebooks && \
 #             sudo docker compose exec -T api \
 #             python -m saebooks.cli sync-feeds'
 #
@@ -36,7 +36,7 @@
 # guard are scoped, the WEB app DATABASE_URL should also flip to the
 # saebooks_app role; that's a separate change, not gated on this cron.
 #
-# 0 * * * * deploy cd /opt/saebooks && \
+# 0 * * * * primary cd /home/youruser/server/compose/saebooks && \
 #     sudo docker compose exec -T api \
 #     python -m saebooks.cli sync-feeds \
 #     >> /var/log/saebooks/sync-feeds.log 2>&1

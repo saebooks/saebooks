@@ -284,6 +284,7 @@ async def post_quote_send_email(
         CustomerEmailError,
         send_customer_email,
     )
+    from saebooks.services.features import FLAG_SMTP_RELAY, feature_enabled_for_request
     from saebooks.services.latex_pdf import render_latex
 
     tenant_id = resolve_tenant_id(request)
@@ -375,6 +376,7 @@ async def post_quote_send_email(
             attachments=[CustomerEmailAttachment(
                 filename=pdf_filename, content=pdf_bytes, content_type="application/pdf",
             )],
+            sae_relay_entitled=feature_enabled_for_request(FLAG_SMTP_RELAY, request),
         )
     except CustomerEmailError as exc:
         raise HTTPException(422, str(exc)) from exc

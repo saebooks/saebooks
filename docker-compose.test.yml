@@ -92,7 +92,11 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 10.99.224.0/24
+        # Parametrized so concurrent test lanes (e.g. two feature branches
+        # running the suite at once) don't collide on one fixed subnet.
+        # Default preserves the historical value; override per run via
+        # SAEBOOKS_TEST_SUBNET (paired with a unique SAEBOOKS_TEST_PROJECT).
+        - subnet: ${SAEBOOKS_TEST_SUBNET:-192.0.2.0/24}
 
 volumes:
   testdb:

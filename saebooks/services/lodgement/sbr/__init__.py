@@ -1,12 +1,13 @@
-"""SBR (Standard Business Reporting) business-document generators.
+"""SBR (Standard Business Reporting) generators — PUBLIC SHIM.
 
-Engine-side XBRL generation for ATO lodgement. The engine produces the
-business document; the private commercial lodge-server signs it (ATO Machine
-Credential) and handles ebMS3/AS4 transport — that server and its API
-contract are private/commercial, not part of this repository.
+The ATO SBR XBRL document generation is part of the certified-transmission path
+and is stubbed in the open engine (the community build computes the return and,
+for Estonia, generates the KMD file — see ``services/lodgement/kmd/`` — but the
+ATO SBR document generation raises ``NotImplementedError("commercial feature")``).
 
-⚠ The taxonomy concept names / schemaRefs are PLACEHOLDERS pending the ATO SBR
-MIGs (DSP-gated) + EVTE validation. See ``xbrl`` and ``bas`` module docstrings.
+The full public symbol set is preserved so kept code
+(``api/v1/tax_returns.py``) imports unchanged: the data shapes are real; the
+``build_*`` / ``build_instance`` / ``envelope_parts`` functions raise.
 """
 from __future__ import annotations
 

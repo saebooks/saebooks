@@ -18,12 +18,28 @@ the Dr Inventory / Dr COGS lines directly. This keeps the service
 layer free of journaling side-effects and makes the WAC math
 verifiable in isolation.
 
-Cost-method policy for v1:
+Costing-method policy (Wave D, 2026-07-10):
 
-* Only ``CostMethod.WAC`` is supported. ``CostMethod.FIFO`` /
-  ``CostMethod.STANDARD`` are reserved for a later batch and the
-  Python layer raises on them — the DB CHECK constraint is the
-  second line of defence.
+* Costing is a PER-COMPANY setting (``companies.costing_method``,
+  ``CostingMethod``), NOT a per-item choice — Richard's decision (2).
+  The per-item ``items.cost_method`` column stays ``WAC`` and is
+  effectively vestigial; the company setting drives dispatch.
+* :func:`receive_stock` / :func:`issue_stock` take a ``method`` kwarg
+  (default ``WEIGHTED_AVERAGE`` so every existing direct caller /
+  test is unaffected). The bill/invoice posting sites resolve the
+  company's method via :func:`get_company_costing_method` and pass it
+  in.
+* ``WEIGHTED_AVERAGE`` — the pre-Wave-D WAC blend (receipt re-blends
+  ``wac_cost``; issue returns COGS at the running average).
+* ``FIFO`` — a receipt creates an :class:`InventoryCostLayer`; an
+  issue consumes layers oldest-first and returns COGS = sum of the
+  consumed layers' cost. ``wac_cost`` is still maintained on receipt
+  as a display-only running average (the stock endpoint reads it);
+  COGS never uses it under FIFO.
+* ``QUANTITY_ONLY`` — receipt/issue adjust ``on_hand_qty`` only;
+  issue returns ``0`` so NO COGS/valuation journal is posted (the
+  caller guards ``if cogs_value > 0``). ``wac_cost`` is left untouched
+  — valuation is whatever the bills recorded.
 
 Over-issue policy for v1:
 
@@ -36,13 +52,15 @@ Over-issue policy for v1:
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from saebooks.models.company import Company, CostingMethod
+from saebooks.models.inventory_cost_layer import InventoryCostLayer
 from saebooks.models.item import CostMethod, Item, ItemType
 from saebooks.services import audit as audit_svc
 from saebooks.services import change_log as change_log_svc
@@ -294,32 +312,122 @@ async def archive(
 # ---------------------------------------------------------------------- #
 
 
+async def get_company_costing_method(
+    session: AsyncSession, company_id: uuid.UUID
+) -> CostingMethod:
+    """Resolve the company's inventory costing policy.
+
+    Falls back to ``WEIGHTED_AVERAGE`` when the company is missing
+    (defensive — the FK guarantees it exists in practice), preserving
+    the pre-Wave-D default.
+    """
+    value = await session.scalar(
+        select(Company.costing_method).where(Company.id == company_id)
+    )
+    if value is None:
+        return CostingMethod.WEIGHTED_AVERAGE
+    return CostingMethod(value)
+
+
+async def _consume_fifo_layers(
+    session: AsyncSession, item: Item, qty: Decimal
+) -> Decimal:
+    """Consume ``qty`` units from ``item``'s cost layers oldest-first.
+
+    Returns the COGS = sum over consumed layers of
+    ``consumed_units * layer.unit_cost``. Fully-consumed layers are
+    left as ``remaining_qty = 0`` rows (audit history), not deleted.
+
+    Coverage gap: if the open layers don't cover ``qty`` (e.g. opening
+    stock seeded at create-time carries no layer, or a company switched
+    to FIFO mid-life), the shortfall is valued at ``item.wac_cost`` (the
+    running-average display cost) so the ledger stays balanced and the
+    issue never spuriously fails — the real over-issue guard is the
+    ``on_hand_qty`` check in :func:`issue_stock`.
+    """
+    remaining = qty
+    cogs = Decimal("0")
+    layers = (
+        await session.execute(
+            select(InventoryCostLayer)
+            .where(
+                InventoryCostLayer.item_id == item.id,
+                InventoryCostLayer.remaining_qty > Decimal("0"),
+            )
+            # Oldest-first: received_date is the primary FIFO key;
+            # created_at breaks ties for same-date receipts so they consume
+            # in receipt order; id is the final deterministic tiebreak.
+            .order_by(
+                InventoryCostLayer.received_date,
+                InventoryCostLayer.created_at,
+                InventoryCostLayer.id,
+            )
+        )
+    ).scalars().all()
+    for layer in layers:
+        if remaining <= Decimal("0"):
+            break
+        take = min(layer.remaining_qty, remaining)
+        cogs += take * layer.unit_cost
+        layer.remaining_qty = _q4(layer.remaining_qty - take)
+        remaining = _q4(remaining - take)
+    if remaining > Decimal("0"):
+        # Un-layered opening stock — value the remainder at the running
+        # average (0 if never set) so double-entry stays balanced.
+        cogs += remaining * item.wac_cost
+    return _q4(cogs)
+
+
 async def receive_stock(
     session: AsyncSession,
     item_id: uuid.UUID,
     *,
     qty: Decimal,
     unit_cost: Decimal,
+    method: CostingMethod = CostingMethod.WEIGHTED_AVERAGE,
+    received_date: date | None = None,
 ) -> Item:
     """Receive ``qty`` units at ``unit_cost`` (base currency).
 
-    Updates ``on_hand_qty`` and re-computes ``wac_cost`` via
-    :func:`compute_new_wac`. Does NOT commit — callers (``post_bill``)
-    are already inside their own transaction and commit once for the
-    whole bill.
+    Dispatches on the company's ``method``:
+
+    * ``WEIGHTED_AVERAGE`` / ``FIFO`` — re-computes ``wac_cost`` via
+      :func:`compute_new_wac` (a running average; for FIFO it is a
+      display-only figure, COGS comes from layers).
+    * ``FIFO`` additionally creates an :class:`InventoryCostLayer`.
+    * ``QUANTITY_ONLY`` — leaves ``wac_cost`` untouched.
+
+    Always increments ``on_hand_qty``. Does NOT commit — callers
+    (``post_bill``) are already inside their own transaction and commit
+    once for the whole bill.
     """
     if qty <= Decimal("0"):
         raise ItemError(f"receive_stock qty must be > 0, got {qty}")
     item = await session.get(Item, item_id)
     if item is None:
         raise ItemError(f"Item {item_id} not found")
-    item.wac_cost = compute_new_wac(
-        old_on_hand=item.on_hand_qty,
-        old_wac=item.wac_cost,
-        received_qty=qty,
-        received_unit_cost=unit_cost,
-    )
+
+    if method != CostingMethod.QUANTITY_ONLY:
+        item.wac_cost = compute_new_wac(
+            old_on_hand=item.on_hand_qty,
+            old_wac=item.wac_cost,
+            received_qty=qty,
+            received_unit_cost=unit_cost,
+        )
     item.on_hand_qty = _q4(item.on_hand_qty + qty)
+
+    if method == CostingMethod.FIFO:
+        session.add(
+            InventoryCostLayer(
+                company_id=item.company_id,
+                tenant_id=item.tenant_id,
+                item_id=item.id,
+                received_date=received_date or datetime.now(UTC).date(),
+                original_qty=_q4(qty),
+                remaining_qty=_q4(qty),
+                unit_cost=_q4(unit_cost),
+            )
+        )
     return item
 
 
@@ -328,15 +436,21 @@ async def issue_stock(
     item_id: uuid.UUID,
     *,
     qty: Decimal,
+    method: CostingMethod = CostingMethod.WEIGHTED_AVERAGE,
 ) -> Decimal:
-    """Issue ``qty`` units and return the COGS value ``qty * wac_cost``.
+    """Issue ``qty`` units and return the COGS value for the company's method.
 
-    WAC is unchanged by an issue (only receipts move the average).
-    ``on_hand_qty`` decrements by ``qty``. Raises if ``qty`` exceeds
-    current ``on_hand_qty`` — negative stock is out of scope for v1.
+    * ``WEIGHTED_AVERAGE`` — COGS = ``qty * wac_cost`` (WAC unchanged by
+      an issue; only receipts move the average).
+    * ``FIFO`` — COGS = sum of consumed layers, oldest-first (see
+      :func:`_consume_fifo_layers`).
+    * ``QUANTITY_ONLY`` — COGS = ``0`` so the caller posts NO
+      COGS/valuation journal (it guards ``if cogs_value > 0``).
 
-    Does NOT commit — callers (``post_invoice``) commit once per
-    invoice.
+    ``on_hand_qty`` decrements by ``qty`` in every case. Raises if
+    ``qty`` exceeds current ``on_hand_qty`` — negative stock is out of
+    scope for v1. Does NOT commit — callers (``post_invoice``) commit
+    once per invoice.
     """
     if qty <= Decimal("0"):
         raise ItemError(f"issue_stock qty must be > 0, got {qty}")
@@ -348,7 +462,14 @@ async def issue_stock(
             f"Cannot issue {qty} of {item.sku} — only {item.on_hand_qty} "
             "on hand. Receive more stock or reduce the invoice line."
         )
-    cogs_value = _q4(qty * item.wac_cost)
+
+    if method == CostingMethod.FIFO:
+        cogs_value = await _consume_fifo_layers(session, item, qty)
+    elif method == CostingMethod.QUANTITY_ONLY:
+        cogs_value = Decimal("0")
+    else:  # WEIGHTED_AVERAGE
+        cogs_value = _q4(qty * item.wac_cost)
+
     item.on_hand_qty = _q4(item.on_hand_qty - qty)
     return cogs_value
 

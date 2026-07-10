@@ -245,9 +245,20 @@ class QuoteLine(Base):
     line_total: Mapped[Decimal] = mapped_column(
         Numeric(18, 2), nullable=False, default=Decimal("0")
     )
-    # Optional posting hint: which income account this line maps to
-    # when convert-to-invoice runs. NULL is fine — the invoice service
-    # will use the item's default account or prompt the user.
+    # Posting hint: which income account this line maps to when
+    # convert-to-invoice runs. NULL is permitted at the schema level
+    # so a salesperson can draft a quote before an accountant has
+    # decided on GL coding — but ``saebooks.services.quotes`` rejects
+    # convert-to-invoice on any quote that still has a NULL account_id
+    # line (see services/quotes.py — "Cannot convert to invoice"),
+    # which is the gate that protects the GL invariants.
+    #
+    # The audit (M3) suggested tightening this to NOT NULL. Decision
+    # 2026-05-10: keep nullable. The service-layer gate is the right
+    # place — a NOT NULL column would force a default account choice
+    # at draft time, breaking the salesperson → accountant workflow,
+    # without removing a real bug class (the convert path is already
+    # gated and tested at tests/api/v1/test_quotes.py).
     account_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("accounts.id", ondelete="SET NULL"),

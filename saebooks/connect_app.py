@@ -34,8 +34,8 @@ implements:
 The two server-streaming methods (``WatchChanges``, ``WatchPresence``)
 and the two lock RPCs (``AcquireLock``, ``ReleaseLock``) inherit the
 Protocol's UNIMPLEMENTED default; the grpcio :50051 server still
-handles those for clients that need streaming. This is a deliberately
-deferred follow-up, not an oversight.
+handles those for clients that need streaming. Tracked in
+DEFERRED.md.
 
 Auth: every request is expected to carry ``Authorization: Bearer
 <jwt or saebk_*>`` like the REST API. Verification is the same path

@@ -10,7 +10,7 @@ parent line/entry) and full Row-Level Security, per the project's
 new-tenant-table checklist — even though the parent journal_lines relies
 on cascade + company_id, this adds defence-in-depth for GL tax data.
 
-See docs/multi-jurisdiction.md (M1.5) (theme T2).
+See ~/records/saebooks/global-reference-audit-2026-07-09.md (theme T2).
 
 Revision ID: 0180_journal_line_tax_components
 Revises: 0179_tax_code_tax_family

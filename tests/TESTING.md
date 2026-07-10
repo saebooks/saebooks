@@ -8,7 +8,7 @@ network, separate `saebooks-test-api` image built from
 freshly-migrated DB, everything torn down on exit.
 
 ```bash
-cd /path/to/saebooks
+cd /home/youruser/projects/saebooks
 bash scripts/run-tests.sh                 # full suite
 bash scripts/run-tests.sh -k journal      # filter by keyword
 bash scripts/run-tests.sh tests/test_invoices.py    # one file
@@ -31,7 +31,7 @@ sudo docker run --rm --network saebooks-test_testnet \
     "alembic upgrade head >/dev/null && python -m pytest --tb=line tests/<file>"
 ```
 
-**Live containers (`saebooks-<tenant>-api-1` etc.) have NO pytest.**
+**Live containers (`saebooks-primary-api-1` etc.) have NO pytest.**
 Never run pytest against them — the image is built without dev
 dependencies.
 

@@ -58,6 +58,22 @@ async def api_client() -> AsyncClient:
         yield ac
 
 
+@pytest.fixture(autouse=True)
+def _set_edition_enterprise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run this file's tests at enterprise (all flags on) by default.
+
+    ``_LIST_ROUTES`` below includes ``/api/v1/budgets`` and
+    ``/api/v1/projects``, both gated by FLAG_PROJECTS_BUDGETS
+    (Wave A, 2026-07-10) — this sweep asserts 400/404/200 status
+    codes coming from ``get_active_company_id``, not from the feature
+    gate, so every route here needs a tier that has the flag. Harmless
+    no-op for the other (ungated) routes in the list.
+    """
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "enterprise")
+
+
 @pytest.fixture
 async def seed_company_id() -> str:
     async with AsyncSessionLocal() as session:

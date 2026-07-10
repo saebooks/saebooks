@@ -63,12 +63,12 @@
 # supercronic sidecar (`inbox-cron`) instead of host cron — same
 # commands, same env-file as the api service.
 #
-# * * * * * deploy cd /opt/saebooks && \
+# * * * * * primary cd /home/youruser/server/compose/saebooks && \
 #     sudo docker compose exec -T api \
 #     python -m saebooks.cli inbox-extract \
 #     >> /var/log/saebooks/inbox-extract.log 2>&1
 #
-# */2 * * * * deploy cd /opt/saebooks && \
+# */2 * * * * primary cd /home/youruser/server/compose/saebooks && \
 #     sudo docker compose exec -T api \
 #     python -m saebooks.cli inbox-poll-mail \
 #     >> /var/log/saebooks/inbox-poll-mail.log 2>&1

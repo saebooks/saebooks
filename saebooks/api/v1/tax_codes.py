@@ -42,6 +42,7 @@ from saebooks.api.v1.schemas import (
 )
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import tax_codes as svc
+from saebooks.services.authz import no_additional_gate, require_permission_or_role
 from saebooks.services.hard_delete import hard_delete_with_audit
 
 router = APIRouter(
@@ -147,7 +148,14 @@ async def get_tax_code(
 # ---------------------------------------------------------------------------
 
 
-@router.post("", response_model=TaxCodeOut, status_code=201)
+@router.post(
+    "",
+    response_model=TaxCodeOut,
+    status_code=201,
+    dependencies=[
+        Depends(require_permission_or_role("tax_code.manage", no_additional_gate))
+    ],
+)
 async def create_tax_code(
     payload: TaxCodeCreate,
     request: Request,
@@ -188,6 +196,9 @@ async def create_tax_code(
         200: {"model": TaxCodeOut},
         409: {"model": TaxCodeConflictBody, "description": "Version mismatch"},
     },
+    dependencies=[
+        Depends(require_permission_or_role("tax_code.manage", no_additional_gate))
+    ],
 )
 async def update_tax_code(
     tax_code_id: UUID,
@@ -243,6 +254,9 @@ async def update_tax_code(
         204: {"description": "Archived"},
         409: {"model": TaxCodeConflictBody, "description": "Version mismatch"},
     },
+    dependencies=[
+        Depends(require_permission_or_role("tax_code.manage", no_additional_gate))
+    ],
 )
 async def archive_tax_code(
     tax_code_id: UUID,

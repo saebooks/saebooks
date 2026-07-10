@@ -25,7 +25,7 @@ import pytest
 from sqlalchemy import select
 
 from saebooks.db import AsyncSessionLocal
-from saebooks.models.account import Account
+from saebooks.models.account import Account, AccountType
 from saebooks.models.bill import Bill, BillStatus
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
@@ -607,3 +607,91 @@ async def test_no_retention_uses_standard_ap_path() -> None:
     # Standard path: full amount to Trade Creditors, nothing to Retentions Payable.
     assert ap_credits == Decimal("55000.00")  # 50k + 5k GST
     assert retention_credits == Decimal("0.00")
+
+
+@pytest.mark.asyncio
+async def test_post_bill_rejects_reverse_charge_eu_acquisition() -> None:
+    """Critic-round-4 fix: post_bill must refuse an EU-acquisition
+    reverse-charge tax code (rc_eu_acq_goods/services) rather than
+    silently overstate Accounts Payable by the self-assessed VAT and
+    never book the output-side liability — see
+    ``services.bills._reject_unsupported_reverse_charge``."""
+    company_id = uuid.uuid4()
+    async with AsyncSessionLocal() as session:
+        company = Company(
+            id=company_id,
+            name=f"RC Guard Test {company_id.hex[:8]}",
+            base_currency="EUR",
+            fin_year_start_month=1,
+            audit_mode="immutable",
+            jurisdiction="EE",
+        )
+        session.add(company)
+        await session.flush()
+
+        expense_acct = Account(
+            company_id=company_id,
+            code="6-1000",
+            name="Purchases",
+            account_type=AccountType.EXPENSE,
+        )
+        ap_acct = Account(
+            company_id=company_id,
+            code="2-1200",
+            name="Trade Creditors",
+            account_type=AccountType.LIABILITY,
+        )
+        session.add_all([expense_acct, ap_acct])
+        await session.flush()
+
+        rc_tc = TaxCode(
+            company_id=company_id,
+            code="RC-EUACQ",
+            name="EE reverse charge — EU acquisition of goods (24%)",
+            rate=Decimal("24.000"),
+            tax_system="VAT",
+            jurisdiction="EE",
+            reporting_type="rc_eu_acq_goods",
+        )
+        session.add(rc_tc)
+
+        contact = Contact(
+            company_id=company_id,
+            name="EU Supplier OU",
+            contact_type=ContactType.SUPPLIER,
+            email="eu-supplier@example.com",
+        )
+        session.add(contact)
+        await session.commit()
+        await session.refresh(rc_tc)
+        await session.refresh(contact)
+
+    async with AsyncSessionLocal() as session:
+        bill = await svc.create_draft(
+            session,
+            company_id=company_id,
+            contact_id=contact.id,
+            issue_date=date(2026, 6, 1),
+            due_date=date(2026, 6, 30),
+            lines=[
+                {
+                    "description": "EU acquisition of goods",
+                    "account_id": expense_acct.id,
+                    "tax_code_id": rc_tc.id,
+                    "quantity": Decimal("1"),
+                    "unit_price": Decimal("4000"),
+                    "discount_pct": Decimal("0"),
+                },
+            ],
+        )
+
+    async with AsyncSessionLocal() as session:
+        with pytest.raises(svc.BillError, match="reverse-charge"):
+            await svc.post_bill(session, bill.id, posted_by="test")
+
+    # Confirm no journal was posted — the bill is still a DRAFT.
+    async with AsyncSessionLocal() as session:
+        refreshed = await session.get(Bill, bill.id)
+        assert refreshed is not None
+        assert refreshed.status == BillStatus.DRAFT
+        assert refreshed.journal_entry_id is None

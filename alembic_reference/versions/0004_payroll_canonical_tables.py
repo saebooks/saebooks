@@ -10,7 +10,7 @@ coefficient/levy shape. See ``withholding_table.py`` and
 
 Both are reference tables (jurisdiction-keyed, not tenant-scoped) — no RLS.
 
-See docs/multi-jurisdiction.md (M1.5) (theme T7).
+See ~/records/saebooks/global-reference-audit-2026-07-09.md (theme T7).
 
 Revision ID: 0004_payroll_canonical_tables
 Revises: 0003_entity_structure_types

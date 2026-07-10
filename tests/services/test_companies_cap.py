@@ -60,7 +60,7 @@ async def test_create_company_succeeds_on_developer(
 ) -> None:
     """Regression for ``ValueError: Unknown edition: 'developer'``.
 
-    Our own reference deployment runs ``SAEBOOKS_EDITION=developer`` (internal
+    The live primary stack runs ``SAEBOOKS_EDITION=developer`` (internal
     guardrails-off edition, CHARTER 12.4). Before the cap entry existed,
     ``create_company`` -> ``resolve_licence`` -> ``caps_for("developer")``
     raised on an unknown edition. Developer has unlimited company caps,

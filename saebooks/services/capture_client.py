@@ -43,6 +43,27 @@ Errors
   original caller (the module already speaks the engine's error contract), so
   a 404 / 409 / 422 / 503 the module returns is the status the API client
   sees — identical to the in-process path.
+
+Runtime circuit breaker (M2 wave 2a, P0a/P0b)
+----------------------------------------------
+Every network call below reports its outcome to a module-level
+``CircuitBreaker`` (``_breaker``): a transport failure (timeout /
+``httpx.RequestError``) records a breaker failure; any response actually
+received (including a non-2xx one — the module answered, it just said no)
+records a breaker success, since only *unreachability* should trip the
+breaker, not ordinary application-level errors. ``delegating()`` consults
+``_breaker.allow_request()`` in addition to the config flag: once the
+breaker trips OPEN (after ``_BREAKER_FAILURE_THRESHOLD`` consecutive
+transport failures), ``delegating()`` returns False for
+``_BREAKER_COOLDOWN_SECONDS`` — every one of this module's ~15 call sites
+already has an ``if delegating(): ... else: <in-process>`` shape, so an open
+breaker makes the engine fall back to in-process transparently, with no
+network attempt (no hammering the down service), until a single half-open
+probe succeeds. This closes the "capture raises unconditionally on transport
+failure, zero failure budget" gap (audit §7.1 decision 2, P0b(a)): a
+transport failure still raises ``CaptureServiceError`` on the attempt that
+hits it (mapped to a structured 503 by ``saebooks.api.errors``), but
+subsequent requests stop paying that cost and degrade to in-process instead.
 """
 from __future__ import annotations
 
@@ -53,19 +74,44 @@ from typing import Any
 
 import httpx
 
+from saebooks.services.circuit_breaker import CircuitBreaker, DelegatedServiceError
+
 _TIMEOUT_SECONDS = 60.0  # generous — AI extraction round-trips to LiteLLM
 _BASE_PATH = "/module/capture"
 
+_BREAKER_FAILURE_THRESHOLD = 5
+_BREAKER_COOLDOWN_SECONDS = 30.0
 
-class CaptureServiceError(RuntimeError):
+_breaker = CircuitBreaker(
+    "capture",
+    failure_threshold=_BREAKER_FAILURE_THRESHOLD,
+    cooldown_seconds=_BREAKER_COOLDOWN_SECONDS,
+)
+
+
+class CaptureServiceError(DelegatedServiceError):
     """The capture module was unreachable or answered unexpectedly."""
+
+    module = "capture"
+
+
+def _reset_breaker_for_tests() -> None:
+    """Testing hook — force the runtime breaker back to CLOSED."""
+    _breaker.reset()
 
 
 def delegating() -> bool:
-    """True when the engine should delegate capture work to the module."""
+    """True when the engine should delegate capture work to the module.
+
+    False when the flag is unset, OR when the runtime breaker is OPEN
+    (module unreachable) — either way the caller's existing in-process
+    fallback runs.
+    """
     from saebooks.config import settings
 
-    return bool(settings.capture_base_url.strip())
+    if not settings.capture_base_url.strip():
+        return False
+    return _breaker.allow_request()
 
 
 def jsonable(value: Any) -> Any:
@@ -134,15 +180,19 @@ async def post_json(
     headers["Content-Type"] = "application/json"
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
-            return await client.post(url, json=jsonable(payload), headers=headers)
+            resp = await client.post(url, json=jsonable(payload), headers=headers)
     except httpx.TimeoutException as exc:
+        _breaker.record_failure()
         raise CaptureServiceError(
             f"Timeout waiting for capture module at {url}: {exc}"
         ) from exc
     except httpx.RequestError as exc:
+        _breaker.record_failure()
         raise CaptureServiceError(
             f"Cannot reach capture module at {url}: {exc}"
         ) from exc
+    _breaker.record_success()
+    return resp
 
 
 async def post_raw(
@@ -163,15 +213,19 @@ async def post_raw(
     headers["Content-Type"] = content_type
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
-            return await client.post(url, content=content, headers=headers)
+            resp = await client.post(url, content=content, headers=headers)
     except httpx.TimeoutException as exc:
+        _breaker.record_failure()
         raise CaptureServiceError(
             f"Timeout waiting for capture module at {url}: {exc}"
         ) from exc
     except httpx.RequestError as exc:
+        _breaker.record_failure()
         raise CaptureServiceError(
             f"Cannot reach capture module at {url}: {exc}"
         ) from exc
+    _breaker.record_success()
+    return resp
 
 
 async def post_multipart(
@@ -189,15 +243,19 @@ async def post_multipart(
     files = {"file": (filename, file_bytes, mime_type)}
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
-            return await client.post(url, files=files, headers=headers)
+            resp = await client.post(url, files=files, headers=headers)
     except httpx.TimeoutException as exc:
+        _breaker.record_failure()
         raise CaptureServiceError(
             f"Timeout waiting for capture module at {url}: {exc}"
         ) from exc
     except httpx.RequestError as exc:
+        _breaker.record_failure()
         raise CaptureServiceError(
             f"Cannot reach capture module at {url}: {exc}"
         ) from exc
+    _breaker.record_success()
+    return resp
 
 
 async def get(
@@ -212,15 +270,19 @@ async def get(
     headers = _headers(tenant_id, company_id)
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
-            return await client.get(url, params=params, headers=headers)
+            resp = await client.get(url, params=params, headers=headers)
     except httpx.TimeoutException as exc:
+        _breaker.record_failure()
         raise CaptureServiceError(
             f"Timeout waiting for capture module at {url}: {exc}"
         ) from exc
     except httpx.RequestError as exc:
+        _breaker.record_failure()
         raise CaptureServiceError(
             f"Cannot reach capture module at {url}: {exc}"
         ) from exc
+    _breaker.record_success()
+    return resp
 
 
 async def delete(
@@ -234,15 +296,19 @@ async def delete(
     headers = _headers(tenant_id, company_id)
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
-            return await client.delete(url, headers=headers)
+            resp = await client.delete(url, headers=headers)
     except httpx.TimeoutException as exc:
+        _breaker.record_failure()
         raise CaptureServiceError(
             f"Timeout waiting for capture module at {url}: {exc}"
         ) from exc
     except httpx.RequestError as exc:
+        _breaker.record_failure()
         raise CaptureServiceError(
             f"Cannot reach capture module at {url}: {exc}"
         ) from exc
+    _breaker.record_success()
+    return resp
 
 
 def json_body(resp: httpx.Response, url_hint: str = "") -> Any:

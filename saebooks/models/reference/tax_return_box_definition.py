@@ -1,7 +1,7 @@
 """Box-by-box layout of every tax return form per jurisdiction."""
 import uuid
 
-from sqlalchemy import ARRAY, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import ARRAY, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -33,7 +33,23 @@ class TaxReturnBoxDefinition(ReferenceBase):
     aggregation: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
-        comment="sum_tax_amount_for_codes | sum_taxable_for_codes | formula:<expr> | manual",
+        comment=(
+            "sum_tax_amount_for_codes | sum_taxable_for_codes | formula | manual "
+            "-- when 'formula', the expression lives in the 'formula' column "
+            "(not inlined here: box 4's rate-formula overflows String(64) — "
+            "see M1.5 KMD-formula-support Packet 1)"
+        ),
     )
     feeder_tax_codes: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    formula: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment=(
+            "Box-arithmetic expression for aggregation='formula' boxes: box "
+            "references (<return_type>:<box_code> or bare <box_code>), "
+            "decimal literals, + - * operators, and max(0, <expr>). Parsed/"
+            "evaluated by tax_return_generator (safe AST, no eval()). NULL "
+            "for every non-formula box."
+        ),
+    )

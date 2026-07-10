@@ -20,7 +20,7 @@ No RLS work needed: this is ``ADD COLUMN`` on an existing table, so
 the 0145/0147 policy, FORCE RLS, coherence trigger, and grant are all
 untouched.
 
-See docs/multi-jurisdiction.md (M1.5) (theme T9).
+See ~/records/saebooks/global-reference-audit-2026-07-09.md (theme T9).
 
 Revision ID: 0181_business_ident_tax_cols
 Revises: 0180_journal_line_tax_components

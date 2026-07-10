@@ -84,6 +84,11 @@ class Contact(CompanyScoped, Base):
     abn: Mapped[str | None] = mapped_column(
         String(14), comment="Australian Business Number — 11 digits stored as 'xx xxx xxx xxx'"
     )
+    # Counterparty business registry code, jurisdiction-neutral (0190).
+    # Holds e.g. an Estonian registrikood/isikukood — the KMD-INF
+    # Part A/B counterparty grouping key (services/lodgement/kmd_inf).
+    # Nullable: most contacts (AU-only companies) never set this.
+    registration_number: Mapped[str | None] = mapped_column(String(32))
     address_line1: Mapped[str | None] = mapped_column(String)
     address_line2: Mapped[str | None] = mapped_column(String)
     city: Mapped[str | None] = mapped_column(String)

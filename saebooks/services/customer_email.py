@@ -248,12 +248,25 @@ async def send_customer_email(
     body_html: str,
     body_text: str | None = None,
     attachments: list[CustomerEmailAttachment] | None = None,
+    sae_relay_entitled: bool = True,
 ) -> SendResult:
     """Send (or draft, or block) a customer-facing email via the comms module.
 
     Signature + return contract are unchanged from the pre-#32 engine
     implementation. The kill switch, draft mode and FROM allowlist now live in
     the module; this facade forwards the facts and records the outcome.
+
+    ``sae_relay_entitled`` (Wave B / Richard's decision 7, CHARTER §12.1
+    "SAE-hosted SMTP for invoice delivery" — Business+): the caller resolves
+    this from the request's effective tier (``features.
+    feature_enabled_for_request(FLAG_SMTP_RELAY, request)``) and passes it
+    in. When ``False`` (below-Business tenant), this function does NOT call
+    the comms module at all — it degrades to the exact same shape the
+    module already uses for a disabled/absent relay (``mode="blocked"``,
+    with a reason), rather than raising or 404ing the request. Defaults to
+    ``True`` so callers that don't pass it (tests, any future non-tier-aware
+    caller) keep today's behaviour; every real HTTP call site (invoices /
+    bills / quotes ``/send-email``) passes it explicitly.
 
     Raises
     ------
@@ -296,37 +309,53 @@ async def send_customer_email(
     outbox_path = outbox_dir / f"{timestamp}__{message_id[:8]}.eml"
     outbox_path.write_bytes(eml_bytes)
 
-    # Per-tenant outbound flag — a fact the module ANDs into its gate.
-    tenant_outbound_enabled = await _check_tenant_outbound_enabled(session, tenant_id)
+    if not sae_relay_entitled:
+        # Below-Business tenant: SAE-hosted relay is a Business+ feature
+        # (CHARTER §12.1 "SAE-hosted SMTP for invoice delivery"). Degrade
+        # exactly the way the module already degrades a disabled/absent
+        # relay (outcome="blocked") instead of raising or 404ing — the
+        # .eml audit copy above still exists so "what would have gone
+        # out" is answerable, but we never phone the comms module for a
+        # tenant whose licence doesn't include it.
+        outcome, provider_id, detail = (
+            "blocked",
+            None,
+            "SAE-hosted email delivery requires the Business tier or "
+            "above. Download the document and send it from your own "
+            "email client, or upgrade to Business.",
+        )
+    else:
+        # Per-tenant outbound flag — a fact the module ANDs into its gate.
+        tenant_outbound_enabled = await _check_tenant_outbound_enabled(session, tenant_id)
 
-    # Hand the message + gating facts to the module. It owns the decision.
-    payload = {
-        "kind": "customer_doc",
-        "to": to,
-        "subject": subject,
-        "body_html": body_html,
-        "body_text": body_text,
-        "attachments": [
-            encode_attachment(att.filename, att.content, att.content_type)
-            for att in attachments
-        ],
-        "meta": {
-            "tenant_id": str(tenant_id),
-            "doc_type": doc_type,
-            "doc_id": str(doc_id),
-            "doc_version": doc_version,
-            "sent_by_user_id": str(sent_by_user_id) if sent_by_user_id else None,
-            "from_addr": from_addr,
-            "cc": cc,
-            "bcc": bcc,
-            "tenant_outbound_enabled": tenant_outbound_enabled,
-        },
-    }
-    result = await post_comms_send(payload)  # raises CommsServiceError on transport failure
+        # Hand the message + gating facts to the module. It owns the decision.
+        payload = {
+            "kind": "customer_doc",
+            "to": to,
+            "subject": subject,
+            "body_html": body_html,
+            "body_text": body_text,
+            "attachments": [
+                encode_attachment(att.filename, att.content, att.content_type)
+                for att in attachments
+            ],
+            "meta": {
+                "tenant_id": str(tenant_id),
+                "doc_type": doc_type,
+                "doc_id": str(doc_id),
+                "doc_version": doc_version,
+                "sent_by_user_id": str(sent_by_user_id) if sent_by_user_id else None,
+                "from_addr": from_addr,
+                "cc": cc,
+                "bcc": bcc,
+                "tenant_outbound_enabled": tenant_outbound_enabled,
+            },
+        }
+        result = await post_comms_send(payload)  # raises CommsServiceError on transport failure
 
-    outcome = result.outcome
-    provider_id = result.provider_id
-    detail = result.detail
+        outcome = result.outcome
+        provider_id = result.provider_id
+        detail = result.detail
 
     # Map the module's decision onto the legacy email_send_log columns.
     #   sent    -> status 'sent',    id in resend_message_id, no reason

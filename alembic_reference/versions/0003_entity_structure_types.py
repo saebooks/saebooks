@@ -7,7 +7,7 @@ LLP / pension plan) — the structure that drives accounting and tax
 treatment. Companies reference a row by ``companies.entity_structure_code``
 (company-DB side, validated at the service layer — no cross-DB FK).
 
-See docs/multi-jurisdiction.md (M1.5) (theme T4).
+See ~/records/saebooks/global-reference-audit-2026-07-09.md (theme T4).
 
 Revision ID: 0003_entity_structure_types
 Revises: 0002_jurisdiction_hierarchy

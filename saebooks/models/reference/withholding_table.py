@@ -16,7 +16,7 @@ Additive only — ``payg_withholding_scales`` is untouched; a future pass may
 migrate AU onto this table and retire the AU-specific one, but that is a
 deferred, coordinated rename, not part of this change.
 
-See docs/multi-jurisdiction.md (M1.5) (theme T7).
+See ~/records/saebooks/global-reference-audit-2026-07-09.md (theme T7).
 """
 import enum
 import uuid

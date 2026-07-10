@@ -59,6 +59,19 @@ async def unauth_client() -> AsyncClient:
         yield ac
 
 
+@pytest.fixture(autouse=True)
+def _set_edition_enterprise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run this file's tests at enterprise (all flags on) by default.
+
+    FLAG_PROJECTS_BUDGETS (Wave A, 2026-07-10) now gates the whole
+    /api/v1/projects router. The gate-specific tests below override
+    this per-test to exercise the below-tier / at-tier boundary.
+    """
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "enterprise")
+
+
 def _project_payload(**overrides: object) -> dict:
     """Return a minimal valid ProjectCreate payload."""
     base: dict = {
@@ -445,3 +458,41 @@ async def test_projects_change_log_full_sequence(api_client: AsyncClient) -> Non
     assert "updated" in ops
     assert "deleted" in ops
     assert versions == sorted(versions)  # monotonically increasing
+
+
+# ---------------------------------------------------------------------------
+# FLAG_PROJECTS_BUDGETS gate — Wave A (2026-07-10)
+# ---------------------------------------------------------------------------
+
+
+async def test_projects_gate_community(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FLAG_PROJECTS_BUDGETS gate: community → 404 on the whole router."""
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "community")
+    r = await api_client.get("/api/v1/projects")
+    assert r.status_code == 404
+
+
+async def test_projects_gate_offline_succeeds(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FLAG_PROJECTS_BUDGETS gate: offline → 200 (this is where it turns on)."""
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "offline")
+    r = await api_client.get("/api/v1/projects")
+    assert r.status_code == 200, r.text
+
+
+async def test_projects_gate_community_create_404(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FLAG_PROJECTS_BUDGETS gate: community → 404 on create too, not just list."""
+    from saebooks.config import settings as _s
+
+    monkeypatch.setattr(_s, "edition", "community")
+    r = await api_client.post("/api/v1/projects", json=_project_payload())
+    assert r.status_code == 404

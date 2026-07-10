@@ -100,9 +100,8 @@ async def _create_and_post_je(
     )
     assert r.status_code == 201, r.text
     body = r.json()
-    r2 = await client.patch(
-        f"/api/v1/journal_entries/{body['id']}",
-        json={"status": "POSTED"},
+    r2 = await client.post(
+        f"/api/v1/journal_entries/{body['id']}/post",
         headers={"If-Match": str(body["version"])},
     )
     assert r2.status_code == 200, r2.text

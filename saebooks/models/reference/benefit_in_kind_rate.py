@@ -15,7 +15,7 @@ new table alongside it as one ``benefit_category`` row. A future,
 coordinated pass may migrate AU services onto this table; that rename
 (K7 in the audit) is explicitly deferred.
 
-See docs/multi-jurisdiction.md (M1.5) (theme T11,
+See ~/records/saebooks/global-reference-audit-2026-07-09.md (theme T11,
 domain "Income, corporate & capital taxes").
 """
 import enum

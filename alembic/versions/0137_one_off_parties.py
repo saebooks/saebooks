@@ -276,9 +276,8 @@ def upgrade() -> None:
     op.execute("DELETE FROM contacts WHERE is_one_off = true")
 
     # 8. Drop legacy bucket views that depend on contacts.is_one_off.
-    # These exist only on one production tenant stack (created out-of-band,
-    # not in any migration); IF EXISTS makes the statement a no-op on the
-    # other stacks.
+    # These exist only on primary (created out-of-band, not in any migration);
+    # IF EXISTS makes the statement a no-op on the other stacks.
     op.execute("DROP VIEW IF EXISTS v_suppliers_main")
     op.execute("DROP VIEW IF EXISTS v_customers_main")
     op.execute("DROP VIEW IF EXISTS v_one_off_suppliers")
