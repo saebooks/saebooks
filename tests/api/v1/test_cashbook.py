@@ -783,7 +783,7 @@ async def test_setup_idempotent_when_already_cashbook(api_client: AsyncClient) -
 @pytest.mark.skip(
     reason=(
         "Behaviour superseded by Round-2 audit fix #10 + "
-        "[[cashbook-upgrade-downgrade-policy]]: full -> cashbook is now a "
+        "cashbook-upgrade-downgrade-policy: full -> cashbook is now a "
         "first-class downgrade that refuses only on AR > 0, not on the "
         "mere presence of journal entries. ``setup_cashbook_mode`` delegates "
         "to ``downgrade_full_to_cashbook`` for the policy check (see "

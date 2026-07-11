@@ -447,7 +447,7 @@ async def gst_backdate_preview(
 # ---------------------------------------------------------------------------
 # POST /api/v1/companies/{id}/bookkeeping-mode — Round-2 audit fix #10
 #
-# Bidirectional cashbook ↔ full per [[cashbook-upgrade-downgrade-policy]].
+# Bidirectional cashbook ↔ full per cashbook-upgrade-downgrade-policy.
 # Picks upgrade or downgrade based on the current and target modes:
 #
 #   current=cashbook + target=full      → upgrade_cashbook_to_full
@@ -494,7 +494,7 @@ async def set_bookkeeping_mode(
     """Flip a company between cashbook and full bookkeeping modes.
 
     Round-2 audit fix #10. Bidirectional per
-    [[cashbook-upgrade-downgrade-policy]] — *no* "you cannot go back".
+    cashbook-upgrade-downgrade-policy — *no* "you cannot go back".
 
     * cashbook → full: lossless (cashbook entries are real journals).
     * full → cashbook: refused if AR > 0 (schema invariant — list of

@@ -1,6 +1,6 @@
 """roles — tenant-scoped, renameable roles (granular_permissions, D2).
 
-Tenant-scoping checklist (see feedback_new-table-rls-checklist):
+Tenant-scoping checklist (see new-table-rls-checklist):
 [x] tenant_id NOT NULL column
 [x] FK to tenants(id)
 [x] ENABLE ROW LEVEL SECURITY + FORCE ROW LEVEL SECURITY

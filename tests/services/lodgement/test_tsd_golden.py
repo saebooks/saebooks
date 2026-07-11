@@ -15,12 +15,19 @@ list-shaped ``figures`` JSONB.
 """
 from __future__ import annotations
 
+import os
 import uuid
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+
+
+def _maybe_regen(path: Path, data: bytes) -> None:
+    """Re-pin the fixture from real output when SAEBOOKS_REGEN_FIXTURES is set."""
+    if os.environ.get("SAEBOOKS_REGEN_FIXTURES"):
+        path.write_bytes(data)
 
 from saebooks.api.v1.auth import DEFAULT_TENANT_ID
 from saebooks.db import AsyncSessionLocal
@@ -116,6 +123,9 @@ async def test_tsd_golden_month_serialises_byte_for_byte() -> None:
     main_csv = build_tsd_main_csv_document(listing, ctx)
     lisa1_csv = build_tsd_lisa1_csv_document(listing, ctx)
 
+    _maybe_regen(_FIXTURES_DIR / "golden.xml", xml_doc)
+    _maybe_regen(_FIXTURES_DIR / "golden_main.csv", main_csv)
+    _maybe_regen(_FIXTURES_DIR / "golden_lisa1.csv", lisa1_csv)
     assert xml_doc == (_FIXTURES_DIR / "golden.xml").read_bytes()
     assert main_csv == (_FIXTURES_DIR / "golden_main.csv").read_bytes()
     assert lisa1_csv == (_FIXTURES_DIR / "golden_lisa1.csv").read_bytes()
@@ -142,11 +152,13 @@ async def test_tsd_zero_rows_serialises_empty_lisa1_and_header_only_csv() -> Non
 
     xml_doc = build_tsd_xml_document(listing, ctx)
     root = etree.fromstring(xml_doc)
-    ns = "urn:emta:PLACEHOLDER:tsd"
-    assert len(root.find(f"{{{ns}}}Lisa1")) == 0
+    # tsd_vorm (no namespace); zero rows -> empty aIsikList.
+    assert root.tag == "tsd_vorm"
+    assert len(root.find("tsd_L1_0").find("aIsikList")) == 0
 
     lisa1_csv = build_tsd_lisa1_csv_document(listing, ctx)
-    assert len(lisa1_csv.decode("utf-8").strip("\r\n").split("\r\n")) == 1  # header only
+    # Header row of column codes only (no data rows).
+    assert len(lisa1_csv.decode("utf-8").strip("\r\n").split("\r\n")) == 1
 
 
 async def test_persist_tsd_return_writes_list_shaped_figures() -> None:

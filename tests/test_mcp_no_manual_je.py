@@ -1,7 +1,7 @@
 """Guardrails that keep the MCP surface from making the manual-journal-entry
 shortcut easy.
 
-Background: the handover hard rule + ``feedback_no-manual-journal-entries`` say
+Background: the handover hard rule + ``no-manual-journal-entries`` say
 Claude must never author a manual JE as a shortcut — the engine derives the
 ledger from real records, and a record-type tool carries provenance + a real
 audit trail while a hand-written JE does not. The MCP is the tool surface

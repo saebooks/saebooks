@@ -16,10 +16,9 @@ from saebooks.services.lodgement.kmd_inf.generator import (
     generate_kmd_inf,
 )
 from saebooks.services.lodgement.kmd_inf.mapping import (
-    KMD_INF_PART_A_COLUMNS,
-    KMD_INF_PART_B_COLUMNS,
-    KMD_INF_SCHEMA_REF,
-    KMD_INF_TAXONOMY_NS,
+    KMD_INF_PART_A_ELEMENTS,
+    KMD_INF_PART_B_ELEMENTS,
+    tax_rate_classifier,
 )
 from saebooks.services.lodgement.kmd_inf.serializer import (
     KmdInfReportingContext,
@@ -36,10 +35,9 @@ __all__ = [
     "KmdInfPartARow",
     "KmdInfPartBRow",
     "generate_kmd_inf",
-    "KMD_INF_PART_A_COLUMNS",
-    "KMD_INF_PART_B_COLUMNS",
-    "KMD_INF_SCHEMA_REF",
-    "KMD_INF_TAXONOMY_NS",
+    "KMD_INF_PART_A_ELEMENTS",
+    "KMD_INF_PART_B_ELEMENTS",
+    "tax_rate_classifier",
     "KmdInfReportingContext",
     "build_kmd_inf_part_a_csv_document",
     "build_kmd_inf_part_b_csv_document",

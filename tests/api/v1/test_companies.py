@@ -483,7 +483,7 @@ async def test_gst_backdate_preview_too_far_past_rejected(api_client: AsyncClien
 
 # ---------------------------------------------------------------------------
 # Round-2 audit fix #10: POST /companies/{id}/bookkeeping-mode
-# Bidirectional cashbook <-> full per [[cashbook-upgrade-downgrade-policy]].
+# Bidirectional cashbook <-> full per cashbook-upgrade-downgrade-policy.
 # ---------------------------------------------------------------------------
 
 

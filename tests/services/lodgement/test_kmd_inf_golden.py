@@ -12,12 +12,19 @@ see the fixture files' provenance note below).
 """
 from __future__ import annotations
 
+import os
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+
+
+def _maybe_regen(path: Path, data: bytes) -> None:
+    """Re-pin the fixture from real output when SAEBOOKS_REGEN_FIXTURES is set."""
+    if os.environ.get("SAEBOOKS_REGEN_FIXTURES"):
+        path.write_bytes(data)
 
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.account import Account, AccountType
@@ -121,6 +128,9 @@ async def test_kmd_inf_golden_period_serialises_byte_for_byte() -> None:
     csv_a = build_kmd_inf_part_a_csv_document(listing, ctx)
     csv_b = build_kmd_inf_part_b_csv_document(listing, ctx)
 
+    _maybe_regen(_FIXTURES_DIR / "golden.xml", xml_doc)
+    _maybe_regen(_FIXTURES_DIR / "golden_part_a.csv", csv_a)
+    _maybe_regen(_FIXTURES_DIR / "golden_part_b.csv", csv_b)
     assert xml_doc == (_FIXTURES_DIR / "golden.xml").read_bytes()
     assert csv_a == (_FIXTURES_DIR / "golden_part_a.csv").read_bytes()
     assert csv_b == (_FIXTURES_DIR / "golden_part_b.csv").read_bytes()
@@ -141,11 +151,14 @@ async def test_kmd_inf_zero_rows_serialises_empty_containers_and_header_only_csv
 
     xml_doc = build_kmd_inf_xml_document(listing, ctx)
     root = etree.fromstring(xml_doc)
-    ns = "urn:emta:PLACEHOLDER:kmdinf"
-    assert len(root.find(f"{{{ns}}}OsaA")) == 0
-    assert len(root.find(f"{{{ns}}}OsaB")) == 0
+    # Annex-only vatDeclaration (no namespace). Empty annexes carry their
+    # mandatory flags but zero saleLine/purchaseLine rows.
+    assert root.tag == "vatDeclaration"
+    assert root.find("salesAnnex").findall("saleLine") == []
+    assert root.find("purchasesAnnex").findall("purchaseLine") == []
 
     csv_a = build_kmd_inf_part_a_csv_document(listing, ctx)
     csv_b = build_kmd_inf_part_b_csv_document(listing, ctx)
-    assert len(csv_a.decode("utf-8").strip("\r\n").split("\r\n")) == 1  # header only
-    assert len(csv_b.decode("utf-8").strip("\r\n").split("\r\n")) == 1
+    # Row-symbol CSV has NO column-name header — zero rows -> empty file.
+    assert csv_a == b""
+    assert csv_b == b""

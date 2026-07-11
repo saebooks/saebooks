@@ -123,7 +123,7 @@ FLAG_INBOX_EMAIL = "inbox_email"
 # These exist ONLY in the ``developer`` tier — Richard's personal instances
 # (primary / acme / app-preview / cashbook-demo) where the codebase is
 # also the dev surface. They MUST NOT appear in any commercial tier — see
-# memory feedback_primary-instance-no-guardrails for the rationale.
+# memory primary-instance-no-guardrails for the rationale.
 #
 # FLAG_HARD_DELETE — admin can hard-delete rows directly from the ledger
 #   (skips the soft-archive / reverse-JE workflow that public editions

@@ -3,7 +3,7 @@
 **Status:** Draft for Richard's review
 **Drafted:** 2026-05-27
 **Closes:** P0-C from round-2 critic audit (Critics 02, 07, 13, 18)
-**Related:** [[feedback_new-table-rls-checklist]], [[saebooks-strategy-api-first]]
+**Related:** new-table-rls-checklist, saebooks-strategy-api-first
 
 ---
 

@@ -7,7 +7,7 @@ back later (e.g. a stored SISS credential). This module wraps a
 CLIENT-SUPPLIED passphrase that SAE Books never persists anywhere —
 the caller passes it in, we derive a key, encrypt, and the passphrase
 falls out of scope. That is the entire point: per
-``[[saebooks-liability-pricing-principle]]`` / planned-modules decision
+``saebooks-liability-pricing-principle`` / planned-modules decision
 6, "encrypted on download" is the open, self-managed baseline and the
 LIMIT of SAE's responsibility — SAE must be structurally INCAPABLE of
 decrypting a client's export after the fact, not merely promise not to.

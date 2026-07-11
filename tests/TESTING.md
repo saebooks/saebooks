@@ -108,7 +108,7 @@ that need case-by-case judgment.
   `services/pay_runs.add_line` reworked against Employee model
   (currently queries Contact but DB FK points at `employees`)
 - `tests/services/test_payg.py` (4 FAILs) — PAYG coefficients
-  flagged in memory `[[saebooks-payroll]]` as placeholder; block
+  flagged in memory `saebooks-payroll` as placeholder; block
   prod until ATO-XLS verified
 
 **Plus ~25-30 scattered F's** across `test_ai_extraction`,

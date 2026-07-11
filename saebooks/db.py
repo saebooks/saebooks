@@ -405,7 +405,7 @@ async def bootstrap_schema(engine_to_init: AsyncEngine | None = None) -> None:
     types, ALTER TABLE forms beyond ADD COLUMN, …). Rewriting each one
     for cross-dialect compatibility is a massive surface and changes
     the migrations' intent — which the architecture decision (see
-    [[saebooks-mobile-architecture]] §"two-backend rule") explicitly
+    saebooks-mobile-architecture §"two-backend rule") explicitly
     forbade.
 
     Instead, SQLite consumers (the Cashbook mobile app via the Rust

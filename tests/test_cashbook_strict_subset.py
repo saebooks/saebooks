@@ -12,8 +12,8 @@ feature. A failure here means either:
   (b) The schema dump (db/cashbook.schema.sql) is stale.  Fix: re-run
       ``python scripts/dump_cashbook_schema.py`` and commit the result.
 
-See ``[[cashbook-upgrade-downgrade-policy]]`` and
-``[[saebooks-mobile-architecture]]`` in the project memory for the full
+See ``cashbook-upgrade-downgrade-policy`` and
+``saebooks-mobile-architecture`` in the project memory for the full
 design rationale.
 
 Type compatibility rules (narrowing allowed, widening fails):

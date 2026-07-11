@@ -75,25 +75,28 @@ from saebooks.services.lodgement.tsd.generator import (
     TsdMainTotals,
 )
 from saebooks.services.lodgement.tsd.mapping import (
-    TSD_ATTR_PERIOD_END,
-    TSD_ATTR_PERIOD_START,
-    TSD_ATTR_REGCODE,
     TSD_CSV_DELIMITER,
     TSD_CSV_ENCODING,
-    TSD_CSV_HEADER_PERIOD_END,
-    TSD_CSV_HEADER_PERIOD_START,
-    TSD_CSV_HEADER_REGCODE,
-    TSD_LISA1_COLUMNS,
-    TSD_LISA1_CONTAINER_ELEMENT,
-    TSD_LISA1_FIELD_NAMES,
-    TSD_LISA1_ROW_ELEMENT,
-    TSD_MAIN_COLUMNS,
-    TSD_MAIN_ELEMENT,
-    TSD_MAIN_FIELD_NAMES,
+    TSD_CSV_BOM,
+    TSD_EL_A_ISIK,
+    TSD_EL_A_ISIK_LIST,
+    TSD_EL_FORM,
+    TSD_EL_ISIK_KOOD,
+    TSD_EL_LISA1,
+    TSD_EL_LOAD_METHOD,
+    TSD_EL_MONTH,
+    TSD_EL_REGKOOD,
+    TSD_EL_VM,
+    TSD_EL_VM_LIST,
+    TSD_EL_YEAR,
+    TSD_FORM_TSD,
+    TSD_LISA1_CSV_COLUMNS,
+    TSD_LOAD_METHOD_NEW,
+    TSD_MAIN_CSV_COLUMNS,
+    TSD_MAIN_ELEMENTS,
     TSD_ROOT_ELEMENT,
-    TSD_SCHEMA_REF,
-    TSD_TAXONOMY_NS,
-    TSD_TAXONOMY_PREFIX,
+    TSD_VM_ELEMENTS,
+    payment_type_code,
 )
 
 _TWO_PLACES = Decimal("0.01")
@@ -106,14 +109,10 @@ def _money(value: Decimal) -> str:
     return str(value.quantize(_TWO_PLACES, rounding=ROUND_HALF_UP))
 
 
-def _format_value(value: Any) -> str:
-    """Type-driven cell/text formatter for a field value — dispatch on
-    type rather than field name, same posture as
-    ``kmd_inf.serializer._format_value`` (shared by MAIN and Lisa 1)."""
+def _xml_text(value: Any) -> str:
+    """Element-text formatter — Decimal to 2 dp, date ISO, else str."""
     if value is None:
         return ""
-    if isinstance(value, bool):
-        return "true" if value else "false"
     if isinstance(value, Decimal):
         return _money(value)
     if isinstance(value, date):
@@ -121,95 +120,139 @@ def _format_value(value: Any) -> str:
     return str(value)
 
 
+def _main_value(main: TsdMainTotals, key: str) -> Decimal:
+    """Resolve a MAIN roll-up value, including the synthesised combined
+    unemployment premium (c116_Tk = employee + employer)."""
+    if key == "_unemployment_total":
+        return main.total_unemployment_employee + main.total_unemployment_employer
+    return getattr(main, key)
+
+
+def _vm_value(row: TsdLisa1Row, key: str) -> Any:
+    """Resolve a Lisa-1 payment (Vm) value; maps the payment-type token to its
+    official ``c1020_ValiKood`` code."""
+    if key == "payment_type_code":
+        return payment_type_code(row.payment_type_code)
+    return getattr(row, key)
+
+
+def _group_by_person(rows: list[TsdLisa1Row]) -> list[tuple[str, list[TsdLisa1Row]]]:
+    """Group Lisa-1 rows by isikukood, preserving first-appearance order — one
+    ``tsd_L1_A_Isik`` per person, its payments as ``tsd_L1_A_Vm`` children."""
+    order: list[str] = []
+    by_person: dict[str, list[TsdLisa1Row]] = {}
+    for row in rows:
+        if row.isikukood not in by_person:
+            by_person[row.isikukood] = []
+            order.append(row.isikukood)
+        by_person[row.isikukood].append(row)
+    return [(kood, by_person[kood]) for kood in order]
+
+
 @dataclass(frozen=True)
 class TsdReportingContext:
-    """The filer identity + period every TSD file carries. Kept as a
-    separate type (not imported from ``kmd``/``kmd_inf``) so ``tsd`` stays
-    a self-contained sibling package, per the scope's package layout.
-    ``@dataclass(frozen=True)``, mirroring both siblings'
-    ``KmdReportingContext``/``KmdInfReportingContext`` exactly."""
+    """Filer identity + taxable period. ``year``/``month`` derive from
+    ``period_start``; ``load_method`` defaults to "L" (new return)."""
 
     regcode: str
     period_start: date
     period_end: date
+    load_method: str = TSD_LOAD_METHOD_NEW
+
+    @property
+    def year(self) -> int:
+        return self.period_start.year
+
+    @property
+    def month(self) -> int:
+        return self.period_start.month
 
 
 def build_tsd_xml_document(listing: TsdListing, ctx: TsdReportingContext) -> bytes:
-    """Render a TSD return (MAIN + Lisa 1) as one XML document.
+    """Render a TSD return as a ``tsd_vorm`` document.
 
-    MAIN always emits all 7 aggregate fields explicitly (a reported nil
-    is not an absent field — mirrors ``kmd.build_kmd_xml_document``'s
-    convention for its flat vector). Lisa 1 emits an EMPTY container for
-    zero qualifying rows, not a placeholder row (mirrors
-    ``kmd_inf.build_kmd_inf_xml_document``'s "N rows, N may be 0")."""
-    nsmap = {TSD_TAXONOMY_PREFIX: TSD_TAXONOMY_NS}
-    root = etree.Element(etree.QName(TSD_TAXONOMY_NS, TSD_ROOT_ELEMENT), nsmap=nsmap)
-    root.set("schemaRef", TSD_SCHEMA_REF)
-    root.set(TSD_ATTR_REGCODE, ctx.regcode)
-    root.set(TSD_ATTR_PERIOD_START, ctx.period_start.isoformat())
-    root.set(TSD_ATTR_PERIOD_END, ctx.period_end.isoformat())
+    Header (regKood/c108/c109/laadimisViis/vorm) then the calculated MAIN
+    roll-up (c110/c115/c116/c117) then Lisa 1 (``tsd_L1_0`` -> ``aIsikList`` ->
+    one ``tsd_L1_A_Isik`` per person -> ``vmList`` -> one ``tsd_L1_A_Vm`` per
+    payment). A zero-row period still emits ``tsd_L1_0`` with an empty
+    ``aIsikList``."""
+    root = etree.Element(TSD_ROOT_ELEMENT)
+    etree.SubElement(root, TSD_EL_REGKOOD).text = ctx.regcode
+    etree.SubElement(root, TSD_EL_YEAR).text = str(ctx.year)
+    etree.SubElement(root, TSD_EL_MONTH).text = str(ctx.month)
+    etree.SubElement(root, TSD_EL_LOAD_METHOD).text = ctx.load_method
+    etree.SubElement(root, TSD_EL_FORM).text = TSD_FORM_TSD
 
-    main_el = etree.SubElement(root, etree.QName(TSD_TAXONOMY_NS, TSD_MAIN_ELEMENT))
-    for key in TSD_MAIN_COLUMNS:
-        sub = etree.SubElement(main_el, etree.QName(TSD_TAXONOMY_NS, TSD_MAIN_FIELD_NAMES[key]))
-        sub.text = _format_value(getattr(listing.main, key))
+    for key, element_name in TSD_MAIN_ELEMENTS:
+        etree.SubElement(root, element_name).text = _money(_main_value(listing.main, key))
 
-    lisa1_el = etree.SubElement(root, etree.QName(TSD_TAXONOMY_NS, TSD_LISA1_CONTAINER_ELEMENT))
-    for row in listing.lisa1:
-        row_el = etree.SubElement(lisa1_el, etree.QName(TSD_TAXONOMY_NS, TSD_LISA1_ROW_ELEMENT))
-        for key in TSD_LISA1_COLUMNS:
-            sub = etree.SubElement(row_el, etree.QName(TSD_TAXONOMY_NS, TSD_LISA1_FIELD_NAMES[key]))
-            sub.text = _format_value(getattr(row, key))
+    lisa1 = etree.SubElement(root, TSD_EL_LISA1)
+    isik_list = etree.SubElement(lisa1, TSD_EL_A_ISIK_LIST)
+    for isikukood, payments in _group_by_person(listing.lisa1):
+        isik = etree.SubElement(isik_list, TSD_EL_A_ISIK)
+        etree.SubElement(isik, TSD_EL_ISIK_KOOD).text = isikukood
+        vm_list = etree.SubElement(isik, TSD_EL_VM_LIST)
+        for row in payments:
+            vm = etree.SubElement(vm_list, TSD_EL_VM)
+            for key, element_name in TSD_VM_ELEMENTS:
+                etree.SubElement(vm, element_name).text = _xml_text(_vm_value(row, key))
 
     return etree.tostring(root, xml_declaration=True, encoding="UTF-8", pretty_print=True)
 
 
-def build_tsd_main_csv_document(listing: TsdListing, ctx: TsdReportingContext) -> bytes:
-    """MAIN aggregate CSV — one header row + one data row (a single
-    period's totals, not a per-line listing — mirrors
-    ``kmd.build_kmd_csv_document``'s single-row shape)."""
-    buf = io.StringIO()
-    writer = csv.writer(buf, delimiter=TSD_CSV_DELIMITER, lineterminator="\r\n")
-    header = [
-        TSD_CSV_HEADER_REGCODE,
-        TSD_CSV_HEADER_PERIOD_START,
-        TSD_CSV_HEADER_PERIOD_END,
-        *(TSD_MAIN_FIELD_NAMES[key] for key in TSD_MAIN_COLUMNS),
-    ]
-    row = [
-        ctx.regcode,
-        ctx.period_start.isoformat(),
-        ctx.period_end.isoformat(),
-        *(_format_value(getattr(listing.main, key)) for key in TSD_MAIN_COLUMNS),
-    ]
-    writer.writerow(header)
-    writer.writerow(row)
-    return buf.getvalue().encode(TSD_CSV_ENCODING)
+def _csv_money(value: Decimal) -> str:
+    """2 dp with a COMMA decimal separator (TSD CSV spec)."""
+    return _money(value).replace(".", ",")
+
+
+def _csv_text(value: str) -> str:
+    """Quote a text field (chr 34), escaping ``\\`` then ``"`` per the spec."""
+    return '"' + str(value).replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+# Which Lisa-1 CSV column codes are text (quoted) vs numeric (comma decimal).
+_TSD_TEXT_CODES = frozenset({"1000", "1020"})
+
+
+def _tsd_csv(header_codes: list[str], data_rows: list[list[str]]) -> bytes:
+    """Assemble a TSD CSV: UTF-8 with BOM, CRLF lines, ';' separator, no
+    trailing ';'. Cells are pre-formatted (quoting/decimal handled by caller)."""
+    lines = [TSD_CSV_DELIMITER.join(header_codes)]
+    lines += [TSD_CSV_DELIMITER.join(cells) for cells in data_rows]
+    return (TSD_CSV_BOM + "\r\n".join(lines) + "\r\n").encode(TSD_CSV_ENCODING)
 
 
 def build_tsd_lisa1_csv_document(listing: TsdListing, ctx: TsdReportingContext) -> bytes:
-    """Lisa-1 CSV — one header row + N data rows (genuinely multi-row,
-    mirrors ``kmd_inf``'s Part A/B CSVs). Each data row repeats the header
-    regcode/period as its leading three columns (PLACEHOLDER convention,
-    see ``mapping.py``), same self-describing-row posture as
-    ``kmd_inf.serializer._build_csv``."""
-    buf = io.StringIO()
-    writer = csv.writer(buf, delimiter=TSD_CSV_DELIMITER, lineterminator="\r\n")
-    header = [
-        TSD_CSV_HEADER_REGCODE,
-        TSD_CSV_HEADER_PERIOD_START,
-        TSD_CSV_HEADER_PERIOD_END,
-        *(TSD_LISA1_FIELD_NAMES[key] for key in TSD_LISA1_COLUMNS),
-    ]
-    writer.writerow(header)
+    """Lisa-1 CSV (Annex 1 subform 1a): header row of column codes then one row
+    per payment. Text fields quoted, money with a comma decimal."""
+    header = [code for _, code in TSD_LISA1_CSV_COLUMNS]
+    data_rows: list[list[str]] = []
     for row in listing.lisa1:
-        writer.writerow([
-            ctx.regcode,
-            ctx.period_start.isoformat(),
-            ctx.period_end.isoformat(),
-            *(_format_value(getattr(row, key)) for key in TSD_LISA1_COLUMNS),
-        ])
-    return buf.getvalue().encode(TSD_CSV_ENCODING)
+        cells: list[str] = []
+        for key, code in TSD_LISA1_CSV_COLUMNS:
+            value = _vm_value(row, key) if key == "payment_type_code" else getattr(row, key)
+            if code in _TSD_TEXT_CODES:
+                cells.append(_csv_text(str(value)))
+            else:
+                cells.append(_csv_money(value))
+        data_rows.append(cells)
+    return _tsd_csv(header, data_rows)
+
+
+def build_tsd_main_csv_document(listing: TsdListing, ctx: TsdReportingContext) -> bytes:
+    """MAIN roll-up CSV: header row of main-form codes then one value row. The
+    official CSV spec is annex-focused; this follows the same code-header style
+    (year/month plain integers, money with a comma decimal)."""
+    header = [code for _, code in TSD_MAIN_CSV_COLUMNS]
+    cells: list[str] = []
+    for key, code in TSD_MAIN_CSV_COLUMNS:
+        if key == "_year":
+            cells.append(str(ctx.year))
+        elif key == "_month":
+            cells.append(str(ctx.month))
+        else:
+            cells.append(_csv_money(_main_value(listing.main, key)))
+    return _tsd_csv(header, [cells])
 
 
 def _to_jsonable(value: Any) -> Any:

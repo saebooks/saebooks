@@ -4,8 +4,8 @@
 # Behaviour:
 #   - in sync         → log "ok", exit 0, silent
 #   - drift detected  → auto-heal via `saebooks-token-sync`, log diff, exit 0
-#   - canonical gone  → claude-notify (emergency channel), exit 1
-#   - sync itself fails → claude-notify (emergency channel), exit 1
+#   - canonical gone  → notify-hook (emergency channel), exit 1
+#   - sync itself fails → notify-hook (emergency channel), exit 1
 #
 # Telegram is reserved for genuine emergencies per CLAUDE.md, so drift
 # (recoverable) only goes to the log. Loss of the canonical secret file
@@ -30,8 +30,8 @@ CANONICAL="${HOME}/.claude/secrets/saebooks-claude-code.env"
 if [ ! -r "$CANONICAL" ]; then
     msg="⚠ SAE Books canonical token file missing: $CANONICAL"
     log "ERROR $msg"
-    if command -v claude-notify >/dev/null 2>&1; then
-        claude-notify "$msg" || true
+    if command -v notify-hook >/dev/null 2>&1; then
+        notify-hook "$msg" || true
     fi
     exit 1
 fi
@@ -56,7 +56,7 @@ fi
 # Sync itself failed.
 msg="⚠ saebooks-token-sync FAILED to heal drift — see $LOG"
 log "ERROR $msg"
-if command -v claude-notify >/dev/null 2>&1; then
-    claude-notify "$msg" || true
+if command -v notify-hook >/dev/null 2>&1; then
+    notify-hook "$msg" || true
 fi
 exit 1

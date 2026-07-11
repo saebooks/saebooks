@@ -703,7 +703,7 @@ async def upgrade_to_full(
     Round-2 audit fix #10: the reverse direction (full → cashbook)
     *is* supported now via
     ``POST /api/v1/companies/{id}/bookkeeping-mode`` per
-    ``[[cashbook-upgrade-downgrade-policy]]``. Downgrade refuses
+    ``cashbook-upgrade-downgrade-policy``. Downgrade refuses
     when AR > 0 and lists the offending invoices.
 
     Returns 409 if the company is already in 'full' mode.

@@ -1182,7 +1182,7 @@ async def persist_return(
     helper boxes that feed the box-1/box-5 BOX-FORMULA) from the
     persisted ``figures``. These are engine-internal aggregation legs,
     not fields on any filable form, and the KMD-specific serializer
-    already excludes them via ``KMD_BOX_ORDER``; but the generic
+    already excludes them via ``KMD_EMITTED_BOX_ORDER``; but the generic
     ``GET /tax_returns`` read API (``api/v1/tax_returns.py::
     _serialise_return``) echoes ``figures`` raw, so leaving them in would
     surface 4 non-form codes — one labelled "(internal) ..." — to any

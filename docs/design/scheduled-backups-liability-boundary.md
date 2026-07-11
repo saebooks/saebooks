@@ -8,7 +8,7 @@ in this file is enforced by the application; it documents what the
 `saebooks/services/scheduled_backups.py` module docstrings) so
 whoever writes the customer-facing terms has the accurate technical
 boundary to describe, per planned-modules build plan decision 6 and
-[[saebooks-liability-pricing-principle]].
+saebooks-liability-pricing-principle.
 
 ## What SAE Books does
 
@@ -51,7 +51,7 @@ option where **SAE manages the certificate/key and guarantees the
 handling** of your backup end-to-end (custody, availability, recovery
 support if you lose access). That is a materially different — and
 priced — offer, because it means SAE assumes a liability it does not
-assume today: [[saebooks-liability-pricing-principle]]'s "risk is
+assume today: saebooks-liability-pricing-principle's "risk is
 liability, whoever bears it must be compensated for it." **This option
 does not exist yet** — the config field exists so the schema won't
 need a migration when it's built, and the API explicitly refuses to

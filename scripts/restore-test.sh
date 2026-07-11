@@ -16,7 +16,7 @@
 #     snapshot, writes may have happened since)
 #
 # Results are appended as JSON lines to $SAEBOOKS_BACKUP_DIR/restore-tests.jsonl
-# and a claude-notify fires on failure.
+# and a notify-hook fires on failure.
 #
 # Env: same as backup.sh
 
@@ -42,8 +42,8 @@ log_line() {
 }
 
 notify() {
-    if command -v claude-notify >/dev/null 2>&1; then
-        claude-notify "$1" >/dev/null 2>&1 || true
+    if command -v notify-hook >/dev/null 2>&1; then
+        notify-hook "$1" >/dev/null 2>&1 || true
     fi
 }
 

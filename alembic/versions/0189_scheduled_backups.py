@@ -7,7 +7,7 @@ tenant-coherence trigger is needed (there is no child FK to a company
 row to keep coherent; see ``models/scheduled_backup_config.py``
 docstring).
 
-Tenant-scoping checklist (see feedback_new-table-rls-checklist),
+Tenant-scoping checklist (see new-table-rls-checklist),
 applied to BOTH tables:
 [x] tenant_id NOT NULL column
 [x] FK to tenants(id)

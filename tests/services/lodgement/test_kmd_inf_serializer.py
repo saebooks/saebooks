@@ -1,9 +1,7 @@
 """Unit tests for the EE KMD-INF file serializer (pure — no DB).
 
-kmd-inf-tsd scope Packet 2 (``~/.claude/plans/kmd-inf-tsd-scope.md``
-§4/§7). Mirrors ``tests/services/lodgement/test_kmd_serializer.py``'s
-structural-test shape, adapted for the repeating-row Part A/Part B
-listing instead of a flat 28-box vector.
+Pinned to the real e-MTA ``salesAnnex`` / ``purchasesAnnex`` (part of
+``vatDeclaration``) — see ``saebooks/services/lodgement/kmd_inf/mapping.py``.
 """
 from __future__ import annotations
 
@@ -14,9 +12,6 @@ from decimal import Decimal
 from lxml import etree
 
 from saebooks.services.lodgement.kmd_inf import (
-    KMD_INF_PART_A_COLUMNS,
-    KMD_INF_PART_B_COLUMNS,
-    KMD_INF_TAXONOMY_NS,
     KmdInfListing,
     KmdInfPartARow,
     KmdInfPartBRow,
@@ -24,10 +19,6 @@ from saebooks.services.lodgement.kmd_inf import (
     build_kmd_inf_part_a_csv_document,
     build_kmd_inf_part_b_csv_document,
     build_kmd_inf_xml_document,
-)
-from saebooks.services.lodgement.kmd_inf.mapping import (
-    KMD_INF_PART_A_FIELD_NAMES,
-    KMD_INF_PART_B_FIELD_NAMES,
 )
 
 _D = Decimal
@@ -65,87 +56,93 @@ def _listing(part_a: list[KmdInfPartARow], part_b: list[KmdInfPartBRow]) -> KmdI
     )
 
 
-def test_kmd_inf_xml_root_carries_regcode_and_period() -> None:
-    doc = build_kmd_inf_xml_document(_listing([], []), _ctx())
-    root = etree.fromstring(doc)
-    assert root.tag == f"{{{KMD_INF_TAXONOMY_NS}}}KmdInfDeklaratsioon"
-    assert root.get("regkood") == "10123456"
-    assert root.get("perioodAlgus") == "2026-02-01"
-    assert root.get("perioodLopp") == "2026-02-28"
+def _sale_lines(root: etree._Element) -> list[etree._Element]:
+    return root.find("salesAnnex").findall("saleLine")
 
 
-def test_kmd_inf_xml_empty_listing_emits_empty_containers() -> None:
-    """Zero rows -> empty OsaA/OsaB containers, not an absent element and
-    not a placeholder row (scope §4: N rows, N may be 0)."""
-    doc = build_kmd_inf_xml_document(_listing([], []), _ctx())
-    root = etree.fromstring(doc)
-    part_a = root.find(f"{{{KMD_INF_TAXONOMY_NS}}}OsaA")
-    part_b = root.find(f"{{{KMD_INF_TAXONOMY_NS}}}OsaB")
-    assert part_a is not None
-    assert part_b is not None
-    assert len(part_a) == 0
-    assert len(part_b) == 0
+def _purchase_lines(root: etree._Element) -> list[etree._Element]:
+    return root.find("purchasesAnnex").findall("purchaseLine")
 
 
-def test_kmd_inf_xml_part_a_row_fields() -> None:
-    doc = build_kmd_inf_xml_document(_listing([_row_a()], []), _ctx())
-    root = etree.fromstring(doc)
-    part_a = root.find(f"{{{KMD_INF_TAXONOMY_NS}}}OsaA")
-    rows = part_a.findall(f"{{{KMD_INF_TAXONOMY_NS}}}OsaAKirje")
-    assert len(rows) == 1
-    row_el = rows[0]
-    for key in KMD_INF_PART_A_COLUMNS:
-        el = row_el.find(f"{{{KMD_INF_TAXONOMY_NS}}}{KMD_INF_PART_A_FIELD_NAMES[key]}")
-        assert el is not None, f"missing element for {key!r}"
-    assert row_el.find(f"{{{KMD_INF_TAXONOMY_NS}}}{KMD_INF_PART_A_FIELD_NAMES['taxable_value']}").text == "700.00"
-    assert row_el.find(f"{{{KMD_INF_TAXONOMY_NS}}}{KMD_INF_PART_A_FIELD_NAMES['rate']}").text == "24.00"
-    # lxml normalises an empty-string-assigned element's .text to None
-    # (round-tripped through fromstring) — this asserts "no erisuse-kood",
-    # not the empty string literal.
-    assert row_el.find(f"{{{KMD_INF_TAXONOMY_NS}}}{KMD_INF_PART_A_FIELD_NAMES['erisuse_kood']}").text is None
-    assert row_el.find(f"{{{KMD_INF_TAXONOMY_NS}}}{KMD_INF_PART_A_FIELD_NAMES['is_credit_note']}").text == "false"
+def test_kmd_inf_xml_is_an_annex_only_vatdeclaration() -> None:
+    root = etree.fromstring(build_kmd_inf_xml_document(_listing([], []), _ctx()))
+    assert root.tag == "vatDeclaration"
+    assert root.find("taxPayerRegCode").text == "10123456"
+    assert root.find("year").text == "2026"
+    assert root.find("month").text == "02"
+    # annex-only: no declarationBody
+    assert root.find("declarationBody") is None
+    assert root.find("salesAnnex") is not None
+    assert root.find("purchasesAnnex") is not None
 
 
-def test_kmd_inf_xml_credit_note_row_is_signed_negative() -> None:
-    doc = build_kmd_inf_xml_document(_listing([_row_a(credit_note=True)], []), _ctx())
-    root = etree.fromstring(doc)
-    row_el = root.find(f"{{{KMD_INF_TAXONOMY_NS}}}OsaA/{{{KMD_INF_TAXONOMY_NS}}}OsaAKirje")
-    assert row_el.find(f"{{{KMD_INF_TAXONOMY_NS}}}{KMD_INF_PART_A_FIELD_NAMES['taxable_value']}").text == "-700.00"
-    assert row_el.find(f"{{{KMD_INF_TAXONOMY_NS}}}{KMD_INF_PART_A_FIELD_NAMES['is_credit_note']}").text == "true"
+def test_kmd_inf_xml_empty_listing_has_no_line_rows() -> None:
+    root = etree.fromstring(build_kmd_inf_xml_document(_listing([], []), _ctx()))
+    assert _sale_lines(root) == []
+    assert _purchase_lines(root) == []
+    # empty annex still carries its mandatory noSales flag = true.
+    assert root.find("salesAnnex").find("noSales").text == "true"
 
 
-def test_kmd_inf_xml_part_b_row_fields() -> None:
-    doc = build_kmd_inf_xml_document(_listing([], [_row_b()]), _ctx())
-    root = etree.fromstring(doc)
-    row_el = root.find(f"{{{KMD_INF_TAXONOMY_NS}}}OsaB/{{{KMD_INF_TAXONOMY_NS}}}OsaBKirje")
-    assert row_el.find(f"{{{KMD_INF_TAXONOMY_NS}}}{KMD_INF_PART_B_FIELD_NAMES['input_vat']}").text == "264.00"
-    assert row_el.find(f"{{{KMD_INF_TAXONOMY_NS}}}{KMD_INF_PART_B_FIELD_NAMES['document_total_incl_vat']}").text == "1364.00"
-    assert row_el.find(f"{{{KMD_INF_TAXONOMY_NS}}}{KMD_INF_PART_B_FIELD_NAMES['erisuse_kood']}").text == "12"
+def test_kmd_inf_xml_part_a_saleline_fields() -> None:
+    root = etree.fromstring(build_kmd_inf_xml_document(_listing([_row_a()], []), _ctx()))
+    lines = _sale_lines(root)
+    assert len(lines) == 1
+    line = lines[0]
+    assert line.find("buyerRegCode").text == "10111111"
+    assert line.find("buyerName").text == "P1 Straddles Both Ways"
+    assert line.find("invoiceNumber").text == "INV-1"
+    assert line.find("invoiceSum").text == "700.00"
+    assert line.find("taxRate").text == "24"  # TAX_RATE_SALES classifier, not "24.00"
+    assert line.find("invoiceSumForRate").text == "700.00"
+    assert line.find("sumForRateInPeriod").text == "700.00"
+    # no erisuse-kood -> empty comments element (lxml normalises "" to None)
+    assert line.find("comments").text is None
+    # the real saleLine has NO JrkNr / kmd-box / credit-note flag elements
+    assert line.find("KreeditArve") is None
+    assert line.find("JrkNr") is None
 
 
-def test_kmd_inf_part_a_csv_header_and_row_count() -> None:
+def test_kmd_inf_xml_credit_note_is_signed_negative() -> None:
+    root = etree.fromstring(build_kmd_inf_xml_document(_listing([_row_a(credit_note=True)], []), _ctx()))
+    line = _sale_lines(root)[0]
+    assert line.find("invoiceSum").text == "-700.00"
+    assert line.find("invoiceSumForRate").text == "-700.00"
+
+
+def test_kmd_inf_xml_part_b_purchaseline_fields() -> None:
+    root = etree.fromstring(build_kmd_inf_xml_document(_listing([], [_row_b()]), _ctx()))
+    line = _purchase_lines(root)[0]
+    assert line.find("sellerRegCode").text == "10555555"
+    assert line.find("invoiceSumVat").text == "1364.00"
+    assert line.find("vatSum").text == "264.00"
+    assert line.find("vatInPeriod").text == "264.00"
+    assert line.find("comments").text == "12"
+    # Part B has NO rate column in the real schema.
+    assert line.find("taxRate") is None
+
+
+def test_kmd_inf_part_a_csv_is_symbol_rows_no_header() -> None:
     doc = build_kmd_inf_part_a_csv_document(_listing([_row_a(), _row_a()], []), _ctx())
     lines = doc.decode("utf-8").strip("\r\n").split("\r\n")
-    assert len(lines) == 3  # header + 2 rows
-    header = lines[0].split(";")
-    assert header[:3] == ["regkood", "periood_algus", "periood_lopp"]
-    assert len(header) == 3 + len(KMD_INF_PART_A_COLUMNS)
-    row = lines[1].split(";")
-    assert row[:3] == ["10123456", "2026-02-01", "2026-02-28"]
+    assert len(lines) == 2  # two rows, no column-name header
+    cells = lines[0].split(";")
+    assert cells[0] == "A"
+    assert cells[1] == "10111111"     # buyerRegCode
+    assert cells[6] == "24"           # taxRate classifier
 
 
-def test_kmd_inf_part_a_csv_empty_listing_is_header_only() -> None:
-    doc = build_kmd_inf_part_a_csv_document(_listing([], []), _ctx())
-    lines = doc.decode("utf-8").strip("\r\n").split("\r\n")
-    assert len(lines) == 1
+def test_kmd_inf_part_a_csv_empty_listing_is_empty() -> None:
+    assert build_kmd_inf_part_a_csv_document(_listing([], []), _ctx()) == b""
 
 
-def test_kmd_inf_part_b_csv_header_and_values() -> None:
+def test_kmd_inf_part_b_csv_values() -> None:
     doc = build_kmd_inf_part_b_csv_document(_listing([], [_row_b()]), _ctx())
-    lines = doc.decode("utf-8").strip("\r\n").split("\r\n")
-    header = lines[0].split(";")
-    row = lines[1].split(";")
-    values = dict(zip(header, row))
-    assert values[KMD_INF_PART_B_FIELD_NAMES["input_vat"]] == "264.00"
-    assert values[KMD_INF_PART_B_FIELD_NAMES["document_total_incl_vat"]] == "1364.00"
-    assert len(header) == 3 + len(KMD_INF_PART_B_COLUMNS)
+    cells = doc.decode("utf-8").strip("\r\n").split("\r\n")[0].split(";")
+    # B;sellerRegCode;sellerName;invoiceNumber;invoiceDate;invoiceSumVat;vatSum;vatInPeriod;comments
+    assert cells[0] == "B"
+    assert cells[1] == "10555555"     # sellerRegCode
+    assert cells[5] == "1364.00"      # invoiceSumVat
+    assert cells[6] == "264.00"       # vatSum
+    assert cells[7] == "264.00"       # vatInPeriod
+    assert cells[8] == "12"           # comments

@@ -19,7 +19,7 @@ For ``destination_type="local_path"`` it stores a path relative to
 so a tenant config can never point outside that root).
 
 ``managed_by`` is the liability-pricing extension point
-([[saebooks-liability-pricing-principle]]): ``"client"`` (the only
+(saebooks-liability-pricing-principle): ``"client"`` (the only
 value the service layer currently implements) means the client
 supplies their own passphrase and owns the destination/retention —
 open baseline, no SAE liability assumed. ``"sae"`` is RESERVED for a

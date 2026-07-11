@@ -89,7 +89,7 @@ Stacks (one server compose project per tenant DB):
     # expect: a row with usename='saebooks_app' (the API container's pool)
     ```
 
-5. **Smoke-test endpoints.** Hit any tenant-scoped route on the stack and confirm 200. The `saebooks-verify` per-stack tokens (`~/bin/saebooks-verify`, [[saebooks-claude-verify-tokens]]) bypass CF Access and curl the internal API directly. Spot-check at least one endpoint per category — list, detail, mutation — because the failure mode of a missed `SET LOCAL` in a router is a zero-row response, which list endpoints surface as `{items: [], total: 0}` (looks superficially fine) but detail endpoints surface as 404 (very visible).
+5. **Smoke-test endpoints.** Hit any tenant-scoped route on the stack and confirm 200. The `saebooks-verify` per-stack tokens (`~/bin/saebooks-verify`, saebooks-claude-verify-tokens) bypass CF Access and curl the internal API directly. Spot-check at least one endpoint per category — list, detail, mutation — because the failure mode of a missed `SET LOCAL` in a router is a zero-row response, which list endpoints surface as `{items: [], total: 0}` (looks superficially fine) but detail endpoints surface as 404 (very visible).
 
 6. **24-h soak on sandbox before promoting** to primary. Watch `saebooks-sandbox-api-1` logs for sudden 404 spikes on previously-200ing endpoints — that is the SET-LOCAL-missing signature.
 
@@ -144,5 +144,5 @@ These all become higher-priority once fix-F lands: under the BYPASSRLS role they
 
 - Lane 4 report — `/home/youruser/projects/saebooks-critics-reports/audit-trail/2026-05-23-overnight/04-rls-multi-tenant.md`
 - Lane 5 P0-005 (paperless SET LOCAL) — same report directory.
-- `feedback_new-table-rls-checklist` memory file — the checklist this work makes mean something.
-- `[[saebooks-claude-verify-tokens]]` — per-stack Bearer tokens for the smoke-test step.
+- `new-table-rls-checklist` memory file — the checklist this work makes mean something.
+- `saebooks-claude-verify-tokens` — per-stack Bearer tokens for the smoke-test step.

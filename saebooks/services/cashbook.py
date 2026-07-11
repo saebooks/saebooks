@@ -810,7 +810,7 @@ async def setup_cashbook_mode(
         )
 
     # full → cashbook flip: Round-2 audit fix #10 makes this a
-    # first-class downgrade per ``[[cashbook-upgrade-downgrade-policy]]``.
+    # first-class downgrade per ``cashbook-upgrade-downgrade-policy``.
     # Delegate to downgrade_full_to_cashbook for the AR-balance check
     # so the policy is enforced consistently regardless of entry point.
     # (Previously this raised "switching mid-life is not supported".)
@@ -842,7 +842,7 @@ async def _ar_outstanding_invoice_ids(
     non-zero AR balance on this company.
 
     Used by ``downgrade_full_to_cashbook`` to refuse the mode flip
-    when AR > 0 — the schema invariant (``[[cashbook-upgrade-downgrade-policy]]``)
+    when AR > 0 — the schema invariant (``cashbook-upgrade-downgrade-policy``)
     is that no AR balances exist in cashbook mode.
     """
     from saebooks.models.invoice import Invoice, InvoiceStatus
@@ -874,7 +874,7 @@ async def downgrade_full_to_cashbook(
     """Flip ``bookkeeping_mode='full'`` → ``'cashbook'`` (Round-2 audit
     fix #10 — bidirectional bookkeeping_mode).
 
-    Schema invariant (per ``[[cashbook-upgrade-downgrade-policy]]``):
+    Schema invariant (per ``cashbook-upgrade-downgrade-policy``):
     no AR balances + cashbook mode. So this function refuses the flip
     when any POSTED invoice still has an unpaid balance. The error
     body lists the offending invoice IDs + numbers so the user can

@@ -21,7 +21,7 @@ Architectural change:
       transactions repointed, contact rows deleted, then
       `contacts.is_one_off` dropped.
 
-Tenant-scoping checklist (see feedback_new-table-rls-checklist):
+Tenant-scoping checklist (see new-table-rls-checklist):
     [x] tenant_id NOT NULL column + FK to tenants(id)
     [x] ENABLE + FORCE ROW LEVEL SECURITY
     [x] CREATE POLICY tenant_isolation (USING + WITH CHECK)

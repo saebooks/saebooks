@@ -15,7 +15,7 @@ written to close everywhere else. This migration closes it before
 enforcement in a later commit in the same branch — never one without
 the other, same discipline as 0186's audit_snapshots note).
 
-Tenant-scoping checklist (see feedback_new-table-rls-checklist):
+Tenant-scoping checklist (see new-table-rls-checklist):
 [x] tenant_id NOT NULL column
 [x] FK to tenants(id)
 [x] ENABLE ROW LEVEL SECURITY + FORCE ROW LEVEL SECURITY

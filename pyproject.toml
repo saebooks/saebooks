@@ -5,7 +5,7 @@ name = "saebooks"
 # asserts they match, so they can't drift. (Dynamic attr is impractical here:
 # the Dockerfile installs deps before copying saebooks/, so attr resolution
 # would ModuleNotFound or bust the dependency-cache layer every release.)
-version = "0.5"
+version = "0.5.1"
 description = "Self-hosted double-entry accounting for small-to-medium businesses"
 readme = "README.md"
 requires-python = ">=3.12"

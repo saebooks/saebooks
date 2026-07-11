@@ -58,9 +58,9 @@ log_line() {
 }
 
 notify() {
-    # Best-effort Telegram notification via claude-notify if available.
-    if command -v claude-notify >/dev/null 2>&1; then
-        claude-notify "$1" >/dev/null 2>&1 || true
+    # Best-effort Telegram notification via notify-hook if available.
+    if command -v notify-hook >/dev/null 2>&1; then
+        notify-hook "$1" >/dev/null 2>&1 || true
     fi
 }
 

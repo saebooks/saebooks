@@ -14,7 +14,7 @@ this module against the SQLite backend, which has no RLS at all, and
 still proves zero foreign rows — the app-layer filter alone is the
 guarantee, RLS is defence-in-depth on top of it (same posture as every
 other tenant-scoped query in this codebase, see
-``feedback_new-table-rls-checklist`` item 6).
+``new-table-rls-checklist`` item 6).
 
 This is emphatically NOT ``services/backups.py``'s whole-database
 ``pg_dump`` — that file stays a read-only VIEW of the infra timer's
@@ -25,7 +25,7 @@ HOW "WHICH TABLES" IS DECIDED — AND HOW THAT DECISION STAYS CORRECT
 ----------------------------------------------------------------------
 This codebase has ~103 ORM tables. Rather than hand-listing "the
 tables a backup includes" (the exact anti-pattern
-``feedback_new-table-rls-checklist`` documents recurring — a
+``new-table-rls-checklist`` documents recurring — a
 hand-maintained list silently goes stale as new tables are added), this
 module REFLECTS ``Base.metadata`` at runtime and classifies EVERY table
 into exactly one bucket:

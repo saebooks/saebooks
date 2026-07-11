@@ -1,98 +1,106 @@
-"""KMD-INF (VAT-return invoice annex) -> e-MTA manual-upload field-name
-mapping.
+"""KMD-INF (VAT-return invoice annex) -> official e-MTA ``salesAnnex`` /
+``purchasesAnnex`` element mapping.
 
-⚠ CONFORMANCE STATUS — read before trusting the output
-------------------------------------------------------
-Every name below — the XML root element, its namespace/prefix/schemaRef,
-the Part A/B container + row element names, each per-column local-name,
-and the CSV column headers/delimiter — is a **PLACEHOLDER**, exactly like
-``services/lodgement/kmd/mapping.py``'s. Per the scope
-(``~/.claude/plans/kmd-inf-tsd-scope.md`` §4/§5): "emta.ee is a
-JS-rendered Drupal site ... the machine XML/CSV formats for BOTH annexes
-are UNVERIFIED". This module follows the identical mitigation: ship
-structurally-correct PLACEHOLDER names, centralised in this ONE file,
-pinned by golden-file tests (``tests/services/lodgement/test_kmd_inf_*``),
-so dropping the real e-MTA element/column names in later is a mechanical,
-reviewable diff — no logic in ``serializer.py`` changes.
+CONFORMANCE STATUS — PINNED to the real e-MTA format (2026-07)
+--------------------------------------------------------------
+The former PLACEHOLDER names are replaced with the REAL element names from
+``vatdeclaration.xsd`` + the KMD6 example
+(``tests/fixtures/emta_schemas/vatdeclaration_example.xml``). KMD-INF is NOT a
+standalone document: Part A = ``salesAnnex`` and Part B = ``purchasesAnnex``,
+both children of the same ``vatDeclaration`` the KMD main form lives in. The
+serializer therefore builds these annex ELEMENTS and hands them to
+``kmd.serializer.build_vat_declaration_document`` (annex-only or combined).
 
-**Structural delta from ``kmd/mapping.py`` (scope §4):** KMD is a flat
-28-box vector — one element/column per box. KMD-INF is a **repeating-row**
-document — a header block (regcode, period) plus a list of Part A rows
-and a list of Part B rows, each row a fixed set of columns. So this
-module defines, per part, a header-field name set *and* a per-row column
-name set, plus the row container/row element names, rather than a single
-flat field dict.
+Structural deltas from the old guessed model (see serializer.py):
 
-Column *semantics* (which figure goes in which column) are NOT
-placeholder — they come from the scope's §2.1 Part A/B tables, themselves
-citing [SEED-EE]. Only the on-the-wire *names* are unverified.
+* No ``JrkNr`` / row-number column, no ``KreeditArve`` boolean, no
+  ``kmd_box_code`` column — the real ``saleLine`` has none of these. A credit
+  note is just a ``saleLine`` with a NEGATIVE ``invoiceSum``.
+* Part A row = ``saleLine`` with columns buyerRegCode, buyerName, invoiceNumber,
+  invoiceDate, invoiceSum, taxRate, invoiceSumForRate, sumForRateInPeriod,
+  comments (9). ``taxRate`` is the TAX_RATE_SALES classifier STRING ("24", "22",
+  ...), not a decimal percentage.
+* Part B row = ``purchaseLine`` with columns sellerRegCode, sellerName,
+  invoiceNumber, invoiceDate, invoiceSumVat, vatSum, vatInPeriod, comments (8).
+  There is NO rate column in Part B.
+* Annex containers carry an optional ``groupMemberRegCode`` (VAT-group only,
+  omitted for a plain taxpayer) then ``noSales``/``sumPerPartnerSales``
+  (``noPurchases``/``sumPerPartnerPurchases`` for B) then the line rows.
+
+⚠ UNVERIFIED (kept explicit):
+  - ``invoiceSumForRate`` (cell 8, "cash-basis only") vs ``sumForRateInPeriod``
+    (cell 9, period-declared taxable value): we emit our per-rate
+    ``taxable_value`` into BOTH (equal for an accrual, single-period line).
+  - ``vatSum`` (cell 7, "cash-basis only") vs ``vatInPeriod`` (cell 8,
+    mandatory box-5 input VAT): we emit our ``input_vat`` into BOTH.
+  - ``taxRate`` "erikord" (special-arrangement) variants (24erikord, ...) are
+    NOT distinguished — the generator carries no special-arrangement flag on the
+    rate; the plain numeric classifier is emitted.
+
+erisus/COMMENT reconciliation (kmd_classifiers_01.07.2025.pdf): the generator's
+derived erisus codes are ALL valid official classifier values — Part A "02"
+(§41¹ buyer self-assess) and "03" (mixed-rate) ∈ COMMENT_SALES {01,02,03};
+Part B "12" (§41¹ reverse-charge acquisition) ∈ COMMENT_PURCHASES {11,12}. The
+generator deliberately never derives "01"/"11" (documented — no finer seed
+leaf). No mapping table needed: the values pass straight through to ``comments``.
 """
 from __future__ import annotations
 
-# --- XML PLACEHOLDERS -------------------------------------------------------
-# ⚠ TODO(e-MTA XSD): replace with the real namespace/schemaRef once fetched
-# from e-MTA's technical-info page / X-tee catalogue (scope §5 UNVERIFIED item).
-KMD_INF_TAXONOMY_NS = "urn:emta:PLACEHOLDER:kmdinf"
-KMD_INF_TAXONOMY_PREFIX = "kmdinf"
-KMD_INF_SCHEMA_REF = "urn:emta:PLACEHOLDER:kmdinf.xsd"
-KMD_INF_ROOT_ELEMENT = "KmdInfDeklaratsioon"
+from decimal import Decimal
 
-# Root-level attribute names (also PLACEHOLDER, mirrors kmd/mapping.py).
-KMD_INF_ATTR_REGCODE = "regkood"
-KMD_INF_ATTR_PERIOD_START = "perioodAlgus"
-KMD_INF_ATTR_PERIOD_END = "perioodLopp"
+# --- salesAnnex / purchasesAnnex element names -------------------------------
+KMD_INF_EL_SALES_ANNEX = "salesAnnex"
+KMD_INF_EL_PURCHASES_ANNEX = "purchasesAnnex"
+KMD_INF_EL_GROUP_MEMBER_REGCODE = "groupMemberRegCode"
+KMD_INF_EL_NO_SALES = "noSales"
+KMD_INF_EL_NO_PURCHASES = "noPurchases"
+KMD_INF_EL_SUM_PER_PARTNER_SALES = "sumPerPartnerSales"
+KMD_INF_EL_SUM_PER_PARTNER_PURCHASES = "sumPerPartnerPurchases"
+KMD_INF_EL_SALE_LINE = "saleLine"
+KMD_INF_EL_PURCHASE_LINE = "purchaseLine"
 
-# Part A / Part B row-container + per-row element names (PLACEHOLDER).
-KMD_INF_PART_A_CONTAINER_ELEMENT = "OsaA"
-KMD_INF_PART_A_ROW_ELEMENT = "OsaAKirje"
-KMD_INF_PART_B_CONTAINER_ELEMENT = "OsaB"
-KMD_INF_PART_B_ROW_ELEMENT = "OsaBKirje"
+# --- Part A (saleLine) columns: (generator-row attribute, element name) ------
+# The row attribute is a KmdInfPartARow field EXCEPT the three synthesised
+# columns (taxRate / invoiceSumForRate / sumForRateInPeriod) which the
+# serializer derives — see serializer._sale_line_element. Order is the real
+# SaleLine XSD/CSV order.
+KMD_INF_PART_A_ELEMENTS: tuple[tuple[str, str], ...] = (
+    ("partner_registration_number", "buyerRegCode"),
+    ("partner_name", "buyerName"),
+    ("document_number", "invoiceNumber"),
+    ("document_date", "invoiceDate"),
+    ("document_total_ex_vat", "invoiceSum"),
+    ("_tax_rate_classifier", "taxRate"),
+    ("_invoice_sum_for_rate", "invoiceSumForRate"),
+    ("_sum_for_rate_in_period", "sumForRateInPeriod"),
+    ("erisuse_kood", "comments"),
+)
 
-# --- CSV PLACEHOLDERS --------------------------------------------------------
-# ⚠ TODO(e-MTA CSV spec): delimiter/encoding/column-order are PLACEHOLDER,
-# same convention as kmd/mapping.py (semicolon — common EE/EU CSV choice,
-# NOT verified against any e-MTA sample file). Every data row repeats the
-# header regcode/period as its leading three columns — each row is
-# self-describing (a repeating-row bulk-upload file, unlike KMD's single
-# summary row) — PLACEHOLDER convention, not sourced from a real sample.
-KMD_INF_CSV_DELIMITER = ";"
+# --- Part B (purchaseLine) columns -------------------------------------------
+KMD_INF_PART_B_ELEMENTS: tuple[tuple[str, str], ...] = (
+    ("partner_registration_number", "sellerRegCode"),
+    ("partner_name", "sellerName"),
+    ("document_number", "invoiceNumber"),
+    ("document_date", "invoiceDate"),
+    ("document_total_incl_vat", "invoiceSumVat"),
+    ("_vat_sum", "vatSum"),
+    ("input_vat", "vatInPeriod"),
+    ("erisuse_kood", "comments"),
+)
+
+# --- CSV ---------------------------------------------------------------------
+# Same row-symbol CSV family as the KMD body: 'A' rows and 'B' rows, no
+# column-name header, ';' delimiter, no trailing ';', CRLF, UTF-8.
 KMD_INF_CSV_ENCODING = "utf-8"
-KMD_INF_CSV_HEADER_REGCODE = "regkood"
-KMD_INF_CSV_HEADER_PERIOD_START = "periood_algus"
-KMD_INF_CSV_HEADER_PERIOD_END = "periood_lopp"
+KMD_INF_CSV_DELIMITER = ";"
+KMD_INF_CSV_SALES_SYMBOL = "A"
+KMD_INF_CSV_PURCHASES_SYMBOL = "B"
 
-# --- Part A per-row field names (shared by XML sub-element local-names and
-# CSV column headers, so there is exactly one name-per-column to correct
-# later) -----------------------------------------------------------------
-# ⚠ PLACEHOLDER local-names — modelled on the scope §2.1 Part A column
-# table / Estonian form vocabulary, NOT sourced from the real XSD.
-# Ordering below IS load-bearing (KMD_INF_PART_A_COLUMNS, derived from this
-# dict's insertion order) — mirrors the scope's own column table order.
-KMD_INF_PART_A_FIELD_NAMES: dict[str, str] = {
-    "row_no": "JrkNr",
-    "partner_registration_number": "PartneriKood",
-    "partner_name": "PartneriNimi",
-    "document_number": "ArveNumber",
-    "document_date": "ArveKuupaev",
-    "document_total_ex_vat": "ArveSummaKm",
-    "taxable_value": "MaksustatavVaartus",
-    "rate": "Maksumaar",
-    "kmd_box_code": "KmdLahter",
-    "erisuse_kood": "ErisuseKood",
-    "is_credit_note": "KreeditArve",
-}
-KMD_INF_PART_A_COLUMNS: tuple[str, ...] = tuple(KMD_INF_PART_A_FIELD_NAMES.keys())
 
-# --- Part B per-row field names --------------------------------------------
-KMD_INF_PART_B_FIELD_NAMES: dict[str, str] = {
-    "row_no": "JrkNr",
-    "partner_registration_number": "PartneriKood",
-    "partner_name": "PartneriNimi",
-    "document_number": "ArveNumber",
-    "document_date": "ArveKuupaev",
-    "document_total_incl_vat": "ArveSummaKoosKm",
-    "input_vat": "SisendKaibemaks",
-    "rate": "Maksumaar",
-    "erisuse_kood": "ErisuseKood",
-}
-KMD_INF_PART_B_COLUMNS: tuple[str, ...] = tuple(KMD_INF_PART_B_FIELD_NAMES.keys())
+def tax_rate_classifier(rate: Decimal) -> str:
+    """Map a decimal VAT rate (e.g. ``Decimal('24.00')``) to its TAX_RATE_SALES
+    classifier code ("24"). Integer-valued rates only (all current EE rates are
+    whole percents: 24/22/20/13/9/5). ``erikord`` variants are NOT distinguished
+    (UNVERIFIED, see module docstring)."""
+    q = rate.quantize(Decimal("1")) if rate == rate.to_integral_value() else rate
+    return str(q.to_integral_value()) if rate == rate.to_integral_value() else str(q)

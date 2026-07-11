@@ -48,7 +48,7 @@ What this migration does
    ``tenant_isolation`` policy (deferred until after the reseed, same
    "data first, FORCE second" precedent as 0058/0186/0190).
 
-Tenant-scoping checklist (see feedback_new-table-rls-checklist):
+Tenant-scoping checklist (see new-table-rls-checklist):
 [x] tenant_id NOT NULL column
 [x] FK to tenants(id)
 [x] ENABLE ROW LEVEL SECURITY + FORCE ROW LEVEL SECURITY

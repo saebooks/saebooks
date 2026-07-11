@@ -1,9 +1,7 @@
 """Unit tests for the EE KMD file serializer (pure — no DB).
 
-KMD-formula support Packet 4 (see
-``~/.claude/plans/kmd-formula-support-scope.md`` §5/§6/§7 Packet 4).
-Mirrors ``tests/services/lodgement/test_sbr_bas.py``'s structural-test
-shape for the AU SBR generator.
+Pinned to the real e-MTA ``vatDeclaration`` (KMD6) format — see
+``saebooks/services/lodgement/kmd/mapping.py``.
 """
 from __future__ import annotations
 
@@ -13,14 +11,13 @@ from decimal import Decimal
 from lxml import etree
 
 from saebooks.services.lodgement.kmd import (
-    KMD_BOX_ORDER,
-    KMD_TAXONOMY_NS,
+    KMD_EMITTED_BOX_ORDER,
     KmdFigures,
     KmdReportingContext,
     build_kmd_csv_document,
     build_kmd_xml_document,
 )
-from saebooks.services.lodgement.kmd.mapping import KMD_FIELD_NAMES
+from saebooks.services.lodgement.kmd.mapping import KMD_CSV_BODY_COLUMNS, KMD_FIELD_NAMES
 
 
 def _ctx() -> KmdReportingContext:
@@ -31,83 +28,72 @@ def _ctx() -> KmdReportingContext:
 
 def _figures() -> KmdFigures:
     return KmdFigures.from_box_amounts(
-        {"1": Decimal("10000.00"), "2": Decimal("2000.00"), "4": Decimal("2710.00")}
+        {"1": Decimal("10000.00"), "2": Decimal("2000.00"), "5": Decimal("840.00")}
     )
 
 
-def test_kmd_box_order_has_all_28_official_boxes() -> None:
-    assert len(KMD_BOX_ORDER) == 28
-    assert KMD_BOX_ORDER[0] == "1"
-    assert KMD_BOX_ORDER[-1] == "13"
-    # internal helper boxes from the EE seed (Packet 3) must NOT appear.
-    assert "1_DOMESTIC" not in KMD_BOX_ORDER
-    assert "1_RC" not in KMD_BOX_ORDER
-    assert "5_DOMESTIC" not in KMD_BOX_ORDER
-    assert "5_RC" not in KMD_BOX_ORDER
+def test_kmd_emitted_box_order_is_24_filable_boxes() -> None:
+    assert len(KMD_EMITTED_BOX_ORDER) == 24
+    assert KMD_EMITTED_BOX_ORDER[0] == "1"
+    assert KMD_EMITTED_BOX_ORDER[-1] == "11"
+    # e-MTA-computed boxes are not submitted.
+    for computed in ("4", "4-1", "12", "13"):
+        assert computed not in KMD_EMITTED_BOX_ORDER
+    # internal seed helper boxes must never appear.
+    for helper in ("1_DOMESTIC", "1_RC", "5_DOMESTIC", "5_RC"):
+        assert helper not in KMD_EMITTED_BOX_ORDER
 
 
-def test_kmd_xml_is_wellformed_with_regcode_and_period() -> None:
-    doc = build_kmd_xml_document(_figures(), _ctx())
-    root = etree.fromstring(doc)
-    assert root.tag == f"{{{KMD_TAXONOMY_NS}}}KmdDeklaratsioon"
-    assert root.get("regkood") == "12345678"
-    assert root.get("perioodAlgus") == "2026-01-01"
-    assert root.get("perioodLopp") == "2026-01-31"
+def test_kmd_xml_envelope_uses_real_vatdeclaration_shape() -> None:
+    root = etree.fromstring(build_kmd_xml_document(_figures(), _ctx()))
+    assert root.tag == "vatDeclaration"
+    assert root.find("taxPayerRegCode").text == "12345678"
+    assert root.find("year").text == "2026"
+    assert root.find("month").text == "01"
+    assert root.find("declarationType").text == "1"
+    assert root.find("version").text == "KMD6"  # 2026-01 is 07.2025+
+    body = root.find("declarationBody")
+    assert body is not None
+    # four mandatory flags lead the body.
+    assert [e.tag for e in body[:4]] == [
+        "noSales", "noPurchases", "sumPerPartnerSales", "sumPerPartnerPurchases",
+    ]
 
 
-def test_kmd_xml_emits_all_28_boxes_including_nils() -> None:
-    doc = build_kmd_xml_document(_figures(), _ctx())
-    root = etree.fromstring(doc)
-    for box_code in KMD_BOX_ORDER:
-        el = root.find(f"{{{KMD_TAXONOMY_NS}}}{KMD_FIELD_NAMES[box_code]}")
-        assert el is not None, f"missing element for box {box_code!r}"
-    box_3 = root.find(f"{{{KMD_TAXONOMY_NS}}}{KMD_FIELD_NAMES['3']}")
-    assert box_3.text == "0.00"  # reported nil, not absent
+def test_kmd_xml_emits_all_24_boxes_including_nils() -> None:
+    body = etree.fromstring(build_kmd_xml_document(_figures(), _ctx())).find("declarationBody")
+    for box_code in KMD_EMITTED_BOX_ORDER:
+        assert body.find(KMD_FIELD_NAMES[box_code]) is not None, f"missing box {box_code!r}"
+    # box 3 (transactionsZeroVat) reported nil, not absent.
+    assert body.find(KMD_FIELD_NAMES["3"]).text == "0.00"
+    # 24% standard rate maps to transactions24 (KMD6).
+    assert KMD_FIELD_NAMES["1"] == "transactions24"
 
 
 def test_kmd_xml_values_are_two_decimal_places() -> None:
-    doc = build_kmd_xml_document(_figures(), _ctx())
-    root = etree.fromstring(doc)
-    box_1 = root.find(f"{{{KMD_TAXONOMY_NS}}}{KMD_FIELD_NAMES['1']}")
-    assert box_1.text == "10000.00"
-    box_4 = root.find(f"{{{KMD_TAXONOMY_NS}}}{KMD_FIELD_NAMES['4']}")
-    assert box_4.text == "2710.00"
+    body = etree.fromstring(build_kmd_xml_document(_figures(), _ctx())).find("declarationBody")
+    assert body.find("transactions24").text == "10000.00"
+    assert body.find("inputVatTotal").text == "840.00"
 
 
-def test_kmd_csv_has_header_and_one_data_row() -> None:
-    doc = build_kmd_csv_document(_figures(), _ctx())
-    text = doc.decode("utf-8")
-    lines = text.strip("\r\n").split("\r\n")
-    assert len(lines) == 2
-    header = lines[0].split(";")
-    row = lines[1].split(";")
-    assert header[:3] == ["regkood", "periood_algus", "periood_lopp"]
-    assert row[:3] == ["12345678", "2026-01-01", "2026-01-31"]
-    assert len(header) == len(row) == 3 + len(KMD_BOX_ORDER)
-
-
-def test_kmd_csv_box_1_and_4_values() -> None:
-    doc = build_kmd_csv_document(_figures(), _ctx())
-    lines = doc.decode("utf-8").strip("\r\n").split("\r\n")
-    header = lines[0].split(";")
-    row = lines[1].split(";")
-    values = dict(zip(header, row))
-    assert values[KMD_FIELD_NAMES["1"]] == "10000.00"
-    assert values[KMD_FIELD_NAMES["4"]] == "2710.00"
-    assert values[KMD_FIELD_NAMES["3"]] == "0.00"
+def test_kmd_csv_is_a_single_symbol_row() -> None:
+    lines = build_kmd_csv_document(_figures(), _ctx()).decode("utf-8").strip("\r\n").split("\r\n")
+    assert len(lines) == 1  # no column-name header row
+    cells = lines[0].split(";")
+    assert cells[0] == "KMD6"
+    assert cells[1:5] == ["false", "false", "false", "false"]  # the four flags
+    # positional body = 24 boxes + the 2 empty car-count columns.
+    assert len(cells) == 5 + len(KMD_CSV_BODY_COLUMNS) == 5 + 26
+    # first box after the flags is transactions24 (24%).
+    assert cells[5] == "10000.00"
+    # the two car-count columns sit at their documented slots, emitted empty.
+    empty_idx = [5 + i for i, (kind, _) in enumerate(KMD_CSV_BODY_COLUMNS) if kind == "empty"]
+    assert [cells[i] for i in empty_idx] == ["", ""]
 
 
 def test_kmd_figures_from_figures_json_exact_key_match_no_collision() -> None:
-    """Regression guard: unlike sbr.bas.BasFigures.from_figures_json's
-    separator-stripping lookup (which would fold "1-1" and "1-2" toward
-    colliding keys), KmdFigures.from_figures_json must match box codes
-    EXACTLY — "1-1" and "1-2" must resolve independently."""
     figs = KmdFigures.from_figures_json(
-        {
-            "1-1": {"amount": "111.11"},
-            "1-2": {"amount": "222.22"},
-            "1": "333.33",
-        }
+        {"1-1": {"amount": "111.11"}, "1-2": {"amount": "222.22"}, "1": "333.33"}
     )
     assert figs.amount("1-1") == Decimal("111.11")
     assert figs.amount("1-2") == Decimal("222.22")

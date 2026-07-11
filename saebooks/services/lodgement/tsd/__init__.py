@@ -17,10 +17,10 @@ from saebooks.services.lodgement.tsd.generator import (
     generate_tsd,
 )
 from saebooks.services.lodgement.tsd.mapping import (
-    TSD_LISA1_COLUMNS,
-    TSD_MAIN_COLUMNS,
-    TSD_SCHEMA_REF,
-    TSD_TAXONOMY_NS,
+    TSD_MAIN_ELEMENTS,
+    TSD_PAYMENT_TYPE_MAP,
+    TSD_ROOT_ELEMENT,
+    TSD_VM_ELEMENTS,
 )
 from saebooks.services.lodgement.tsd.serializer import (
     TsdReportingContext,
@@ -37,10 +37,10 @@ __all__ = [
     "TsdListing",
     "TsdMainTotals",
     "generate_tsd",
-    "TSD_LISA1_COLUMNS",
-    "TSD_MAIN_COLUMNS",
-    "TSD_SCHEMA_REF",
-    "TSD_TAXONOMY_NS",
+    "TSD_MAIN_ELEMENTS",
+    "TSD_PAYMENT_TYPE_MAP",
+    "TSD_ROOT_ELEMENT",
+    "TSD_VM_ELEMENTS",
     "TsdReportingContext",
     "build_tsd_lisa1_csv_document",
     "build_tsd_main_csv_document",

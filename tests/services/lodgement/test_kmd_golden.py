@@ -14,11 +14,21 @@ values these DB-backed tests independently assert in
 """
 from __future__ import annotations
 
+import os
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
+
+
+def _maybe_regen(path: Path, data: bytes) -> None:
+    """When SAEBOOKS_REGEN_FIXTURES is set, (re)write the golden fixture from
+    the real generator+serializer output before the byte-compare (used to pin
+    the fixtures to the real e-MTA schema — run in-container with
+    tests/fixtures bind-mounted). No-op in a normal run."""
+    if os.environ.get("SAEBOOKS_REGEN_FIXTURES"):
+        path.write_bytes(data)
 
 from saebooks.services.lodgement.kmd import (
     KmdFigures,
@@ -92,6 +102,8 @@ async def test_kmd_domestic_golden_serialises_byte_for_byte() -> None:
     xml_doc = build_kmd_xml_document(figures, ctx)
     csv_doc = build_kmd_csv_document(figures, ctx)
 
+    _maybe_regen(_FIXTURES_DIR / "domestic_golden.xml", xml_doc)
+    _maybe_regen(_FIXTURES_DIR / "domestic_golden.csv", csv_doc)
     assert xml_doc == (_FIXTURES_DIR / "domestic_golden.xml").read_bytes()
     assert csv_doc == (_FIXTURES_DIR / "domestic_golden.csv").read_bytes()
 
@@ -146,5 +158,7 @@ async def test_kmd_rc_eu_acquisition_golden_serialises_byte_for_byte() -> None:
     xml_doc = build_kmd_xml_document(figures, ctx)
     csv_doc = build_kmd_csv_document(figures, ctx)
 
+    _maybe_regen(_FIXTURES_DIR / "rc_eu_acquisition_golden.xml", xml_doc)
+    _maybe_regen(_FIXTURES_DIR / "rc_eu_acquisition_golden.csv", csv_doc)
     assert xml_doc == (_FIXTURES_DIR / "rc_eu_acquisition_golden.xml").read_bytes()
     assert csv_doc == (_FIXTURES_DIR / "rc_eu_acquisition_golden.csv").read_bytes()

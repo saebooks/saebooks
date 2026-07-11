@@ -365,7 +365,7 @@ override; nobody who isn't deliberately switching ever sees a difference.
 ## 9. What NOT to build (yet)
 
 - **Bank-feed integration.** Cashbook v1 is manual entry. SISS bank feeds
-  are still in onboarding (see [[bank-feeds]]); when they land, cashbook
+  are still in onboarding (see bank-feeds); when they land, cashbook
   becomes the natural surface for them. Until then, manual entry only.
 - **Multi-currency.** AUD only. Sole traders billing in USD have outgrown
   cashbook by the second invoice.

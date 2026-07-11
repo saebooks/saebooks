@@ -3,7 +3,7 @@
 **Status:** Draft for Richard's review
 **Drafted:** 2026-05-27
 **Closes:** P0-H from round-2 critic audit (Critic 13)
-**Related:** [[saebooks-strategy-api-first]], audit-log-coverage pitch
+**Related:** saebooks-strategy-api-first, audit-log-coverage pitch
 
 ---
 
@@ -47,7 +47,7 @@ CREATE TABLE credit_applications (
   archived_at       timestamptz
 );
 
--- FORCE RLS + tenant_isolation policy [per [[feedback_new-table-rls-checklist]]]
+-- FORCE RLS + tenant_isolation policy [per new-table-rls-checklist]
 ALTER TABLE credit_applications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE credit_applications FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON credit_applications

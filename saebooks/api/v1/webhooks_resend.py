@@ -60,7 +60,7 @@ _EVENT_TIMESTAMP_COL: dict[str, str | None] = {
     "email.complained": "complained_at",
 }
 
-# Events that fire the Telegram emergency channel — see [[telegram-bridge]]
+# Events that fire the Telegram emergency channel — see telegram-bridge
 _ALERT_EVENTS = {"email.bounced", "email.complained"}
 
 
@@ -99,16 +99,16 @@ def _verify_svix_signature(
 
 
 def _claude_notify(message: str) -> None:
-    """Best-effort emergency notify via claude-notify (silent failure)."""
+    """Best-effort emergency notify via notify-hook (silent failure)."""
     try:
         subprocess.run(
-            ["claude-notify", message],
+            ["notify-hook", message],
             check=False,
             timeout=5,
             capture_output=True,
         )
     except Exception as exc:
-        logger.warning("claude-notify failed: %s", exc)
+        logger.warning("notify-hook failed: %s", exc)
 
 
 @router.post("")

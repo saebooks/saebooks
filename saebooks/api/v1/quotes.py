@@ -265,10 +265,10 @@ async def post_quote_send_email(
 
     Request JSON body:
         {
-            "from_addr": "admin@saee.com.au",
+            "from_addr": "admin@example.com",
             "to":   ["customer@example.com"],
             "cc":   ["other@example.com"],          // optional
-            "bcc":  ["accounts@saee.com.au"],       // optional
+            "bcc":  ["accounts@example.com"],       // optional
             "subject": "Estimate SAE-2026-1019 — ...",
             "body_html": "<p>Please find attached…</p>"
         }
