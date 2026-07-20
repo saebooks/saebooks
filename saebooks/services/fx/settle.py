@@ -33,13 +33,13 @@ extra Dr/Cr lines to the payment's journal entry.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 
-_TWOPLACES = Decimal("0.01")
+from saebooks.money import round_money
 
 
 def _q2(value: Decimal) -> Decimal:
-    return value.quantize(_TWOPLACES, rounding=ROUND_HALF_UP)
+    return round_money(value)
 
 
 @dataclass(frozen=True)

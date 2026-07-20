@@ -38,8 +38,9 @@ from saebooks.models.supplier_statement import (
     SupplierStatement,
     SupplierStatementLine,
 )
+from saebooks.money import money_quantum
 
-_CENT = Decimal("0.01")
+_CENT = money_quantum(2)
 
 
 @dataclass

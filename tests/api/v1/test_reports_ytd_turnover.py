@@ -5,7 +5,7 @@ Tests:
 2. test_ytd_turnover_below        — income below $75k → not crossed
 3. test_ytd_turnover_above        — income at or above $75k → threshold_crossed=True
 4. test_ytd_turnover_above_already_registered — income >= $75k AND
-   company.gst_registered=True → threshold_crossed=False (the registration
+   company.tax_registered=True → threshold_crossed=False (the registration
    obligation is moot for an already-registered entity, so the dashboard
    banner must not fire). Regression test for the "register within 21 days"
    nag firing on long-standing GST-registered businesses.
@@ -170,14 +170,14 @@ async def test_ytd_turnover_above_threshold(
     income_account_id: str,
     asset_account_id: str,
 ) -> None:
-    """Income >= $75k AND company.gst_registered=False → threshold_crossed=True.
+    """Income >= $75k AND company.tax_registered=False → threshold_crossed=True.
 
     Asserts the seed company is unregistered (the default) so the
     register-within-21-days obligation is real.
     """
     async with AsyncSessionLocal() as session:
         company = (await session.execute(select(Company).order_by(Company.created_at).limit(1))).scalar_one()
-        company.gst_registered = False
+        company.tax_registered = False
         await session.commit()
 
     # FY start: always past once the FY has begun — see comment in
@@ -203,7 +203,7 @@ async def test_ytd_turnover_above_threshold_already_registered(
     income_account_id: str,
     asset_account_id: str,
 ) -> None:
-    """Income >= $75k AND company.gst_registered=True → threshold_crossed=False.
+    """Income >= $75k AND company.tax_registered=True → threshold_crossed=False.
 
     The "register with the ATO within 21 days" obligation only applies to
     unregistered businesses that cross the $75k threshold. A long-standing
@@ -212,7 +212,7 @@ async def test_ytd_turnover_above_threshold_already_registered(
     """
     async with AsyncSessionLocal() as session:
         company = (await session.execute(select(Company).order_by(Company.created_at).limit(1))).scalar_one()
-        company.gst_registered = True
+        company.tax_registered = True
         company.gst_effective_date = date(2020, 7, 1)
         await session.commit()
 

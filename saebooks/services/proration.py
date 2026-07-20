@@ -38,7 +38,8 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
-_TWOPLACES = Decimal("0.01")
+from saebooks.money import round_money
+
 _FOURPLACES = Decimal("0.0001")
 
 
@@ -57,7 +58,7 @@ class ProrationError(ValueError):
 
 
 def _q2(value: Decimal) -> Decimal:
-    return value.quantize(_TWOPLACES, rounding=ROUND_HALF_UP)
+    return round_money(value)
 
 
 def _q4(value: Decimal) -> Decimal:

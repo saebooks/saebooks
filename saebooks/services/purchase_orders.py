@@ -58,6 +58,7 @@ from saebooks.models.purchase_order import (
     PurchaseOrderStatus,
 )
 from saebooks.models.tax_code import TaxCode
+from saebooks.money import decimal_places_for, round_money
 from saebooks.services import change_log as change_log_svc
 from saebooks.services import idempotency as idem_svc
 from saebooks.services import numbering
@@ -65,7 +66,6 @@ from saebooks.services import preaccounting_client as _preacct
 from saebooks.services import preaccounting_facades as _pf
 from saebooks.services.idempotency import ClaimStatus
 
-_TWOPLACES = Decimal("0.01")
 _FOURPLACES = Decimal("0.0001")
 _DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
@@ -90,8 +90,9 @@ class VersionConflict(Exception):
 # ---------------------------------------------------------------------- #
 
 
-def _q2(value: Decimal) -> Decimal:
-    return value.quantize(_TWOPLACES, rounding=ROUND_HALF_UP)
+def _q2(value: Decimal, places: int = 2) -> Decimal:
+    """ROUND_HALF_UP to a currency's minor unit (default AUD/base — 2)."""
+    return round_money(value, places)
 
 
 def _q4(value: Decimal) -> Decimal:
@@ -117,13 +118,13 @@ class _LineInput:
 
 
 def _compute_line_totals(
-    line: _LineInput, tax_rate: Decimal
+    line: _LineInput, tax_rate: Decimal, places: int = 2
 ) -> tuple[Decimal, Decimal, Decimal]:
     """Return (subtotal, tax, total) — add-on (ex-GST) tax treatment."""
     gross = line.quantity * line.unit_price
     discount_factor = (Decimal("100") - line.discount_pct) / Decimal("100")
-    subtotal = _q2(gross * discount_factor)
-    tax = _q2(subtotal * tax_rate / Decimal("100"))
+    subtotal = _q2(gross * discount_factor, places)
+    tax = _q2(subtotal * tax_rate / Decimal("100"), places)
     total = subtotal + tax
     return subtotal, tax, total
 
@@ -281,7 +282,9 @@ async def _replace_lines(
         tax_rate = await _resolve_tax_rate(
             session, line_input.tax_code_id, company_id
         )
-        subtotal, tax, total = _compute_line_totals(line_input, tax_rate)
+        subtotal, tax, total = _compute_line_totals(
+            line_input, tax_rate, decimal_places_for(po.currency)
+        )
 
         # Optional ``received_qty`` from caller (multi-receipt re-edits).
         # Default 0 on a fresh line; honoured only if non-negative and not
@@ -329,8 +332,9 @@ async def _recalc(session: AsyncSession, po: PurchaseOrder) -> None:
     ).scalars().all()
     subtotal = sum((ln.line_subtotal for ln in lines), Decimal("0"))
     tax = sum((ln.line_tax for ln in lines), Decimal("0"))
-    po.subtotal = _q2(Decimal(subtotal))
-    po.tax_total = _q2(Decimal(tax))
+    doc_places = decimal_places_for(po.currency)
+    po.subtotal = _q2(Decimal(subtotal), doc_places)
+    po.tax_total = _q2(Decimal(tax), doc_places)
     po.total = po.subtotal + po.tax_total
 
     rate = Decimal(str(po.fx_rate or Decimal("1")))

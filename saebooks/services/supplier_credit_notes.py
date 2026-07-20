@@ -36,7 +36,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 
 from sqlalchemy import func as sa_func
 from sqlalchemy import select
@@ -51,14 +51,13 @@ from saebooks.models.supplier_credit_note import (
     SupplierCreditNoteStatus,
 )
 from saebooks.models.tax_code import TaxCode
+from saebooks.money import round_money
 from saebooks.services import audit_log as audit_log_svc
 from saebooks.services import change_log as change_log_svc
+from saebooks.services import control_accounts as control_accounts_svc
 from saebooks.services import journal as journal_svc
 from saebooks.services import numbering
 from saebooks.services import settings as settings_svc
-
-_TWOPLACES = Decimal("0.01")
-_AP_CODE = "2-1200"
 
 # Expense-side account types permitted on a supplier credit-note line.
 _EXPENSE_TYPES = frozenset(
@@ -81,8 +80,9 @@ class VersionConflict(Exception):
         self.current = current
 
 
-def _q2(value: Decimal) -> Decimal:
-    return value.quantize(_TWOPLACES, rounding=ROUND_HALF_UP)
+def _q2(value: Decimal, places: int = 2) -> Decimal:
+    """ROUND_HALF_UP to a currency's minor unit (default AUD/base — 2)."""
+    return round_money(value, places)
 
 
 @dataclass(frozen=True)
@@ -204,19 +204,11 @@ async def _recalc(session: AsyncSession, scn: SupplierCreditNote) -> None:
 
 
 async def _get_ap_account(session: AsyncSession, company_id: uuid.UUID) -> Account:
-    acct = (
-        await session.execute(
-            select(Account).where(
-                Account.company_id == company_id, Account.code == _AP_CODE
-            )
-        )
-    ).scalar_one_or_none()
-    if acct is None:
-        raise SupplierCreditNoteError(
-            "AP control account 2-1200 Trade Creditors is missing — "
-            "re-run the CoA seed."
-        )
-    return acct
+    # Packet 4b: resolves companies.ap_control_account_code, falling
+    # back to the AU convention "2-1200" — see services/control_accounts.py.
+    return await control_accounts_svc.get_ap_account(
+        session, company_id, error_cls=SupplierCreditNoteError
+    )
 
 
 async def _get_gst_paid_account(

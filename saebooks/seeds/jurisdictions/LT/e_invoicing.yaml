@@ -1,0 +1,32 @@
+# Lithuania — e-invoicing state. NOT a reference-DB table seed
+# (reference_seed: false — the UK e_invoicing.yaml precedent).
+# Placeholder ONLY — do not hardcode any wire format against this yet.
+#
+# Facts (verified 2026-07-12; EC eInvoicing country sheet + NBFC/SABIS
+# sources):
+# * B2G e-invoicing mandatory since 2017-07-01 (public-procurement
+#   suppliers; Directive 2014/55/EU basis; EN 16931 semantic model).
+# * SABIS ("Sąskaitų administravimo bendroji informacinė sistema")
+#   replaced eSąskaita as the B2G channel: mandatory from 2024-07-01
+#   (Government Resolution No 405), with eSąskaita disconnected
+#   2024-08-30 — SABIS sole channel from 2024-09-01. Submission via
+#   portal, API, or Peppol; formats EN 16931 / Peppol BIS Billing 3.0 /
+#   CII; no national CIUS.
+# * B2B: NO enacted mandate. A 2028-01-01 target appears in secondary
+#   summaries but is UNVERIFIED as enacted Lithuanian law; the EU ViDA
+#   digital-reporting requirements (2030+) are the outer frame.
+# * The engine's existing EN 16931 work (EE/AU einvoice lane) is the
+#   expected substrate when a SABIS/Peppol rail is built.
+reference_seed: false
+jurisdiction: LTU
+
+mandate:
+  b2g:
+    effective_from: 2017-07-01
+    channel: sabis
+    channel_since: 2024-09-01
+    networks: [peppol, api, portal]
+    semantic_model: EN16931
+  b2b:
+    status: no_enacted_mandate
+    watch: "2028-01-01 target circulating in secondaries — UNVERIFIED; ViDA 2030 outer frame"

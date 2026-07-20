@@ -45,6 +45,7 @@ from saebooks.models.payment import (
     PaymentMethod,
     PaymentStatus,
 )
+from saebooks.money import money_quantum
 
 logger = logging.getLogger("saebooks.stripe")
 
@@ -142,7 +143,7 @@ def _cents_to_decimal(amount: int, currency: str) -> Decimal:
                     "vuv", "xaf", "xof", "xpf"}
     if currency.lower() in zero_decimal:
         return Decimal(amount)
-    return (Decimal(amount) / Decimal(100)).quantize(Decimal("0.01"))
+    return (Decimal(amount) / Decimal(100)).quantize(money_quantum(2))
 
 
 async def _find_contact(

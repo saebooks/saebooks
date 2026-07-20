@@ -1,0 +1,43 @@
+# Latvian mandatory retirement-contribution rules (LV jurisdiction seed).
+# jurisdiction is the 3-char code 'LVA'. Covers ONLY the 2nd pension
+# pillar (valsts fondēto pensiju shēma — the state funded pension
+# scheme), the earmarked-to-a-vehicle contribution. The 1st pillar (NDC
+# state pension) is funded from the general VSAOI, seeded whole under
+# social_contribution_schemes.yaml — the same split the EE seed makes
+# for its 33% social tax vs pillar II.
+#
+# The 2nd-pillar contribution is a REDIRECT of part of the 20-percentage-
+# point pension share inside the ordinary VSAOI — NOT an additional cost
+# to employer or employee. payer='state' follows the EE seed's precedent
+# (and its documented MandatoryContributionPayer taxonomy gap — the
+# String(16) column has no CHECK constraint; 'state' is the accurate
+# value for a redirect neither party pays on top).
+#
+# Rates — VERIFIED (lm.gov.lv pension-policy + manapensija.lv): 2% from
+# 2012, 4% 2013-2014, 5% 2015, 6% from 2016; then 2025-01-01..2028-12-31
+# one percentage point is transferred back to the 1st pillar, so the
+# 2nd-pillar rate is 5% (1st pillar 15%) for 2025-2028. Only the
+# currently-relevant 2016+ rows are seeded.
+table: mandatory_contribution_rules
+key: [jurisdiction, code, effective_from]
+rows:
+  - jurisdiction: LVA
+    code: lv_pillar_ii_redirect
+    payer: state
+    rate_percent: 6.0000
+    earnings_base: gross_wages
+    cap_amount: null
+    effective_from: 2016-01-01
+    effective_to: 2024-12-31
+
+  - jurisdiction: LVA
+    code: lv_pillar_ii_redirect
+    payer: state
+    rate_percent: 5.0000
+    earnings_base: gross_wages
+    cap_amount: null
+    # 2025-2028 window: one pp moved to the 1st pillar (lm.gov.lv).
+    # The post-2028 reversion to 6% is a legislated intention, not
+    # seeded — seed it when 2029 rates are confirmed.
+    effective_from: 2025-01-01
+    effective_to: 2028-12-31

@@ -38,7 +38,6 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Integer,
-    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -48,6 +47,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from saebooks.db import Base
+from saebooks.db_types import Money
 from saebooks.models._scope import CompanyScoped
 
 _DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
@@ -107,13 +107,13 @@ class Receipt(CompanyScoped, Base):
     )
     reference: Mapped[str | None] = mapped_column(String(255))
     subtotal: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     tax_total: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     total: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     reason: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
@@ -172,13 +172,13 @@ class ReceiptLine(Base):
     # ``amount`` is the ex-GST (net) amount credited to ``account_id``;
     # ``tax_amount`` is the GST on it; ``line_total`` = amount + tax.
     amount: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     tax_amount: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     line_total: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
 
     receipt: Mapped[Receipt] = relationship(back_populates="lines")

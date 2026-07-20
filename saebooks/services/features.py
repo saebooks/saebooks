@@ -97,6 +97,15 @@ FLAG_SCHEDULED_BACKUPS = "scheduled_backups"
 # it. Business+ only.
 FLAG_AI_EXTRACTION = "ai_extraction"
 
+# --- Estonian eID authentication (Smart-ID / Mobiil-ID login) ------------ #
+# SK ID Solutions charges the relying party PER authentication transaction
+# in production (the FLAG_AI_EXTRACTION cost model: real marginal cost per
+# use → CHARTER §6.2/§6.15 axis says never free). Community never gets it;
+# Offline is no-phone-home and eID is a live SK API call, so it is excluded
+# there too. Business+ only. The web app additionally brand-gates the UI to
+# EE-branded (Tasur) deployments.
+FLAG_EID_AUTH = "eid_auth"
+
 # --- B/49 (overhead allocation rules — multi-company overhead split) ----- #
 # Useful for any entity with multiple companies / cost centres sharing
 # overhead. Gated at Business+ since multi-company is the primary driver.
@@ -190,6 +199,7 @@ ALL_FLAGS: tuple[str, ...] = (
     FLAG_ALLOCATION_RULES,
     FLAG_DOCUMENT_INBOX,
     FLAG_INBOX_EMAIL,
+    FLAG_EID_AUTH,
 )
 
 _ALL_FLAGS_SET: frozenset[str] = frozenset(ALL_FLAGS)
@@ -225,6 +235,7 @@ _BUSINESS_FLAGS: frozenset[str] = _OFFLINE_FLAGS | frozenset({
     FLAG_AI_EXTRACTION,
     FLAG_ALLOCATION_RULES,
     FLAG_INBOX_EMAIL,
+    FLAG_EID_AUTH,
     # Wave B (2026-07-10) / Richard's decision 7: SAE-hosted SMTP relay
     # (CHARTER §12.1 "SAE-hosted SMTP for invoice delivery") was
     # mis-placed in Offline at the v1.1 rollout -- Offline is explicitly

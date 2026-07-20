@@ -1,0 +1,85 @@
+# Latvian corporate income tax (UIN — uzņēmumu ienākuma nodoklis) rates.
+#
+# ****************************************************************
+# CRITICAL — Latvia is a DISTRIBUTION-BASED system (the Estonian model,
+# adopted 2018 via the Uzņēmumu ienākuma nodokļa likums). The EE seed's
+# warning applies verbatim: DO NOT compute tax as
+# net_distribution * rate_percent / 100.
+#
+#   * entity_scope=retained_reinvested, rate_percent=0.0000 — profit
+#     retained/reinvested is taxed at 0%; tax is DEFERRED until profit
+#     leaves the company. VERIFIED (likumi.lv/ta/id/292700 Art. 3).
+#
+#   * entity_scope=distributed_profit, rate_percent=20.0000 — the
+#     STANDARD regime: 20% of the GROSSED-UP base. UIN likums Art. 4(9):
+#     "...apliekamā objekta vērtību dala ar koeficientu 0,8" — i.e.
+#
+#         tax = net_distributed_amount / 0.8 * 20%
+#             = net_distributed_amount * 0.25
+#
+#     (~25% of the net distribution; the "20/80" framing, Latvia's
+#     analogue of Estonia's 22/78). rate_percent stores the statutory
+#     20 because it is the auditable, law-sourced number; a consuming
+#     service MUST implement the ÷0.8 gross-up explicitly — see
+#     saebooks.jurisdictions.lv.tax.compute_uin_on_distribution, the
+#     module-owned arithmetic helper. VERIFIED (likumi.lv Art. 3(1) +
+#     Art. 4(9); vid.gov.lv/en/corporate-income-tax).
+#
+#   * entity_scope=distributed_profit_alternative, rate_percent=
+#     15.0000 — THE NEW 2026 ELECTIVE REGIME. Law "Grozījumi Uzņēmumu
+#     ienākuma nodokļa likumā" adopted 2025-12-03, in force 2026-01-01
+#     (VID informative bulletin 2025-12-23; UIN likums Art. 3(5) +
+#     new Art. 4.2). Mechanics:
+#         base = net_dividend / 0.85; CIT = base * 15%
+#         PLUS 6% IIN withheld on the dividend simultaneously
+#     Eligibility: taxpayers whose members during the tax period are
+#     EXCLUSIVELY natural persons. Elective, but ALL-OR-NOTHING per tax
+#     period (no mixing 20%/15% within one period; switch only at the
+#     start of a tax year). Applies ONLY to dividends — deemed
+#     distributions (non-business expenses etc.) stay under the 20%/÷0.8
+#     mechanism even when the election is active. Does not apply to
+#     pre-2017 retained profit. VERIFIED (primary VID bulletin + law
+#     text + KPMG/Grant Thornton/TEGOS/fm.gov.lv corroboration).
+#
+#   * entity_scope=micro_enterprise_turnover, rate_percent=25.0000 —
+#     the mikrouzņēmumu nodoklis (MUN): 25% flat ON TURNOVER (not
+#     profit), minimum EUR 50/year. A different tax with a different
+#     base, recorded here for rate discoverability only. Eligibility is
+#     capped by the VAT registration threshold; the exact euro turnover
+#     ceiling figure is UNVERIFIED (VID states it by reference to the
+#     VAT threshold, no number). VERIFIED for rate + EUR 50 floor
+#     (vid.gov.lv/en/microenterprise-tax).
+#
+# Tax period: calendar MONTH; return via EDS by the 20th of the
+# following month, filed ONLY for months with a taxable object except
+# the final month of the financial year (always filed). VERIFIED
+# (vid.gov.lv). Same schema limitation as the EE seed: this table has no
+# gross-up numerator/denominator field — the ÷0.8 / ÷0.85 coefficients
+# live in the module compute helper and in these comments.
+# ****************************************************************
+table: corporate_tax_rates
+key: [jurisdiction, sub_jurisdiction, tax_year, entity_scope]
+rows:
+  - jurisdiction: LVA
+    tax_year: 2026
+    entity_scope: retained_reinvested
+    rate_percent: 0.0000
+    effective_from: 2018-01-01
+
+  - jurisdiction: LVA
+    tax_year: 2026
+    entity_scope: distributed_profit
+    rate_percent: 20.0000
+    effective_from: 2018-01-01
+
+  - jurisdiction: LVA
+    tax_year: 2026
+    entity_scope: distributed_profit_alternative
+    rate_percent: 15.0000
+    effective_from: 2026-01-01
+
+  - jurisdiction: LVA
+    tax_year: 2026
+    entity_scope: micro_enterprise_turnover
+    rate_percent: 25.0000
+    effective_from: 2021-07-01  # UNVERIFIED — the 25% flat MUN rate's exact commencement was not researched; the 2026 rate itself is VERIFIED.

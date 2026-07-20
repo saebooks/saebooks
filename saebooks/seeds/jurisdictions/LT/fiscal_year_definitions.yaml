@@ -1,0 +1,30 @@
+# Lithuania fiscal-year definition. jurisdiction = 'LTU'.
+#
+# CIT law (Pelno mokesčio įstatymas) Art. 6, official VMI English
+# translation, verified 2026-07-12: "The tax period shall be a fiscal
+# year. It shall coincide with a calendar year unless this Article
+# provides otherwise" — a substitute 12-month tax period is available
+# on application to VMI for objective activity reasons (that
+# per-company override has no column in this single-row table; carried
+# as module knowledge).
+#
+# Currency: EUR since 2015-01-01 (euro adoption).
+#
+# Facts this single-row table CANNOT carry — recorded here and consumed
+# as module knowledge by jurisdictions/lt:
+# * FR0600 (PVM) default period = calendar MONTH for legal persons
+#   (half-year for natural-person VAT payers; quarter electable when
+#   prior-year taxable turnover <= EUR 300,000, Art 84); intra-EU
+#   acquisitions or Art 95(2) service purchases FORCE a monthly period.
+#   Filing + payment by the 25th of the following month.
+# * i.SAF invoice registers: monthly, by the 20th of the following
+#   month (nil registers still due).
+# * GPM313 monthly by the 15th; GPM312 annual by 15 February; Sodra SAM
+#   monthly by the 15th.
+# * PLN204 annual CIT return: 15th day of the 6th month after period
+#   end (15 June for calendar-year filers); advance CIT (FR0430)
+#   quarterly by the 15th of each quarter's last month.
+table: fiscal_year_definitions
+key: [jurisdiction]
+rows:
+  - {jurisdiction: LTU, fy_start_month: 1, fy_start_day: 1, quarter_anchors: [1, 4, 7, 10]}

@@ -1,0 +1,29 @@
+# Australian securities-transfer (marketable securities) duty rates
+# (M1.5 · 5-DUTIES). Australia ABOLISHED marketable-securities duty —
+# quoted securities nationally from 1 July 2001 under the IGA reform
+# schedule, unquoted state-by-state through the 2000s-2010s (last in NSW
+# from 1 July 2016). Every AU row is therefore CLOSED (effective_to set):
+# AU parity is "no open securities-duty row", which is what the seed test
+# asserts. Historical rows kept so a pre-abolition transfer can still be
+# rated; a jurisdiction that still levies the duty (e.g. UK-style stamp
+# duty on shares) seeds an open row.
+table: securities_duty_rates
+key: [jurisdiction, sub_jurisdiction, security_class, effective_from]
+rows:
+  - jurisdiction: AUS
+    sub_jurisdiction: NSW
+    security_class: unquoted
+    rate: 0.6000
+    rate_basis: consideration
+    effective_from: 1998-07-01
+    effective_to: 2016-06-30
+    description: NSW duty on transfer of unquoted marketable securities (60c per $100) — abolished from 1 July 2016.
+
+  - jurisdiction: AUS
+    sub_jurisdiction: QLD
+    security_class: unquoted
+    rate: 0.6000
+    rate_basis: consideration
+    effective_from: 2002-03-01
+    effective_to: 2006-12-31
+    description: QLD duty on transfer of unquoted marketable securities under the Duties Act 2001 — abolished from 1 January 2007.

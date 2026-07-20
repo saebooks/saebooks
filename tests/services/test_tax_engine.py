@@ -7,13 +7,13 @@ from decimal import Decimal
 
 import pytest
 
+from saebooks.jurisdictions.au.tax import AUTaxEngine
 from saebooks.models.account import AccountType
 from saebooks.services.tax_engine import (
     PostingContext,
     TaxTreatment,
     get_engine,
 )
-from saebooks.services.tax_engine.au import AUTaxEngine
 
 pytestmark = pytest.mark.postgres_only
 
@@ -48,18 +48,37 @@ def test_get_engine_au_returns_autaxengine() -> None:
 
 
 def test_get_engine_unknown_raises_keyerror() -> None:
+    # "XX" is no longer the unknown-code probe — it is the RESERVED
+    # neutral sentinel (jurisdiction-module Phase 0) and resolves to
+    # NeutralTaxEngine. "ZZ" (also ISO user-assigned, never a real
+    # country) takes over as the genuinely-unregistered code here.
     with pytest.raises(KeyError, match="Unknown jurisdiction"):
-        get_engine("XX")
+        get_engine("ZZ")
 
 
-def test_get_engine_nz_raises_not_implemented() -> None:
-    with pytest.raises(NotImplementedError, match="M1"):
-        get_engine("NZ")
+def test_get_engine_nz_returns_nztaxengine() -> None:
+    # Behaviour change (NZ jurisdiction module, flagged): NZ used to be
+    # an unbuilt stub (raised NotImplementedError, "M1") — the NZ module
+    # landed the real engine via the same in-file lazy factory shape as
+    # AU. No seed/caller ever relied on NZ raising (the harness even
+    # --ignore'd the old synthetic-NZ M0 test), so this is the same safe
+    # tightening EE's Packet 3 flip was.
+    from saebooks.jurisdictions.nz.tax import NZTaxEngine
+
+    engine = get_engine("NZ")
+    assert isinstance(engine, NZTaxEngine)
+    assert engine.jurisdiction == "NZ"
 
 
-def test_get_engine_uk_raises_not_implemented() -> None:
-    with pytest.raises(NotImplementedError, match="M2"):
-        get_engine("UK")
+def test_get_engine_uk_returns_uktaxengine() -> None:
+    """Behaviour change (UK jurisdiction module, flagged): UK used to be
+    an unbuilt stub (raised NotImplementedError, "M2") — the UK module
+    landed the real engine (jurisdictions.uk.tax.UKTaxEngine), the same
+    flagged flip EE made below when Packet 3 landed EETaxEngine. No
+    seed/caller ever relied on UK raising."""
+    engine = get_engine("UK")
+    assert type(engine).__name__ == "UKTaxEngine"
+    assert engine.jurisdiction == "UK"
 
 
 def test_get_engine_ee_returns_eetaxengine() -> None:
@@ -184,27 +203,27 @@ def test_validate_returns_empty_list() -> None:
 
 
 def test_legacy_gst_shim_still_imports_and_warns() -> None:
-    """services.gst is a deprecated shim — must still expose the public API."""
+    """jurisdictions.au.gst is a deprecated shim — must still expose the public API."""
     import importlib
 
-    import saebooks.services.gst as gst_module
+    import saebooks.jurisdictions.au.gst as gst_module
 
-    with pytest.warns(DeprecationWarning, match="saebooks.services.gst"):
+    with pytest.warns(DeprecationWarning, match="saebooks.jurisdictions.au.gst"):
         importlib.reload(gst_module)
 
-    # Public names still resolve (re-exported from tax_engine.au).
+    # Public names still resolve (re-exported from jurisdictions.au.tax).
     assert hasattr(gst_module, "auto_post_gst_lines")
     assert hasattr(gst_module, "is_auto_post_enabled")
     assert hasattr(gst_module, "settle_bas")
 
 
 def test_legacy_bas_shim_still_imports_and_warns() -> None:
-    """services.bas is a deprecated shim — must still expose the public API."""
+    """jurisdictions.au.bas is a deprecated shim — must still expose the public API."""
     import importlib
 
-    import saebooks.services.bas as bas_module
+    import saebooks.jurisdictions.au.bas as bas_module
 
-    with pytest.warns(DeprecationWarning, match="saebooks.services.bas"):
+    with pytest.warns(DeprecationWarning, match="saebooks.jurisdictions.au.bas"):
         importlib.reload(bas_module)
 
     assert hasattr(bas_module, "BASLine")

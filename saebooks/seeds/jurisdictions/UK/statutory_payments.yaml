@@ -1,0 +1,35 @@
+# United Kingdom statutory payments — weekly rates, tax year 2026-27.
+#
+# NOT a reference-DB table seed (reference_seed: false): no reference
+# table models statutory-payment rates; UK-module data.
+#
+# Primary source (fetched raw 2026-07-12 per §5.3, incl. the SMP
+# £194.32 verification the strategy asked for): gov.uk "Rates and
+# thresholds for employers: 2026 to 2027" —
+#   SSP: "£123.25 or 80% of the employee's average weekly earnings,
+#         whichever is lower"
+#   SMP/SPP/SAP/ShPP/SPBP: "£194.32 or 90% of the employee's average
+#         weekly earnings, whichever is lower"
+#
+# NOTE: the 80%-of-AWE alternative on SSP is the post-2026 shape (SSP
+# reform removed the LEL eligibility floor / waiting-day structure for
+# lower earners); the compute below is NOT implemented in the payroll
+# engine this wave — statutory-payment runs hard-refuse (see
+# jurisdictions/uk/payroll.py).
+reference_seed: false
+jurisdiction: GBR
+effective_from: 2026-04-06
+
+ssp:
+  weekly_rate_gbp: 123.25
+  rule: min(123.25, 80% of average weekly earnings)
+
+smp:
+  weeks_at_90_percent_awe: 6
+  remaining_weeks: 33
+  remaining_weeks_rate: min(194.32, 90% of average weekly earnings)
+  standard_weekly_cap_gbp: 194.32
+
+spp_sap_shpp_spbp:
+  standard_weekly_cap_gbp: 194.32
+  rule: min(194.32, 90% of average weekly earnings)

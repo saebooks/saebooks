@@ -28,6 +28,69 @@ class OAuthError(Exception):
     """Base exception for identity-handoff errors."""
 
 
+async def find_linked_user(
+    provider: str,
+    provider_user_id: str,
+    email: str,
+) -> User | None:
+    """Lookup-only variant of :func:`find_or_create_user` — NEVER creates.
+
+    Fail-closed path for assertion-style providers (Estonian eID): a
+    validated external assertion may only log into a user that already
+    exists — matched by provider link first, then by email (which also
+    upserts the link for next time). A miss returns ``None`` and the
+    caller refuses; auto-creating an account from an eID assertion is a
+    business decision that has deliberately NOT been taken.
+    """
+    import os
+    DEFAULT_TENANT_ID = os.environ.get(
+        "SAEBOOKS_DEFAULT_TENANT_ID",
+        "00000000-0000-0000-0000-000000000001",
+    )
+    async with AsyncSessionLocal() as session:
+        session.info["tenant_id"] = DEFAULT_TENANT_ID
+        link = await session.execute(
+            select(OAuthProviderLink).where(
+                (OAuthProviderLink.provider == provider)
+                & (OAuthProviderLink.provider_user_id == provider_user_id)
+            )
+        )
+        existing_link = link.scalars().first()
+        if existing_link:
+            user = await session.get(User, existing_link.user_id)
+            if user and not user.archived_at:
+                return user
+
+        user_result = await session.execute(
+            select(User).where(User.email == email)
+        )
+        existing_user = user_result.scalars().first()
+        if existing_user is None or existing_user.archived_at:
+            return None
+
+        existing_link_q = await session.execute(
+            select(OAuthProviderLink).where(
+                (OAuthProviderLink.user_id == existing_user.id)
+                & (OAuthProviderLink.provider == provider)
+            )
+        )
+        user_link = existing_link_q.scalars().first()
+        if user_link is None:
+            session.add(
+                OAuthProviderLink(
+                    user_id=existing_user.id,
+                    provider=provider,
+                    provider_user_id=provider_user_id,
+                    provider_user_email=email,
+                )
+            )
+        else:
+            user_link.provider_user_id = provider_user_id
+            user_link.provider_user_email = email
+        await session.commit()
+        return existing_user
+
+
 async def find_or_create_user(
     provider: str,
     provider_user_id: str,

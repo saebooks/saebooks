@@ -12,7 +12,6 @@ from sqlalchemy import select, text
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.business_identifier import BusinessIdentifier
 from saebooks.models.company import Company
-from saebooks.models.tenant import Tenant
 from saebooks.services import business_identifiers as bi_svc
 
 _GLOBAL_JURISDICTIONS_SEED = (
@@ -121,79 +120,51 @@ async def test_rls_policy_installed_on_business_identifiers() -> None:
         )
 
 
-async def test_backfill_seeded_au_abn_from_companies_abn() -> None:
-    """Migration 0145 backfill: any company with companies.abn set at
-    migration time gets a matching scheme='au_abn' business_identifiers
-    row (see ``alembic/versions/0145_business_identifiers.py::upgrade``).
+async def test_company_abn_round_trips_as_au_abn_identifier() -> None:
+    """K6 (migration 0204): the ``companies.abn`` column was dropped and a
+    company's ABN now lives in ``business_identifiers`` under scheme
+    ``au_abn``. A company's au_abn identifier round-trips through the
+    ``Company.abn`` hybrid, and the physical column no longer exists.
 
-    Hermetic by construction, not by asserting against the shared
-    suite-global seed company (previously: skip-if-no-ABN /
-    skip-if-no-backfilled-row against ``_seed_company()``). That made the
-    test order-dependent: ``tests/api/v1/test_tax_returns_lodge_bas.py``
-    mutates the shared seed company's ``abn`` directly (and leaves it set
-    after the last test in that file runs), collected before this file
-    (``tests/api`` sorts before ``tests/services``). In the full suite
-    that leak makes ``co.abn`` truthy but leaves no migration-time
-    ``au_abn`` row for it (the seed company is created at app-startup,
-    strictly AFTER migrations run, so migration 0145's backfill never
-    saw it) — so the two skip guards no longer protect the assertion
-    the way they do in isolation.
-
-    Instead of depending on global seed-company state, this test creates
-    its own tenant + company with a known ABN, then re-runs migration
-    0145's exact backfill INSERT (scoped to just this company via
-    ``AND c.id = :company_id``) against it, and asserts the resulting
-    row. This proves the backfill SQL's behaviour directly and is
-    immune to what any other test does to any other company.
+    This supersedes the old ``test_backfill_seeded_au_abn_from_companies_abn``
+    (which re-ran 0145's ``SELECT c.abn FROM companies`` backfill) — that
+    scenario is unreachable now that the column is gone; the equivalent
+    invariant is that the au_abn identifier is the source of truth. Seeds the
+    company directly (not via ``create_company``) to stay independent of the
+    edition company cap.
     """
-    tenant_id = uuid.uuid4()
-    company_id = uuid.uuid4()
     suffix = uuid.uuid4().hex[:8]
     abn = "51824753556"
 
     async with AsyncSessionLocal() as session:
-        session.add(
-            Tenant(
-                id=tenant_id,
-                name=f"business-identifiers-backfill-{suffix}",
-                slug=f"bi-backfill-{suffix}",
+        # The physical column was dropped in 0204.
+        col = (
+            await session.execute(
+                text(
+                    "SELECT 1 FROM information_schema.columns "
+                    "WHERE table_name = 'companies' AND column_name = 'abn'"
+                )
             )
+        ).first()
+        assert col is None, "companies.abn should have been dropped in 0204"
+
+        company = Company(
+            tenant_id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
+            name=f"BI-abn-roundtrip-{suffix}",
         )
-        await session.flush()
-        session.add(
-            Company(
-                id=company_id,
-                tenant_id=tenant_id,
-                name=f"BI178-backfill-co-{suffix}",
-                abn=abn,
-                base_currency="AUD",
-                fin_year_start_month=7,
-            )
+        session.add(company)
+        await session.flush()  # populate company.id (uuid default applies at INSERT)
+        await bi_svc.upsert(
+            session, company.id, "au_abn", abn, tenant_id=company.tenant_id
         )
         await session.commit()
 
-        # The exact backfill statement from 0145_business_identifiers.py,
-        # scoped to just the company created above.
-        await session.execute(
-            text(
-                "INSERT INTO business_identifiers "
-                "  (id, company_id, tenant_id, scheme, value, created_at, updated_at) "
-                "SELECT gen_random_uuid(), c.id, c.tenant_id, 'au_abn', c.abn, NOW(), NOW() "
-                "FROM companies c "
-                "WHERE c.abn IS NOT NULL "
-                "  AND c.abn <> '' "
-                "  AND c.id = :company_id "
-                "  AND NOT EXISTS ("
-                "    SELECT 1 FROM business_identifiers bi "
-                "    WHERE bi.company_id = c.id AND bi.scheme = 'au_abn'"
-                "  )"
-            ).bindparams(company_id=company_id)
-        )
-        await session.commit()
-
-        existing = await bi_svc.get(session, company_id, "au_abn")
+        existing = await bi_svc.get(session, company.id, "au_abn")
         assert existing is not None
         assert existing.value == abn
+        # The hybrid reads the same value back through the relationship.
+        await session.refresh(company, ["identifiers"])
+        assert company.abn == abn
 
 
 # ---------------------------------------------------------------------------
@@ -279,11 +250,18 @@ async def test_upsert_computes_check_digit_valid_for_registered_scheme() -> None
 
 
 async def test_upsert_leaves_check_digit_valid_none_for_unregistered_scheme() -> None:
-    """nz_nzbn has no validator registered — writing it is unaffected by T9."""
+    """uk_crn has no validator registered — writing it is unaffected by T9.
+
+    (Was pinned on nz_nzbn, which is no longer reliably validator-less:
+    validators may be LAZILY REGISTERED by jurisdiction modules — the NZ
+    module registers a GS1 check-digit validator for nz_nzbn when its
+    compute package first imports, so the old pin was test-order
+    dependent. Pick probe schemes here from the set no module registers.)
+    """
     tenant_id, company_id = await _seed_company()
     async with AsyncSessionLocal() as session:
         row = await bi_svc.upsert(
-            session, company_id, "nz_nzbn", "9429000000001", tenant_id=tenant_id
+            session, company_id, "uk_crn", "01234567", tenant_id=tenant_id
         )
         await session.commit()
         assert row.check_digit_valid is None
@@ -320,8 +298,47 @@ def test_scheme_validators(scheme: str, value: str, expected: bool) -> None:
 
 
 def test_validate_returns_none_for_scheme_without_a_registered_validator() -> None:
-    for scheme in ("nz_nzbn", "uk_crn", "ee_regcode", "global_lei"):
+    # NOTE for future jurisdiction modules: validators may be lazily
+    # registered by a module at import (the NZ module registers nz_nzbn;
+    # nz_ird has been core-registered since T9). A scheme in this loop
+    # must be one NO module registers — if your module adds a validator,
+    # move the scheme OUT of this loop and add a deterministic positive
+    # pin like test_nz_nzbn_validator_registered_by_nz_module below,
+    # rather than leaving the verdict test-order dependent.
+    # ee_regcode/ee_vat moved OUT: the EE module now registers validators
+    # for them (test_ee_registry_validators_registered_by_ee_module below),
+    # exactly the situation this test's NOTE anticipates.
+    for scheme in ("uk_crn", "global_lei"):
         assert bi_svc.validate(scheme, "anything") is None
+
+
+def test_nz_nzbn_validator_registered_by_nz_module() -> None:
+    """Deterministic pin of the NZ module's lazy nz_nzbn registration.
+
+    Import the registering module explicitly (idempotent if something
+    earlier in the test order already pulled it) so the new behaviour is
+    pinned rather than order-dependent: once the NZ compute package is
+    imported, nz_nzbn validates with the GS1 GLN check digit
+    (9429041234563 = prefix 942904123456 + check digit 3).
+    """
+    import saebooks.jurisdictions.nz.identifiers  # noqa: F401
+
+    assert bi_svc.validate("nz_nzbn", "9429041234563") is True
+    assert bi_svc.validate("nz_nzbn", "9429041234562") is False
+
+
+def test_ee_registry_validators_registered_by_ee_module() -> None:
+    """Deterministic pin of the EE module's lazy ee_regcode/ee_vat
+    registration (the nz_nzbn precedent). Import the registering module
+    explicitly so the verdict is not test-order dependent: once
+    jurisdictions.ee.identifiers is imported, ee_regcode validates as
+    exactly 8 digits and ee_vat as 'EE' + 9 digits (format-only)."""
+    import saebooks.jurisdictions.ee.identifiers  # noqa: F401
+
+    assert bi_svc.validate("ee_regcode", "12345678") is True
+    assert bi_svc.validate("ee_regcode", "1234567") is False
+    assert bi_svc.validate("ee_vat", "EE123456789") is True
+    assert bi_svc.validate("ee_vat", "123456789") is False
 
 
 def test_all_known_schemes_accepted() -> None:

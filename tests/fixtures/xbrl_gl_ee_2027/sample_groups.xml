@@ -1,0 +1,237 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!-- Sample file for data-based reporting data on VAT-related transactions and acts, based on the XBRL Global Ledger standard -->
+<!-- The "root" of every XBRL file ("instance document") is xbrl. -->
+<!-- schema location "https://xbrl.eesti.ee/gl/ext/2026-03-31 change-->
+<xbrli:xbrl
+	xmlns:xbrli="http://www.xbrl.org/2003/instance"
+	xmlns:xlink="http://www.w3.org/1999/xlink"
+	xmlns:xbrll="http://www.xbrl.org/2003/linkbase"
+    xsi:schemaLocation="https://xbrl.eesti.ee/gl/plt/2026-03-31 https://xbrl.eesti.ee/gl/ext/2026-03-31/gl/plt/case-c-b-e/gl-plt-2026-03-31.xsd"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:gl-cor="http://www.xbrl.org/int/gl/cor/2015-03-25"
+	xmlns:gl-ext="https://xbrl.eesti.ee/gl/ext/2026-03-31"
+	xmlns:iso639="http://www.xbrl.org/2005/iso639"
+	xmlns:iso4217="http://www.xbrl.org/2003/iso4217"
+	xmlns:gl-bus="http://www.xbrl.org/int/gl/bus/2015-03-25">
+	<xbrll:schemaRef xlink:href="https://xbrl.eesti.ee/gl/ext/2026-03-31/gl/plt/case-c-b-e/gl-plt-2026-03-31.xsd" xlink:arcrole="http://www.w3.org/1999/xlink/properties/linkbase" xlink:type="simple"/>
+	<!-- Contexts, is mandatory. According to the XBRL specification -->
+	<xbrli:context id="now">
+<!-- The following block displays the registry code of the person (for whom the data are being transmitted). Must match the value shown 
+at gl-cor:uniqueID and in the block gl-bus:organizationIdentifiers -->
+        <xbrli:entity>
+            <!-- Scheme specifies the code. Allowed code specifications from the list ORGANIZATIONDESCRIPTION_enum, excl. TOIMLA_KOOD -->
+            <xbrli:identifier scheme="ARIREGISTRIKOOD">10004321</xbrli:identifier>
+        </xbrli:entity>
+		<!-- Date of file creation -->
+		<xbrli:period>
+			<xbrli:instant>2027-02-08</xbrli:instant>
+		</xbrli:period>
+	</xbrli:context>
+	<!-- Both currency and other agreed-upon units of measurement are considered as units of measurement -->
+	<xbrli:unit id="EUR">
+		<xbrli:measure>iso4217:EUR</xbrli:measure>
+	</xbrli:unit>
+	<xbrli:unit id="pureRef">
+		<xbrli:measure>pure</xbrli:measure>
+	</xbrli:unit>
+	<xbrli:unit id="NotUsed">
+		<xbrli:measure>pure</xbrli:measure>
+	</xbrli:unit>
+	<!-- The XBRL GL section begins here -->
+	<gl-cor:accountingEntries>
+		<!-- Document information is required to define the type of entries -->
+		<gl-cor:documentInfo>
+			<!-- For VAT-related transactions and acts, the transaction type "other" is always used. -->
+			<gl-cor:entriesType contextRef="now">other</gl-cor:entriesType>
+			<!-- A unique identifier for the report which must be provided by the reporting entity. Must be submitted in the following format: reporting entity code+report date+time.
+            The code must match the value shown at <xbrli:entity> and in the block gl-bus:organizationIdentifiers -->
+			<gl-cor:uniqueID contextRef="now">10004321-2027-02-08T09:36:51.554</gl-cor:uniqueID>
+			<gl-cor:language contextRef="now">iso639:et</gl-cor:language>
+			<!-- Date of report preparation -->
+			<gl-cor:creationDate contextRef="now">2027-03-08</gl-cor:creationDate>
+			<gl-bus:creator contextRef="now">Testettevõte OÜ</gl-bus:creator>
+			<!-- Explanation of report -->
+			<gl-cor:entriesComment contextRef="now">Käibemaksuga seotud tehingute ja toimingute andmed Maksu- ja Tolliametile</gl-cor:entriesComment>
+			<!-- Tax period -->
+			<gl-cor:periodCoveredStart contextRef="now">2027-01-01</gl-cor:periodCoveredStart>
+			<gl-cor:periodCoveredEnd contextRef="now">2027-01-31</gl-cor:periodCoveredEnd>
+			<!-- Name of business software or information system -->
+			<gl-bus:sourceApplication contextRef="now">Raamatupidamistarkvara Test</gl-bus:sourceApplication>
+		</gl-cor:documentInfo>
+		<!-- The following is agency information block -->
+		<gl-cor:entityInformation>
+			<!-- A code identifying the taxable person, such as a business registry code, along with a description specifying the code type from the list ORGANIZATIONDESCRIPTION_enum, excl. TOIMLA_KOOD.
+            Must match the value shown at gl-cor:uniqueID and <xbrli:entity> -->
+			<gl-bus:organizationIdentifiers>
+				<gl-bus:organizationIdentifier contextRef="now">10004321</gl-bus:organizationIdentifier>
+				<gl-bus:organizationDescription contextRef="now">ARIREGISTRIKOOD</gl-bus:organizationDescription>
+			</gl-bus:organizationIdentifiers>
+		</gl-cor:entityInformation>
+		<!-- This header (data section) is intended for submitting data on VAT-related transactions and acts to the ETCB -->
+		<gl-cor:entryHeader>
+			<!-- Value from the list APA_SEKTSIOONID_enum. The value EE0203001 is used to transmit data on VAT-related purchase and sale transactions and acts. -->
+			<gl-cor:entryNumber contextRef="now">EE0203001</gl-cor:entryNumber>
+			<!-- Data section version number. -->
+			<gl-ext:entryVersion contextRef="now">1.0</gl-ext:entryVersion>
+			<!-- Data source identifier (to be included if data are transmitted from several data sources for the same tax period). -->
+			<gl-ext:entrySourceId contextRef ="now">ERP-01</gl-ext:entrySourceId>
+			<!-- The number of different data sources sent to the same report (to be included if data are transmitted from several data sources for the same tax period). -->
+			<gl-ext:entrySourceCount contextRef ="now">2</gl-ext:entrySourceCount>
+			
+			
+			<!-- Example 1 -->
+            <!-- Supply of the VAT group representative subject to a 24% tax rate -->
+			<gl-cor:entryDetail>
+				<!-- Entry line number is the sequence number of the entries in one header -->
+				<gl-cor:lineNumberCounter contextRef="now" unitRef="NotUsed">1</gl-cor:lineNumberCounter>
+				<gl-cor:account>
+					<!-- Subaccounts, or dimensions, are required to categorise information using the desired classifications -->
+					<gl-cor:accountSub>
+						<!-- Item of the classification of types of VAT-related transactions and acts -->
+						<gl-cor:accountSubID contextRef="now">M_101</gl-cor:accountSubID>
+						<gl-cor:accountSubType contextRef="now">KMDTYYP2026ap</gl-cor:accountSubType>
+					</gl-cor:accountSub>
+				</gl-cor:account>
+				<!-- Declared amount, i.e. taxable value -->
+				<gl-cor:amount contextRef="now" decimals="2" unitRef="EUR">1300</gl-cor:amount>
+				<!-- Information about the transaction party and, if necessary, the invoice’s identifier -->
+				<gl-cor:identifierReference>
+					<!-- Transaction partner's registry code, personal identification code, or non-resident code -->
+					<gl-cor:identifierCode contextRef="now">11111129</gl-cor:identifierCode>
+                    <!-- Explanation specifying the type of code of the transaction partner from the list IDENTIFIERDESCRIPTION_enum -->
+					<gl-cor:identifierDescription contextRef="now">ARIREGISTRIKOOD</gl-cor:identifierDescription>
+					<!-- Transaction partner’s and invoice’s specifics identifier -->
+					<gl-cor:identifierCategory contextRef="now">100</gl-cor:identifierCategory>
+				</gl-cor:identifierReference>
+				<!-- Information about the VAT group member -->
+				<gl-cor:identifierReference>
+					<!-- VAT group member’s registry code or non-resident code -->
+					<gl-cor:identifierCode contextRef="now">10004321</gl-cor:identifierCode>
+					<!-- Explanation specifying the type of code of the VAT group member from the list IDENTIFIERDESCRIPTION_enum -->
+					<gl-cor:identifierDescription contextRef="now">ARIREGISTRIKOOD</gl-cor:identifierDescription>
+					<!-- VAT group member’s identifier -->
+					<gl-cor:identifierCategory contextRef="now">300</gl-cor:identifierCategory>
+				</gl-cor:identifierReference>
+				<!-- Invoice number -->
+				<gl-cor:documentNumber contextRef="now">MA11001</gl-cor:documentNumber>
+				<!-- Date of invoice -->
+				<gl-cor:documentDate contextRef="now">2027-01-01</gl-cor:documentDate>
+				<!-- In each measurable block, the basis is gl-bus_measurableId-->
+				<gl-bus:measurable>
+                <!-- Value of measurableQuantity from the list MEASURABLEQUANTITY_enum, allowed value ARVE_KOGUSUMMA -->
+					<gl-bus:measurableID contextRef="now">ARVE_KOGUSUMMA</gl-bus:measurableID>
+                    <!-- Allowed value for the field measurableIDSchema: MEASURABLEQUANTITY_enum -->
+					<gl-bus:measurableIDSchema contextRef="now">MEASURABLEQUANTITY_enum</gl-bus:measurableIDSchema>
+					<!-- Total amount invoiced -->
+					<gl-bus:measurableQuantity contextRef="now" decimals="2" unitRef="EUR">1300</gl-bus:measurableQuantity>
+				</gl-bus:measurable>
+				<!-- VAT rate -->
+				<gl-cor:taxes>
+					<gl-cor:taxPercentageRate contextRef="now" decimals="3" unitRef="pureRef">0.24</gl-cor:taxPercentageRate>
+				</gl-cor:taxes>
+			</gl-cor:entryDetail>
+			
+			
+			<!-- Example 2 -->
+            <!-- Declaration of VAT group member's intra-Community supply of goods -->
+			<gl-cor:entryDetail>
+				<!-- Entry line number is the sequence number of the entries in one header -->
+				<gl-cor:lineNumberCounter contextRef="now" unitRef="NotUsed">3</gl-cor:lineNumberCounter>
+				<gl-cor:account>
+					<!-- Subaccounts, or dimensions, are required to categorise information using the desired classifications -->
+					<gl-cor:accountSub>
+						<!-- Item of the classification of types of VAT-related transactions and acts -->
+						<gl-cor:accountSubID contextRef="now">M_201</gl-cor:accountSubID>
+						<gl-cor:accountSubType contextRef="now">KMDTYYP2026ap</gl-cor:accountSubType>
+					</gl-cor:accountSub>
+					<gl-cor:accountSub>
+                        <!-- Transaction partner’s country code from the classification RTK2T2013ap, only EU Member States allowed -->
+						<gl-cor:accountSubID contextRef="now">FI</gl-cor:accountSubID>
+						<gl-cor:accountSubType contextRef="now">RTK2T2013ap</gl-cor:accountSubType>
+						<gl-cor:segmentParentTuple>
+                            <!-- Identifier from the classification RIIGIROLL2022ap, allowed value RR_ostja -->
+							<gl-cor:parentSubaccountCode contextRef="now">RR_OSTJA</gl-cor:parentSubaccountCode>
+							<gl-cor:parentSubaccountType contextRef="now">RIIGIROLL2022ap</gl-cor:parentSubaccountType>
+						</gl-cor:segmentParentTuple>
+					</gl-cor:accountSub>
+				</gl-cor:account>
+				<!-- Declared amount, i.e. taxable value -->
+				<gl-cor:amount contextRef="now" decimals="2" unitRef="EUR">1850</gl-cor:amount>
+				<!-- Information about the transaction party and, if necessary, the invoice’s identifier -->
+				<gl-cor:identifierReference>
+					<!-- For intra-Community supply, the VAT number of the transaction partner must be provided -->
+					<gl-cor:identifierCode contextRef="now">FI08611111</gl-cor:identifierCode>
+                    <!-- Explanation specifying the type of code of the transaction partner from the list IDENTIFIERDESCRIPTION_enum -->
+					<gl-cor:identifierDescription contextRef="now">KMKR_NUMBER</gl-cor:identifierDescription>
+                    <!-- Transaction partner’s and invoice’s specifics identifier -->
+					<gl-cor:identifierCategory contextRef="now">100</gl-cor:identifierCategory>
+				</gl-cor:identifierReference>
+				<gl-cor:identifierReference>
+					<!-- VAT group member’s registry code or non-resident code -->
+					<gl-cor:identifierCode contextRef="now">10000009</gl-cor:identifierCode>
+					<!-- Explanation specifying the type of code of the VAT group member from the list IDENTIFIERDESCRIPTION_enum -->
+					<gl-cor:identifierDescription contextRef="now">ARIREGISTRIKOOD</gl-cor:identifierDescription>
+					<!-- VAT group member’s identifier -->
+					<gl-cor:identifierCategory contextRef="now">300</gl-cor:identifierCategory>
+				</gl-cor:identifierReference>
+				<!-- It is not mandatory to include the invoice number, date, and total amount invoiced -->
+                <!-- VAT rate -->
+				<gl-cor:taxes>
+					<gl-cor:taxPercentageRate contextRef="now" decimals="3" unitRef="pureRef">0.00</gl-cor:taxPercentageRate>
+				</gl-cor:taxes>
+			</gl-cor:entryDetail>
+			
+			
+			<!-- Example 3 -->
+			<!-- Input VAT of the representative of the VAT group deductible under the law -->
+			<gl-cor:entryDetail>
+				<!-- Entry line number is the sequence number of the entries in one header -->
+				<gl-cor:lineNumberCounter contextRef="now" unitRef="NotUsed">3</gl-cor:lineNumberCounter>
+				<gl-cor:account>
+					<!-- Subaccounts, or dimensions, are required to categorise information using the desired classifications -->
+					<gl-cor:accountSub>
+						<!-- Item of the classification of types of VAT-related transactions and acts -->
+						<gl-cor:accountSubID contextRef="now">O_101</gl-cor:accountSubID>
+						<gl-cor:accountSubType contextRef="now">KMDTYYP2026ap</gl-cor:accountSubType>
+					</gl-cor:accountSub>
+				</gl-cor:account>
+				<!-- Declared amount, i.e. taxable value -->
+				<gl-cor:amount contextRef="now" decimals="2" unitRef="EUR">240</gl-cor:amount>
+				<!-- Information about the transaction party and, if necessary, the invoice’s identifier -->
+				<gl-cor:identifierReference>
+					<!-- Transaction partner's registry code, personal identification code, or non-resident code -->
+					<gl-cor:identifierCode contextRef="now">13000001</gl-cor:identifierCode>
+                    <!-- Explanation specifying the type of code of the transaction partner from the list IDENTIFIERDESCRIPTION_enum -->
+					<gl-cor:identifierDescription contextRef="now">ARIREGISTRIKOOD</gl-cor:identifierDescription>
+					<!-- Transaction partner’s and invoice’s specifics identifier -->
+					<gl-cor:identifierCategory contextRef="now">100</gl-cor:identifierCategory>
+				</gl-cor:identifierReference>
+				<!-- Information about the VAT group member -->
+				<gl-cor:identifierReference>
+					<!-- VAT group member’s registry code or non-resident code -->
+					<gl-cor:identifierCode contextRef="now">10004321</gl-cor:identifierCode>
+					<!-- Explanation specifying the type of code of the VAT group member from the list IDENTIFIERDESCRIPTION_enum -->
+					<gl-cor:identifierDescription contextRef="now">ARIREGISTRIKOOD</gl-cor:identifierDescription>
+					<!-- VAT group member’s identifier -->
+					<gl-cor:identifierCategory contextRef="now">300</gl-cor:identifierCategory>
+				</gl-cor:identifierReference>
+				<!-- Invoice number -->
+				<gl-cor:documentNumber contextRef="now">OA26001</gl-cor:documentNumber>
+				<!-- Date of invoice -->
+				<gl-cor:documentDate contextRef="now">2027-01-07</gl-cor:documentDate>
+				<gl-bus:measurable>
+                <!-- Value of measurableQuantity from the list MEASURABLEQUANTITY_enum, allowed value ARVE_KOGUSUMMA -->
+	                <gl-bus:measurableID contextRef="now">ARVE_KOGUSUMMA</gl-bus:measurableID>
+                    <!-- Allowed value for the field measurableIDSchema: MEASURABLEQUANTITY_enum -->
+	                <gl-bus:measurableIDSchema contextRef="now">MEASURABLEQUANTITY_enum</gl-bus:measurableIDSchema>
+					<!-- Total amount invoiced -->
+					<gl-bus:measurableQuantity contextRef="now" decimals="2" unitRef="EUR">1000</gl-bus:measurableQuantity>
+				</gl-bus:measurable>
+				<!-- VAT rate -->
+				<gl-cor:taxes>
+					<gl-cor:taxPercentageRate contextRef="now" decimals="3" unitRef="pureRef">0.24</gl-cor:taxPercentageRate>
+				</gl-cor:taxes>
+			</gl-cor:entryDetail>			
+		</gl-cor:entryHeader>
+	</gl-cor:accountingEntries>
+</xbrli:xbrl>

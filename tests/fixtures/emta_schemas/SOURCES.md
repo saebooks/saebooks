@@ -11,6 +11,7 @@ from emta.ee's technical-information pages; full download set + README live at
 | `tsd_example.xml` | Official TSD example (`tsd_naide_xml_01.01.2025_eng.xml`) | parse-under-our-reader-assumptions check |
 | `vatdeclaration.xsd` | KMD + KMD-INF XSD, root `vatDeclaration` | structural reference for KMD/KMD-INF |
 | `vatdeclaration_example.xml` | Official KMD6 example (`vatdeclaration example.xml`) | KMD/KMD-INF element-name + order source of truth |
+| `XBRL_GL_sample_20260617.xml` | Official 2027 data-based KMD XBRL GL sample (`Andmepohine_KMD_2027.zip → English/`), 20 transactions, section EE0203001 | structural-conformance source of truth for the `kmd_2027` exporter (element/namespace set + KMDTYYP codes) — full XSD validation is NOT feasible offline (the XBRL GL taxonomy imports the remote XBRL 2003 instance schema; lxml raises `XMLSchemaParseError` on `gl-plt-2026-03-31.xsd` standalone), so `test_kmd_2027_serializer.py` asserts structural conformance, mirroring the KMD/KMD-INF precedent below |
 
 ## Version caveat — READ
 

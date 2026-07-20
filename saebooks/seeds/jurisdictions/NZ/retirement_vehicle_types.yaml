@@ -1,0 +1,39 @@
+# New Zealand retirement vehicle types — KiwiSaver as the RetirementVehicle
+# row (the AU-super analogue in the generalised model).
+#
+# NZ Superannuation (the universal state pension) is DELIBERATELY NOT
+# SEEDED as a vehicle row — it is a universal, non-account, general-tax-
+# funded entitlement, the same reason AU's Age Pension and EE's Pillar I
+# are absent from their files.
+#
+# tax_treatment: KiwiSaver is TTE in the standard shorthand — employee
+# contributions come from AFTER-tax pay, employer contributions are
+# taxed via ESCT, fund earnings are taxed (PIE regime), withdrawals are
+# tax-free. The RetirementTaxTreatment enum has no TTE member
+# (EET/TEE/ETT/other only), so "other" is used with the real treatment
+# spelled out here and in the description — a genuine taxonomy gap
+# flagged in the build summary, not silently forced into TEE.
+table: retirement_vehicle_types
+key: [jurisdiction, code]
+rows:
+  - jurisdiction: NZL
+    code: kiwisaver
+    local_name: "KiwiSaver"
+    canonical_bucket: defined_contribution
+    tax_treatment: other
+    # (description kept < 512 chars — the column is String(512). The
+    # dated rate detail lives in mandatory_contribution_rules.yaml:
+    # default employee rate + employer minimum 3% -> 3.5% on 2026-04-01
+    # -> 4% on 2028-04-01; employee options 3.5/4/6/8/10% with a
+    # temporary 3% opt-down the employer may match. Government
+    # contribution extended to 16-17-year-olds 1 Jul 2025; employer
+    # matching for them from 1 Apr 2026.)
+    description: >-
+      Auto-enrolment (opt-out) defined-contribution workplace savings
+      scheme administered via Inland Revenue payday filing. Employee
+      deduction from after-tax pay at an elected rate; compulsory
+      employer contribution subject to ESCT (fund receives the employer
+      contribution net of ESCT). Effective treatment is TTE: taxed
+      contributions, taxed fund earnings (PIE), exempt withdrawals.
+      Dated employee/employer rate rows (3% -> 3.5% 2026-04-01 -> 4%
+      2028-04-01): see mandatory_contribution_rules.yaml.

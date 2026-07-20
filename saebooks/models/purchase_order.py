@@ -72,6 +72,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from saebooks.db import Base
+from saebooks.db_types import Money
 from saebooks.models._scope import CompanyScoped
 
 
@@ -114,13 +115,13 @@ class PurchaseOrder(CompanyScoped, Base):
         default=PurchaseOrderStatus.DRAFT,
     )
     subtotal: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     tax_total: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     total: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     # Foreign-currency mirror of Bill — POs can be denominated in any
     # currency; ``fx_rate`` stamps the rate at issue, ``base_*`` carries
@@ -132,13 +133,13 @@ class PurchaseOrder(CompanyScoped, Base):
         Numeric(18, 8), nullable=False, default=Decimal("1")
     )
     base_subtotal: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     base_tax_total: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     base_total: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     delivery_address: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
@@ -208,13 +209,13 @@ class PurchaseOrderLine(Base):
         Numeric(6, 2), nullable=False, default=Decimal("0")
     )
     line_subtotal: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     line_tax: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     line_total: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     # Quantity already received via converted bills. Convert-to-bill
     # advances this; ``quantity - received_qty`` is what's still

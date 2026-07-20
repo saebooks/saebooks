@@ -66,6 +66,9 @@ from saebooks.models.company import Company
 from saebooks.models.journal import EntryStatus, JournalEntry
 from saebooks.services import cashbook as cashbook_svc
 from saebooks.services.cashbook_categories import (
+    _PROFILES as _CASHBOOK_PROFILES,
+)
+from saebooks.services.cashbook_categories import (
     CashbookCategory,
     UnknownCashbookCategory,
     all_defaults,
@@ -210,16 +213,40 @@ def _service_error_to_http(exc: cashbook_svc.CashbookError) -> HTTPException:
     return HTTPException(status.HTTP_400_BAD_REQUEST, body)
 
 
-def _je_to_cashbook_out(je: JournalEntry) -> CashbookEntryOut:
+def _any_profile_label(category_code: str) -> str:
+    """Display-label fallback across every registered jurisdiction profile
+    (these projection helpers have no company context; AU is tried first
+    via resolve_for_company, then any bolt-on profile, else the raw code)."""
+    for profile in _CASHBOOK_PROFILES.values():
+        cat = profile.by_code.get(category_code)
+        if cat is not None:
+            return cat.label
+    return category_code
+
+
+async def _company_jurisdiction(session, company_id) -> str:
+    """The active company's jurisdiction for label resolution ("AU" when
+    unresolvable — matches the pre-jurisdiction-profiles behaviour)."""
+    row = (
+        await session.execute(
+            select(Company.jurisdiction).where(Company.id == company_id)
+        )
+    ).scalar_one_or_none()
+    return row or "AU"
+
+
+def _je_to_cashbook_out(
+    je: JournalEntry, jurisdiction: str = "AU"
+) -> CashbookEntryOut:
     """Project a JE that carries cashbook_meta into the cashbook response shape."""
     meta = (je.attachments or {}).get("cashbook_meta") or {}
     direction = meta.get("direction") or "expense"
     category_code = meta.get("category_code") or ""
     try:
-        category = resolve_for_company(category_code, None)
+        category = resolve_for_company(category_code, None, jurisdiction)
         category_label = category.label
     except UnknownCashbookCategory:
-        category_label = category_code  # fall back to raw code
+        category_label = _any_profile_label(category_code)
     gross_amount_raw = meta.get("gross_amount")
     try:
         amount = Decimal(gross_amount_raw) if gross_amount_raw else Decimal("0")
@@ -308,7 +335,9 @@ async def create_entry(
     except cashbook_svc.CashbookError as exc:
         raise _service_error_to_http(exc) from exc
 
-    return _je_to_cashbook_out(je)
+    return _je_to_cashbook_out(
+        je, await _company_jurisdiction(session, company_id)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -375,7 +404,8 @@ async def list_entries(
 
     rows = (await session.execute(stmt)).scalars().unique().all()
     has_more = len(rows) > limit
-    items = [_je_to_cashbook_out(je) for je in rows[:limit]]
+    _juris = await _company_jurisdiction(session, company_id)
+    items = [_je_to_cashbook_out(je, _juris) for je in rows[:limit]]
     next_cursor = (
         rows[limit - 1].created_at.isoformat() if has_more else None
     )
@@ -404,7 +434,9 @@ async def get_entry(
         # surface for the same reason they're hidden from list. Audit
         # tools query journal_entries directly.
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Cashbook entry not found")
-    return _je_to_cashbook_out(je)
+    return _je_to_cashbook_out(
+        je, await _company_jurisdiction(session, company_id)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -491,7 +523,9 @@ async def replace_entry(
     except cashbook_svc.CashbookError as exc:
         raise _service_error_to_http(exc) from exc
 
-    return _je_to_cashbook_out(new_je)
+    return _je_to_cashbook_out(
+        new_je, await _company_jurisdiction(session, company_id)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -514,11 +548,12 @@ async def list_categories(
         await session.execute(select(Company).where(Company.id == company_id))
     ).scalar_one_or_none()
     overrides = company.cashbook_categories if company else None
+    jurisdiction = company.jurisdiction if company else "AU"
 
     out: list[CashbookCategoryOut] = []
-    for default in all_defaults():
+    for default in all_defaults(jurisdiction):
         try:
-            resolved = resolve_for_company(default.code, overrides)
+            resolved = resolve_for_company(default.code, overrides, jurisdiction)
         except UnknownCashbookCategory:
             continue  # hidden — skip
         out.append(_category_to_out(resolved))
@@ -602,11 +637,12 @@ async def get_summary(
         bucket["count"] += 1
 
     by_cat_out: list[CashbookSummaryByCategory] = []
+    _juris = await _company_jurisdiction(session, company_id)
     for code, bucket in by_category.items():
         try:
-            label = resolve_for_company(code, None).label
+            label = resolve_for_company(code, None, _juris).label
         except UnknownCashbookCategory:
-            label = code
+            label = _any_profile_label(code)
         by_cat_out.append(
             CashbookSummaryByCategory(
                 code=code,

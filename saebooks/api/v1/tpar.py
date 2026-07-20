@@ -89,7 +89,7 @@ async def create_tpar_run(
           "notes":    "…"
         }
     """
-    from saebooks.services.tpar import build_tpar_run
+    from saebooks.jurisdictions.au.tpar import build_tpar_run
 
     tenant_id = resolve_tenant_id(request)
     fy_start_raw = payload.get("fy_start")
@@ -142,7 +142,7 @@ async def get_tpar_run(
     session: AsyncSession = Depends(get_session),
     company_id: UUID = Depends(get_active_company_id),
 ) -> JSONResponse:
-    from saebooks.services.tpar import get_tpar_run as _get
+    from saebooks.jurisdictions.au.tpar import get_tpar_run as _get
     tenant_id = resolve_tenant_id(request)
     row = await _get(session, tenant_id=tenant_id, company_id=company_id, run_id=run_id)
     if row is None:
@@ -158,8 +158,8 @@ async def get_tpar_run_lines(
     session: AsyncSession = Depends(get_session),
     company_id: UUID = Depends(get_active_company_id),
 ) -> JSONResponse:
-    from saebooks.services.tpar import get_tpar_run as _get
-    from saebooks.services.tpar import list_tpar_lines
+    from saebooks.jurisdictions.au.tpar import get_tpar_run as _get
+    from saebooks.jurisdictions.au.tpar import list_tpar_lines
     tenant_id = resolve_tenant_id(request)
     if (await _get(session, tenant_id=tenant_id, company_id=company_id, run_id=run_id)) is None:
         raise HTTPException(404, "TPAR run not found")
@@ -175,8 +175,8 @@ async def get_tpar_run_csv(
     session: AsyncSession = Depends(get_session),
     company_id: UUID = Depends(get_active_company_id),
 ) -> Response:
-    from saebooks.services.tpar import get_tpar_run as _get
-    from saebooks.services.tpar import lines_to_csv, list_tpar_lines
+    from saebooks.jurisdictions.au.tpar import get_tpar_run as _get
+    from saebooks.jurisdictions.au.tpar import lines_to_csv, list_tpar_lines
     tenant_id = resolve_tenant_id(request)
     if (await _get(session, tenant_id=tenant_id, company_id=company_id, run_id=run_id)) is None:
         raise HTTPException(404, "TPAR run not found")
@@ -197,7 +197,7 @@ async def finalise_tpar_run(
     session: AsyncSession = Depends(get_session),
     company_id: UUID = Depends(get_active_company_id),
 ) -> JSONResponse:
-    from saebooks.services.tpar import finalise_tpar_run as _final
+    from saebooks.jurisdictions.au.tpar import finalise_tpar_run as _final
     tenant_id = resolve_tenant_id(request)
     try:
         await _final(session, tenant_id=tenant_id, run_id=run_id,

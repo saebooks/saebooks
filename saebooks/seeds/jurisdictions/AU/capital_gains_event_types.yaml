@@ -1,0 +1,280 @@
+# Australian CGT event catalogue (M1.5 · Wave 5-Income).
+# The statutory event types from the summary table in ITAA 1997 s 104-5,
+# grouped by the Act's own lettered categories. The catalogue carries no
+# effective dating — date-ranged relief mechanics live on
+# capital_gains_tax_regimes. Gaps in the lettering (D1A, G2, J3, K-series
+# renumberings, L7) are events that were never enacted or have been
+# repealed; they are intentionally absent.
+table: capital_gains_event_types
+key: [jurisdiction, code]
+rows:
+  - jurisdiction: AUS
+    code: A1
+    name: Disposal of a CGT asset
+    category: disposals
+    statutory_reference: ITAA 1997 s 104-10
+  - jurisdiction: AUS
+    code: B1
+    name: Use and enjoyment before title passes
+    category: use_before_title
+    statutory_reference: ITAA 1997 s 104-15
+  - jurisdiction: AUS
+    code: C1
+    name: Loss or destruction of a CGT asset
+    category: end_of_asset
+    statutory_reference: ITAA 1997 s 104-20
+  - jurisdiction: AUS
+    code: C2
+    name: Cancellation, surrender and similar endings
+    category: end_of_asset
+    statutory_reference: ITAA 1997 s 104-25
+  - jurisdiction: AUS
+    code: C3
+    name: End of an option to acquire shares etc.
+    category: end_of_asset
+    statutory_reference: ITAA 1997 s 104-30
+  - jurisdiction: AUS
+    code: D1
+    name: Creating contractual or other rights
+    category: bringing_into_existence
+    statutory_reference: ITAA 1997 s 104-35
+  - jurisdiction: AUS
+    code: D2
+    name: Granting an option
+    category: bringing_into_existence
+    statutory_reference: ITAA 1997 s 104-40
+  - jurisdiction: AUS
+    code: D3
+    name: Granting a right to income from mining
+    category: bringing_into_existence
+    statutory_reference: ITAA 1997 s 104-45
+  - jurisdiction: AUS
+    code: D4
+    name: Entering into a conservation covenant
+    category: bringing_into_existence
+    statutory_reference: ITAA 1997 s 104-47
+  - jurisdiction: AUS
+    code: E1
+    name: Creating a trust over a CGT asset
+    category: trusts
+    statutory_reference: ITAA 1997 s 104-55
+  - jurisdiction: AUS
+    code: E2
+    name: Transferring a CGT asset to a trust
+    category: trusts
+    statutory_reference: ITAA 1997 s 104-60
+  - jurisdiction: AUS
+    code: E3
+    name: Converting a trust to a unit trust
+    category: trusts
+    statutory_reference: ITAA 1997 s 104-65
+  - jurisdiction: AUS
+    code: E4
+    name: Capital payment for a trust interest
+    category: trusts
+    statutory_reference: ITAA 1997 s 104-70
+  - jurisdiction: AUS
+    code: E5
+    name: Beneficiary becoming entitled to a trust asset
+    category: trusts
+    statutory_reference: ITAA 1997 s 104-75
+  - jurisdiction: AUS
+    code: E6
+    name: Disposal to a beneficiary to end an income right
+    category: trusts
+    statutory_reference: ITAA 1997 s 104-80
+  - jurisdiction: AUS
+    code: E7
+    name: Disposal to a beneficiary to end a capital interest
+    category: trusts
+    statutory_reference: ITAA 1997 s 104-85
+  - jurisdiction: AUS
+    code: E8
+    name: Disposal by a beneficiary of a capital interest
+    category: trusts
+    statutory_reference: ITAA 1997 s 104-90
+  - jurisdiction: AUS
+    code: E9
+    name: Creating a trust over future property
+    category: trusts
+    statutory_reference: ITAA 1997 s 104-105
+  - jurisdiction: AUS
+    code: E10
+    name: Annual cost base reduction exceeds cost base of interest in an AMIT
+    category: trusts
+    statutory_reference: ITAA 1997 s 104-107A
+  - jurisdiction: AUS
+    code: F1
+    name: Granting a lease
+    category: leases
+    statutory_reference: ITAA 1997 s 104-110
+  - jurisdiction: AUS
+    code: F2
+    name: Granting a long-term lease
+    category: leases
+    statutory_reference: ITAA 1997 s 104-115
+  - jurisdiction: AUS
+    code: F3
+    name: Lessor pays lessee to get lease changed
+    category: leases
+    statutory_reference: ITAA 1997 s 104-120
+  - jurisdiction: AUS
+    code: F4
+    name: Lessee receives payment for changing a lease
+    category: leases
+    statutory_reference: ITAA 1997 s 104-125
+  - jurisdiction: AUS
+    code: F5
+    name: Lessor receives payment for changing a lease
+    category: leases
+    statutory_reference: ITAA 1997 s 104-130
+  - jurisdiction: AUS
+    code: G1
+    name: Capital payment for shares
+    category: shares
+    statutory_reference: ITAA 1997 s 104-135
+  - jurisdiction: AUS
+    code: G3
+    name: Liquidator or administrator declares shares or financial instruments worthless
+    category: shares
+    statutory_reference: ITAA 1997 s 104-145
+  - jurisdiction: AUS
+    code: H1
+    name: Forfeiture of a deposit
+    category: special_receipts
+    statutory_reference: ITAA 1997 s 104-150
+  - jurisdiction: AUS
+    code: H2
+    name: Receipt for an event relating to a CGT asset
+    category: special_receipts
+    statutory_reference: ITAA 1997 s 104-155
+  - jurisdiction: AUS
+    code: I1
+    name: Individual or company stops being an Australian resident
+    category: residency
+    statutory_reference: ITAA 1997 s 104-160
+  - jurisdiction: AUS
+    code: I2
+    name: Trust stops being a resident trust
+    category: residency
+    statutory_reference: ITAA 1997 s 104-170
+  - jurisdiction: AUS
+    code: J1
+    name: Company ceasing to be a member of a wholly-owned group after a roll-over
+    category: rollover_reversals
+    statutory_reference: ITAA 1997 s 104-175
+  - jurisdiction: AUS
+    code: J2
+    name: Change in relation to a replacement asset or improved asset after a roll-over under Subdivision 152-E
+    category: rollover_reversals
+    statutory_reference: ITAA 1997 s 104-185
+  - jurisdiction: AUS
+    code: J4
+    name: Trust failing to cease to exist after a roll-over under Subdivision 124-N
+    category: rollover_reversals
+    statutory_reference: ITAA 1997 s 104-195
+  - jurisdiction: AUS
+    code: J5
+    name: Failure to acquire a replacement asset and to incur fourth element expenditure after a roll-over under Subdivision 152-E
+    category: rollover_reversals
+    statutory_reference: ITAA 1997 s 104-197
+  - jurisdiction: AUS
+    code: J6
+    name: Cost of acquisition of a replacement asset or amount of fourth element expenditure, or both, not sufficient to cover the disregarded capital gain
+    category: rollover_reversals
+    statutory_reference: ITAA 1997 s 104-198
+  - jurisdiction: AUS
+    code: K1
+    name: Incoming international transfer of an emissions unit
+    category: other
+    statutory_reference: ITAA 1997 s 104-205
+  - jurisdiction: AUS
+    code: K2
+    name: Bankrupt pays an amount in relation to a debt
+    category: other
+    statutory_reference: ITAA 1997 s 104-210
+  - jurisdiction: AUS
+    code: K3
+    name: Asset passing to a tax-advantaged entity
+    category: other
+    statutory_reference: ITAA 1997 s 104-215
+  - jurisdiction: AUS
+    code: K4
+    name: CGT asset starts being trading stock
+    category: other
+    statutory_reference: ITAA 1997 s 104-220
+  - jurisdiction: AUS
+    code: K5
+    name: Special capital loss from a collectable that has fallen in market value
+    category: other
+    statutory_reference: ITAA 1997 s 104-225
+  - jurisdiction: AUS
+    code: K6
+    name: Pre-CGT shares or trust interest
+    category: other
+    statutory_reference: ITAA 1997 s 104-230
+  - jurisdiction: AUS
+    code: K7
+    name: Balancing adjustment event for a depreciating asset
+    category: other
+    statutory_reference: ITAA 1997 s 104-235
+  - jurisdiction: AUS
+    code: K8
+    name: Direct value shifts affecting equity or loan interests
+    category: other
+    statutory_reference: ITAA 1997 s 104-250
+  - jurisdiction: AUS
+    code: K9
+    name: Entitlement to receive payment of a carried interest
+    category: other
+    statutory_reference: ITAA 1997 s 104-255
+  - jurisdiction: AUS
+    code: K10
+    name: Forex realisation gain as a result of forex realisation event 2
+    category: other
+    statutory_reference: ITAA 1997 s 104-260
+  - jurisdiction: AUS
+    code: K11
+    name: Forex realisation loss as a result of forex realisation event 2
+    category: other
+    statutory_reference: ITAA 1997 s 104-265
+  - jurisdiction: AUS
+    code: K12
+    name: Foreign hybrid loss exposure adjustment
+    category: other
+    statutory_reference: ITAA 1997 s 104-270
+  - jurisdiction: AUS
+    code: L1
+    name: Reduction under section 705-57 in tax cost setting amount of assets of an entity becoming a subsidiary member of a consolidated group or MEC group
+    category: consolidation
+    statutory_reference: ITAA 1997 s 104-500
+  - jurisdiction: AUS
+    code: L2
+    name: Amount remaining after step 3A etc. of joining allocable cost amount is negative
+    category: consolidation
+    statutory_reference: ITAA 1997 s 104-505
+  - jurisdiction: AUS
+    code: L3
+    name: Tax cost setting amounts for retained cost base assets exceed the joining allocable cost amount
+    category: consolidation
+    statutory_reference: ITAA 1997 s 104-510
+  - jurisdiction: AUS
+    code: L4
+    name: No reset cost base assets against which to apply excess of net allocable cost amount on joining
+    category: consolidation
+    statutory_reference: ITAA 1997 s 104-515
+  - jurisdiction: AUS
+    code: L5
+    name: Amount remaining after step 4 of leaving allocable cost amount is negative
+    category: consolidation
+    statutory_reference: ITAA 1997 s 104-520
+  - jurisdiction: AUS
+    code: L6
+    name: Error in calculation of tax cost setting amount for joining entity's assets
+    category: consolidation
+    statutory_reference: ITAA 1997 s 104-525
+  - jurisdiction: AUS
+    code: L8
+    name: Reduction in tax cost setting amount for reset cost base assets on joining cannot be allocated
+    category: consolidation
+    statutory_reference: ITAA 1997 s 104-535

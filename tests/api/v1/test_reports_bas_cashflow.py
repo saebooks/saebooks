@@ -1022,7 +1022,7 @@ async def test_bas_g2_g10_reconcile_with_au_bas_report(
     # au.bas_report directly, for the same company + period.
     from decimal import Decimal
 
-    from saebooks.services.tax_engine import au as au_engine
+    from saebooks.jurisdictions.au import tax as au_engine
 
     async with AsyncSessionLocal() as session:
         seed_company = (

@@ -1,0 +1,54 @@
+# United Kingdom — VAT registration + Making Tax Digital thresholds.
+#
+# NOT a reference-DB table seed (reference_seed: false — the
+# kmdtyyp_mapping.yaml precedent): the engine's
+# consumption_tax_registration_threshold reference table has no natural-
+# key unique constraint the idempotent loader can upsert on, and these
+# values are consumed as module data (jurisdictions/uk), not via a
+# ledger aggregation path. Loaded directly off disk by the UK module
+# when needed.
+#
+# Primary sources (fetched raw 2026-07-12 per the §5.3 re-pull list):
+# * gov.uk "Register for VAT" + "How VAT works: VAT thresholds" —
+#   registration £90,000 ("your total taxable turnover for the last 12
+#   months goes over £90,000" — rolling 12-month test — or "you expect
+#   your taxable turnover to go over £90,000 in the next 30 days");
+#   deregistration permitted below £88,000; NI-EU acquisitions into
+#   Northern Ireland over £90,000 also require registration.
+# * MTD ITSA wave thresholds per the UK market-entry strategy §5.1
+#   (verified there 2026-07-12); the £20,000 wave was announced with an
+#   April 2028 start — treat as announced-not-yet-in-force.
+reference_seed: false
+jurisdiction: GBR
+
+vat_registration:
+  threshold_gbp: 90000
+  test: rolling_12_months_or_next_30_days
+  registration_deadline: "within 30 days of the end of the month when you went over the threshold"
+  effective_registration_date: "the first day of the second month after you go over the threshold"
+  effective_from: 2024-04-01
+  ni_eu_acquisitions_threshold_gbp: 90000
+  non_established_taxable_persons: no_threshold_register_from_first_uk_sale
+
+vat_deregistration:
+  threshold_gbp: 88000
+  effective_from: 2024-04-01
+
+mtd_vat:
+  in_force: true
+  scope: all_vat_registered_businesses
+  effective_from: 2022-04-01
+
+mtd_itsa_waves:
+  - threshold_gbp: 50000
+    basis: qualifying income (gross self-employment + property income)
+    effective_from: 2026-04-06
+    status: in_force
+  - threshold_gbp: 30000
+    basis: qualifying income
+    effective_from: 2027-04-06
+    status: legislated
+  - threshold_gbp: 20000
+    basis: qualifying income
+    effective_from: 2028-04-06
+    status: announced   # start-of-wave confirmed to April 2028 in Budget statements; watch for the implementing SI

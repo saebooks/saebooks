@@ -42,6 +42,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from saebooks.db import Base
 from saebooks.models._scope import CompanyScoped
+from saebooks.money import money_quantum
 
 
 class TimeEntryApprovalStatus(enum.StrEnum):
@@ -166,4 +167,4 @@ class TimeEntry(CompanyScoped, Base):
         """
         if self.rate is None:
             return Decimal("0")
-        return (self.rate * self.hours).quantize(Decimal("0.01"))
+        return (self.rate * self.hours).quantize(money_quantum(2))

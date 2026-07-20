@@ -1,0 +1,56 @@
+# Latvian identifier formats — MODULE DATA, not a reference-DB table
+# (reference_seed: false, the UK tax_identifiers.yaml precedent: format
+# data documented beside the other LV seeds; the check-digit COMPUTE
+# lives in saebooks/jurisdictions/lv/identifiers.py).
+#
+# Verification status (2026-07-12 research pass):
+#
+# * Reģistrācijas numurs (Uzņēmumu reģistrs registration number):
+#   11 digits; first digits indicate legal form (40=SIA-era commercial
+#   register numbers, 50=AS, 90=public bodies — structure per secondary
+#   sources; ur.gov.lv sub-pages 404'd). NO separately-published UR
+#   check-digit specification was found (NOT FOUND) — however the
+#   VAT-number checksum below validates against every real registration
+#   number tested (airBaltic 40003245752, Swedbank 40003074764, LMT
+#   50003050931, Latvenergo 40003009497, VID 90000069281, + 3 more),
+#   because for legal entities the VAT number's numeric body IS the
+#   registration number. The lv_regnum validator therefore applies the
+#   same checksum for first-digit>3 numbers, flagged as
+#   empirically-confirmed rather than spec-published.
+#
+# * PVN numurs (VAT number): "LV" + 11 digits; legal entities: the 11
+#   digits = the UR registration number (PVN likums Art. 125 by
+#   reference; LV portāls corroboration). Check digit (first digit > 3):
+#   weights (9,1,4,8,3,10,2,5,7,6) over digits 1-10; r = 3 - (sum mod
+#   11); r == -1 -> invalid; r < -1 -> check = r + 11; else check = r.
+#   VERIFIED via two independent open-source implementations
+#   (python-stdnum + vat_validator) agreeing exactly, plus the empirical
+#   pass over real registration numbers above. Natural persons: VAT
+#   number = personas kods (first digit 0-3, or 32 for the new format);
+#   the natural-person checksum variant is UNVERIFIED (python-stdnum's
+#   own comment says unconfirmed) — format-only acceptance, never a
+#   guessed algorithm (the UK UTR precedent).
+#
+# * Personas kods (personal identity code): 11 digits, canonically
+#   DDMMYY-XXXXX; since 2017-07-01 new codes begin "32" and encode no
+#   birth date (PMLP — primary). Checksum: weights
+#   (1,6,3,7,9,10,5,8,4,2) over digits 1-10;
+#   check = ((1101 - sum) mod 11) mod 10. VERIFIED (laacz.lv reference
+#   algorithm + python-stdnum structural corroboration). A PERSONAL
+#   identifier — validated by a plain module function, not registered as
+#   a business-identifier scheme (the NZ bank-account precedent).
+reference_seed: false
+jurisdiction: LVA
+identifiers:
+  - scheme: lv_regnum
+    label: "Reģistrācijas numurs (Uzņēmumu reģistrs)"
+    regex: "^\\d{11}$"
+    check_digit: "vat_checksum_when_first_digit_gt_3 (empirically confirmed, no published UR spec)"
+  - scheme: lv_pvn
+    label: "PVN maksātāja numurs"
+    regex: "^(LV)?\\d{11}$"
+    check_digit: "mod-11 weights 9,1,4,8,3,10,2,5,7,6 (legal entities, first digit > 3); natural persons format-only (algorithm UNVERIFIED)"
+  - scheme: personas_kods
+    label: "Personas kods (personal — not a business-identifier scheme)"
+    regex: "^\\d{6}-?\\d{5}$"
+    check_digit: "((1101 - sum(w*d)) mod 11) mod 10, weights 1,6,3,7,9,10,5,8,4,2"

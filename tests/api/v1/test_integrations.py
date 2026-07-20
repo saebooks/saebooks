@@ -644,7 +644,7 @@ async def test_companies_house_gate_community(
 
 
 def _abr_lookup_result(**overrides: Any) -> Any:
-    from saebooks.services.abr import AbrLookup
+    from saebooks.jurisdictions.au.abr import AbrLookup
 
     defaults: dict[str, Any] = dict(
         abn="51824753556",
@@ -762,7 +762,7 @@ async def test_abr_lookup_returns_result_lookup_only(
 @pytest.mark.asyncio
 async def test_abr_lookup_404_not_found(client: AsyncClient) -> None:
     """POST /integrations/abr/lookup → 404 when ABR has no record for the ABN."""
-    from saebooks.services.abr import AbrError
+    from saebooks.jurisdictions.au.abr import AbrError
 
     with patch(
         "saebooks.api.v1.integrations.lookup_abn",
@@ -780,7 +780,7 @@ async def test_abr_lookup_404_not_found(client: AsyncClient) -> None:
 @pytest.mark.asyncio
 async def test_abr_lookup_400_malformed_abn(client: AsyncClient) -> None:
     """POST /integrations/abr/lookup → 400 when the ABN isn't 11 digits."""
-    from saebooks.services.abr import AbrError
+    from saebooks.jurisdictions.au.abr import AbrError
 
     with patch(
         "saebooks.api.v1.integrations.lookup_abn",
@@ -798,7 +798,7 @@ async def test_abr_lookup_400_malformed_abn(client: AsyncClient) -> None:
 @pytest.mark.asyncio
 async def test_abr_lookup_503_not_configured(client: AsyncClient) -> None:
     """POST /integrations/abr/lookup → 503 when ABR_API_GUID isn't set."""
-    from saebooks.services.abr import AbrNotConfiguredError
+    from saebooks.jurisdictions.au.abr import AbrNotConfiguredError
 
     with patch(
         "saebooks.api.v1.integrations.lookup_abn",

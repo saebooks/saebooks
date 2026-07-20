@@ -48,6 +48,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from saebooks.db import Base
+from saebooks.db_types import Money
 from saebooks.models._scope import CompanyScoped
 
 if TYPE_CHECKING:
@@ -99,13 +100,13 @@ class Expense(CompanyScoped, Base):
         default=ExpenseStatus.DRAFT,
     )
     subtotal: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     tax_total: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     total: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     currency: Mapped[str] = mapped_column(
         String(3), nullable=False, default="AUD"
@@ -114,13 +115,13 @@ class Expense(CompanyScoped, Base):
         Numeric(18, 8), nullable=False, default=Decimal("1")
     )
     base_subtotal: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     base_tax_total: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     base_total: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     notes: Mapped[str | None] = mapped_column(Text)
     posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -209,13 +210,13 @@ class ExpenseLine(Base):
         Numeric(6, 2), nullable=False, default=Decimal("0")
     )
     line_subtotal: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     line_tax: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     line_total: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     project_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),

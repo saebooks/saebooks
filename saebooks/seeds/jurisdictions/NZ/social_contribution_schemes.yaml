@@ -1,0 +1,46 @@
+# New Zealand social-contribution schemes — the ACC earner's levy
+# (collected inside PAYE) as dated rows.
+#
+# Source: ~/records/saebooks/nz-market-entry-strategy.md §5.4-§5.5
+# (verified against IRD's ACC earner's levy page 2026-07-12).
+#
+# ACC EMPLOYER levies (Work levy + Working Safer levy) are DELIBERATELY
+# NOT SEEDED: they are invoiced directly by ACC off IRD-supplied payroll
+# data — not filed or withheld through payroll — and the rate is
+# per-industry (Classification Unit), so no single rate_percent row is
+# truthful. Module implication (§5.5): track/accrue as an expense
+# category; no lodgement artefact. The per-industry CU rate table lives
+# in the ACC Levy Guidebook PDF and is PARKED (out of the build brief's
+# scope).
+table: social_contribution_schemes
+key: [jurisdiction, code, effective_from]
+rows:
+  - jurisdiction: NZL
+    code: nz_acc_earners_levy
+    name: "ACC earner's levy (collected within PAYE)"
+    payer: employee
+    rate_percent: 1.6700
+    wage_base_cap: 152790.00
+    collection_mechanism: payroll_withholding
+    effective_from: 2025-04-01
+    effective_to: 2026-03-31
+
+  - jurisdiction: NZL
+    code: nz_acc_earners_levy
+    name: "ACC earner's levy (collected within PAYE)"
+    payer: employee
+    rate_percent: 1.7500
+    wage_base_cap: 156641.00
+    collection_mechanism: payroll_withholding
+    effective_from: 2026-04-01
+    effective_to: 2027-03-31
+
+  - jurisdiction: NZL
+    code: nz_acc_earners_levy
+    name: "ACC earner's levy (collected within PAYE)"
+    payer: employee
+    rate_percent: 1.8300
+    wage_base_cap: 160244.00
+    collection_mechanism: payroll_withholding
+    effective_from: 2027-04-01
+    effective_to: 2028-03-31

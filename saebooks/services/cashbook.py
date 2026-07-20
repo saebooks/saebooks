@@ -4,7 +4,7 @@ The cashbook UI sits on top of one service function:
 ``record_cashbook_entry``. Every cashbook entry compiles to a real
 ``JournalEntry`` with two lines (non-registered) or a ``JournalEntry``
 with two lines + an auto-posted GST line (registered, via
-``services.gst.auto_post_gst_lines`` at JE post time).
+``jurisdictions.au.tax.auto_post_gst_lines`` at JE post time).
 
 See ``docs/cashbook-edition-design.md`` for the full design and
 ``services/cashbook_categories.py`` for the picker taxonomy.
@@ -39,10 +39,13 @@ from saebooks.models.account import Account
 from saebooks.models.company import Company
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalOrigin
 from saebooks.models.tax_code import TaxCode
+from saebooks.money import money_quantum
 from saebooks.services import journal as journal_svc
 from saebooks.services.cashbook_categories import (
     CashbookCategory,
+    CashbookUnsupportedJurisdiction,
     UnknownCashbookCategory,
+    profile_for,
     resolve_account_id_override,
     resolve_for_company,
 )
@@ -156,9 +159,14 @@ async def _resolve_company(
             "Cashbook default bank account is not set for this company. "
             "Pick a bank account in Settings before recording entries."
         )
-    if company.base_currency != "AUD":
+    try:
+        profile = profile_for(company.jurisdiction)
+    except CashbookUnsupportedJurisdiction as e:
+        raise CashbookCurrencyError(str(e)) from e
+    if company.base_currency != profile.currency:
         raise CashbookCurrencyError(
-            f"Cashbook supports AUD only in v1 "
+            f"Cashbook supports {profile.currency} only for jurisdiction "
+            f"{company.jurisdiction} "
             f"(company base_currency={company.base_currency!r})"
         )
     return company
@@ -179,7 +187,9 @@ async def _resolve_category(
     separate service surface because they need *two* bank accounts.
     """
     try:
-        category = resolve_for_company(category_code, company.cashbook_categories)
+        category = resolve_for_company(
+            category_code, company.cashbook_categories, company.jurisdiction
+        )
     except UnknownCashbookCategory as e:
         raise CashbookCategoryError(str(e)) from e
 
@@ -236,7 +246,7 @@ def _quantize_money(value: Decimal) -> Decimal:
     """Round to two decimal places, half-even (banker's rounding) —
     matches what Numeric(14,2) will store anyway, but normalising up
     front means the JE rows we create round-trip without surprises."""
-    return value.quantize(Decimal("0.01"))
+    return value.quantize(money_quantum(2))
 
 
 # ---------------------------------------------------------------------------
@@ -248,6 +258,7 @@ async def _resolve_category_tax_code(
     session: AsyncSession,
     company_id: uuid.UUID,
     category: CashbookCategory,
+    jurisdiction: str = "AU",
 ) -> uuid.UUID | None:
     """Resolve a cashbook category's ``tax_code`` to a ``TaxCode.id`` in
     this company.
@@ -274,7 +285,7 @@ async def _resolve_category_tax_code(
             select(TaxCode).where(
                 TaxCode.company_id == company_id,
                 TaxCode.code == category.tax_code,
-                TaxCode.jurisdiction == "AU",
+                TaxCode.jurisdiction == jurisdiction,
                 TaxCode.archived_at.is_(None),
             )
         )
@@ -287,7 +298,7 @@ async def _resolve_category_tax_code(
             select(TaxCode)
             .where(
                 TaxCode.company_id == company_id,
-                TaxCode.jurisdiction == "AU",
+                TaxCode.jurisdiction == jurisdiction,
                 TaxCode.reporting_type == category.reporting_type,
                 TaxCode.archived_at.is_(None),
             )
@@ -356,7 +367,7 @@ async def record_cashbook_entry(
         per-company overrides resolve.
     gst_amount:
         Override the category default GST. ``None`` means "use the
-        category default × company gst_registered". Pass
+        category default × company tax_registered". Pass
         ``Decimal("0")`` to suppress GST on a one-off (e.g. a
         GST-registered trader booking a GST-free expense). Always the
         GST portion of the gross ``amount`` (i.e. for $110 inclusive
@@ -412,7 +423,7 @@ async def record_cashbook_entry(
     # on the category (P&L/asset) line only; the bank counter-line and
     # the auto-posted GST line are not BAS-reportable themselves.
     category_tax_code_id = await _resolve_category_tax_code(
-        db, company.id, resolved.category
+        db, company.id, resolved.category, company.jurisdiction
     )
 
     # GST split. Non-registered traders never get a GST line; the JE
@@ -420,7 +431,7 @@ async def record_cashbook_entry(
     # amount lives on the category line as ``gst_amount`` so
     # ``gst.auto_post_gst_lines`` will add the matching DR/CR GST
     # account line at post time.
-    if not company.gst_registered:
+    if not company.tax_registered:
         line_gst: Decimal | None = None
         net_amount = amount
     else:

@@ -53,6 +53,13 @@ from saebooks.services.lodgement.base import (
     LodgementStatus,
 )
 from saebooks.services.lodgement.exceptions import (
+    EEConfirmServiceUnverified,
+    EEFilingRejected,
+    EEFilingStateError,
+    EEFilingValidationError,
+    EELiveCredentialsMissing,
+    EELodgementError,
+    EEUpstreamUnavailable,
     LodgementAuthError,
     LodgementEditionError,
     LodgementError,
@@ -67,6 +74,13 @@ from saebooks.services.lodgement.registry import UnknownJurisdiction, get_adapte
 from saebooks.services.lodgement.remote import RemoteLodgementService
 
 __all__ = [
+    "EEConfirmServiceUnverified",
+    "EEFilingRejected",
+    "EEFilingStateError",
+    "EEFilingValidationError",
+    "EELiveCredentialsMissing",
+    "EELodgementError",
+    "EEUpstreamUnavailable",
     "LodgementAuthError",
     "LodgementEditionError",
     "LodgementError",

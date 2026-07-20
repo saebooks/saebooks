@@ -1,0 +1,21 @@
+# United Kingdom — e-invoicing mandate placeholder.
+#
+# NOT a reference-DB table seed (reference_seed: false). Placeholder
+# ONLY — do not hardcode any wire format against this yet.
+#
+# Facts (UK market-entry strategy §4.4, verified 2026-07-12):
+# * E-invoicing mandatory for ALL VAT invoices (B2B + B2G) from
+#   1 April 2029 (consultation outcome 26 Nov 2025).
+# * Peppol confirmed as the network on 23 June 2026.
+# * Technical roadmap/spec due at Budget 2026 — "mandate confirmed,
+#   spec pending". The engine's existing EN 16931 work (EE/AU lane) is
+#   the expected substrate.
+reference_seed: false
+jurisdiction: GBR
+
+mandate:
+  scope: all_vat_invoices_b2b_and_b2g
+  effective_from: 2029-04-01
+  network: peppol
+  semantic_model: EN16931
+  spec_status: pending_budget_2026

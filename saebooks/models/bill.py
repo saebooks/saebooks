@@ -36,6 +36,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from saebooks.db import Base
+from saebooks.db_types import Money
 from saebooks.models._scope import CompanyScoped
 
 if TYPE_CHECKING:
@@ -84,16 +85,16 @@ class Bill(CompanyScoped, Base):
         default=BillStatus.DRAFT,
     )
     subtotal: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     tax_total: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     total: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     amount_paid: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     # --- Foreign-currency header (Batch GG/2) ------------------------------
     # Mirror of ``Invoice`` — the supplier's document may be in any
@@ -106,16 +107,16 @@ class Bill(CompanyScoped, Base):
         Numeric(18, 8), nullable=False, default=Decimal("1")
     )
     base_subtotal: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     base_tax_total: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     base_total: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     base_amount_paid: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     notes: Mapped[str | None] = mapped_column(Text)
     posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -203,13 +204,13 @@ class BillLine(Base):
         Numeric(6, 2), nullable=False, default=Decimal("0")
     )
     line_subtotal: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     line_tax: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     line_total: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     # Optional project tag for cost-by-project / job-costing reports.
     project_id: Mapped[uuid.UUID | None] = mapped_column(

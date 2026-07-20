@@ -223,6 +223,604 @@ async def test_post_company_creates_with_enterprise_edition(
 
 
 # ---------------------------------------------------------------------------
+# POST /companies — EE fields (Packet 1a)
+# ---------------------------------------------------------------------------
+
+
+async def test_post_ee_company_persists_ee_fields(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST with jurisdiction=EE + registrikood/kmv_number persists and returns them."""
+    from saebooks.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "edition", "enterprise")
+
+    tag = uuid.uuid4().hex[:8]
+    name = f"EECo_{tag}"
+    try:
+        resp = await api_client.post(
+            "/api/v1/companies",
+            json={
+                "name": name,
+                "jurisdiction": "EE",
+                "coa_template_key": "ee/default",
+                "registrikood": "12345678",
+                "kmv_number": "EE123456789",
+            },
+        )
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["jurisdiction"] == "EE"
+        assert body["coa_template_key"] == "ee/default"
+        assert body["registrikood"] == "12345678"
+        assert body["kmv_number"] == "EE123456789"
+
+        # Get round-trips the same fields.
+        get_resp = await api_client.get(f"/api/v1/companies/{body['id']}")
+        assert get_resp.status_code == 200
+        get_body = get_resp.json()
+        assert get_body["jurisdiction"] == "EE"
+        assert get_body["registrikood"] == "12345678"
+        assert get_body["kmv_number"] == "EE123456789"
+    finally:
+        from sqlalchemy import delete
+
+        from saebooks.models.company import Company
+
+        async with AsyncSessionLocal() as session:
+            await session.execute(delete(Company).where(Company.name == name))
+            await session.commit()
+
+
+async def test_patch_ee_company_registrikood_whitespace_stripped(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Round 3, finding 4: an otherwise-valid registrikood/kmv_number with
+    incidental leading/trailing whitespace is stripped before format
+    validation, matching services.companies.update()'s own
+    `.strip() or None` normalisation -- not rejected as malformed."""
+    from saebooks.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "edition", "enterprise")
+
+    tag = uuid.uuid4().hex[:8]
+    name = f"EEWs_{tag}"
+    try:
+        create_resp = await api_client.post(
+            "/api/v1/companies",
+            json={
+                "name": name,
+                "jurisdiction": "EE",
+                "coa_template_key": "ee/default",
+                "registrikood": "12345678",
+            },
+        )
+        assert create_resp.status_code == 201, create_resp.text
+        body = create_resp.json()
+
+        patch_resp = await api_client.patch(
+            f"/api/v1/companies/{body['id']}",
+            json={"registrikood": " 87654321", "kmv_number": "EE123456789 "},
+            headers={"If-Match": str(body["version"])},
+        )
+        assert patch_resp.status_code == 200, patch_resp.text
+        assert patch_resp.json()["registrikood"] == "87654321"
+        assert patch_resp.json()["kmv_number"] == "EE123456789"
+    finally:
+        from sqlalchemy import delete
+
+        from saebooks.models.company import Company
+
+        async with AsyncSessionLocal() as session:
+            await session.execute(delete(Company).where(Company.name == name))
+            await session.commit()
+
+
+async def test_post_au_company_unchanged_defaults(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST without jurisdiction still defaults to AU/au-default, EE fields NULL."""
+    from saebooks.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "edition", "enterprise")
+
+    tag = uuid.uuid4().hex[:8]
+    name = f"AUCo_{tag}"
+    try:
+        resp = await api_client.post("/api/v1/companies", json={"name": name})
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["jurisdiction"] == "AU"
+        assert body["coa_template_key"] == "au/default"
+        assert body["registrikood"] is None
+        assert body["kmv_number"] is None
+    finally:
+        from sqlalchemy import delete
+
+        from saebooks.models.company import Company
+
+        async with AsyncSessionLocal() as session:
+            await session.execute(delete(Company).where(Company.name == name))
+            await session.commit()
+
+
+async def test_patch_ee_company_clears_registrikood_and_kmv_number(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PATCH with registrikood="" (whitespace) clears a previously-set
+    value to NULL, same as every other optional string column — not a
+    422 (critic round 1, finding 4)."""
+    from saebooks.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "edition", "enterprise")
+
+    tag = uuid.uuid4().hex[:8]
+    name = f"EEClear_{tag}"
+    try:
+        create_resp = await api_client.post(
+            "/api/v1/companies",
+            json={
+                "name": name,
+                "jurisdiction": "EE",
+                "coa_template_key": "ee/default",
+                "registrikood": "12345678",
+                "kmv_number": "EE123456789",
+            },
+        )
+        assert create_resp.status_code == 201, create_resp.text
+        body = create_resp.json()
+        company_id, version = body["id"], body["version"]
+
+        patch_resp = await api_client.patch(
+            f"/api/v1/companies/{company_id}",
+            json={"registrikood": "  ", "kmv_number": ""},
+            headers={"If-Match": str(version)},
+        )
+        assert patch_resp.status_code == 200, patch_resp.text
+        assert patch_resp.json()["registrikood"] is None
+        assert patch_resp.json()["kmv_number"] is None
+
+        get_resp = await api_client.get(f"/api/v1/companies/{company_id}")
+        assert get_resp.json()["registrikood"] is None
+        assert get_resp.json()["kmv_number"] is None
+    finally:
+        from sqlalchemy import delete
+
+        from saebooks.models.company import Company
+
+        async with AsyncSessionLocal() as session:
+            await session.execute(delete(Company).where(Company.name == name))
+            await session.commit()
+
+
+async def test_patch_ee_company_clears_ar_control_account_resolves_to_ee_default(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fixer round 4: PATCH clearing an EE company's ar_control_account_code
+    override must not leave it silently resolving to the AU convention code
+    ("1-1200"), which doesn't exist in an EE chart. The company's own
+    ee/default chart carries the EE control accounts (1200/2100), so after
+    clearing, get_ar_account (the exact posting-time lookup invoices/bills
+    use) must resolve to a real Account row, not raise "control account
+    missing"."""
+    from saebooks.config import settings as app_settings
+    from saebooks.services import control_accounts as control_accounts_svc
+
+    monkeypatch.setattr(app_settings, "edition", "enterprise")
+
+    tag = uuid.uuid4().hex[:8]
+    name = f"EEClearAR_{tag}"
+    try:
+        # CompanyCreate has no ar_control_account_code field -- chart_ee's
+        # applier is what sets it (to "1200") at creation time.
+        create_resp = await api_client.post(
+            "/api/v1/companies",
+            json={
+                "name": name,
+                "jurisdiction": "EE",
+                "coa_template_key": "ee/default",
+                "registrikood": "87654321",
+            },
+        )
+        assert create_resp.status_code == 201, create_resp.text
+        body = create_resp.json()
+        company_id, version = body["id"], body["version"]
+        assert body["ar_control_account_code"] == "1200"
+
+        # PATCH an explicit override to a different real EE account first,
+        # to prove this is a genuine "explicit override -> cleared" flow
+        # rather than a no-op (both the default and chart_ee's initial
+        # value happen to be "1200").
+        override_resp = await api_client.patch(
+            f"/api/v1/companies/{company_id}",
+            json={"ar_control_account_code": "1300"},
+            headers={"If-Match": str(version)},
+        )
+        assert override_resp.status_code == 200, override_resp.text
+        version = override_resp.json()["version"]
+
+        # Clear the override -- the guard must accept this (it does not
+        # blend with ap, which is still unset -> its own EE default).
+        patch_resp = await api_client.patch(
+            f"/api/v1/companies/{company_id}",
+            json={"ar_control_account_code": ""},
+            headers={"If-Match": str(version)},
+        )
+        assert patch_resp.status_code == 200, patch_resp.text
+        assert patch_resp.json()["ar_control_account_code"] is None
+
+        async with AsyncSessionLocal() as session:
+            resolved = await control_accounts_svc.resolve_ar_code(
+                session, uuid.UUID(company_id)
+            )
+            assert resolved == "1200"
+
+            # The exact posting-time lookup (invoices/bills route through
+            # this) must resolve to a real Account row in this EE
+            # company's chart, not raise "AR control account missing".
+            account = await control_accounts_svc.get_ar_account(
+                session, uuid.UUID(company_id)
+            )
+            assert account.code == "1200"
+    finally:
+        from sqlalchemy import delete
+
+        from saebooks.models.company import Company
+
+        async with AsyncSessionLocal() as session:
+            await session.execute(delete(Company).where(Company.name == name))
+            await session.commit()
+
+
+async def test_post_ee_company_malformed_registrikood_422(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Malformed registrikood (not 8 digits) on an EE company is rejected 422."""
+    from saebooks.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "edition", "enterprise")
+
+    resp = await api_client.post(
+        "/api/v1/companies",
+        json={
+            "name": f"BadEE_{uuid.uuid4().hex[:8]}",
+            "jurisdiction": "EE",
+            "registrikood": "not-digits",
+        },
+    )
+    assert resp.status_code == 422
+
+
+async def test_post_ee_company_malformed_kmv_number_422_field_scoped(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fixer round 4: a malformed kmv_number on CompanyCreate must report a
+    field-scoped loc (['body', 'kmv_number']), not a bare model-level
+    loc=['body'] -- format checking now runs in a field_validator (mirrors
+    CompanyUpdate.kmv_number_format) instead of inline in the cross-field
+    model_validator, so callers like saebooks-web can place the error next
+    to the right form input.
+
+    The engine's RFC 7807 handler (saebooks/api/errors.py) fires whenever
+    the caller's Accept header satisfies its _wants_json check -- true by
+    default for httpx.AsyncClient (it always sends "Accept: */*" unless
+    overridden, incl. this test's own ``api_client`` fixture) -- so the
+    field-scoped pydantic error list lives under "errors", not "detail"
+    ("detail" is a fixed human string in that shape)."""
+    from saebooks.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "edition", "enterprise")
+
+    resp = await api_client.post(
+        "/api/v1/companies",
+        json={
+            "name": f"BadKMV_{uuid.uuid4().hex[:8]}",
+            "jurisdiction": "EE",
+            "registrikood": f"{uuid.uuid4().int % 90000000 + 10000000}",
+            "kmv_number": "BOGUS",
+        },
+    )
+    assert resp.status_code == 422
+    errors = resp.json()["errors"]
+    assert any(err["loc"] == ["body", "kmv_number"] for err in errors), errors
+
+
+async def test_post_ee_company_missing_registrikood_422(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Round 3, finding 1: registrikood is mandatory for jurisdiction=EE
+    at the engine layer, not just the web UI -- omitting it entirely
+    (key absent) must 422, not silently persist a company with
+    registrikood=NULL."""
+    from saebooks.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "edition", "enterprise")
+
+    resp = await api_client.post(
+        "/api/v1/companies",
+        json={
+            "name": f"NoRegNo_{uuid.uuid4().hex[:8]}",
+            "jurisdiction": "EE",
+            "coa_template_key": "ee/default",
+        },
+    )
+    assert resp.status_code == 422, resp.text
+
+
+async def test_post_company_unknown_jurisdiction_422(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unrecognised jurisdiction code is rejected 422."""
+    from saebooks.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "edition", "enterprise")
+
+    resp = await api_client.post(
+        "/api/v1/companies",
+        json={"name": f"ZZCo_{uuid.uuid4().hex[:8]}", "jurisdiction": "ZZ"},
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.parametrize("jurisdiction", ["NZ", "UK"])
+async def test_post_company_stub_jurisdiction_422(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch, jurisdiction: str
+) -> None:
+    """NZ/UK are registered engine slots (fail loudly, by name) but not
+    ready jurisdictions to create a company against — 422, not a silent
+    201 with an unimplemented jurisdiction persisted (critic round 1,
+    finding 2)."""
+    from saebooks.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "edition", "enterprise")
+
+    resp = await api_client.post(
+        "/api/v1/companies",
+        json={
+            "name": f"Stub_{uuid.uuid4().hex[:8]}",
+            "jurisdiction": jurisdiction,
+        },
+    )
+    assert resp.status_code == 422
+
+
+async def test_post_company_mismatched_template_and_jurisdiction_422(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """jurisdiction=AU with an EE coa_template_key (or vice versa) is
+    rejected rather than persisting a company whose chart language/tax
+    codes don't match its stored jurisdiction (critic round 1, finding 3)."""
+    from saebooks.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "edition", "enterprise")
+
+    resp = await api_client.post(
+        "/api/v1/companies",
+        json={
+            "name": f"Mismatch_{uuid.uuid4().hex[:8]}",
+            "jurisdiction": "AU",
+            "coa_template_key": "ee/default",
+        },
+    )
+    assert resp.status_code == 422
+
+    resp2 = await api_client.post(
+        "/api/v1/companies",
+        json={
+            "name": f"Mismatch2_{uuid.uuid4().hex[:8]}",
+            "jurisdiction": "EE",
+            "registrikood": "12345678",
+            # coa_template_key omitted -> defaults to "au/default", must
+            # not silently create an EE company with zero accounts.
+        },
+    )
+    assert resp2.status_code == 422
+
+
+async def test_post_company_ee_fields_rejected_for_non_ee_jurisdiction(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """registrikood/kmv_number are EE-only at create time too — mirrors
+    services.companies.update()'s existing guard (critic round 1,
+    finding 5).
+
+    Fixer round 4: uses a WELL-FORMED registrikood -- since registrikood_
+    format is now a field_validator (runs unconditionally, before the
+    cross-field model_validator that owns this guard), a malformed value
+    would 422 via the format check instead, and this test would pass for
+    the wrong reason without actually exercising the EE-only guard."""
+    from saebooks.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "edition", "enterprise")
+
+    resp = await api_client.post(
+        "/api/v1/companies",
+        json={
+            "name": f"AUWithEE_{uuid.uuid4().hex[:8]}",
+            "jurisdiction": "AU",
+            "registrikood": "12345678",
+        },
+    )
+    assert resp.status_code == 422
+    errors = resp.json()["errors"]
+    assert any("can only be set on an EE company" in err["msg"] for err in errors), errors
+
+
+async def test_post_company_unregistered_template_key_422(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Critic round 2, finding 1/2/4: a coa_template_key whose *prefix*
+    matches jurisdiction but isn't an actually-registered template (a
+    typo, e.g. "ee/defualt") must be rejected 422 at the schema layer —
+    not accepted, then blow up 500 inside create_company after the
+    Company row is already committed."""
+    from saebooks.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "edition", "enterprise")
+
+    resp = await api_client.post(
+        "/api/v1/companies",
+        json={
+            "name": f"Typo_{uuid.uuid4().hex[:8]}",
+            "jurisdiction": "EE",
+            "registrikood": "12345678",
+            "coa_template_key": "ee/defualt",
+        },
+    )
+    assert resp.status_code == 422
+
+    async with AsyncSessionLocal() as session:
+        rows = (
+            await session.execute(
+                select(Company).where(
+                    Company.jurisdiction == "EE", Company.registrikood == "12345678"
+                )
+            )
+        ).scalars().all()
+        assert rows == []
+
+
+async def test_post_company_neutral_jurisdiction_succeeds(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Critic round 2, finding 1: jurisdiction="XX" (the neutral sentinel,
+    zero jurisdiction modules) is advertised by known_jurisdictions() and
+    must actually be able to create a company, not dead-end in an
+    unhandled 500 from an unregistered "xx/default" template."""
+    from saebooks.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "edition", "enterprise")
+
+    resp = await api_client.post(
+        "/api/v1/companies",
+        json={
+            "name": f"Neutral_{uuid.uuid4().hex[:8]}",
+            "jurisdiction": "XX",
+            "coa_template_key": "xx/default",
+        },
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["jurisdiction"] == "XX"
+    assert body["coa_template_key"] == "xx/default"
+
+
+async def test_post_company_neutral_jurisdiction_omitted_template_succeeds(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fixer round 4: jurisdiction="XX" with coa_template_key OMITTED must
+    also succeed -- the schema's own class default ("au/default") does not
+    match "XX" and previously 422'd, contradicting the stated "company
+    creation works with zero jurisdiction modules" design goal for the one
+    jurisdiction it is supposed to hold for by construction."""
+    from saebooks.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "edition", "enterprise")
+
+    resp = await api_client.post(
+        "/api/v1/companies",
+        json={"name": f"NeutralNoKey_{uuid.uuid4().hex[:8]}", "jurisdiction": "XX"},
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["jurisdiction"] == "XX"
+    assert body["coa_template_key"] == "xx/default"
+
+
+async def test_post_company_duplicate_registrikood_409(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Critic round 2, finding 3: two companies cannot claim the same
+    registrikood for the same tenant — the second POST is rejected
+    (unique constraint 0204), not silently persisted as a duplicate."""
+    from saebooks.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "edition", "enterprise")
+
+    registrikood = str(uuid.uuid4().int)[:8]
+    first = await api_client.post(
+        "/api/v1/companies",
+        json={
+            "name": f"DupA_{uuid.uuid4().hex[:8]}",
+            "jurisdiction": "EE",
+            "registrikood": registrikood,
+            "coa_template_key": "ee/default",
+        },
+    )
+    assert first.status_code == 201
+
+    second = await api_client.post(
+        "/api/v1/companies",
+        json={
+            "name": f"DupB_{uuid.uuid4().hex[:8]}",
+            "jurisdiction": "EE",
+            "registrikood": registrikood,
+            "coa_template_key": "ee/default",
+        },
+    )
+    assert second.status_code == 409
+
+    async with AsyncSessionLocal() as session:
+        rows = (
+            await session.execute(
+                select(Company).where(Company.registrikood == registrikood)
+            )
+        ).scalars().all()
+        assert len(rows) == 1
+
+
+async def test_patch_company_duplicate_registrikood_409(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Round 3, finding 2: PATCHing company B's registrikood to a value
+    already held by company A hits the same tenant-scoped unique
+    constraint (0204) as POST -- must return a clean 409, not a bare
+    500 from an uncaught IntegrityError."""
+    from saebooks.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "edition", "enterprise")
+
+    registrikood = str(uuid.uuid4().int)[:8]
+    first = await api_client.post(
+        "/api/v1/companies",
+        json={
+            "name": f"PatchDupA_{uuid.uuid4().hex[:8]}",
+            "jurisdiction": "EE",
+            "registrikood": registrikood,
+            "coa_template_key": "ee/default",
+        },
+    )
+    assert first.status_code == 201, first.text
+
+    second = await api_client.post(
+        "/api/v1/companies",
+        json={
+            "name": f"PatchDupB_{uuid.uuid4().hex[:8]}",
+            "jurisdiction": "EE",
+            "registrikood": str(uuid.uuid4().int)[:8],
+            "coa_template_key": "ee/default",
+        },
+    )
+    assert second.status_code == 201, second.text
+    body_b = second.json()
+
+    patch_resp = await api_client.patch(
+        f"/api/v1/companies/{body_b['id']}",
+        json={"registrikood": registrikood},
+        headers={"If-Match": str(body_b["version"])},
+    )
+    assert patch_resp.status_code == 409, patch_resp.text
+
+    async with AsyncSessionLocal() as session:
+        rows = (
+            await session.execute(
+                select(Company).where(Company.registrikood == registrikood)
+            )
+        ).scalars().all()
+        assert len(rows) == 1
+
+
+# ---------------------------------------------------------------------------
 # X-Company-Id header — get_active_company_id dep
 # ---------------------------------------------------------------------------
 
@@ -256,39 +854,39 @@ async def test_x_company_id_header_valid_uuid_returns_200(api_client: AsyncClien
 
 
 # ---------------------------------------------------------------------------
-# HOBB-1 — gst_registered + gst_effective_date fields
+# HOBB-1 — tax_registered + gst_effective_date fields
 # ---------------------------------------------------------------------------
 
 
 async def test_companies_gst_fields_present_in_response(api_client: AsyncClient) -> None:
-    """CompanyOut always includes gst_registered and gst_effective_date."""
+    """CompanyOut always includes tax_registered and gst_effective_date."""
     company_id, _ = await _get_seed_company()
     r = await api_client.get(f"/api/v1/companies/{company_id}")
     assert r.status_code == 200
     body = r.json()
-    assert "gst_registered" in body
-    assert isinstance(body["gst_registered"], bool)
+    assert "tax_registered" in body
+    assert isinstance(body["tax_registered"], bool)
     assert "gst_effective_date" in body
 
 
 async def test_companies_patch_gst_fields(api_client: AsyncClient) -> None:
-    """PATCH gst_registered + gst_effective_date round-trips correctly."""
+    """PATCH tax_registered + gst_effective_date round-trips correctly."""
     company_id, version = await _get_seed_company()
     r = await api_client.patch(
         f"/api/v1/companies/{company_id}",
-        json={"gst_registered": True, "gst_effective_date": "2024-07-01"},
+        json={"tax_registered": True, "gst_effective_date": "2024-07-01"},
         headers={"If-Match": str(version)},
     )
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["gst_registered"] is True
+    assert body["tax_registered"] is True
     assert body["gst_effective_date"] == "2024-07-01"
     assert body["version"] == version + 1
 
     # Restore
     await api_client.patch(
         f"/api/v1/companies/{company_id}",
-        json={"gst_registered": False},
+        json={"tax_registered": False},
         headers={"If-Match": str(version + 1)},
     )
 
@@ -678,6 +1276,116 @@ async def test_companies_patch_bad_debt_invalid_mode_rejected(
     r = await api_client.patch(
         f"/api/v1/companies/{company_id}",
         json={"writeoff_mode": "banana"},
+        headers={"If-Match": str(version)},
+    )
+    assert r.status_code == 422, r.text
+
+
+# ---------------------------------------------------------------------------
+# AR/AP control-account override (0198, Packet 4b) — same "plain company
+# column, round-trips via PATCH" pattern as bad_debt_recovery_account above.
+# ---------------------------------------------------------------------------
+
+
+async def test_companies_control_account_defaults(api_client: AsyncClient) -> None:
+    """NULL by default — engine resolves the AU convention codes."""
+    company_id, _ = await _get_seed_company()
+    r = await api_client.get(f"/api/v1/companies/{company_id}")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ar_control_account_code"] is None
+    assert body["ap_control_account_code"] is None
+
+
+async def test_companies_patch_control_accounts_round_trip(
+    api_client: AsyncClient,
+) -> None:
+    """PATCH the AR/AP control-account override; persists and bumps version."""
+    company_id, version = await _get_seed_company()
+    r = await api_client.patch(
+        f"/api/v1/companies/{company_id}",
+        json={"ar_control_account_code": "1000", "ap_control_account_code": "2000"},
+        headers={"If-Match": str(version)},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ar_control_account_code"] == "1000"
+    assert body["ap_control_account_code"] == "2000"
+    assert body["version"] == version + 1
+
+    # Restore defaults.
+    await api_client.patch(
+        f"/api/v1/companies/{company_id}",
+        json={"ar_control_account_code": None, "ap_control_account_code": None},
+        headers={"If-Match": str(version + 1)},
+    )
+
+
+async def _reset_control_accounts_to_null(api_client: AsyncClient, company_id: str) -> int:
+    """Force both control-account columns to NULL and return the resulting
+    version. Self-contained setup so the collision tests below don't
+    depend on some earlier test's cleanup having actually landed (the
+    round-trip test above never asserts its own restore PATCH -- and
+    that restore is itself a no-op: JSON ``null`` is indistinguishable
+    from "field omitted" once ``exclude_unset=True``/the ``is not
+    None`` guards collapse it, so clearing a column here means PATCHing
+    an empty string, per the ``address``-block comment a few lines
+    above the guard in ``companies.update``)."""
+    _, version = await _get_seed_company()
+    r = await api_client.patch(
+        f"/api/v1/companies/{company_id}",
+        json={"ar_control_account_code": "", "ap_control_account_code": ""},
+        headers={"If-Match": str(version)},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ar_control_account_code"] is None
+    assert body["ap_control_account_code"] is None
+    return body["version"]
+
+
+async def test_companies_patch_control_accounts_explicit_collision_rejected(
+    api_client: AsyncClient,
+) -> None:
+    """Both sides explicitly set to the same code is rejected."""
+    company_id, _ = await _get_seed_company()
+    version = await _reset_control_accounts_to_null(api_client, company_id)
+    r = await api_client.patch(
+        f"/api/v1/companies/{company_id}",
+        json={"ar_control_account_code": "9000", "ap_control_account_code": "9000"},
+        headers={"If-Match": str(version)},
+    )
+    assert r.status_code == 422, r.text
+
+
+async def test_companies_patch_control_accounts_ap_collides_with_ar_default(
+    api_client: AsyncClient,
+) -> None:
+    """Critic round 3: ar_control_account_code is left NULL (resolves to the
+    AR default "1-1200") while ap_control_account_code is explicitly PATCHed
+    to that same code -- must be rejected even though the two *stored*
+    columns never literally match."""
+    company_id, _ = await _get_seed_company()
+    version = await _reset_control_accounts_to_null(api_client, company_id)
+    r = await api_client.patch(
+        f"/api/v1/companies/{company_id}",
+        json={"ap_control_account_code": "1-1200"},
+        headers={"If-Match": str(version)},
+    )
+    assert r.status_code == 422, r.text
+
+
+async def test_companies_patch_control_accounts_ar_collides_with_ap_default(
+    api_client: AsyncClient,
+) -> None:
+    """Symmetric case: ap_control_account_code left NULL (resolves to the
+    AP default "2-1200") while ar_control_account_code is explicitly
+    PATCHed to that same code."""
+    company_id, _ = await _get_seed_company()
+    version = await _reset_control_accounts_to_null(api_client, company_id)
+    r = await api_client.patch(
+        f"/api/v1/companies/{company_id}",
+        json={"ar_control_account_code": "2-1200"},
         headers={"If-Match": str(version)},
     )
     assert r.status_code == 422, r.text

@@ -25,6 +25,7 @@ from saebooks.models.budget import Budget
 from saebooks.models.business_identifier import BusinessIdentifier
 from saebooks.models.change_log import ChangeLog
 from saebooks.models.company import Company, CostingMethod
+from saebooks.models.company_jurisdiction import CompanyJurisdiction
 from saebooks.models.contact import Contact, ContactType
 from saebooks.models.department import CostCentre, Department
 from saebooks.models.depreciation_model import DepreciationModel
@@ -137,6 +138,7 @@ __all__ = [
     "BusinessIdentifier",
     "ChangeLog",
     "Company",
+    "CompanyJurisdiction",
     "Contact",
     "ContactType",
     "CostCentre",

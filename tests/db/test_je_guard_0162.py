@@ -137,7 +137,7 @@ async def _raw_insert_with_source(
 #     directions. The session opts the guard IN (je_guard=True), so this is a
 #     true under-guard regression — the existing cashbook suite runs hatch-open.
 # ---------------------------------------------------------------------------
-async def _seed_cashbook_company(*, gst_registered: bool):
+async def _seed_cashbook_company(*, tax_registered: bool):
     """Flip the shared AU-seed company into cashbook mode (mirrors
     tests/services/test_cashbook.py::_seed_company_into_cashbook_mode).
     Returns (tenant_id, company_id)."""
@@ -166,8 +166,8 @@ async def _seed_cashbook_company(*, gst_registered: bool):
         assert bank is not None, "AU CoA seed missing 1-1110 Bank"
         co.bookkeeping_mode = "cashbook"
         co.cashbook_default_bank_account_id = bank.id
-        co.gst_registered = gst_registered
-        if gst_registered:
+        co.tax_registered = tax_registered
+        if tax_registered:
             await settings_svc.set(session, "gst_collected_account_code", "2-1310")
             await settings_svc.set(session, "gst_paid_account_code", "2-1330")
             await settings_svc.set(session, "gst_auto_post", "true")
@@ -198,7 +198,7 @@ async def _restore_seed_company():
         await session.execute(
             text(
                 "UPDATE companies SET bookkeeping_mode='full', "
-                "cashbook_default_bank_account_id=NULL, gst_registered=false "
+                "cashbook_default_bank_account_id=NULL, tax_registered=false "
                 "WHERE id = :cid"
             ),
             {"cid": co.id},
@@ -206,13 +206,13 @@ async def _restore_seed_company():
         await session.commit()
 
 
-@pytest.mark.parametrize("gst_registered", [True, False])
+@pytest.mark.parametrize("tax_registered", [True, False])
 @pytest.mark.parametrize(
     "direction,category_code",
     [("income", "INC_SERVICES"), ("expense", "EXP_MATERIALS")],
 )
 async def test_cashbook_create_under_guard_is_allowed(
-    _restore_seed_company, gst_registered, direction, category_code
+    _restore_seed_company, tax_registered, direction, category_code
 ):
     """Drive record_cashbook_entry with the 0162 guard LIVE on the session.
     Under 0161 this raised je_engine_guard at the attachments flush; 0162
@@ -220,7 +220,7 @@ async def test_cashbook_create_under_guard_is_allowed(
     FIX 2."""
     from saebooks.services.cashbook import record_cashbook_entry
 
-    tenant_id, company_id = await _seed_cashbook_company(gst_registered=gst_registered)
+    tenant_id, company_id = await _seed_cashbook_company(tax_registered=tax_registered)
     async with guarded_session() as s:
         je = await record_cashbook_entry(
             db=s,
@@ -231,7 +231,7 @@ async def test_cashbook_create_under_guard_is_allowed(
             amount=Decimal("110.00"),
             direction=direction,
             category_code=category_code,
-            idempotency_key=f"g62-{direction}-{gst_registered}-{uuid.uuid4().hex[:8]}",
+            idempotency_key=f"g62-{direction}-{tax_registered}-{uuid.uuid4().hex[:8]}",
             actor="guard62-test",
         )
     assert je.status.value == "POSTED"

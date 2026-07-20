@@ -1,4 +1,4 @@
-"""Unit tests for saebooks.services.abr.enrich."""
+"""Unit tests for saebooks.jurisdictions.au.abr.enrich."""
 from __future__ import annotations
 
 import uuid
@@ -7,14 +7,14 @@ import httpx
 import respx
 
 from saebooks.config import Settings
-from saebooks.models.contact import Contact, ContactType
-from saebooks.services.abr.enrich import (
+from saebooks.jurisdictions.au.abr.enrich import (
     AbrLookup,
     _format_abn,
     apply_to_contact,
     lookup_abn,
     parse_abr_response,
 )
+from saebooks.models.contact import Contact, ContactType
 
 ABR_BASE = "https://abr.example/json"
 

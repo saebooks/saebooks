@@ -30,6 +30,7 @@ import re
 import uuid
 from collections.abc import Callable
 from datetime import UTC, date, datetime
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,6 +45,13 @@ KNOWN_SCHEMES: frozenset[str] = frozenset({
     "nz_nzbn",
     "uk_crn",
     "ee_regcode",
+    # EE VAT number ("käibemaksukohustuslase number" / KMV). Follows the
+    # ``uk_vat`` / ``lt_vat`` / ``eu_vat`` scheme-naming convention (the
+    # generic ``_vat`` suffix, not the local KMV term — the same generic
+    # posture as ``ee_regcode`` over "registrikood"). Format validator
+    # registers lazily from ``saebooks.jurisdictions.ee.identifiers`` on
+    # first EE onboarding dispatch (the ``lv_pvn`` precedent).
+    "ee_vat",
     "global_lei",
     # M1.5 · T9 additions.
     "us_ein",
@@ -54,6 +62,16 @@ KNOWN_SCHEMES: frozenset[str] = frozenset({
     "in_pan",
     "nz_ird",
     "ca_bn",
+    # LT jurisdiction module. Validators register lazily from
+    # saebooks.jurisdictions.lt.identifiers on first LT dispatch (the
+    # nz_nzbn precedent) — until then validate() returns None for these.
+    "lt_company_code",
+    "lt_vat",
+    "lt_personal_code",
+    # LV jurisdiction module (validators registered lazily by
+    # saebooks.jurisdictions.lv.identifiers on first LV dispatch).
+    "lv_regnum",
+    "lv_pvn",
 })
 
 # Best-effort scheme -> jurisdiction-code mapping (matches the reference DB's
@@ -71,15 +89,54 @@ _SCHEME_JURISDICTION: dict[str, str] = {
     "uk_utr": "GBR",
     "uk_vat": "GBR",
     "ee_regcode": "EST",
+    "ee_vat": "EST",
     "us_ein": "USA",
     "in_gstin": "IND",
     "in_pan": "IND",
     "ca_bn": "CAN",
+    "lt_company_code": "LTU",
+    "lt_vat": "LTU",
+    "lt_personal_code": "LTU",
+    "lv_regnum": "LVA",
+    "lv_pvn": "LVA",
 }
 
 
 class UnknownScheme(ValueError):
     """Raised when a caller passes a scheme outside ``KNOWN_SCHEMES``."""
+
+
+class DuplicateIdentifier(Exception):
+    """Raised by ``upsert`` when writing a value that another company in
+    the same tenant already holds under a value-unique scheme.
+
+    Value-uniqueness is deliberately per-scheme (see
+    ``_VALUE_UNIQUE_SCHEMES``) AND opt-in (``upsert(..., enforce_unique=
+    True)``), NOT a blanket rule: a company registration number that legally
+    identifies exactly one entity (the Estonian registrikood / KMV number)
+    must be unique per tenant when written through the company service,
+    whereas ``au_abn`` / ``au_acn`` stay value-unconstrained — matching what
+    ``business_identifiers`` enforces at the table level (only ``(company_id,
+    scheme)`` uniqueness). The API layer maps this to HTTP 409.
+    """
+
+    def __init__(self, scheme: str, value: str) -> None:
+        self.scheme = scheme
+        self.value = value
+        super().__init__(
+            f"Another company already holds {value!r} under scheme {scheme!r}."
+        )
+
+
+# Schemes whose ``value`` must be unique per tenant — a registry code that
+# legally names exactly one entity. Enforced only when a caller passes
+# ``enforce_unique=True`` to ``upsert`` (the company write path does); there
+# is NO DB unique index, because the e-invoice/lodgement test fixtures
+# legitimately reuse a single registrikood across many scratch companies in
+# one tenant and an index would reject them regardless of code path. Extend
+# deliberately — au_abn/au_acn are NOT here (unchanged unconstrained
+# behaviour).
+_VALUE_UNIQUE_SCHEMES: frozenset[str] = frozenset({"ee_regcode", "ee_vat"})
 
 
 def _validate_scheme(scheme: str) -> str:
@@ -95,6 +152,46 @@ def _derive_jurisdiction(scheme: str) -> str | None:
     """Best-effort default jurisdiction for a scheme, or None if the
     scheme has no single owning jurisdiction (global_lei, eu_vat)."""
     return _SCHEME_JURISDICTION.get(scheme)
+
+
+# The one "primary" registry-code scheme per jurisdiction — the identifier a
+# jurisdiction stamps on invoices / lodgements as *the* company registration
+# number. Keyed by ``Company.jurisdiction`` (2- or 3-char, e.g. 'AU'/'AUS').
+# This is what de-overloads the legacy ``Company.abn`` column, which stored an
+# ABN for AU companies but the äriregistri kood for EE companies: each now
+# lands in its correctly-typed scheme, and a caller asks for "the company's
+# primary registration number" jurisdiction-aware, rather than reading a
+# column that meant different things per country.
+_PRIMARY_SCHEME_BY_JURISDICTION: dict[str, str] = {
+    "AU": "au_abn",
+    "AUS": "au_abn",
+    "EE": "ee_regcode",
+    "EST": "ee_regcode",
+}
+
+
+def primary_scheme_for(jurisdiction: str | None) -> str | None:
+    """The primary registry-code scheme for a ``Company.jurisdiction`` value,
+    or None if the jurisdiction has no single mapped scheme."""
+    if not jurisdiction:
+        return None
+    return _PRIMARY_SCHEME_BY_JURISDICTION.get(jurisdiction.strip().upper())
+
+
+async def primary_registry_identifier(session: AsyncSession, company: Any) -> str:
+    """Resolve a company's primary registration number (jurisdiction-aware).
+
+    AU company -> its ``au_abn`` value; EE company -> its ``ee_regcode``
+    value; etc. Returns "" when the jurisdiction has no mapped scheme or the
+    company has not recorded that identifier. Callers who want *specifically*
+    an ABN read ``company.abn`` (the AU-only hybrid); callers who want *the*
+    registration number whatever the country (e-invoicing seller identity)
+    use this."""
+    scheme = primary_scheme_for(getattr(company, "jurisdiction", None))
+    if scheme is None:
+        return ""
+    row = await get(session, company.id, scheme)
+    return (row.value if row is not None else "") or ""
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +349,39 @@ async def get(
     return result.scalars().first()
 
 
+_DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+
+async def _guard_value_unique(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    scheme: str,
+    value: str,
+    tenant_id: uuid.UUID | None,
+) -> None:
+    """Raise ``DuplicateIdentifier`` if another company in the same tenant
+    already holds ``value`` under a value-unique ``scheme``.
+
+    Runs BEFORE any INSERT/UPDATE so the (sequential) duplicate path never
+    poisons the session. No-op for schemes outside ``_VALUE_UNIQUE_SCHEMES``
+    (au_abn/au_acn stay unconstrained). Only invoked when the caller passes
+    ``enforce_unique=True`` (the company write path) — see ``upsert``.
+    """
+    if scheme not in _VALUE_UNIQUE_SCHEMES:
+        return
+    tid = tenant_id if tenant_id is not None else _DEFAULT_TENANT_ID
+    clash = await session.execute(
+        select(BusinessIdentifier.id).where(
+            BusinessIdentifier.tenant_id == tid,
+            BusinessIdentifier.scheme == scheme,
+            BusinessIdentifier.value == value,
+            BusinessIdentifier.company_id != company_id,
+        )
+    )
+    if clash.scalars().first() is not None:
+        raise DuplicateIdentifier(scheme, value)
+
+
 async def upsert(
     session: AsyncSession,
     company_id: uuid.UUID,
@@ -265,8 +395,24 @@ async def upsert(
     valid_to: date | None = None,
     issuing_authority: str | None = None,
     auto_validate: bool = True,
+    enforce_unique: bool = False,
 ) -> BusinessIdentifier:
     """Insert or update the identifier for ``(company_id, scheme)``.
+
+    ``enforce_unique`` (default False) opts the write into per-tenant
+    VALUE uniqueness for a value-unique scheme (``_VALUE_UNIQUE_SCHEMES``,
+    currently the EE registry codes): if another company in the tenant
+    already holds this value, raise ``DuplicateIdentifier``. The default is
+    False so this stays a bare primitive matching what the table enforces
+    (``(company_id, scheme)`` only) — direct callers (e-invoice / lodgement
+    test fixtures that legitimately reuse a registrikood across scratch
+    companies, external-registry sync) are unaffected. The sanctioned
+    company write path (``services.companies._set_company_registry_id``)
+    passes ``enforce_unique=True`` so registrikood/KMV duplicates are a 409
+    at create/update. There is intentionally NO DB unique index (that would
+    reject the direct-caller fixtures regardless of path); the pre-check
+    covers the sequential/retry case, and a truly-concurrent duplicate
+    create is a rare, recoverable edge left out of scope.
 
     ``jurisdiction`` defaults to a scheme-derived value (see
     ``_derive_jurisdiction``) when not supplied — the model column has no
@@ -282,6 +428,8 @@ async def upsert(
     Caller is responsible for committing the session.
     """
     _validate_scheme(scheme)
+    if enforce_unique:
+        await _guard_value_unique(session, company_id, scheme, value, tenant_id)
     resolved_jurisdiction = (
         jurisdiction if jurisdiction is not None else _derive_jurisdiction(scheme)
     )

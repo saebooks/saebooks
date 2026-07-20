@@ -1,8 +1,7 @@
 """Canonical per-jurisdiction wage/other withholding tables (M1.5 · T7).
 
-AU payroll withholding lives under an AU noun — ``payg_withholding_scales``,
-shaped exactly like the ATO's own a/b-coefficient formula (``PaygWithholdingScale``,
-see ``payg_withholding_scale.py``). That shape does not fit most other
+The ATO's own withholding shape is an a/b-coefficient formula (see
+``FormulaType.COEFFICIENT`` below), which does not fit most other
 jurisdictions: the US federal wage-bracket method is a lookup table, UK PAYE
 is bracketed like an income-tax scale, and dividend/interest/royalty
 withholding is usually a single flat rate. Rather than force every country
@@ -12,9 +11,13 @@ JSONB blob whose keys are defined by that formula type (services interpret
 ``parameters`` according to ``formula_type`` — there is no cross-jurisdiction
 schema for it, deliberately, since the shapes genuinely differ).
 
-Additive only — ``payg_withholding_scales`` is untouched; a future pass may
-migrate AU onto this table and retire the AU-specific one, but that is a
-deferred, coordinated rename, not part of this change.
+The AU-named coefficient table this generalises, ``payg_withholding_scale``
+/ ``PaygWithholdingScale``, had zero consumers and no seed data, and was
+dropped (M1.5 Wave 3a rename sweep). NOTE: the operative AU withholding
+path used by live payroll is a DIFFERENT model, ``models/payg.py:PaygTaxScale``
+(consumed by ``jurisdictions/au/payg.py``) — untouched by this table or the drop;
+migrating AU payroll onto this canonical table is still a deferred,
+coordinated change, not part of this sweep.
 
 See ~/records/saebooks/global-reference-audit-2026-07-09.md (theme T7).
 """

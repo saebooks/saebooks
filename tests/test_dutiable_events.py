@@ -3,9 +3,10 @@
 Covers migration 0181 (``dutiable_transaction_events`` table) and
 ``services/dutiable_events.py``. A ``DutiableTransactionEvent`` is the
 first-class postable EVENT for an assessed stamp/transfer/conveyance/
-securities/insurance duty — before this table ``stamp_duty_rate`` was a
-rate-lookup table only, with nothing recording that a jurisdiction
-actually assessed duty on a real transaction.
+securities/insurance duty — before this table ``duty_rate_schedule``
+(renamed from ``stamp_duty_rate`` — M1.5 Wave 3a) was a rate-lookup
+table only, with nothing recording that a jurisdiction actually
+assessed duty on a real transaction.
 
 Structural / RLS (Postgres only):
   * RLS ENABLE + FORCE + a ``tenant_isolation`` policy on
@@ -53,6 +54,7 @@ os.environ.setdefault("SAEBOOKS_ENV", "test")
 
 from saebooks.db import AsyncSessionLocal
 from saebooks.db import engine as _owner_engine
+from saebooks.jurisdictions.au import dutiable_events as svc
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.models.dutiable_transaction_event import (
@@ -67,7 +69,6 @@ from saebooks.models.journal import (
     JournalOrigin,
 )
 from saebooks.models.tenant import Tenant
-from saebooks.services import dutiable_events as svc
 
 pytestmark = pytest.mark.postgres_only
 
@@ -554,7 +555,7 @@ async def _assert_nothing_persisted(company_id: uuid.UUID) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Reference-DB stamp-duty-rate lookup (optional, decoupled — inline fixture)
+# Reference-DB duty-rate-schedule lookup (optional, decoupled — inline fixture)
 # --------------------------------------------------------------------------- #
 pytestmark_ref = pytest.mark.skipif(
     not os.environ.get("REFERENCE_MIGRATION_DATABASE_URL"),
@@ -565,10 +566,11 @@ pytestmark_ref = pytest.mark.skipif(
 @pytestmark_ref
 @pytest.mark.asyncio
 async def test_lookup_stamp_duty_rate_from_reference_db() -> None:
-    """Inserts its own stamp_duty_rate bracket row (no seed data required —
-    stamp_duty_rate owns no rows by default, see services/dutiable_events.py
-    module docstring) and cleans it up, mirroring the AUQ insert/delete
-    pattern in tests/seeds/test_jurisdiction_hierarchy.py."""
+    """Inserts its own duty_rate_schedules bracket row (no seed data
+    required — duty_rate_schedule owns no rows by default, see
+    services/dutiable_events.py module docstring) and cleans it up,
+    mirroring the AUQ insert/delete pattern in
+    tests/seeds/test_jurisdiction_hierarchy.py."""
     from saebooks.db import ReferenceMigrationSession
     from saebooks.services.reference.loader import load_seeds
 
@@ -578,7 +580,7 @@ async def test_lookup_stamp_duty_rate_from_reference_db() -> None:
     async with ReferenceMigrationSession() as s:
         await s.execute(
             text(
-                "INSERT INTO stamp_duty_rates "
+                "INSERT INTO duty_rate_schedules "
                 "(id, jurisdiction, state, transaction_type, lower_bound, "
                 " upper_bound, rate, base_amount) "
                 "VALUES (gen_random_uuid(), 'AUS', 'QLD', 'property_transfer', "
@@ -615,8 +617,94 @@ async def test_lookup_stamp_duty_rate_from_reference_db() -> None:
         async with ReferenceMigrationSession() as s:
             await s.execute(
                 text(
-                    "DELETE FROM stamp_duty_rates WHERE jurisdiction = 'AUS' "
+                    "DELETE FROM duty_rate_schedules WHERE jurisdiction = 'AUS' "
                     "AND state = 'QLD' AND transaction_type = 'property_transfer'"
                 )
             )
             await s.commit()
+
+
+# --------------------------------------------------------------------------- #
+# Surcharge-duty breakdown (M1.5 · 5-DUTIES, migration 0199)
+# --------------------------------------------------------------------------- #
+async def test_event_with_surcharge_breakdown(event_setup: dict[str, Any]) -> None:
+    """``surcharge_duty`` / ``applied_surcharge_rate_id`` stamp the event
+    row as an informational breakdown — the JE still posts
+    ``computed_duty`` as ONE amount (no posting-path change)."""
+    d = event_setup
+    surcharge_rate_id = uuid.uuid4()  # opaque reference-DB row id
+    async with AsyncSessionLocal() as session:
+        event = await svc.create_and_post_event(
+            session,
+            tenant_id=_DEFAULT_TENANT,
+            company_id=d["company_id"],
+            event_date=date(2026, 7, 9),
+            duty_type=DutyType.PROPERTY_TRANSFER.value,
+            jurisdiction="AUS",
+            sub_jurisdiction="AUQ",
+            dutiable_value=Decimal("500000.00"),
+            # 15925 base + 40000 AFAD (8% of 500k) — one assessed total.
+            computed_duty=Decimal("55925.00"),
+            surcharge_duty=Decimal("40000.00"),
+            applied_surcharge_rate_id=surcharge_rate_id,
+            debit_account_id=d["expense"],
+            credit_account_id=d["payable"],
+            description="Stamp duty incl. foreign-purchaser surcharge",
+            posted_by="test",
+        )
+    assert event.status == DutiableEventStatus.POSTED
+    assert event.surcharge_duty == Decimal("40000.00")
+    assert event.applied_surcharge_rate_id == surcharge_rate_id
+
+    async with AsyncSessionLocal() as session:
+        lines = (await session.execute(
+            select(JournalLine).where(
+                JournalLine.entry_id == event.journal_entry_id
+            )
+        )).scalars().all()
+        # Still exactly two lines for the TOTAL — the surcharge is a
+        # breakdown on the event row, never a third JE line.
+        assert len(lines) == 2
+        assert sum(line.debit for line in lines) == Decimal("55925.00")
+
+
+async def test_surcharge_exceeding_total_rejected(
+    event_setup: dict[str, Any]
+) -> None:
+    d = event_setup
+    async with AsyncSessionLocal() as session:
+        with pytest.raises(svc.DutiableEventError, match="cannot\\s+exceed"):
+            await svc.create_and_post_event(
+                session,
+                tenant_id=_DEFAULT_TENANT,
+                company_id=d["company_id"],
+                event_date=date(2026, 7, 9),
+                duty_type=DutyType.PROPERTY_TRANSFER.value,
+                jurisdiction="AUS",
+                dutiable_value=Decimal("1000.00"),
+                computed_duty=Decimal("10.00"),
+                surcharge_duty=Decimal("11.00"),  # component > total
+                debit_account_id=d["expense"],
+                credit_account_id=d["payable"],
+            )
+    await _assert_nothing_persisted(d["company_id"])
+
+
+async def test_negative_surcharge_rejected(event_setup: dict[str, Any]) -> None:
+    d = event_setup
+    async with AsyncSessionLocal() as session:
+        with pytest.raises(svc.DutiableEventError, match="negative"):
+            await svc.create_and_post_event(
+                session,
+                tenant_id=_DEFAULT_TENANT,
+                company_id=d["company_id"],
+                event_date=date(2026, 7, 9),
+                duty_type=DutyType.PROPERTY_TRANSFER.value,
+                jurisdiction="AUS",
+                dutiable_value=Decimal("1000.00"),
+                computed_duty=Decimal("10.00"),
+                surcharge_duty=Decimal("-1.00"),
+                debit_account_id=d["expense"],
+                credit_account_id=d["payable"],
+            )
+    await _assert_nothing_persisted(d["company_id"])

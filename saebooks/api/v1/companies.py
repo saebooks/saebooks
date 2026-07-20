@@ -39,6 +39,7 @@ from saebooks.api.v1.schemas import (
 )
 from saebooks.models.company import Company
 from saebooks.models.invoice import Invoice, InvoiceStatus
+from saebooks.services import business_identifiers as biz_ident
 from saebooks.services import companies as svc
 from saebooks.services.authz import no_additional_gate, require_permission_or_role
 from saebooks.services.features import (
@@ -159,6 +160,10 @@ async def create_company(
             acn=payload.acn,
             base_currency=payload.base_currency,
             fin_year_start_month=payload.fin_year_start_month,
+            jurisdiction=payload.jurisdiction,
+            coa_template_key=payload.coa_template_key,
+            registrikood=payload.registrikood,
+            kmv_number=payload.kmv_number,
         )
     except svc.CompanyCapExceeded as exc:
         raise HTTPException(
@@ -168,6 +173,11 @@ async def create_company(
                 f"{exc.current}/{exc.limit}"
             ),
         ) from exc
+    except biz_ident.DuplicateIdentifier as exc:
+        # A registrikood / kmv_number already held by another company in
+        # this tenant (per-tenant value uniqueness — the EE-scoped partial
+        # unique index / service pre-check). Clean 409, not a bare 500.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return CompanyOut.model_validate(company)
 
 
@@ -274,6 +284,12 @@ async def update_company(
             await store_response(session, key, 409, json.dumps(body).encode())
             await session.commit()
         return JSONResponse(body, status_code=409)
+    except biz_ident.DuplicateIdentifier as exc:
+        # PATCHing registrikood/kmv_number to a value another company in the
+        # tenant already holds — clean 409, not a bare 500 from the pre-check
+        # / unique index. Roll back the partial update first.
+        await session.rollback()
+        return JSONResponse({"detail": str(exc)}, status_code=409)
     except ValueError as exc:
         msg = str(exc)
         if "not found" in msg.lower():

@@ -1,0 +1,12 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<tsd_vorm>
+  <regKood>10123456</regKood>
+  <c108_Aasta>2026</c108_Aasta>
+  <c109_Kuu>4</c109_Kuu>
+  <laadimisViis>L</laadimisViis>
+  <vorm>TSD</vorm>
+  <tsd_L3_0>
+    <c3000_VKasum>1000.00</c3000_VKasum>
+    <c3020_RiikKood>FI</c3020_RiikKood>
+  </tsd_L3_0>
+</tsd_vorm>

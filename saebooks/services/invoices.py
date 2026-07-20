@@ -22,7 +22,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,15 +35,16 @@ from saebooks.models.invoice import Invoice, InvoiceLine, InvoiceStatus
 from saebooks.models.item import Item
 from saebooks.models.journal import JournalOrigin
 from saebooks.models.tax_code import TaxCode
+from saebooks.money import decimal_places_for, round_money
 from saebooks.services import audit_log as audit_log_svc
 from saebooks.services import bills as bills_svc
 from saebooks.services import change_log as change_log_svc
+from saebooks.services import control_accounts as control_accounts_svc
 from saebooks.services import items as items_svc
 from saebooks.services import journal as journal_svc
 from saebooks.services import numbering
 from saebooks.services import settings as settings_svc
-
-_TWOPLACES = Decimal("0.01")
+from saebooks.services.einvoice import buyer_requirement as einvoice_buyer_svc
 
 
 class InvoiceError(ValueError):
@@ -55,8 +56,9 @@ class InvoiceError(ValueError):
 # ---------------------------------------------------------------------- #
 
 
-def _q2(value: Decimal) -> Decimal:
-    return value.quantize(_TWOPLACES, rounding=ROUND_HALF_UP)
+def _q2(value: Decimal, places: int = 2) -> Decimal:
+    """ROUND_HALF_UP to a currency's minor unit (default AUD/base — 2)."""
+    return round_money(value, places)
 
 
 @dataclass(frozen=True)
@@ -77,23 +79,24 @@ class _LineInput:
 
 
 def _compute_line_totals(
-    line: _LineInput, tax_code: TaxCode | None
+    line: _LineInput, tax_code: TaxCode | None, places: int = 2
 ) -> tuple[Decimal, Decimal, Decimal]:
     """Return (subtotal, tax, total) — add-on (ex-GST) tax treatment.
 
     For margin_scheme codes (Div 75 s66-50), GST = 1/11 × max(0, subtotal − acq_cost)
-    rather than rate % of subtotal.
+    rather than rate % of subtotal. Amounts round to ``places`` — the
+    document currency's minor unit.
     """
     gross = line.quantity * line.unit_price
     discount_factor = (Decimal("100") - line.discount_pct) / Decimal("100")
-    subtotal = _q2(gross * discount_factor)
+    subtotal = _q2(gross * discount_factor, places)
     if tax_code is not None and tax_code.reporting_type == "margin_scheme":
         acq_cost = line.margin_acq_cost or Decimal("0")
         margin = max(Decimal("0"), subtotal - acq_cost)
-        tax = _q2(margin / Decimal("11"))
+        tax = _q2(margin / Decimal("11"), places)
     elif tax_code is not None:
         rate = Decimal(str(tax_code.rate or 0))
-        tax = _q2(subtotal * rate / Decimal("100"))
+        tax = _q2(subtotal * rate / Decimal("100"), places)
     else:
         tax = Decimal("0")
     total = subtotal + tax
@@ -156,14 +159,19 @@ async def create_draft(
     settlement_date: date | None = None,
 ) -> Invoice:
     ct_chk = await session.execute(
-        select(Contact.id).where(
+        select(Contact).where(
             Contact.id == contact_id, Contact.company_id == company_id
         )
     )
-    if ct_chk.scalar_one_or_none() is None:
+    contact = ct_chk.scalar_one_or_none()
+    if contact is None:
         raise InvoiceError(f"contact {contact_id} not found")
     if payment_terms is None:
         payment_terms = await _company_default_payment_terms(session, company_id)
+    # E-invoicing buyer-demand surfacing (M3, task 3) — reuses the existing
+    # generic books-review flag/note (migration 0157) rather than adding new
+    # Invoice-level state. See services.einvoice.buyer_requirement.
+    review_note = einvoice_buyer_svc.review_note_for_new_invoice(contact)
     inv = Invoice(
         company_id=company_id,
         contact_id=contact_id,
@@ -175,6 +183,8 @@ async def create_draft(
         currency=currency.upper(),
         fx_rate=fx_rate if fx_rate is not None else Decimal("1"),
         settlement_date=settlement_date,
+        flagged_for_review=review_note is not None,
+        review_note=review_note,
     )
     session.add(inv)
     await session.flush()
@@ -314,7 +324,9 @@ async def _add_line(
         is_trade_in=is_trade_in,
     )
     tax_code = await _resolve_tax_code(session, line_input.tax_code_id, company_id)
-    subtotal, tax, total = _compute_line_totals(line_input, tax_code)
+    subtotal, tax, total = _compute_line_totals(
+        line_input, tax_code, decimal_places_for(inv.currency)
+    )
     line = InvoiceLine(
         invoice_id=inv.id,
         line_no=line_no,
@@ -355,10 +367,11 @@ async def _recalc(session: AsyncSession, inv: Invoice) -> None:
     # not contribute to G1 (they are purchases, not sales) and will be
     # posted as a separate AP bill at post_invoice time.
     sale_lines = [ln for ln in lines if not ln.is_trade_in]
+    doc_places = decimal_places_for(inv.currency)
     subtotal = sum((ln.line_subtotal for ln in sale_lines), Decimal("0"))
     tax = sum((ln.line_tax for ln in sale_lines), Decimal("0"))
-    inv.subtotal = _q2(Decimal(subtotal))
-    inv.tax_total = _q2(Decimal(tax))
+    inv.subtotal = _q2(Decimal(subtotal), doc_places)
+    inv.tax_total = _q2(Decimal(tax), doc_places)
     inv.total = inv.subtotal + inv.tax_total
 
     # Foreign-currency shadow totals. Computed from per-line base
@@ -485,19 +498,11 @@ async def update_draft(
 async def _get_ar_account(
     session: AsyncSession, company_id: uuid.UUID
 ) -> Account:
-    result = await session.execute(
-        select(Account).where(
-            Account.company_id == company_id,
-            Account.code == "1-1200",
-        )
+    # Packet 4b: resolves companies.ar_control_account_code, falling
+    # back to the AU convention "1-1200" — see services/control_accounts.py.
+    return await control_accounts_svc.get_ar_account(
+        session, company_id, error_cls=InvoiceError
     )
-    acct = result.scalar_one_or_none()
-    if acct is None:
-        raise InvoiceError(
-            "AR control account 1-1200 Trade Debtors is missing — "
-            "re-run the CoA seed."
-        )
-    return acct
 
 
 async def _get_unearned_income_account(
@@ -1236,6 +1241,14 @@ async def api_create(
             f"(ends {locked_through}); contact your controller to adjust period lock"
         )
 
+    # E-invoicing buyer-demand surfacing (M3, task 3) — reuses the existing
+    # generic books-review flag/note (migration 0157) rather than adding new
+    # Invoice-level state. See services.einvoice.buyer_requirement.
+    contact = (
+        await session.execute(select(Contact).where(Contact.id == contact_id))
+    ).scalar_one_or_none()
+    review_note = einvoice_buyer_svc.review_note_for_new_invoice(contact)
+
     inv = Invoice(
         company_id=company_id,
         tenant_id=tenant_id,
@@ -1245,6 +1258,8 @@ async def api_create(
         notes=notes,
         payment_terms=payment_terms,
         status=InvoiceStatus.DRAFT,
+        flagged_for_review=review_note is not None,
+        review_note=review_note,
         currency=currency.upper(),
         fx_rate=fx_rate if fx_rate is not None else Decimal("1"),
         version=1,

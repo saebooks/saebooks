@@ -112,6 +112,156 @@ async def test_tax_codes_list_filter_by_tax_system(api_client: AsyncClient) -> N
 
 
 # ---------------------------------------------------------------------------
+# List — jurisdiction defaults to the requesting company (Packet 4a)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+async def ee_api_client():
+    """Bearer client pinned (via X-Company-Id) to a throwaway EE company."""
+    from saebooks.models.company import Company
+
+    company_id = uuid.uuid4()
+    tenant_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+    async with AsyncSessionLocal() as session:
+        session.add(
+            Company(
+                id=company_id,
+                tenant_id=tenant_id,
+                name=f"EE TaxCode Test {company_id.hex[:8]}",
+                base_currency="EUR",
+                fin_year_start_month=1,
+                audit_mode="immutable",
+                jurisdiction="EE",
+            )
+        )
+        await session.commit()
+
+    token = current_token()
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "X-Company-Id": str(company_id),
+        },
+    ) as ac:
+        yield ac
+
+    async with AsyncSessionLocal() as session:
+        from sqlalchemy import delete as _delete
+
+        await session.execute(_delete(Company).where(Company.id == company_id))
+        await session.commit()
+
+
+async def test_tax_codes_list_no_jurisdiction_param_defaults_to_au_company(
+    api_client: AsyncClient,
+) -> None:
+    """Unchanged AU behaviour: no ``jurisdiction`` param, AU company ->
+    only AU-jurisdiction codes come back (byte-identical to the old
+    hardcoded default="AU")."""
+    r = await api_client.get("/api/v1/tax_codes")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["items"]
+    for item in body["items"]:
+        assert item["jurisdiction"] == "AU"
+
+
+async def test_tax_codes_list_no_jurisdiction_param_defaults_to_ee_company(
+    ee_api_client: AsyncClient,
+) -> None:
+    """New behaviour: an EE company with no explicit ``jurisdiction``
+    param gets EE-jurisdiction codes, not the old hardcoded AU.
+
+    The create endpoint doesn't accept an explicit ``jurisdiction`` (out
+    of scope here), so the EE-jurisdiction row is inserted directly —
+    this test is purely about the list default resolving per-company.
+    """
+    from saebooks.models.tax_code import TaxCode
+
+    code = _rand_code()
+    async with AsyncSessionLocal() as session:
+        # Recover the pinned company id from the client's own header.
+        cid = uuid.UUID(ee_api_client.headers["X-Company-Id"])
+        session.add(
+            TaxCode(
+                company_id=cid,
+                code=code,
+                name=f"EE Default {code}",
+                rate="24.000",
+                tax_system="VAT",
+                jurisdiction="EE",
+            )
+        )
+        await session.commit()
+
+    r2 = await ee_api_client.get("/api/v1/tax_codes")
+    assert r2.status_code == 200
+    body = r2.json()
+    codes = [i["code"] for i in body["items"]]
+    assert code in codes
+    for item in body["items"]:
+        assert item["jurisdiction"] == "EE"
+
+
+async def test_tax_codes_list_explicit_jurisdiction_still_overrides(
+    ee_api_client: AsyncClient,
+) -> None:
+    """Explicit ``jurisdiction`` query param keeps working even for a
+    non-default company (e.g. an EE company asking for AU codes)."""
+    from saebooks.models.tax_code import TaxCode
+
+    au_code = _rand_code()
+    ee_code = _rand_code()
+    async with AsyncSessionLocal() as session:
+        cid = uuid.UUID(ee_api_client.headers["X-Company-Id"])
+        session.add(
+            TaxCode(company_id=cid, code=au_code, name="AU override", rate="10.000", jurisdiction="AU")
+        )
+        session.add(
+            TaxCode(company_id=cid, code=ee_code, name="EE default", rate="24.000", jurisdiction="EE")
+        )
+        await session.commit()
+
+    r = await ee_api_client.get("/api/v1/tax_codes", params={"jurisdiction": "AU"})
+    assert r.status_code == 200
+    body = r.json()
+    codes = [i["code"] for i in body["items"]]
+    assert au_code in codes
+    assert ee_code not in codes
+    for item in body["items"]:
+        assert item["jurisdiction"] == "AU"
+
+
+async def test_tax_codes_list_empty_jurisdiction_param_returns_all(
+    ee_api_client: AsyncClient,
+) -> None:
+    """Explicit empty-string ``jurisdiction`` still means 'all jurisdictions'."""
+    from saebooks.models.tax_code import TaxCode
+
+    au_code = _rand_code()
+    ee_code = _rand_code()
+    async with AsyncSessionLocal() as session:
+        cid = uuid.UUID(ee_api_client.headers["X-Company-Id"])
+        session.add(
+            TaxCode(company_id=cid, code=au_code, name="AU row", rate="10.000", jurisdiction="AU")
+        )
+        session.add(
+            TaxCode(company_id=cid, code=ee_code, name="EE row", rate="24.000", jurisdiction="EE")
+        )
+        await session.commit()
+
+    r = await ee_api_client.get("/api/v1/tax_codes", params={"jurisdiction": ""})
+    assert r.status_code == 200
+    body = r.json()
+    codes = [i["code"] for i in body["items"]]
+    assert au_code in codes
+    assert ee_code in codes
+
+
+# ---------------------------------------------------------------------------
 # Get
 # ---------------------------------------------------------------------------
 

@@ -1,0 +1,16 @@
+# Latvian fiscal year — default is the calendar year. A company may
+# elect a different pārskata gads (reporting year) in its founding
+# documents/statutes under the Gada pārskatu un konsolidēto gada
+# pārskatu likums (Annual Reports and Consolidated Annual Reports Law,
+# likumi.lv/ta/id/277779 — the companion statute to the Grāmatvedības
+# likums, NOT the Accounting Law itself). A change to an existing
+# company's period must still yield 12-month years and be justified in
+# the annual-report notes; a newly-formed company's FIRST reporting
+# period may be shorter or longer than 12 months but must NOT exceed 18
+# months. (Content verified via search-snippet of the statute, not a
+# direct quoted fetch — the 18-month figure is flagged accordingly.)
+# Currency: EUR (since 2014-01-01).
+table: fiscal_year_definitions
+key: [jurisdiction]
+rows:
+  - {jurisdiction: LVA, fy_start_month: 1, fy_start_day: 1, quarter_anchors: [1, 4, 7, 10]}

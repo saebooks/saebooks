@@ -170,6 +170,125 @@ def _short_token() -> str:
     return uuid.uuid4().hex[:8]
 
 
+# --------------------------------------------------------------------------- #
+# Per-flavour company profile — drives the per-visit company row + template.   #
+# --------------------------------------------------------------------------- #
+# The inline AU company defaults used to live hardcoded in provision(); they
+# now come from a per-flavour profile so a new jurisdiction is a data change
+# here, not another inline conditional. ``saebooks`` / ``cashbook`` keep the
+# exact AU behaviour they had before (AUD, July FY, "Demo Pty Ltd", AU GST
+# date, jurisdiction AU); ``ee`` is the Estonian flavour (EUR, Jan FY, "Näidis
+# OÜ", jurisdiction EE, EE chart, a clearly-fake registrikood).
+@dataclass(frozen=True)
+class _FlavourProfile:
+    name_pattern: str          # "{token}" is substituted with the 8-hex token
+    legal_name: str
+    base_currency: str
+    fin_year_start_month: int
+    jurisdiction: str
+    coa_template_key: str
+    tax_registered: bool
+    # AU companies stamp a GST effective date; EE companies don't use it.
+    gst_effective_date: bool
+    # Registry identifiers written through to business_identifiers on the
+    # per-visit company row. ``registrikood`` is a constant clearly-fake EE
+    # code (8 digits) — safe as a constant because each visit is its OWN
+    # tenant, so ee_regcode's per-tenant enforce_unique uniqueness never
+    # clashes across visits. ``kmv`` stays None on the per-visit row (the
+    # template may carry one, which the clone copies).
+    registrikood: str | None = None
+    kmv: str | None = None
+
+
+# A clearly-fake Estonian registrikood: 8 digits, reserved-looking "10000000"
+# so no real Estonian company (real codes start 1xxxxxxx / 8xxxxxxx but this
+# specific value is a placeholder) is impersonated. Constant across visits by
+# design — per-visit tenants make ee_regcode uniqueness per-tenant.
+_EE_FAKE_REGISTRIKOOD = "10000000"
+# Clearly-fake EE VAT number ("EE" + 9 digits) carried by the TEMPLATE only
+# (not written on the per-visit row directly). The clone copies it onto every
+# visit — this is the "kmv on the per-visit row because the template carries
+# one" path, and the row the clone-copies-business_identifiers check keys on.
+_EE_FAKE_KMV = "EE100000000"
+
+_FLAVOUR_PROFILES: dict[str, _FlavourProfile] = {
+    "saebooks": _FlavourProfile(
+        name_pattern="Demo Pty Ltd ({token})",
+        legal_name="Demo Pty Ltd",
+        base_currency="AUD",
+        fin_year_start_month=7,
+        jurisdiction="AU",
+        coa_template_key="au/default",
+        tax_registered=True,
+        gst_effective_date=True,
+    ),
+    "cashbook": _FlavourProfile(
+        name_pattern="Demo Pty Ltd ({token})",
+        legal_name="Demo Pty Ltd",
+        base_currency="AUD",
+        fin_year_start_month=7,
+        jurisdiction="AU",
+        coa_template_key="au/default",
+        tax_registered=True,
+        gst_effective_date=True,
+    ),
+    "ee": _FlavourProfile(
+        name_pattern="Näidis OÜ ({token})",
+        legal_name="Näidis OÜ",
+        base_currency="EUR",
+        fin_year_start_month=1,
+        jurisdiction="EE",
+        coa_template_key="ee/default",
+        tax_registered=True,
+        gst_effective_date=False,
+        registrikood=_EE_FAKE_REGISTRIKOOD,
+        kmv=_EE_FAKE_KMV,
+    ),
+}
+
+
+def _flavour_name() -> str:
+    return (settings.demo_seed_flavour or "saebooks").strip().lower()
+
+
+def _flavour_profile() -> _FlavourProfile:
+    """The active flavour's company profile (defaults to ``saebooks``)."""
+    return _FLAVOUR_PROFILES.get(_flavour_name(), _FLAVOUR_PROFILES["saebooks"])
+
+
+async def _write_registry_identifier(
+    session: AsyncSession,
+    company: Company,
+    scheme: str,
+    value: str | None,
+) -> None:
+    """Write one registry identifier onto ``company`` via
+    ``business_identifiers`` (the sole source of truth — the legacy
+    ``companies.abn``/``registrikood`` columns were dropped in 0204). Uses
+    ``enforce_unique=True`` (the sanctioned company-write posture): a constant
+    fake registrikood is safe because each demo visit is its OWN tenant, so the
+    per-tenant value-uniqueness never clashes across visits. No-op for a falsy
+    value.
+
+    Provision writes the per-visit ``ee_regcode`` (registrikood); the TEMPLATE
+    carries ``ee_vat`` (kmv) which the FK-graph-generic clone copies onto every
+    visit. The two schemes are disjoint on purpose — if the template also
+    carried ee_regcode, the clone's INSERT would collide with provision's own
+    ee_regcode row on the ``(company_id, scheme)`` unique key."""
+    from saebooks.services import business_identifiers as biz_ident
+
+    if not value:
+        return
+    await biz_ident.upsert(
+        session,
+        company.id,
+        scheme,
+        value,
+        tenant_id=company.tenant_id,
+        enforce_unique=True,
+    )
+
+
 async def _count_demos(session: AsyncSession) -> int:
     return int(
         (
@@ -248,8 +367,11 @@ async def provision(
         tenant_id = uuid.uuid4()
         company_id = uuid.uuid4()
         demo_email = f"demo+{token}@saebooks.example"
+        profile = _flavour_profile()
 
-        # 1. New tenant (own isolation boundary) + company.
+        # 1. New tenant (own isolation boundary) + company. Company row fields
+        #    come from the per-flavour profile (currency / FY / jurisdiction /
+        #    chart key / registry ids), not inline AU defaults.
         session.add(
             Tenant(
                 id=tenant_id,
@@ -262,15 +384,30 @@ async def provision(
         company = Company(
             id=company_id,
             tenant_id=tenant_id,
-            name=f"Demo Pty Ltd ({token})",
-            legal_name="Demo Pty Ltd",
-            base_currency="AUD",
-            fin_year_start_month=7,
-            gst_registered=True,
-            gst_effective_date=datetime(2020, 7, 1, tzinfo=UTC).date(),
+            name=profile.name_pattern.format(token=token),
+            legal_name=profile.legal_name,
+            base_currency=profile.base_currency,
+            coa_template_key=profile.coa_template_key,
+            jurisdiction=profile.jurisdiction,
+            fin_year_start_month=profile.fin_year_start_month,
+            tax_registered=profile.tax_registered,
+            gst_effective_date=(
+                datetime(2020, 7, 1, tzinfo=UTC).date()
+                if profile.gst_effective_date
+                else None
+            ),
             version=1,
         )
         session.add(company)
+        await session.flush()
+
+        # Per-visit registry identifier: registrikood → ee_regcode (fake, but
+        # written through the real enforce_unique path, per-tenant unique).
+        # The template's kmv (ee_vat) arrives later via the clone. AU flavours
+        # carry no registrikood → no-op.
+        await _write_registry_identifier(
+            session, company, "ee_regcode", profile.registrikood
+        )
         await session.flush()
 
         # 2. The company's OWN demo user (admin so the demo can drive every
@@ -416,6 +553,13 @@ async def _seed_company_dataset(
     if company is None:  # pragma: no cover — provision just committed it
         return
 
+    # EE flavour: Estonian chart + käibemaks codes + a small posted dataset,
+    # all via the service layer (no manual journal entries). Branch out before
+    # the AU CoA load — an EE company gets the EE chart, never the AU one.
+    if _flavour_name() == "ee":
+        await _seed_ee_dataset(session, tenant_id=tenant_id, company_id=company_id)
+        return
+
     # 1. AU chart of accounts + tax codes (scoped to this company).
     await _load_accounts(session, company)
     await ensure_tax_codes(session, company_id)
@@ -551,6 +695,218 @@ async def _seed_company_dataset(
             logger.debug("demo invoice seed skip (%s): %r", desc, exc)
 
 
+# EE VAT-posting settings the demo dataset needs configured to post its
+# invoices/bill. Settings are GLOBAL (not tenant-scoped), so the seeder sets
+# them to the EE chart's VAT accounts only for the duration of the posting and
+# then RESTORES the prior values — an AU-flavour instance (or a concurrent AU
+# test in the shared suite) must see its own configuration unchanged.
+_EE_VAT_SETTINGS: dict[str, str] = {
+    "gst_collected_account_code": "2200",  # Käibemaks (VAT) Payable
+    "gst_paid_account_code": "1400",       # Käibemaks (VAT) Receivable
+    # Reverse-charge self-assessed OUTPUT VAT payable (bills.py key).
+    "gst_reverse_charge_payable_account_code": "2200",
+}
+
+
+async def _seed_ee_dataset(
+    session: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    company_id: uuid.UUID,
+) -> None:
+    """Seed an Estonian demo company: the EE chart of accounts, EE käibemaks
+    tax codes, and a small POSTED dataset (contacts + 2 sales invoices at 24%
+    + 1 reverse-charge EU-acquisition bill + 1 payment) — all through the
+    service layer, never a manual journal entry. Mirrors the AU seeder's
+    tenant-stamping discipline: chart_ee stamps accounts with the company's
+    tenant_id directly, but ensure_ee_seed's tax codes carry the model DEFAULT
+    tenant (same as ensure_au_seed), so they are re-stamped here."""
+    from saebooks.models.account import Account, AccountType
+    from saebooks.models.payment import PaymentDirection
+    from saebooks.models.tax_code import TaxCode
+    from saebooks.services import bills as bills_svc
+    from saebooks.services import contacts as contacts_svc
+    from saebooks.services import invoices as invoices_svc
+    from saebooks.services import payments as payments_svc
+    from saebooks.services import settings as settings_svc
+    from saebooks.services.tax_codes import ensure_ee_seed
+    from saebooks.services.templates import apply_template
+
+    company = await session.get(Company, company_id)
+    if company is None:  # pragma: no cover
+        return
+
+    # 1. EE chart of accounts (sets ar/ap control codes 1200/2100; accounts
+    #    are stamped with company.tenant_id inside the applier). Commits.
+    #    Dispatched through the neutral template seam rather than importing
+    #    the EE chart module directly — the applier lives in
+    #    ``jurisdictions/ee/chart.py`` and self-registers as "ee/default".
+    await apply_template(session, company_id, "ee/default")
+
+    # 2. EE käibemaks tax codes, then re-stamp tenant_id (they insert with the
+    #    model DEFAULT tenant — the RLS-isolation fix, identical to the AU path).
+    await ensure_ee_seed(session, company_id)
+    await session.execute(
+        text("UPDATE tax_codes SET tenant_id = :tid WHERE company_id = :cid")
+        .bindparams(tid=tenant_id, cid=company_id)
+    )
+    await session.commit()
+
+    # 3. Template-carried kmv (ee_vat) — the clone copies this business
+    #    identifier onto every visit (proving the FK-graph-generic clone spans
+    #    business_identifiers). registrikood is written per-visit in provision().
+    await _write_registry_identifier(session, company, "ee_vat", _EE_FAKE_KMV)
+    await session.commit()
+
+    # Resolve the accounts / tax codes the dataset posts against.
+    async def _acct(code: str) -> Account | None:
+        return (
+            await session.execute(
+                select(Account).where(
+                    Account.company_id == company_id, Account.code == code
+                )
+            )
+        ).scalars().first()
+
+    async def _tax(code: str) -> TaxCode | None:
+        return (
+            await session.execute(
+                select(TaxCode).where(
+                    TaxCode.company_id == company_id, TaxCode.code == code
+                )
+            )
+        ).scalars().first()
+
+    income = await _acct("4100")     # Müügitulu — teenused (INCOME)
+    expense = await _acct("6400")    # Side- ja internetikulud (EXPENSE, input)
+    bank = await _acct("1100")       # Pank — arvelduskonto (ASSET)
+    std = await _tax("STD")          # 24% output VAT
+    rc = await _tax("RC_EU_ACQ")     # reverse-charge EU acquisition (services)
+    if income is None or std is None:  # pragma: no cover — chart just seeded
+        return
+
+    # 4. Configure the global VAT-posting account settings for EE, remembering
+    #    the prior values so we can restore them (settings are global).
+    prior: dict[str, object] = {
+        k: await settings_svc.get(session, k) for k in _EE_VAT_SETTINGS
+    }
+    for k, v in _EE_VAT_SETTINGS.items():
+        await settings_svc.set(session, k, v, updated_by="demo-seed")
+    await session.commit()
+
+    try:
+        today = datetime.now(UTC).date()
+        # Contacts: two Estonian customers + one EU supplier (services).
+        cust1 = await contacts_svc.create(
+            session, company_id, actor="demo-seed", tenant_id=tenant_id,
+            name="Kohvik Meri OÜ", contact_type=ContactType.CUSTOMER,
+            email="raamatupidamine@kohvikmeri.example",
+        )
+        cust2 = await contacts_svc.create(
+            session, company_id, actor="demo-seed", tenant_id=tenant_id,
+            name="Tisleritöökoda Tamm OÜ", contact_type=ContactType.CUSTOMER,
+            email="arved@tisleritamm.example",
+        )
+        supplier = await contacts_svc.create(
+            session, company_id, actor="demo-seed", tenant_id=tenant_id,
+            name="Nordic Pilv AB", contact_type=ContactType.SUPPLIER,
+            email="billing@nordicpilv.example",
+        )
+        await session.commit()
+
+        # Two POSTED sales invoices with a 24% käibemaks line each.
+        sales = [
+            (cust1.id, 9, "Konsultatsiooniteenus — juuni", Decimal("800.00")),
+            (cust2.id, 4, "Projekteerimistööd", Decimal("1500.00")),
+        ]
+        first_invoice = None
+        for contact_id, days_ago, desc, net in sales:
+            issue = today - timedelta(days=days_ago)
+            inv = await invoices_svc.api_create(
+                session, company_id, tenant_id, "demo-seed",
+                contact_id=contact_id, issue_date=issue,
+                due_date=issue + timedelta(days=14), currency="EUR",
+                lines=[{
+                    "description": desc, "account_id": income.id,
+                    "tax_code_id": std.id, "quantity": Decimal("1"),
+                    "unit_price": net,
+                }],
+                notes="[demo]",
+            )
+            posted = await invoices_svc.api_post_invoice(
+                session, inv.id, "demo-seed", inv.version, tenant_id=tenant_id
+            )
+            if first_invoice is None:
+                first_invoice = posted
+
+        # One reverse-charge EU-acquisition supplier bill (if the RC tax code
+        # is available). The RC line fans out to a self-assessed output + a
+        # deductible input VAT component via the EE engine.
+        if rc is not None and expense is not None:
+            bill = await bills_svc.api_create(
+                session, company_id, tenant_id, "demo-seed",
+                contact_id=supplier.id, issue_date=today - timedelta(days=6),
+                due_date=today + timedelta(days=8), currency="EUR",
+                lines=[{
+                    "description": "Pilveteenus (EU) — pöördmaks",
+                    "account_id": expense.id, "tax_code_id": rc.id,
+                    "quantity": Decimal("1"), "unit_price": Decimal("400.00"),
+                }],
+                notes="[demo] reverse-charge EU acquisition",
+            )
+            await bills_svc.api_post_bill(
+                session, bill.id, "demo-seed", bill.version, tenant_id=tenant_id
+            )
+
+        # One incoming payment settling the first invoice.
+        if first_invoice is not None and bank is not None:
+            pay = await payments_svc.api_create(
+                session, company_id, tenant_id, "demo-seed",
+                contact_id=cust1.id, bank_account_id=bank.id,
+                payment_date=today - timedelta(days=2),
+                amount=Decimal("992.00"),  # 800 net + 24% VAT
+                direction=PaymentDirection.INCOMING, currency="EUR",
+                allocations=[{
+                    "invoice_id": str(first_invoice.id),
+                    "amount": Decimal("992.00"),
+                }],
+            )
+            await payments_svc.api_post_payment(
+                session, pay.id, "demo-seed", pay.version, tenant_id=tenant_id
+            )
+
+        # Monthly tax periods for the demo window (previous + current month)
+        # so KMD/TSD generation is clickable from Deklaratsioonid — there is
+        # no API route that creates periods, so the seed must provide them.
+        from saebooks.models.tax_period import TaxPeriod, TaxPeriodType
+
+        month_first = today.replace(day=1)
+        prev_last = month_first - timedelta(days=1)
+        prev_first = prev_last.replace(day=1)
+        next_first = (month_first + timedelta(days=32)).replace(day=1)
+        for start, end in ((prev_first, month_first - timedelta(days=1)),
+                           (month_first, next_first - timedelta(days=1))):
+            session.add(TaxPeriod(
+                company_id=company_id, tenant_id=tenant_id,
+                jurisdiction="EST", period_type=TaxPeriodType.MONTHLY,
+                period_start=start, period_end=end,
+            ))
+        await session.commit()
+    finally:
+        # Restore the global VAT-posting settings to their prior state so an
+        # AU-flavour instance / other suite tests see no change. A key that was
+        # previously UNSET is deleted (the value column is NOT NULL, so it
+        # cannot be "set to None").
+        for k, v in prior.items():
+            if v is None:
+                await session.execute(
+                    text("DELETE FROM settings WHERE key = :k").bindparams(k=k)
+                )
+            else:
+                await settings_svc.set(session, k, v, updated_by="demo-seed")
+        await session.commit()
+
+
 # --------------------------------------------------------------------------- #
 # Clone-from-template — fast per-visit dataset copy.                           #
 # --------------------------------------------------------------------------- #
@@ -580,7 +936,31 @@ async def _ensure_template() -> tuple[uuid.UUID, uuid.UUID]:
     would faithfully (and uglily) copy into every visitor's demo (and can carry
     dangling cross-company FK refs that break the clone).
     """
-    flavour = (settings.demo_seed_flavour or "saebooks").strip().lower()
+    flavour = _flavour_name()
+
+    # Option A escape hatch: an operator-seeded company is the template. When
+    # DEMO_TEMPLATE_COMPANY_ID is set the engine clones from it verbatim and
+    # NEVER builds/purges/re-seeds a template of its own (the guard in
+    # _refresh_stale_template honours the same override). We still need a tenant
+    # id for the clone's :newt binding — read it off the operator company.
+    override = (settings.demo_template_company_id or "").strip()
+    if override:
+        tcid = uuid.UUID(override)
+        async with LoginSessionLocal() as s:
+            row = (
+                await s.execute(
+                    text(
+                        "SELECT tenant_id FROM companies WHERE id = :c"
+                    ).bindparams(c=tcid)
+                )
+            ).first()
+        if row is None:
+            raise DemoDisabled(
+                f"DEMO_TEMPLATE_COMPANY_ID {tcid} not found — cannot clone"
+            )
+        return tcid, row[0]
+
+    profile = _flavour_profile()
     async with _template_lock, LoginSessionLocal() as s:
         ttid, tcid = _template_ids(flavour)
         exists = (
@@ -603,11 +983,17 @@ async def _ensure_template() -> tuple[uuid.UUID, uuid.UUID]:
                     id=tcid,
                     tenant_id=ttid,
                     name=f"Demo Template ({flavour})",
-                    legal_name="Demo Template",
-                    base_currency="AUD",
-                    fin_year_start_month=7,
-                    gst_registered=True,
-                    gst_effective_date=datetime(2020, 7, 1, tzinfo=UTC).date(),
+                    legal_name=profile.legal_name,
+                    base_currency=profile.base_currency,
+                    coa_template_key=profile.coa_template_key,
+                    jurisdiction=profile.jurisdiction,
+                    fin_year_start_month=profile.fin_year_start_month,
+                    tax_registered=profile.tax_registered,
+                    gst_effective_date=(
+                        datetime(2020, 7, 1, tzinfo=UTC).date()
+                        if profile.gst_effective_date
+                        else None
+                    ),
                     version=1,
                 )
             )
@@ -931,6 +1317,24 @@ async def _hard_delete_demo_company(
             cid=company_id
         )
     )
+    # EE flavour posts supplier bills + payments — both carry RESTRICT FKs into
+    # the accounts cycle (bill_lines.account_id, payments.bank_account_id) that
+    # would block the company cascade exactly like invoice_lines. Pre-delete
+    # bill_lines (the account-RESTRICT line rows) and payments (which cascades
+    # payment_allocations, clearing their invoice/bill RESTRICT refs, and drops
+    # the payment→bank-account RESTRICT). No-ops for the AU flavours (no bills /
+    # payments posted). See the invoice_lines/journal_lines note above.
+    await session.execute(
+        text(
+            "DELETE FROM bill_lines WHERE bill_id IN "
+            "(SELECT id FROM bills WHERE company_id = :cid)"
+        ).bindparams(cid=company_id)
+    )
+    await session.execute(
+        text("DELETE FROM payments WHERE company_id = :cid").bindparams(
+            cid=company_id
+        )
+    )
     await session.execute(
         text("DELETE FROM companies WHERE id = :cid").bindparams(cid=company_id)
     )
@@ -1063,10 +1467,14 @@ async def _refresh_stale_template() -> None:
     independent copies that never reference the template, so replacing it is
     safe and invisible to existing demos.
     """
+    # Never purge/re-seed an operator-owned template (Option A override): the
+    # engine does not own its lifecycle. Guard FIRST, before any age check.
+    if (settings.demo_template_company_id or "").strip():
+        return
     max_age = int(settings.demo_template_max_age)
     if max_age <= 0:
         return
-    flavour = (settings.demo_seed_flavour or "saebooks").strip().lower()
+    flavour = _flavour_name()
     ttid, tcid = _template_ids(flavour)
     async with _template_lock, LoginSessionLocal() as s:
         row = (
@@ -1099,6 +1507,17 @@ async def _refresh_stale_template() -> None:
             text(
                 "DELETE FROM invoice_lines WHERE invoice_id IN "
                 "(SELECT id FROM invoices WHERE company_id = CAST(:c AS uuid))"
+            ),
+            {"c": str(tcid)},
+        )
+        # bill_lines has no company_id column (scoped via its parent bill), so
+        # the company_id loop above skips it and — under the replica role —
+        # deleting bills does not cascade to it. Purge it explicitly, mirroring
+        # invoice_lines, so an EE template refresh leaves no orphaned rows.
+        await s.execute(
+            text(
+                "DELETE FROM bill_lines WHERE bill_id IN "
+                "(SELECT id FROM bills WHERE company_id = CAST(:c AS uuid))"
             ),
             {"c": str(tcid)},
         )

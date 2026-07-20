@@ -28,11 +28,11 @@ from sqlalchemy import select
 
 from saebooks.api.v1.auth import DEFAULT_TENANT_ID, current_token
 from saebooks.db import AsyncSessionLocal
+from saebooks.jurisdictions.au import tpar as tpar_svc
 from saebooks.main import app
 from saebooks.models.account import Account, AccountType
 from saebooks.models.contact import ContactType
 from saebooks.services import contacts as contacts_svc
-from saebooks.services import tpar as tpar_svc
 from saebooks.services.companies import ensure_seed_company
 
 pytestmark = pytest.mark.postgres_only

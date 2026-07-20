@@ -35,6 +35,7 @@ from sqlalchemy.orm import selectinload
 from saebooks.models.contact import Contact
 from saebooks.models.quote import Quote, QuoteLine, QuoteStatus
 from saebooks.models.tax_code import TaxCode
+from saebooks.money import decimal_places_for, round_money
 from saebooks.services import change_log as change_log_svc
 from saebooks.services import idempotency as idem_svc
 from saebooks.services import numbering
@@ -42,7 +43,6 @@ from saebooks.services import preaccounting_client as _preacct
 from saebooks.services import preaccounting_facades as _pf
 from saebooks.services.idempotency import ClaimStatus
 
-_TWOPLACES = Decimal("0.01")
 _FOURPLACES = Decimal("0.0001")
 _DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
@@ -67,8 +67,9 @@ class VersionConflict(Exception):
 # ---------------------------------------------------------------------- #
 
 
-def _q2(value: Decimal) -> Decimal:
-    return value.quantize(_TWOPLACES, rounding=ROUND_HALF_UP)
+def _q2(value: Decimal, places: int = 2) -> Decimal:
+    """ROUND_HALF_UP to a currency's minor unit (default AUD/base — 2)."""
+    return round_money(value, places)
 
 
 def _q4(value: Decimal) -> Decimal:
@@ -199,9 +200,10 @@ async def _replace_lines(
         )
 
         tax_rate = await _resolve_tax_rate(session, line_input.tax_code_id, company_id)
+        doc_places = decimal_places_for(quote.currency)
         gross = line_input.quantity * line_input.unit_price
-        subtotal = _q2(gross)
-        tax = _q2(subtotal * tax_rate / Decimal("100"))
+        subtotal = _q2(gross, doc_places)
+        tax = _q2(subtotal * tax_rate / Decimal("100"), doc_places)
         line_total = subtotal + tax
 
         session.add(
@@ -236,9 +238,10 @@ async def _recalc(session: AsyncSession, quote: Quote) -> None:
     total = sum((ln.line_total for ln in lines), Decimal("0"))
     tax = total - subtotal
 
-    quote.subtotal = _q2(Decimal(str(subtotal)))
-    quote.tax_total = _q2(Decimal(str(tax)))
-    quote.total = _q2(Decimal(str(total)))
+    doc_places = decimal_places_for(quote.currency)
+    quote.subtotal = _q2(Decimal(str(subtotal)), doc_places)
+    quote.tax_total = _q2(Decimal(str(tax)), doc_places)
+    quote.total = _q2(Decimal(str(total)), doc_places)
 
 
 # ---------------------------------------------------------------------- #

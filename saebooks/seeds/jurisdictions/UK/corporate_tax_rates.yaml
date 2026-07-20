@@ -1,0 +1,34 @@
+# United Kingdom Corporation Tax rates — financial year 2026
+# (1 April 2026 – 31 March 2027). jurisdiction = 'GBR'.
+#
+# Primary source (fetched raw 2026-07-12 per §5.3, gov.uk marginal
+# relief guidance): "19% for taxable profits below £50,000 (small
+# profit rate)"; "25% for taxable profits above £250,000 (main rate)";
+# "These limits are also proportionately reduced by the number of
+# associated companies your company has" (an example divides both
+# limits by [1 + associated companies]) and by short accounting
+# periods.
+#
+# The corporate_tax_rates table carries the two RATES only; the
+# marginal-relief band (£50k–£250k), the standard fraction, the
+# associated-company divisor, dividend rates, and capital-allowance
+# parameters live in corporation_tax_parameters.yaml
+# (reference_seed: false) beside this file.
+#
+# tax_year uses the CT financial-year label (FY2026 starts 1 Apr 2026
+# — note the UK CT year is 1 April, unlike the 6 April personal year;
+# see fiscal_year_definitions.yaml).
+table: corporate_tax_rates
+key: [jurisdiction, sub_jurisdiction, tax_year, entity_scope]
+rows:
+  - jurisdiction: GBR
+    tax_year: 2026
+    entity_scope: small_profits
+    rate_percent: 19.0000
+    effective_from: 2026-04-01
+
+  - jurisdiction: GBR
+    tax_year: 2026
+    entity_scope: standard
+    rate_percent: 25.0000
+    effective_from: 2026-04-01

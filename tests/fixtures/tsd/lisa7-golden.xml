@@ -1,0 +1,70 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<tsd_vorm>
+  <regKood>10123456</regKood>
+  <c108_Aasta>2026</c108_Aasta>
+  <c109_Kuu>4</c109_Kuu>
+  <laadimisViis>L</laadimisViis>
+  <vorm>TSD</vorm>
+  <tsd_L7_0>
+    <c7008_DivKokku>5000.00</c7008_DivKokku>
+    <c7012_VmKeSum>1000.00</c7012_VmKeSum>
+    <tsd_L7_1bList>
+      <tsd_L7_1b>
+        <c7101_Regkood>1973378-1</c7101_Regkood>
+        <c7102_Nimi>Swedbank Helsinki</c7102_Nimi>
+        <c7103_RiikKood>FI</c7103_RiikKood>
+        <c7110_TuliKood>701</c7110_TuliKood>
+        <c7120_Kpv>2025-03-20</c7120_Kpv>
+        <c7130_VrSumma>300.55</c7130_VrSumma>
+        <c7140_VrTasutudTm>40.35</c7140_VrTasutudTm>
+        <c7150_KohustVahendSumma>40.35</c7150_KohustVahendSumma>
+      </tsd_L7_1b>
+    </tsd_L7_1bList>
+    <tsd_L7_1CList>
+      <tsd_L7_1C>
+        <c7020_Aasta>2023</c7020_Aasta>
+        <c7021_Summa>700.00</c7021_Summa>
+      </tsd_L7_1C>
+    </tsd_L7_1CList>
+    <tsd_L7_2List>
+      <tsd_L7_2>
+        <c7201_Regkood>556016-0680</c7201_Regkood>
+        <c7202_Nimi>Ericsson AB</c7202_Nimi>
+        <c7203_RiikKood>SE</c7203_RiikKood>
+        <c7210_TuliKood>730</c7210_TuliKood>
+        <c7220_Kpv>2025-03-21</c7220_Kpv>
+        <c7240_OsalusOmakap>15.00</c7240_OsalusOmakap>
+        <c7250_Summa>444.00</c7250_Summa>
+        <c7260_VrTasutudTm>44.00</c7260_VrTasutudTm>
+        <c7270_VrMaksustKasum>55.00</c7270_VrMaksustKasum>
+        <c7280_Mvt>400.00</c7280_Mvt>
+      </tsd_L7_2>
+    </tsd_L7_2List>
+    <tsd_L7_2BList>
+      <tsd_L7_2B>
+        <c7201_Regkood>10000704</c7201_Regkood>
+        <c7202_Nimi>AKTSIASELTS &amp; " NILES "</c7202_Nimi>
+        <c7203_RiikKood>EE</c7203_RiikKood>
+        <c7210_TuliKood>734</c7210_TuliKood>
+        <c7220_Kpv>2025-03-13</c7220_Kpv>
+        <c7211_TagLaen>900.00</c7211_TagLaen>
+        <c7212_Summa>900.00</c7212_Summa>
+        <c7213_Kuu>1</c7213_Kuu>
+        <c7214_Aasta>2023</c7214_Aasta>
+        <c7280_Mvt>900.00</c7280_Mvt>
+      </tsd_L7_2B>
+    </tsd_L7_2BList>
+    <tsd_L7_4List>
+      <tsd_L7_4>
+        <c7501_Regkood>71021997</c7501_Regkood>
+        <c7502_Nimi>KOOPERATIIV "SUURKU"LA"</c7502_Nimi>
+        <c7503_RiikKood>EE</c7503_RiikKood>
+        <c7510_AyhSm>100.00</c7510_AyhSm>
+        <c7530_AyhVrTasutudTm>300.00</c7530_AyhVrTasutudTm>
+        <c7550_AyhVmt>400.00</c7550_AyhVmt>
+        <c7580_MmDiv>500.00</c7580_MmDiv>
+        <c7581_TonnDiv>600.00</c7581_TonnDiv>
+      </tsd_L7_4>
+    </tsd_L7_4List>
+  </tsd_L7_0>
+</tsd_vorm>

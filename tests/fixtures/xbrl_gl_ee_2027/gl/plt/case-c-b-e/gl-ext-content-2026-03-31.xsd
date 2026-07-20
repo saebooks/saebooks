@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- (c) XBRL International.  See http://www.xbrl.org/legal -->
+<schema targetNamespace="https://xbrl.eesti.ee/gl/ext/2026-03-31"
+	xmlns:xlink="http://www.w3.org/1999/xlink"
+	xmlns="http://www.w3.org/2001/XMLSchema"
+	xmlns:xbrli="http://www.xbrl.org/2003/instance"
+	xmlns:gl-ext="https://xbrl.eesti.ee/gl/ext/2026-03-31"	
+	elementFormDefault="qualified" attributeFormDefault="unqualified">
+	<import namespace="http://www.xbrl.org/2003/instance" schemaLocation="http://www.xbrl.org/2003/xbrl-instance-2003-12-31.xsd"/>
+	<include schemaLocation="../../ext/gl-ext-2026-03-31.xsd"/>
+	
+	<complexType name="identifierEmployeeCategoryItemType">
+		<simpleContent>
+			<restriction base="xbrli:stringItemType">
+			</restriction>
+		</simpleContent>
+	</complexType>
+	<complexType name="identifierBirthDateItemType">
+		<simpleContent>
+			<restriction base="xbrli:dateItemType">
+			</restriction>
+		</simpleContent>
+	</complexType>
+	<complexType name="entrySourceIdItemType">
+		<simpleContent>
+			<restriction base="xbrli:stringItemType">
+			</restriction>
+		</simpleContent>
+	</complexType>
+	<complexType name="entrySourceCountItemType">
+		<simpleContent>
+			<restriction base="xbrli:stringItemType">
+				</restriction>
+		</simpleContent>
+	</complexType>
+		<complexType name="entryVersionItemType">
+		<simpleContent>
+			<restriction base="xbrli:stringItemType">
+				</restriction>
+		</simpleContent>
+	</complexType>
+	<complexType name="periodExtraIdentifierItemType">
+		<simpleContent>
+			<restriction base="xbrli:stringItemType">
+				</restriction>
+		</simpleContent>
+	</complexType>
+</schema>

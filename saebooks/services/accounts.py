@@ -888,7 +888,7 @@ async def delete_account(
 # Bad-debt account resolvers (create-on-demand)
 #
 # Mirrors the GST-account resolver pattern in services.credit_notes /
-# services.tax_engine.au — but where those return None when the chart lacks
+# jurisdictions.au.tax — but where those return None when the chart lacks
 # the account, these CREATE the account on first use so the bad-debt write-off
 # and recovery postings always have a target. The AU seed CoA ships neither a
 # Bad Debts expense (6-2050) nor a Bad Debt Recovery other-income (4-1290)
@@ -901,7 +901,7 @@ async def delete_account(
 # Bad-debt account resolvers (create-on-demand)
 #
 # Mirrors the GST-account resolver pattern in services.credit_notes /
-# services.tax_engine.au — but where those return None when the chart lacks
+# jurisdictions.au.tax — but where those return None when the chart lacks
 # the account, these CREATE the account on first use so the bad-debt write-off
 # and recovery postings always have a target. The AU seed CoA ships neither a
 # Bad Debts expense (6-2050) nor a Bad Debt Recovery other-income (4-1290)

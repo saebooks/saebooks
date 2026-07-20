@@ -25,10 +25,11 @@ from datetime import datetime
 import pytest
 
 from saebooks.db import AsyncSessionLocal
+from saebooks.jurisdictions.au import stp as stp_svc
 from saebooks.models.company import Company
 from saebooks.models.pay_run import PayRun
 from saebooks.models.stp_submission import StpStatus, StpSubmission
-from saebooks.services import stp as stp_svc
+from saebooks.services import business_identifiers
 from saebooks.services.lodgement.base import LodgementResult, LodgementStatus
 from saebooks.services.lodgement.exceptions import (
     LodgementRejected,
@@ -88,9 +89,14 @@ async def _seed_company() -> uuid.UUID:
             tenant_id=_DEFAULT_TENANT_ID,
             name="Acme",
             legal_name="Acme Pty Ltd",
-            abn="12345678901",
         )
         session.add(c)
+        await session.flush()  # populate c.id (uuid default applies at INSERT)
+        # ABN lives in business_identifiers (au_abn); the companies.abn column
+        # was dropped in 0204.
+        await business_identifiers.upsert(
+            session, c.id, "au_abn", "12345678901", tenant_id=c.tenant_id
+        )
         await session.commit()
         await session.refresh(c)
         return c.id

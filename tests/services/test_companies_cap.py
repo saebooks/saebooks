@@ -201,3 +201,57 @@ async def test_create_company_persists_valid_entity_type(
             assert persisted == "COMPANY"
     finally:
         await _purge_test_companies("CAP_TEST_entity_")
+
+
+async def test_create_ee_company_survives_failure_after_applier_commit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """create_company's atomicity guarantee only holds for au/default. For
+    any non-au/default template (currently ee/default), the applier
+    (chart_ee.apply_ee_chart_template) commits internally before control
+    returns. If create_company's own trailing commit/refresh then fails,
+    there is nothing left to roll back: the company row is already durable.
+    This pins that actual (non-atomic-past-the-applier-commit) behaviour.
+    """
+    monkeypatch.setattr(
+        companies_svc, "resolve_licence", lambda: _fake_licence("enterprise")
+    )
+    tag = uuid.uuid4().hex[:8]
+    name = f"CAP_TEST_ee_atomic_{tag}"
+    try:
+        async with AsyncSessionLocal() as session:
+            orig_refresh = session.refresh
+
+            async def boom(instance, attribute_names=None, **kwargs):
+                # Identifier-model adaptation: _set_company_registry_id
+                # calls session.refresh(company, ["identifiers"]) per
+                # registry write, which must pass through. Only the trailing
+                # full refresh(company) — which runs AFTER the EE applier's
+                # internal commit already made the row durable — is the
+                # failure this test simulates.
+                if attribute_names is None:
+                    raise RuntimeError(
+                        "simulated failure after applier already committed"
+                    )
+                return await orig_refresh(instance, attribute_names, **kwargs)
+
+            monkeypatch.setattr(session, "refresh", boom)
+            with pytest.raises(RuntimeError):
+                await companies_svc.create_company(
+                    session,
+                    name=name,
+                    jurisdiction="EE",
+                    coa_template_key="ee/default",
+                    registrikood=str(uuid.uuid4().int)[:8],
+                )
+
+        # A fresh session/connection proves the row survived the raised
+        # exception -- the EE applier's internal commit already made it
+        # durable before create_company's trailing (failed) commit ran.
+        async with AsyncSessionLocal() as session2:
+            rows = (
+                await session2.execute(select(Company).where(Company.name == name))
+            ).scalars().all()
+            assert len(rows) == 1
+    finally:
+        await _purge_test_companies(f"CAP_TEST_ee_atomic_{tag}")

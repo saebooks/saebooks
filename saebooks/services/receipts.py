@@ -35,7 +35,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 
 from sqlalchemy import func as sa_func
 from sqlalchemy import select
@@ -46,13 +46,12 @@ from saebooks.models.account import Account, AccountType
 from saebooks.models.journal import JournalOrigin
 from saebooks.models.receipt import Receipt, ReceiptLine, ReceiptStatus
 from saebooks.models.tax_code import TaxCode
+from saebooks.money import round_money
 from saebooks.services import audit_log as audit_log_svc
 from saebooks.services import change_log as change_log_svc
 from saebooks.services import journal as journal_svc
 from saebooks.services import numbering
 from saebooks.services import settings as settings_svc
-
-_TWOPLACES = Decimal("0.01")
 
 _INCOME_TYPES = frozenset({AccountType.INCOME, AccountType.OTHER_INCOME})
 _EXPENSE_TYPES = frozenset(
@@ -73,8 +72,9 @@ class VersionConflict(Exception):
         self.current = current
 
 
-def _q2(value: Decimal) -> Decimal:
-    return value.quantize(_TWOPLACES, rounding=ROUND_HALF_UP)
+def _q2(value: Decimal, places: int = 2) -> Decimal:
+    """ROUND_HALF_UP to a currency's minor unit (default AUD/base — 2)."""
+    return round_money(value, places)
 
 
 @dataclass(frozen=True)

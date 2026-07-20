@@ -33,6 +33,7 @@ from saebooks.models.account import Account
 from saebooks.models.bank_feed import BankFeedAccount
 from saebooks.models.bank_statement import BankStatementLine, StatementLineStatus
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
+from saebooks.money import money_quantum
 
 logger = logging.getLogger(__name__)
 
@@ -254,9 +255,9 @@ async def sweep(
                 days_since_last_statement=days_since,
                 stale=stale,
                 unmatched_count=unmatched,
-                feed_total=feed_total.quantize(Decimal("0.01")),
-                gl_total=gl_total.quantize(Decimal("0.01")),
-                variance=variance.quantize(Decimal("0.01")),
+                feed_total=feed_total.quantize(money_quantum(2)),
+                gl_total=gl_total.quantize(money_quantum(2)),
+                variance=variance.quantize(money_quantum(2)),
                 has_variance=abs(variance) > VARIANCE_TOLERANCE,
             )
         )

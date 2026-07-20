@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="utf-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+    <xs:element name="operationAccepted" type="OperationAccepted">
+        <xs:annotation>
+            <xs:documentation>Süsteemi poolt koostatav ja edastatav sõnum, millega süsteem teavitab, et deklaratsiooni 
+				andmed on edukalt vastu võetud ning deklaratsioonile kantud. Kui sooviti ka deklaratsiooni esitamist, siis on deklaratsioon ka esitatud. 
+                Message, that is generated and forwarded by the system, informs if declaration data is successfully transmitted and put in the declaration form. 
+				If there was also a request to submit the declaration, the declaration is also submitted.
+            </xs:documentation>
+        </xs:annotation>
+    </xs:element>
+    <xs:complexType name="FunctionalError">
+        <xs:sequence>
+            <xs:element minOccurs="0" name="errorPointer" type="ErrorPointer">
+                <xs:annotation>
+                    <xs:documentation>Reegli kood. Rule code.</xs:documentation>
+                </xs:annotation>
+            </xs:element>
+            <xs:element minOccurs="0" name="originalAttributeValue" type="OriginalAttributeValue">
+                <xs:annotation>
+                    <xs:documentation>Viide vigasele väärtusele. Reference to the invalid value.</xs:documentation>
+                </xs:annotation>
+            </xs:element>
+            <xs:element minOccurs="0" name="errorDescription" type="ErrorDescription">
+                <xs:annotation>
+                    <xs:documentation>Vea kirjeldus. Error description.</xs:documentation>
+                </xs:annotation>
+            </xs:element>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="OperationAccepted">
+	    <xs:sequence>
+	        <xs:element name="requestId" type="RequestId">
+                 <xs:annotation>
+                     <xs:documentation>Päringu ID. Request ID.</xs:documentation>
+                 </xs:annotation>
+            </xs:element>
+            <xs:element name="taxPayerRegCode" type="PersonRegCode">
+                 <xs:annotation>
+                     <xs:documentation>Maksukohustuslase registri- või isikukood või mitteresidendi kood.
+                        Taxable person's registration code or personal identification number or non-resident's code.</xs:documentation>
+                 </xs:annotation>
+            </xs:element>
+            <xs:element name="submitterPersonCode" type="PersonRegCode">
+                <xs:annotation>
+                      <xs:documentation>Esitaja isikukood.
+                        Submitter's personal identification number.</xs:documentation>
+                 </xs:annotation>
+             </xs:element>
+             <xs:element name="year" type="Year">
+                 <xs:annotation>
+                     <xs:documentation>Aasta. Year.</xs:documentation>
+                 </xs:annotation>
+             </xs:element>
+             <xs:element name="month" type="Month">
+                 <xs:annotation>
+                     <xs:documentation>Kuu (maksustamisperiood).
+                        Month (period of taxation).</xs:documentation>
+                 </xs:annotation>
+             </xs:element>
+             <xs:element name="declarationType" type="DeclarationType">
+                 <xs:annotation>
+                     <xs:documentation>KMD ja KMD INF’i esitamine tava- või pankrotiperioodi kohta.
+                        Submitting VAT and VAT INF for normal or bankruptcy period.</xs:documentation>
+                 </xs:annotation>
+             </xs:element>
+             <xs:element name="declarationState" type="DeclarationState">
+                 <xs:annotation>
+                     <xs:documentation>Deklaratsiooni olek. Declaration state.</xs:documentation>
+                 </xs:annotation>
+             </xs:element>
+             <xs:element minOccurs="0" name="vatPayable" type="MonetaryValue">
+                 <xs:annotation>
+                     <xs:documentation>Lahter 12. Tasumisele kuuluv käibemaks (lahter 4 + lahter 4.1 - lahter 5 + lahter 10 - lahter 11) (+)
+                        Field 12. VAT payable (filed 4 + filed 4.1 - filed 5 + filed 10 - filed 11) (+)</xs:documentation>
+                 </xs:annotation>
+             </xs:element>
+             <xs:element minOccurs="0" name="overpaidVat" type="MonetaryValue">
+                 <xs:annotation>
+                     <xs:documentation>Lahter 13. Enammakstud käibemaks (lahter 4 + lahter 4.1 - lahter 5 + lahter 10 - lahter 11) (-)
+                        Field 13. Overpaid VAT (field 4 + field 4.1 - field 5 + field 10 - field 11) (-)</xs:documentation>
+                 </xs:annotation>
+             </xs:element>
+             <xs:element minOccurs="0" maxOccurs="unbounded" name="functionalError" type="FunctionalError">
+                 <xs:annotation>
+                         <xs:documentation>Dokumendi töötlemisel tekkinud funktsionaalsed vead [0..n].
+                            Functional errors while processing the file [0..n].</xs:documentation>
+                 </xs:annotation>
+            </xs:element>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:simpleType name="PersonRegCode">
+        <xs:restriction base="xs:string">
+            <xs:maxLength value="20"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="Year">
+        <xs:restriction base="xs:integer">
+            <xs:totalDigits value="4"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="Month">
+        <xs:restriction base="xs:integer">
+            <xs:totalDigits value="2"/>
+            <xs:minInclusive value="1"/>
+            <xs:maxInclusive value="12"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="DeclarationType">
+        <xs:restriction base="xs:integer">
+            <xs:totalDigits value="1"/>
+            <xs:minInclusive value="1"/>
+            <xs:maxInclusive value="2"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="DeclarationState">
+        <xs:restriction base="xs:string">
+            <xs:maxLength value="20"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="ErrorPointer">
+        <xs:restriction base="xs:string"/>
+    </xs:simpleType>
+    <xs:simpleType name="OriginalAttributeValue">
+        <xs:restriction base="xs:string"/>
+    </xs:simpleType>
+    <xs:simpleType name="RequestId">
+        <xs:restriction base="xs:string">
+            <xs:maxLength value="255"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="ErrorDescription">
+        <xs:restriction base="xs:string"/>
+    </xs:simpleType>
+    <xs:simpleType name="MonetaryValue">
+        <xs:restriction base="xs:decimal">
+            <xs:fractionDigits value="2"/>
+            <xs:minInclusive value="0"/>
+        </xs:restriction>
+    </xs:simpleType>
+</xs:schema>

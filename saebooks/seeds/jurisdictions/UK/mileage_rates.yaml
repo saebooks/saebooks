@@ -1,0 +1,25 @@
+# United Kingdom approved mileage allowance payments (AMAP), tax year
+# 2026-27.
+#
+# NOT a reference-DB table seed (reference_seed: false): AMAP is an
+# approved tax-free PAYMENT CAP for employee-owned vehicles, not a
+# benefit-in-kind rate, so benefit_in_kind_rates is the wrong table;
+# UK-module data.
+#
+# Primary source (fetched raw 2026-07-12): gov.uk "Rates and
+# thresholds for employers: 2026 to 2027" — cars 55p first 10,000
+# business miles / 25p thereafter, motorcycles 24p, cycles 20p.
+# The car rate rose 45p -> 55p on 21 May 2026, applied RETROSPECTIVELY
+# to 6 April 2026 (first change since 2011-12; strategy §5.1 verified).
+reference_seed: false
+jurisdiction: GBR
+effective_from: 2026-04-06
+
+amap:
+  car_van:
+    first_10000_miles_pence: 55   # announced 2026-05-21, retro to 2026-04-06
+    thereafter_pence: 25
+    threshold_miles: 10000
+  motorcycle_pence: 24
+  cycle_pence: 20
+  passenger_payment_per_passenger_pence: 5

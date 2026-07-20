@@ -1,0 +1,33 @@
+# Lithuania II-pillar pension accumulation (pensijų kaupimas) —
+# the 2026 reform state. jurisdiction = 'LTU'. Mirrors AU's
+# au_super_guarantee / UK auto-enrolment shape.
+#
+# 2026 reform (VERIFIED — Seimas news + Ministry of Social Security,
+# fetched 2026-07-12): from 2026-01-01 auto-enrolment is ABOLISHED —
+# participation is VOLUNTARY (ongoing invitations). A participant
+# contributes 3% of gross salary (may raise it, or suspend up to one
+# year, unlimited times); the STATE adds 1.5% of the national average
+# gross wage of the year before last (~EUR 400/yr in 2026) — the state
+# incentive is not an employer cost and has no row here. Opt-out /
+# withdrawal window for existing dissatisfied participants runs
+# 2026-01-01 -> 2027-12-31.
+#
+# For EMPLOYED participants the 3% kaupimo įmoka is calculated and
+# withheld through payroll together with Sodra contributions (Sodra's
+# published employee tariff: 19.5% without / 22.5% with accumulation).
+# There is NO employer contribution component in the LT II pillar —
+# contrast AU SG / UK auto-enrolment employer minimums.
+#
+# payer: employee + collection payroll_withholding is therefore the
+# accurate shape; rate_percent is the DEFAULT contribution (the
+# participant may elect higher — the engine takes an override).
+table: mandatory_contribution_rules
+key: [jurisdiction, code, effective_from]
+rows:
+  - jurisdiction: LTU
+    code: lt_pillar_ii_employee
+    payer: employee
+    rate_percent: 3.0000
+    earnings_base: gross_salary
+    cap_amount: null
+    effective_from: 2026-01-01

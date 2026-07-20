@@ -36,6 +36,18 @@ rows:
     regulator_protocol: e-mta-x-road
     decimal_places: 2
     active: true
+  - code: LTU
+    name: Lithuania
+    currency_default: EUR
+    regulator_name: Valstybinė mokesčių inspekcija
+    regulator_protocol: imas-eds
+  - code: LVA
+    name: Latvia
+    currency_default: EUR
+    regulator_name: Valsts ieņēmumu dienests
+    regulator_protocol: vid-eds
+    decimal_places: 2
+    active: true
   - code: DEU
     name: Germany
     currency_default: EUR

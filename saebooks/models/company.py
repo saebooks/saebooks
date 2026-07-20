@@ -3,11 +3,25 @@ import uuid
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Integer, String, Text, func, text
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    func,
+    select,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.ext.hybrid import hybrid_property
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from saebooks.db import Base
+from saebooks.models.business_identifier import BusinessIdentifier
 
 
 class CostingMethod(enum.StrEnum):
@@ -51,8 +65,21 @@ class Company(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     legal_name: Mapped[str | None] = mapped_column(String)
     trading_name: Mapped[str | None] = mapped_column(String)
-    abn: Mapped[str | None] = mapped_column(String(20))
-    acn: Mapped[str | None] = mapped_column(String(20))
+    # ``abn`` is no longer a column — it is a read-through hybrid over the
+    # ``au_abn`` business identifier (see the ``identifiers`` relationship and
+    # the ``abn`` hybrid_property at the end of the class). The column was
+    # dropped in migration 0204; ``business_identifiers`` is the single source
+    # of truth for every registration number. Writes go through
+    # ``services.business_identifiers.upsert`` (the company service routes the
+    # legacy ``abn`` field there). Non-AU registry codes (e.g. the Estonian
+    # äriregistri kood, ``ee_regcode``) are read explicitly via their own
+    # scheme — this AU-specific accessor deliberately does not overload them.
+    # ``acn`` is no longer a column — it is a read-through hybrid over the
+    # ``au_acn`` business identifier (see the ``acn`` hybrid_property at the end
+    # of the class). The column was dropped in migration 0205, mirroring the
+    # ``abn`` clean-move in 0204; ``business_identifiers`` is the single source
+    # of truth. Writes route through ``services.companies`` (the ``acn`` field
+    # is upserted as the ``au_acn`` identifier).
     # Remittance / "How to Pay" details — rendered on the invoice PDF (0168).
     # All nullable; NULL = nothing shown (template guards on bank_account_number).
     bank_name: Mapped[str | None] = mapped_column(String)
@@ -73,22 +100,37 @@ class Company(Base):
     # standing Terms-of-Trade fine print) and per-contact due-date terms (0165).
     default_payment_terms: Mapped[str | None] = mapped_column(Text)
     address: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
-    base_currency: Mapped[str] = mapped_column(String(3), default="AUD", nullable=False)
+    # Presentation/base currency. Defaults to the jurisdiction-neutral
+    # ISO-4217 "no currency" sentinel ("XXX") so the bare core names no
+    # national currency — a concrete currency (AUD, GBP, EUR…) is supplied
+    # explicitly at company creation (the API/CompanyCreate contract still
+    # defaults to AUD; the seed company sets it from config).
+    base_currency: Mapped[str] = mapped_column(String(3), default="XXX", nullable=False)
     coa_template_key: Mapped[str] = mapped_column(
-        String(64), default="au/default", nullable=False,
+        String(64), default="xx/default", nullable=False,
         comment="Jurisdiction CoA/reference-data template key",
     )
     # Multi-jurisdiction routing key. Free text (no FK) because the
     # jurisdiction registry lives in the reference DB; validated at the
-    # service layer. Defaults to AU because that is the only jurisdiction
-    # wired end-to-end at v0.1.4 (see docs/multi-jurisdiction.md).
-    jurisdiction: Mapped[str] = mapped_column(String(3), default="AU", nullable=False)
+    # service layer. Defaults to the neutral sentinel "XX" (zero bolt-on
+    # jurisdiction modules) so the core is jurisdiction-agnostic — a
+    # concrete jurisdiction (AU/NZ/UK/EE/…) is chosen explicitly at company
+    # creation from the loaded module set. See docs/multi-jurisdiction.md.
+    jurisdiction: Mapped[str] = mapped_column(String(3), default="XX", nullable=False)
     # M1.5 · T4 — legal-entity / business-structure type. Free text (no FK)
     # because the entity_structure_types registry lives in the reference DB;
     # validated at the service layer against this company's jurisdiction,
     # exactly like ``jurisdiction`` above. NULL = not yet classified. Values
     # are RefEntityStructureType.code (e.g. 'pty_ltd', 'disc_trust', 'smsf').
     entity_structure_code: Mapped[str | None] = mapped_column(String(32))
+    # M1.5 · T10b — statutory chart-of-accounts framework the company reports
+    # under (SKR03/SKR04, PCG, ...). Free text (no FK) because the
+    # statutory_account_frameworks registry lives in the reference DB;
+    # validated at the service layer against this company's jurisdiction,
+    # exactly like ``entity_structure_code`` above. NULL = none / not
+    # applicable — which is every AU company, since Australia mandates no
+    # account numbering plan.
+    statutory_framework_code: Mapped[str | None] = mapped_column(String(32))
     fin_year_start_month: Mapped[int] = mapped_column(Integer, default=7, nullable=False)
     audit_mode: Mapped[str] = mapped_column(String, default="immutable", nullable=False)
 
@@ -103,7 +145,7 @@ class Company(Base):
     siss_subscription_key_encrypted: Mapped[str | None] = mapped_column(String)
     siss_environment: Mapped[str | None] = mapped_column(String(32))
 
-    gst_registered: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    tax_registered: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     gst_effective_date: Mapped[date | None] = mapped_column(Date)
 
     # PSI (Personal Services Income) classification — ATO requirement for contractors.
@@ -129,6 +171,38 @@ class Company(Base):
         String(16), nullable=False, default="smart_prompt", server_default="smart_prompt"
     )
     bad_debt_recovery_account: Mapped[str | None] = mapped_column(String(64))
+
+    # AR/AP control-account override (0198, Packet 4b). Every posting site
+    # historically hardcoded the AU chart-of-accounts convention codes
+    # ("1-1200" Trade Debtors / "2-1200" Trade Creditors) — see
+    # ``saebooks.services.control_accounts`` for the single resolver every
+    # call site now shares. NULL = engine falls back to the AU codes, so
+    # every existing (AU) company is byte-identical. A non-AU company whose
+    # chart uses different control-account codes sets these instead of the
+    # engine forcing an AU-shaped chart on it.
+    ar_control_account_code: Mapped[str | None] = mapped_column(String(64))
+    ap_control_account_code: Mapped[str | None] = mapped_column(String(64))
+
+    # EE payroll GL control-account overrides (0200, Fixer round 4 F1).
+    # Previously resolved from a GLOBAL ``Setting`` row keyed only by
+    # ``key`` (no company scoping at all) — two EE companies on one
+    # instance could not configure these independently and a code
+    # collision would silently mispost. Same NULL-raises-loudly contract
+    # as before (see ``pay_runs_v2._account_by_company_column``); unlike
+    # AR/AP there is no AU-convention default to fall back to.
+    ee_payroll_wages_expense_account_code: Mapped[str | None] = mapped_column(String(64))
+    ee_payroll_social_tax_expense_account_code: Mapped[str | None] = mapped_column(String(64))
+    ee_payroll_unemployment_employer_expense_account_code: Mapped[str | None] = mapped_column(String(64))
+    ee_payroll_income_tax_payable_account_code: Mapped[str | None] = mapped_column(String(64))
+    ee_payroll_unemployment_employee_payable_account_code: Mapped[str | None] = mapped_column(String(64))
+    ee_payroll_pillar_ii_payable_account_code: Mapped[str | None] = mapped_column(String(64))
+    ee_payroll_social_tax_payable_account_code: Mapped[str | None] = mapped_column(String(64))
+    ee_payroll_unemployment_employer_payable_account_code: Mapped[str | None] = mapped_column(String(64))
+    ee_payroll_net_pay_clearing_account_code: Mapped[str | None] = mapped_column(String(64))
+    ee_payroll_fringe_benefit_income_tax_expense_account_code: Mapped[str | None] = mapped_column(String(64))
+    ee_payroll_fringe_benefit_social_tax_expense_account_code: Mapped[str | None] = mapped_column(String(64))
+    ee_payroll_fringe_benefit_income_tax_payable_account_code: Mapped[str | None] = mapped_column(String(64))
+    ee_payroll_fringe_benefit_social_tax_payable_account_code: Mapped[str | None] = mapped_column(String(64))
 
     # Cashbook edition (single-entry UX over double-entry storage). See
     # docs/cashbook-edition-design.md. ``bookkeeping_mode`` flips the UX
@@ -203,3 +277,122 @@ class Company(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # Every registration number this company holds, one row per scheme
+    # (au_abn, au_acn, ee_regcode, uk_crn, ...). ``lazy="selectin"`` so the
+    # collection is always eager-loaded alongside the company — the ``abn``
+    # hybrid below reads it synchronously, including from the sync PDF/context
+    # builders that receive a company but no session. The DB owns cascade
+    # (business_identifiers.company_id is ON DELETE CASCADE); the ORM keeps a
+    # plain read-mostly view (writes go through services.business_identifiers).
+    identifiers: Mapped[list["BusinessIdentifier"]] = relationship(
+        "BusinessIdentifier",
+        lazy="selectin",
+        passive_deletes=True,
+    )
+
+    @hybrid_property
+    def abn(self) -> str | None:
+        """The Australian Business Number — the value of the ``au_abn``
+        business identifier, or None. Read-through sugar over
+        ``identifiers``; the physical ``abn`` column was dropped in 0204.
+        This is AU-specific by design: a non-AU registry code (e.g. the
+        Estonian äriregistri kood) is read via its own scheme, never here."""
+        for ident in self.identifiers:
+            if ident.scheme == "au_abn":
+                return ident.value
+        return None
+
+    @abn.inplace.expression
+    @classmethod
+    def _abn_expression(cls):
+        """SQL form: correlated scalar subquery on the ``au_abn`` identifier.
+        Defensive — the engine resolves the abn in Python via the getter; this
+        only serves the rare ``select(Company.abn)`` / filter-on-abn path."""
+        return (
+            select(BusinessIdentifier.value)
+            .where(
+                BusinessIdentifier.company_id == cls.id,
+                BusinessIdentifier.scheme == "au_abn",
+            )
+            .scalar_subquery()
+        )
+
+    @hybrid_property
+    def acn(self) -> str | None:
+        """The Australian Company Number — the value of the ``au_acn``
+        business identifier, or None. Read-through sugar over ``identifiers``;
+        the physical ``acn`` column was dropped in 0205 (same clean-move as
+        ``abn`` in 0204). AU-specific by design."""
+        for ident in self.identifiers:
+            if ident.scheme == "au_acn":
+                return ident.value
+        return None
+
+    @acn.inplace.expression
+    @classmethod
+    def _acn_expression(cls):
+        """SQL form: correlated scalar subquery on the ``au_acn`` identifier.
+        Defensive — the engine resolves the acn in Python via the getter."""
+        return (
+            select(BusinessIdentifier.value)
+            .where(
+                BusinessIdentifier.company_id == cls.id,
+                BusinessIdentifier.scheme == "au_acn",
+            )
+            .scalar_subquery()
+        )
+
+    @hybrid_property
+    def registrikood(self) -> str | None:
+        """The Estonian business-registry code (äriregistri kood) — the
+        value of the ``ee_regcode`` business identifier, or None.
+        Read-through sugar over ``identifiers``, exactly mirroring
+        ``abn``/``acn`` over their AU schemes; there is no physical
+        ``registrikood`` column (business_identifiers is the sole source of
+        truth). Writes route through ``services.companies`` (the
+        ``registrikood`` field is upserted as the ``ee_regcode`` identifier).
+        EE-specific by design — None on every non-EE company."""
+        for ident in self.identifiers:
+            if ident.scheme == "ee_regcode":
+                return ident.value
+        return None
+
+    @registrikood.inplace.expression
+    @classmethod
+    def _registrikood_expression(cls):
+        """SQL form: correlated scalar subquery on the ``ee_regcode``
+        identifier — serves ``select(Company.registrikood)`` / filter-on-
+        registrikood (the duplicate-detection test path)."""
+        return (
+            select(BusinessIdentifier.value)
+            .where(
+                BusinessIdentifier.company_id == cls.id,
+                BusinessIdentifier.scheme == "ee_regcode",
+            )
+            .scalar_subquery()
+        )
+
+    @hybrid_property
+    def kmv_number(self) -> str | None:
+        """The Estonian VAT number ("käibemaksukohustuslase number" / KMV)
+        — the value of the ``ee_vat`` business identifier, or None.
+        Read-through sugar over ``identifiers`` (the ``registrikood``
+        precedent above); no physical column. EE-specific by design."""
+        for ident in self.identifiers:
+            if ident.scheme == "ee_vat":
+                return ident.value
+        return None
+
+    @kmv_number.inplace.expression
+    @classmethod
+    def _kmv_number_expression(cls):
+        """SQL form: correlated scalar subquery on the ``ee_vat`` identifier."""
+        return (
+            select(BusinessIdentifier.value)
+            .where(
+                BusinessIdentifier.company_id == cls.id,
+                BusinessIdentifier.scheme == "ee_vat",
+            )
+            .scalar_subquery()
+        )

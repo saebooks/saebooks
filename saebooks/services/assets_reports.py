@@ -24,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.models.fixed_asset import FixedAsset
+from saebooks.money import money_quantum
 from saebooks.services import assets as asset_svc
 
 
@@ -42,17 +43,17 @@ class DepreciationScheduleRow:
 
     @property
     def book_nbv(self) -> Decimal:
-        return (self.cost - self.book_cumulative).quantize(Decimal("0.01"))
+        return (self.cost - self.book_cumulative).quantize(money_quantum(2))
 
     @property
     def tax_written_down_value(self) -> Decimal:
-        return (self.cost - self.tax_cumulative).quantize(Decimal("0.01"))
+        return (self.cost - self.tax_cumulative).quantize(money_quantum(2))
 
     @property
     def temporary_difference(self) -> Decimal:
         """Book NBV minus tax WDV — positive means deferred tax liability."""
         return (self.book_nbv - self.tax_written_down_value).quantize(
-            Decimal("0.01")
+            money_quantum(2)
         )
 
 
@@ -64,26 +65,26 @@ class DepreciationSchedule:
     @property
     def total_cost(self) -> Decimal:
         return sum((r.cost for r in self.rows), Decimal("0")).quantize(
-            Decimal("0.01")
+            money_quantum(2)
         )
 
     @property
     def total_book_cumulative(self) -> Decimal:
         return sum((r.book_cumulative for r in self.rows), Decimal("0")).quantize(
-            Decimal("0.01")
+            money_quantum(2)
         )
 
     @property
     def total_tax_cumulative(self) -> Decimal:
         return sum((r.tax_cumulative for r in self.rows), Decimal("0")).quantize(
-            Decimal("0.01")
+            money_quantum(2)
         )
 
     @property
     def total_temporary_difference(self) -> Decimal:
         return sum(
             (r.temporary_difference for r in self.rows), Decimal("0")
-        ).quantize(Decimal("0.01"))
+        ).quantize(money_quantum(2))
 
 
 async def depreciation_schedule(

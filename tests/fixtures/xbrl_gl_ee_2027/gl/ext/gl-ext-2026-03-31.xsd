@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- (c) XBRL International.  See http://www.xbrl.org/legal -->
+<schema targetNamespace="https://xbrl.eesti.ee/gl/ext/2026-03-31"
+  elementFormDefault="qualified" attributeFormDefault="unqualified"
+  xmlns="http://www.w3.org/2001/XMLSchema"
+  xmlns:xbrll="http://www.xbrl.org/2003/linkbase"
+  xmlns:xlink="http://www.w3.org/1999/xlink"
+  xmlns:xbrli="http://www.xbrl.org/2003/instance"
+  xmlns:gl-ext="https://xbrl.eesti.ee/gl/ext/2026-03-31">
+  <annotation>
+    <appinfo>
+      <xbrll:linkbaseRef xlink:type="simple" xlink:arcrole="http://www.w3.org/1999/xlink/properties/linkbase"
+        xlink:href="gl-ext-2026-03-31-presentation.xml" xlink:title="Presentation Links, all"
+        xlink:role="http://www.xbrl.org/2003/role/presentationLinkbaseRef"/>
+    </appinfo>
+  </annotation>
+  <import namespace="http://www.xbrl.org/2003/instance" schemaLocation="http://www.xbrl.org/2003/xbrl-instance-2003-12-31.xsd"/>
+  
+  <!-- EXTENSION for identifiers-->
+  <element name="identifierEmployeeCategory" id="gl-ext_identifierEmployeeCategory" type="gl-ext:identifierEmployeeCategoryItemType" substitutionGroup="xbrli:item" nillable="true" xbrli:periodType="instant"/>
+  <element name="identifierBirthDate" id="gl-ext_identifierBirthDate" type="gl-ext:identifierBirthDateItemType" substitutionGroup="xbrli:item" nillable="true" xbrli:periodType="instant"/>
+
+  <!-- EXTENSION for multiple data sources-->
+  <element name="entryVersion" id="gl-ext_entryVersion" type="gl-ext:entryVersionItemType" substitutionGroup="xbrli:item" nillable="true" xbrli:periodType="instant"/>
+  <element name="entrySourceId" id="gl-ext_entrySourceId" type="gl-ext:entrySourceIdItemType" substitutionGroup="xbrli:item" nillable="true" xbrli:periodType="instant"/>
+  <element name="entrySourceCount" id="gl-ext_entrySourceCount" type="gl-ext:entrySourceCountItemType" substitutionGroup="xbrli:item" nillable="true" xbrli:periodType="instant"/>
+   
+     <!--EXTENSION for period-->
+  <element name="periodExtraIdentifier" id="gl-ext_periodExtraIdentifier" type="gl-ext:periodExtraIdentifierItemType" substitutionGroup="xbrli:item" nillable="true" xbrli:periodType="instant"/>
+</schema>

@@ -45,7 +45,7 @@ async def _restore_seed_company_after_module():
     """Reset the seed company back to its post-seed defaults when this
     module's tests finish — ``_seed_company_into_cashbook_mode`` below
     mutates ``bookkeeping_mode='cashbook'``,
-    ``cashbook_default_bank_account_id=<bank>``, and ``gst_registered``
+    ``cashbook_default_bank_account_id=<bank>``, and ``tax_registered``
     on the shared seed company. Without a teardown those mutations
     leak to every subsequent test in the session (the test stack runs
     alphabetically by directory and the seed company is shared across
@@ -74,13 +74,13 @@ async def _restore_seed_company_after_module():
             return  # No seed company — nothing to reset.
         # Atomic UPDATE: both columns at once so the CHECK constraint sees
         # the consistent (full, NULL bank) end state regardless of order.
-        # gst_registered also gets reset to the model default (False).
+        # tax_registered also gets reset to the model default (False).
         await session.execute(
             text(
                 "UPDATE companies SET "
                 "bookkeeping_mode = 'full', "
                 "cashbook_default_bank_account_id = NULL, "
-                "gst_registered = false "
+                "tax_registered = false "
                 "WHERE id = :cid"
             ).bindparams(cid=co.id)
         )
@@ -89,7 +89,7 @@ async def _restore_seed_company_after_module():
 
 async def _seed_company_into_cashbook_mode(
     *,
-    gst_registered: bool = False,
+    tax_registered: bool = False,
 ) -> tuple[uuid.UUID, uuid.UUID]:
     """Configure the test seed company into cashbook mode and return
     ``(tenant_id, company_id)``. Idempotent across tests."""
@@ -116,11 +116,11 @@ async def _seed_company_into_cashbook_mode(
 
         co.bookkeeping_mode = "cashbook"
         co.cashbook_default_bank_account_id = bank.id
-        co.gst_registered = gst_registered
+        co.tax_registered = tax_registered
 
         # Wire up GST accounts for auto-post if registered. Settings are
         # tenant-default so we set them once; safe to overwrite.
-        if gst_registered:
+        if tax_registered:
             await settings_svc.set(session, "gst_collected_account_code", "2-1310")
             await settings_svc.set(session, "gst_paid_account_code", "2-1330")
             await settings_svc.set(session, "gst_auto_post", "true")
@@ -145,7 +145,7 @@ def _trial_balance(entry: JournalEntry) -> tuple[Decimal, Decimal]:
 
 async def test_expense_non_registered_balances_two_lines() -> None:
     tenant_id, company_id = await _seed_company_into_cashbook_mode(
-        gst_registered=False
+        tax_registered=False
     )
     async with AsyncSessionLocal() as session:
         je = await record_cashbook_entry(
@@ -175,7 +175,7 @@ async def test_expense_non_registered_balances_two_lines() -> None:
 
 async def test_income_non_registered_balances_two_lines() -> None:
     tenant_id, company_id = await _seed_company_into_cashbook_mode(
-        gst_registered=False
+        tax_registered=False
     )
     async with AsyncSessionLocal() as session:
         je = await record_cashbook_entry(
@@ -203,7 +203,7 @@ async def test_income_non_registered_balances_two_lines() -> None:
 
 async def test_expense_registered_gst_three_lines() -> None:
     tenant_id, company_id = await _seed_company_into_cashbook_mode(
-        gst_registered=True
+        tax_registered=True
     )
     async with AsyncSessionLocal() as session:
         je = await record_cashbook_entry(
@@ -236,7 +236,7 @@ async def test_expense_registered_gst_three_lines() -> None:
 
 async def test_income_registered_gst_three_lines() -> None:
     tenant_id, company_id = await _seed_company_into_cashbook_mode(
-        gst_registered=True
+        tax_registered=True
     )
     async with AsyncSessionLocal() as session:
         je = await record_cashbook_entry(
@@ -266,7 +266,7 @@ async def test_expense_registered_gst_free_category_skips_gst_line() -> None:
     """Bank fees (EXP_BANK) are GST-free even for a GST-registered trader.
     No GST line should be generated."""
     tenant_id, company_id = await _seed_company_into_cashbook_mode(
-        gst_registered=True
+        tax_registered=True
     )
     async with AsyncSessionLocal() as session:
         je = await record_cashbook_entry(
@@ -294,7 +294,7 @@ async def test_expense_registered_gst_free_category_skips_gst_line() -> None:
 
 async def test_idempotency_replay_returns_same_entry() -> None:
     tenant_id, company_id = await _seed_company_into_cashbook_mode(
-        gst_registered=False
+        tax_registered=False
     )
     key = _new_key("idem")
 
@@ -332,7 +332,7 @@ async def test_idempotency_replay_returns_same_entry() -> None:
 
 async def test_different_keys_create_distinct_entries() -> None:
     tenant_id, company_id = await _seed_company_into_cashbook_mode(
-        gst_registered=False
+        tax_registered=False
     )
     async with AsyncSessionLocal() as session:
         a = await record_cashbook_entry(
@@ -492,7 +492,7 @@ async def test_missing_default_bank_typed_error() -> None:
 
 async def test_non_aud_base_currency_refused() -> None:
     tenant_id, company_id = await _seed_company_into_cashbook_mode(
-        gst_registered=False
+        tax_registered=False
     )
     async with AsyncSessionLocal() as session:
         from sqlalchemy import text
@@ -539,7 +539,7 @@ async def test_non_aud_base_currency_refused() -> None:
 
 async def test_unknown_category_rejected() -> None:
     tenant_id, company_id = await _seed_company_into_cashbook_mode(
-        gst_registered=False
+        tax_registered=False
     )
     async with AsyncSessionLocal() as session:
         with pytest.raises(CashbookCategoryError):
@@ -560,7 +560,7 @@ async def test_unknown_category_rejected() -> None:
 async def test_wrong_direction_rejected() -> None:
     """Logging an income category as an expense should be rejected."""
     tenant_id, company_id = await _seed_company_into_cashbook_mode(
-        gst_registered=False
+        tax_registered=False
     )
     async with AsyncSessionLocal() as session:
         with pytest.raises(CashbookCategoryError) as exc:
@@ -581,7 +581,7 @@ async def test_wrong_direction_rejected() -> None:
 
 async def test_transfer_category_rejected_in_income_expense_flow() -> None:
     tenant_id, company_id = await _seed_company_into_cashbook_mode(
-        gst_registered=False
+        tax_registered=False
     )
     async with AsyncSessionLocal() as session:
         with pytest.raises(CashbookCategoryError) as exc:
@@ -607,7 +607,7 @@ async def test_transfer_category_rejected_in_income_expense_flow() -> None:
 
 async def test_zero_amount_rejected() -> None:
     tenant_id, company_id = await _seed_company_into_cashbook_mode(
-        gst_registered=False
+        tax_registered=False
     )
     async with AsyncSessionLocal() as session:
         with pytest.raises(CashbookError, match="positive"):
@@ -627,7 +627,7 @@ async def test_zero_amount_rejected() -> None:
 
 async def test_negative_amount_rejected() -> None:
     tenant_id, company_id = await _seed_company_into_cashbook_mode(
-        gst_registered=False
+        tax_registered=False
     )
     async with AsyncSessionLocal() as session:
         with pytest.raises(CashbookError, match="positive"):
@@ -655,7 +655,7 @@ async def test_void_flips_status_and_posts_reversal() -> None:
     from saebooks.services.cashbook import void_cashbook_entry
 
     tenant_id, company_id = await _seed_company_into_cashbook_mode(
-        gst_registered=False
+        tax_registered=False
     )
     async with AsyncSessionLocal() as session:
         original = await record_cashbook_entry(
@@ -699,7 +699,7 @@ async def test_void_already_reversed_returns_existing_reversal() -> None:
     from saebooks.services.cashbook import void_cashbook_entry
 
     tenant_id, company_id = await _seed_company_into_cashbook_mode(
-        gst_registered=False
+        tax_registered=False
     )
     async with AsyncSessionLocal() as session:
         original = await record_cashbook_entry(
@@ -738,7 +738,7 @@ async def test_void_unknown_entry_raises_not_found() -> None:
     )
 
     tenant_id, company_id = await _seed_company_into_cashbook_mode(
-        gst_registered=False
+        tax_registered=False
     )
     async with AsyncSessionLocal() as session:
         with pytest.raises(CashbookEntryNotFound):
@@ -757,7 +757,7 @@ async def test_replace_voids_original_and_creates_replacement() -> None:
     from saebooks.services.cashbook import replace_cashbook_entry
 
     tenant_id, company_id = await _seed_company_into_cashbook_mode(
-        gst_registered=False
+        tax_registered=False
     )
     async with AsyncSessionLocal() as session:
         original = await record_cashbook_entry(
@@ -812,7 +812,7 @@ async def test_replace_idempotency_replay_returns_same_replacement() -> None:
     from saebooks.services.cashbook import replace_cashbook_entry
 
     tenant_id, company_id = await _seed_company_into_cashbook_mode(
-        gst_registered=False
+        tax_registered=False
     )
     async with AsyncSessionLocal() as session:
         original = await record_cashbook_entry(

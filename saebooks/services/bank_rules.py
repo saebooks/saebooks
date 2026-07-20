@@ -23,6 +23,7 @@ from saebooks.models.bank_rule import BankRule, MatchType
 from saebooks.models.bank_statement import BankStatementLine, StatementLineStatus
 from saebooks.models.journal import JournalEntry, JournalOrigin
 from saebooks.models.tax_code import TaxCode
+from saebooks.money import money_quantum
 from saebooks.services import audit as audit_svc
 from saebooks.services import journal as journal_svc
 
@@ -255,8 +256,8 @@ def _split_gst(gross: Decimal, rate_pct: Decimal) -> tuple[Decimal, Decimal]:
         return gross, Decimal("0")
     rate = rate_pct / Decimal("100")
     # gross = net * (1 + rate); gst = gross - net
-    net = (gross / (Decimal("1") + rate)).quantize(Decimal("0.01"))
-    gst = (gross - net).quantize(Decimal("0.01"))
+    net = (gross / (Decimal("1") + rate)).quantize(money_quantum(2))
+    gst = (gross - net).quantize(money_quantum(2))
     return net, gst
 
 

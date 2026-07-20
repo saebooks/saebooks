@@ -77,13 +77,13 @@ from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_active_company_id, get_session
 from saebooks.config import settings
 from saebooks.db import AsyncSessionLocal
-from saebooks.services import contacts as contacts_svc
-from saebooks.services.abr import (
+from saebooks.jurisdictions.au.abr import (
     AbrError,
     AbrNotConfiguredError,
     apply_to_contact,
     lookup_abn,
 )
+from saebooks.services import contacts as contacts_svc
 from saebooks.services.crypto import FieldEncryptionNotConfiguredError, decrypt_field
 from saebooks.services.features import (
     FLAG_ABR_LOOKUP,
@@ -759,7 +759,7 @@ async def abr_lookup(
         detail = str(exc)
         # The ABR API itself reports "unknown ABN" as a 200 response
         # carrying Message="No record found" / "Invalid ABN" (see
-        # services/abr/client.py docstring) — client.py re-raises both
+        # jurisdictions/au/abr/client.py docstring) — client.py re-raises both
         # as a plain AbrError, so we distinguish by message content.
         # Everything else (malformed-length guard, transport/JSON
         # errors) is a 400.

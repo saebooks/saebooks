@@ -1,0 +1,61 @@
+# Lithuania convenience chart of accounts — used at company creation.
+#
+# NO statutory chart of accounts exists for Lithuanian PRIVATE
+# companies (verified 2026-07-12): AVNT (Audito, apskaitos, turto
+# vertinimo ir nemokumo valdymo tarnyba, under the Ministry of
+# Finance) publishes a RECOMMENDED model chart ("pavyzdinis sąskaitų
+# planas", latest revision order No V2-1 of 2025-02-04) that AVNT
+# itself states is illustrative and NOT mandatory. (The mandatory
+# unified chart applies to PUBLIC-SECTOR entities only — different
+# regime, not this file.) This template therefore follows the AVNT
+# class conventions (1 non-current assets, 2 current assets, 3 equity,
+# 4 liabilities, 5 income, 6 expenses) as a convenience default and
+# makes NO statutory-CoA claim — the exact AVNT account numbers were
+# not transcribed from the AVNT PDF, so these are AVNT-CLASS-SHAPED
+# codes, not AVNT-verbatim codes (stated, not implied).
+#
+# Tax-code defaults reference the codes seeded in tax_codes.yaml.
+# Payroll accounts (6301/6302, 4460/4462/4463) are the accounts
+# jurisdictions/lt/__init__.py's PAYROLL_POSTING profile maps the
+# neutral payroll roles onto.
+table: chart_template
+key: [jurisdiction, account_code]
+rows:
+  # -- class 1/2: assets -------------------------------------------------
+  - {jurisdiction: LTU, account_code: "1200", account_name: "Machinery and equipment — at cost", account_type: ASSET, display_order: 10}
+  - {jurisdiction: LTU, account_code: "1210", account_name: "Machinery and equipment — accumulated depreciation", account_type: ASSET, display_order: 11}
+  - {jurisdiction: LTU, account_code: "2010", account_name: "Inventories (raw materials and goods)", account_type: ASSET, display_order: 20}
+  - {jurisdiction: LTU, account_code: "2410", account_name: "Trade receivables (Accounts Receivable)", account_type: ASSET, display_order: 30}
+  - {jurisdiction: LTU, account_code: "2431", account_name: "VAT receivable (pirkimo PVM)", account_type: ASSET, display_order: 31}
+  - {jurisdiction: LTU, account_code: "2900", account_name: "Prepayments and deferred charges", account_type: ASSET, display_order: 32}
+  - {jurisdiction: LTU, account_code: "2710", account_name: "Bank current account", account_type: ASSET, display_order: 40}
+  - {jurisdiction: LTU, account_code: "2720", account_name: "Cash on hand", account_type: ASSET, display_order: 41}
+  # -- class 3: equity ---------------------------------------------------
+  - {jurisdiction: LTU, account_code: "3010", account_name: "Authorised (share) capital", account_type: EQUITY, display_order: 200}
+  - {jurisdiction: LTU, account_code: "3410", account_name: "Retained earnings (nepaskirstytasis pelnas)", account_type: EQUITY, display_order: 210}
+  # -- class 4: liabilities ----------------------------------------------
+  - {jurisdiction: LTU, account_code: "4430", account_name: "Trade payables (Accounts Payable)", account_type: LIABILITY, display_order: 100}
+  - {jurisdiction: LTU, account_code: "4471", account_name: "VAT payable (pardavimo PVM)", account_type: LIABILITY, display_order: 110}
+  - {jurisdiction: LTU, account_code: "4473", account_name: "VAT self-assessed (reverse charge / EU acquisitions)", account_type: LIABILITY, display_order: 111}
+  - {jurisdiction: LTU, account_code: "4460", account_name: "Payroll taxes payable (GPM + employee Sodra + II pillar)", account_type: LIABILITY, display_order: 120}
+  - {jurisdiction: LTU, account_code: "4462", account_name: "Net wages payable (mokėtinas darbo užmokestis)", account_type: LIABILITY, display_order: 121}
+  - {jurisdiction: LTU, account_code: "4463", account_name: "Employer social insurance payable (darbdavio Sodra)", account_type: LIABILITY, display_order: 122}
+  - {jurisdiction: LTU, account_code: "4480", account_name: "Corporate income tax payable (mokėtinas pelno mokestis)", account_type: LIABILITY, display_order: 130}
+  - {jurisdiction: LTU, account_code: "4010", account_name: "Bank loans (non-current)", account_type: LIABILITY, display_order: 140}
+  # -- class 5: income ---------------------------------------------------
+  - {jurisdiction: LTU, account_code: "5001", account_name: "Sales — services", account_type: INCOME, default_tax_code: STD, display_order: 300}
+  - {jurisdiction: LTU, account_code: "5002", account_name: "Sales — goods", account_type: INCOME, default_tax_code: STD, display_order: 301}
+  - {jurisdiction: LTU, account_code: "5003", account_name: "Sales — intra-EU supplies (0%)", account_type: INCOME, default_tax_code: IC_SUPPLY_0, display_order: 302}
+  - {jurisdiction: LTU, account_code: "5004", account_name: "Sales — exports (0%)", account_type: INCOME, default_tax_code: EXPORT_0, display_order: 303}
+  - {jurisdiction: LTU, account_code: "5390", account_name: "Other operating income", account_type: OTHER_INCOME, default_tax_code: STD, display_order: 320}
+  - {jurisdiction: LTU, account_code: "5380", account_name: "Interest received", account_type: OTHER_INCOME, default_tax_code: OUT_OF_SCOPE, display_order: 321}
+  # -- class 6: expenses -------------------------------------------------
+  - {jurisdiction: LTU, account_code: "6000", account_name: "Purchases — materials and goods", account_type: COST_OF_SALES, default_tax_code: INPUT_STD, display_order: 400}
+  - {jurisdiction: LTU, account_code: "6001", account_name: "Purchases — intra-EU acquisitions", account_type: COST_OF_SALES, default_tax_code: EU_ACQ_GOODS, display_order: 401}
+  - {jurisdiction: LTU, account_code: "6301", account_name: "Wages and salaries (darbo užmokesčio sąnaudos)", account_type: EXPENSE, default_tax_code: OUT_OF_SCOPE, display_order: 500}
+  - {jurisdiction: LTU, account_code: "6302", account_name: "Employer social insurance expense (darbdavio Sodra)", account_type: EXPENSE, default_tax_code: OUT_OF_SCOPE, display_order: 501}
+  - {jurisdiction: LTU, account_code: "6310", account_name: "Rent", account_type: EXPENSE, default_tax_code: INPUT_STD, display_order: 510}
+  - {jurisdiction: LTU, account_code: "6311", account_name: "Utilities", account_type: EXPENSE, default_tax_code: INPUT_STD, display_order: 511}
+  - {jurisdiction: LTU, account_code: "6312", account_name: "Professional services (incl. foreign — Art 95 reverse charge)", account_type: EXPENSE, default_tax_code: INPUT_STD, display_order: 512}
+  - {jurisdiction: LTU, account_code: "6320", account_name: "Depreciation and amortisation", account_type: EXPENSE, default_tax_code: OUT_OF_SCOPE, display_order: 520}
+  - {jurisdiction: LTU, account_code: "6330", account_name: "Bank charges", account_type: EXPENSE, default_tax_code: INPUT_EXEMPT, display_order: 521}

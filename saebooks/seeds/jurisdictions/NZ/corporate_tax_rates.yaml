@@ -1,0 +1,42 @@
+# New Zealand income tax rates — company and trustee scopes.
+#
+# Source: ~/records/saebooks/nz-market-entry-strategy.md §5.3 (verified
+# against IRD 2026-07-12): company 28% flat (adversarially confirmed —
+# NO Budget 2025/2026 change); trustee income 39% from 1 April 2024,
+# 33% where trustee income <= NZD 10,000 (the de-minimis rate).
+#
+# entity_scope is a free-text scope key (corporate_tax_rate.py comment)
+# — "trustee_income" / "trustee_income_de_minimis" follow the same
+# convention latitude EE uses for its distribution-based scopes. The
+# NZD 10,000 de-minimis boundary itself has no column here; it is
+# documented in this comment and enforced by any consuming compute, not
+# by this rate row.
+#
+# INDIVIDUAL brackets (10.5/17.5/30/33/39) are NOT in this table — they
+# live in withholding_tables.yaml (nz_paye parameters), because the
+# income_tax_brackets reference table has NO unique constraint and the
+# idempotent seed loader cannot upsert into it (flagged in the build
+# summary; same gap class as consumption_tax_registration_threshold).
+#
+# tax_year convention: the NZ tax year ending 31 March 2026 is
+# tax_year 2026 (mirrors AU's FY-end-year convention).
+table: corporate_tax_rates
+key: [jurisdiction, sub_jurisdiction, tax_year, entity_scope]
+rows:
+  - jurisdiction: NZL
+    tax_year: 2026
+    entity_scope: standard
+    rate_percent: 28.0000
+    effective_from: 2025-04-01
+
+  - jurisdiction: NZL
+    tax_year: 2026
+    entity_scope: trustee_income
+    rate_percent: 39.0000
+    effective_from: 2025-04-01
+
+  - jurisdiction: NZL
+    tax_year: 2026
+    entity_scope: trustee_income_de_minimis
+    rate_percent: 33.0000
+    effective_from: 2025-04-01

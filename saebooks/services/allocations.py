@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import func as sa_func
@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.models.allocation_rule import AllocationRule
+from saebooks.money import round_money
 from saebooks.services import change_log as change_log_svc
 
 _DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
@@ -290,7 +291,7 @@ def compute_allocation_lines(
     lines.append({
         "account_id": str(rule.source_account_id),
         "debit": "0.00",
-        "credit": str(amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
+        "credit": str(round_money(amount)),
         "description": base_desc,
     })
 
@@ -300,7 +301,7 @@ def compute_allocation_lines(
         pct = Decimal(str(target["percentage"])) / Decimal("100")
         label = target.get("label") or target.get("account_id", "")
         if i < len(rule.targets) - 1:
-            share = (amount * pct).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            share = round_money(amount * pct)
         else:
             # Last target absorbs rounding
             share = amount - allocated

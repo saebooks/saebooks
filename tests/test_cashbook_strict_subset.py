@@ -175,10 +175,15 @@ def _postgres_type_name(col: object) -> str:
         SmallInteger,
         String,
         Text,
+        TypeDecorator,
     )
     from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 
     t = col.type  # type: ignore[attr-defined]
+    # Unwrap TypeDecorator wrappers (e.g. db_types.Money → Numeric(18, 4))
+    # so the comparison sees the storage type, not the wrapper class name.
+    while isinstance(t, TypeDecorator):
+        t = t.impl
     if isinstance(t, UUID):
         return "UUID"
     if isinstance(t, JSONB):

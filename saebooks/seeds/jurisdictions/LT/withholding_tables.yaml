@@ -1,0 +1,75 @@
+# Lithuania GPM (gyventojų pajamų mokestis) employment-income
+# withholding + NPD (neapmokestinamasis pajamų dydis) parameters,
+# calendar year 2026. jurisdiction = 'LTU'.
+#
+# Mirrors the AU/EE/UK withholding_tables.yaml shape: a formula_type
+# tag + a free-shape parameters JSONB blob interpreted by the consuming
+# service (jurisdictions/lt/payroll.py).
+#
+# THE 2026 SYSTEM IS NEW — Law No XV-343 (adopted 2025-06-26, in force
+# 2026-01-01) replaced the 20%/32% two-band system with THREE bands on
+# aggregated annual income, and replaced the two-formula NPD with ONE
+# income-dependent formula. Primary sources (fetched 2026-07-12): VMI
+# official letter R-2727 (2025-07-03); VMI current-rates page
+# (vmi.lt/evmi/5725); consolidated GPMĮ Art. 20 text in force
+# 2026-01-01; the 2026 State Social Funds Budget Indicators Law.
+#
+# Bands (annual aggregated income; VDU for tax purposes 2026 =
+# EUR 2,312.15/month — the FINAL figure from the indicators law, NOT
+# the EUR 2,304.50 projection quoted in mid-2025 circulars):
+#   20%  <= 36 VDU  = EUR  83,237.40
+#   25%  36-60 VDU  = EUR  83,237.40 - 138,729.00
+#   32%  >  60 VDU  = EUR 138,729.00 +
+# All three figures VERIFIED (VMI 5725 states them directly).
+#
+# NPD 2026 (GPMĮ Art. 20, statute text read directly — VERIFIED):
+#   monthly employment income <= MMA (EUR 1,153 at 2026-01-01)
+#       -> NPD = EUR 747
+#   above -> NPD = 747 - 0.49 x (income - 1,153); floor 0
+#       (exhausts at income ~= EUR 2,677.49)
+#   Fixed income-independent NPD for reduced working capacity:
+#       0-25% participation level (severe): EUR 1,127/month
+#       30-55% participation level (medium/mild): EUR 1,057/month
+#   Annual: MNPD max EUR 8,964 if annual income <= 12 x MMA
+#       (EUR 13,836); else 8,964 - 0.49 x (annual income - 13,836).
+#
+# Withholding-agent application: the progressive thresholds are ANNUAL;
+# jurisdictions/lt/payroll.py applies them period-proportionally
+# (annual/12 for the monthly LT payroll cycle) with the monthly NPD —
+# the employee's annual return settles the aggregate (documented
+# approximation in the engine docstring).
+#
+# MMA 2026 = EUR 1,153/month, minimum hourly EUR 7.05 (Government
+# Resolution No 700 of 2025-10-16 — VERIFIED, primary).
+table: withholding_tables
+key: [jurisdiction, code, effective_from]
+rows:
+  - jurisdiction: LTU
+    code: lt_gpm_progressive
+    name: "GPM — employment income, three progressive bands (2026 system, Law XV-343)"
+    withholding_type: wage_paye
+    formula_type: bracketed
+    parameters:
+      vdu_monthly: 2312.15
+      brackets:
+        - {name: first, lower: 0, upper: 83237.40, rate_percent: 20}
+        - {name: middle, lower: 83237.40, upper: 138729.00, rate_percent: 25}
+        - {name: top, lower: 138729.00, upper: null, rate_percent: 32}
+    effective_from: 2026-01-01
+
+  - jurisdiction: LTU
+    code: lt_npd_monthly
+    name: "NPD — monthly non-taxable amount formula (2026, GPMĮ Art. 20)"
+    withholding_type: wage_paye
+    formula_type: sliding_allowance
+    parameters:
+      base_npd: 747.00
+      mma_monthly: 1153.00
+      taper_rate: 0.49
+      # NPD = base_npd when income <= mma_monthly;
+      # else max(0, base_npd - taper_rate * (income - mma_monthly)).
+      disability_npd_severe: 1127.00      # 0-25% participation level
+      disability_npd_moderate: 1057.00    # 30-55% participation level
+      annual_max: 8964.00
+      annual_income_floor: 13836.00       # 12 x MMA
+    effective_from: 2026-01-01

@@ -205,6 +205,8 @@ async def create(
     is_one_off: bool = False,
     payment_terms_basis: PaymentTermsBasis | None = None,
     payment_terms_days: int | None = None,
+    e_invoice_recipient: bool = False,
+    peppol_participant_id: str | None = None,
 ) -> Contact:
     """Create a new contact. Validate ABN format if provided (11 digits)."""
     if abn is not None:
@@ -235,6 +237,8 @@ async def create(
         is_one_off=is_one_off,
         payment_terms_basis=payment_terms_basis,
         payment_terms_days=payment_terms_days,
+        e_invoice_recipient=e_invoice_recipient,
+        peppol_participant_id=peppol_participant_id,
         version=1,
     )
     session.add(contact)
@@ -295,7 +299,8 @@ async def update(
         "currency_code",
         "tfn", "share_percentage", "default_income_classification",
         "is_tpar_supplier", "is_one_off",
-        "payment_terms_basis", "payment_terms_days", }
+        "payment_terms_basis", "payment_terms_days",
+        "e_invoice_recipient", "peppol_participant_id", }
 
     before = audit_svc.capture(contact)
     for key, value in kwargs.items():

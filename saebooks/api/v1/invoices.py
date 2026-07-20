@@ -1000,6 +1000,89 @@ async def get_invoice_pdf(
     )
 
 
+@router.get("/{invoice_id}/einvoice.xml")
+async def get_invoice_einvoice_xml(
+    invoice_id: UUID,
+    request: Request,
+    bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> Response:
+    """Generate the EN 16931 / Peppol BIS Billing 3.0 UBL Invoice XML for a
+    POSTED, EUR-denominated invoice. Always regenerated; never stored.
+
+    Seller identity: the generator resolves the seller's primary registry
+    number (BT-30) from the company's business identifiers; this route takes
+    the seller country (BT-40) from ``Company.jurisdiction`` and resolves the
+    seller VAT number (BT-31) from the company's ``<juris>_vat`` business
+    identifier (e.g. ``ee_vat``) — the same identifier registry the regcode
+    comes from. BT-31 is mandatory for a Standard-rated line under EN 16931
+    (BR-S-02); if the company has not recorded a VAT identifier, the
+    generator refuses (422) rather than emit a standard-rate e-invoice with
+    no VAT id on it. The engine has no structured street-address column, so
+    street/city/postal are omitted — EN 16931 permits a country-only address.
+
+    Errors mirror the generator's own refusals rather than 500-ing:
+    * invoice not found / RLS-invisible / foreign tenant → 404
+    * DRAFT, non-EUR, missing statutory identity (e.g. no resolvable seller
+      registrikood, seller VAT id, or buyer country) → 422 with the
+      generator's message.
+    """
+    from sqlalchemy import select as sa_select
+
+    from saebooks.models.company import Company
+    from saebooks.services import business_identifiers as biz_ids
+    from saebooks.services.einvoice.generator import (
+        EInvoiceError,
+        SellerIdentity,
+        generate_einvoice,
+    )
+
+    tenant_id = resolve_tenant_id(request)
+    inv = await svc.api_get(session, invoice_id, tenant_id=tenant_id, company_id=company_id)
+    if inv is None:
+        raise HTTPException(404, "Invoice not found")
+
+    company = (
+        await session.execute(sa_select(Company).where(Company.id == inv.company_id))
+    ).scalars().first()
+    # Company.jurisdiction is the 2-letter ISO-ish routing key (e.g. "EE");
+    # use it for the seller country when well-formed, else fall back to the
+    # SellerIdentity default. Anything not 2 alpha chars is not a valid
+    # BT-40 country code.
+    juris = (company.jurisdiction or "").strip() if company is not None else ""
+    country_ok = len(juris) == 2 and juris.isalpha()
+
+    # Seller VAT number (BT-31) from the jurisdiction's ``<juris>_vat``
+    # business identifier (ee_vat, uk_vat, …). None when unrecorded — the
+    # generator then refuses a Standard-rated line (BR-S-02) with a 422.
+    seller_vat: str | None = None
+    if company is not None and country_ok:
+        vat_scheme = f"{juris.lower()}_vat"
+        if vat_scheme in biz_ids.KNOWN_SCHEMES:
+            row = await biz_ids.get(session, company.id, vat_scheme)
+            seller_vat = row.value if row is not None else None
+
+    seller = (
+        SellerIdentity(country_code=juris.upper(), vat_number=seller_vat)
+        if country_ok
+        else SellerIdentity(vat_number=seller_vat)
+    )
+
+    try:
+        xml_bytes = await generate_einvoice(session, invoice_id, seller=seller)
+    except EInvoiceError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+    number = inv.number or str(inv.id)[:8]
+    filename = f"invoice-{number}.xml"
+    return Response(
+        content=xml_bytes,
+        media_type="application/xml",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
 @router.post("/{invoice_id}/send-email")
 async def post_invoice_send_email(
     invoice_id: UUID,

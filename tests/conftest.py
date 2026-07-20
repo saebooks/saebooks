@@ -77,7 +77,18 @@ def _bootstrap_sqlite_schema() -> None:
     asyncio.run(_run())
 
 
+# Job C registration inversion: jurisdiction packages self-register on
+# import, but nothing imports them at module load time any more (the
+# core hubs stopped doing that). Explicitly bootstrap here — right
+# after importing the app — so every jurisdiction module is registered
+# before ANY test module's own top-level code runs (pytest loads
+# conftest.py before the test modules in its directory), matching the
+# pre-Job-C behaviour where top-level `from saebooks.services import
+# jurisdiction_modules` eagerly registered everyone as a side effect.
+from saebooks.bootstrap.jurisdictions import ensure_loaded as _ejl
 from saebooks.main import app
+
+_ejl()
 
 
 # ---------------------------------------------------------------------------
@@ -300,7 +311,7 @@ def pytest_ignore_collect(collection_path, config):  # type: ignore[no-untyped-d
 # --- Session-wide seed-company reset -----------------------------------------
 # tests/api/v1/test_cashbook.py and a handful of other modules mutate the
 # shared seed company into bookkeeping_mode=cashbook (with a non-NULL
-# cashbook_default_bank_account_id and possibly gst_registered=true) but
+# cashbook_default_bank_account_id and possibly tax_registered=true) but
 # do not always restore it. That leaks across test files because the
 # seed company is selected by ``ORDER BY created_at`` and pinned to
 # epoch (see seed_coa above) — so every later test that picks "the
@@ -317,7 +328,7 @@ def pytest_ignore_collect(collection_path, config):  # type: ignore[no-untyped-d
 # ``ck_cashbook_default_bank_requires_cashbook_mode`` CHECK
 # constraint (migration 0126) sees the consistent
 # (full, NULL bank) end state regardless of column-update order.
-# ``gst_registered`` is also reset to the model default (False) since
+# ``tax_registered`` is also reset to the model default (False) since
 # the cashbook seed helper flips it on for GST-registered branches.
 
 @pytest.fixture(autouse=True)
@@ -354,7 +365,7 @@ async def _reset_seed_company_to_full_after_test() -> None:
                 "UPDATE companies SET "
                 "bookkeeping_mode = 'full', "
                 "cashbook_default_bank_account_id = NULL, "
-                "gst_registered = false "
+                "tax_registered = false "
                 "WHERE id = :cid"
             ).bindparams(cid=co.id)
         )

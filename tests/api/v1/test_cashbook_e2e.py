@@ -64,7 +64,7 @@ async def _seed_state() -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
         ).scalar_one()
         co.bookkeeping_mode = "cashbook"
         co.cashbook_default_bank_account_id = bank.id
-        co.gst_registered = False
+        co.tax_registered = False
         co.cashbook_categories = None
         await session.commit()
         return co.tenant_id, co.id, bank.id

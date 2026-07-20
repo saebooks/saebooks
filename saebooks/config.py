@@ -63,6 +63,11 @@ class Settings(BaseSettings):
     seed_company_abn: str = Field(default="", alias="SEED_COMPANY_ABN")
     seed_company_acn: str = Field(default="", alias="SEED_COMPANY_ACN")
     seed_company_base_currency: str = Field(default="AUD", alias="SEED_COMPANY_BASE_CURRENCY")
+    # The seed company's jurisdiction. Defaults to AU (Richard's home
+    # books) — the CORE model default is the neutral "XX" sentinel, so the
+    # seed company must state its jurisdiction explicitly rather than
+    # inheriting a national default from the engine.
+    seed_company_jurisdiction: str = Field(default="AU", alias="SEED_COMPANY_JURISDICTION")
     seed_company_fin_year_start_month: int = Field(
         default=7, alias="SEED_COMPANY_FIN_YEAR_START_MONTH"
     )
@@ -702,6 +707,15 @@ class Settings(BaseSettings):
     demo_template_max_age: int = Field(
         default=604800, alias="DEMO_TEMPLATE_MAX_AGE"
     )
+    # demo_template_company_id — Option A escape hatch. When set to a company
+    # UUID, the clone points at that operator-seeded company as its template
+    # instead of the engine building/owning one per flavour. The engine then
+    # NEVER purges/re-seeds it (_refresh_stale_template is a no-op) — its
+    # lifecycle belongs to the operator. Empty (default) = engine-owned
+    # template per DEMO_SEED_FLAVOUR.
+    demo_template_company_id: str = Field(
+        default="", alias="DEMO_TEMPLATE_COMPANY_ID"
+    )
 
     # ---------------------------------------------------------------- #
     # Scheduled backups (planned-modules Wave E, FLAG_SCHEDULED_BACKUPS) #
@@ -731,5 +745,31 @@ class Settings(BaseSettings):
     @property
     def oauth_allowed_emails_set(self) -> set[str]:
         return {e.strip().lower() for e in self.oauth_allowed_emails.split(",") if e.strip()}
+
+    # ---------------------------------------------------------------- #
+    # Jurisdiction-module bootstrap (Job C registration inversion)      #
+    # ---------------------------------------------------------------- #
+    # Boot-time selection of which jurisdiction bolt-on modules
+    # self-register (``saebooks.bootstrap.jurisdictions.ensure_loaded``).
+    # This is the LOADABLE SET (a restart-time config choice) — distinct
+    # from the PER-COMPANY ``Company.jurisdiction`` runtime choice, which
+    # picks from whatever this set actually loaded. Comma-separated,
+    # whitespace and case-insensitive, same pattern as
+    # ``oauth_allowed_emails`` above.
+    #
+    # ``ee`` is included: its tax engine is core-native
+    # (``services/tax_engine/ee.py``), but the ``jurisdictions/ee``
+    # package self-registers its ``ee/default`` chart-template applier and
+    # control-account codes on import, so ``bootstrap.jurisdictions``
+    # loads it from this set (import-light — see that package's docstring).
+    enabled_jurisdictions: str = Field(
+        default="au,nz,uk,lt,lv,ee", alias="SAEBOOKS_ENABLED_JURISDICTIONS"
+    )
+
+    @property
+    def enabled_jurisdictions_set(self) -> set[str]:
+        return {
+            c.strip().lower() for c in self.enabled_jurisdictions.split(",") if c.strip()
+        }
 
 settings = Settings()

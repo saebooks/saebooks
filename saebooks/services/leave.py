@@ -19,15 +19,15 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.models.leave import LeaveAccrual, LeaveAccrualKind, LeaveBalance, LeaveType
+from saebooks.money import round_money
 
 _DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
-_TWOPLACES = Decimal("0.01")
 
 # NES baseline rates (overridable per-employee in v1.1).
 _ANNUAL_PER_OT_HOUR = Decimal("1") / Decimal("13")   # 4 weeks / 52 weeks
@@ -41,7 +41,7 @@ class LeaveError(Exception):
 
 
 def _q2(value: Decimal) -> Decimal:
-    return value.quantize(_TWOPLACES, rounding=ROUND_HALF_UP)
+    return round_money(value)
 
 
 @dataclass

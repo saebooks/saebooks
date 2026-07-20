@@ -315,19 +315,37 @@ async def main() -> None:
         locks_seeded = await _seed_period_locks(session, company)
         logger.info("Period locks seeded: %d", locks_seeded)
 
-        raw_sources = [
-            ("raw_au_tax_codes", "account.tax-au.csv"),
-            ("raw_au_tax_groups", "account.tax.group-au.csv"),
-            ("raw_au_fiscal_positions", "account.fiscal.position-au.csv"),
-            ("raw_au_account_tags", "account.account.tag.csv"),
-            ("raw_au_depreciation_models", "account.depreciation.model-au.csv"),
-        ]
-        for table, name in raw_sources:
-            n = await _load_raw(session, table, name)
-            logger.info("  %s: %d rows", table, n)
+        # The raw_* JSONB staging tables and the typed depreciation_models
+        # catalogue are populated with Postgres-only DML (``CAST(... AS jsonb)``,
+        # ``ON CONFLICT``) against tables that live in the reference/Postgres
+        # schema, not the ORM metadata that ``bootstrap_schema`` builds. On the
+        # SQLite Cashbook backend (single-device community / mobile) those
+        # tables don't exist and the syntax isn't portable — conftest documents
+        # the same limitation and skips this seed on SQLite. Everything the core
+        # double-entry engine needs (company, tax codes, chart of accounts,
+        # period locks) is already loaded above via reference-free ORM inserts,
+        # so we simply skip the Postgres-only reference-data load on SQLite
+        # rather than crash the seed (and, in a container, the whole boot).
+        is_sqlite = session.bind is not None and session.bind.dialect.name == "sqlite"
+        if is_sqlite:
+            logger.info(
+                "SQLite backend — skipping Postgres-only reference-data load "
+                "(raw_* staging tables + depreciation_models catalogue)."
+            )
+        else:
+            raw_sources = [
+                ("raw_au_tax_codes", "account.tax-au.csv"),
+                ("raw_au_tax_groups", "account.tax.group-au.csv"),
+                ("raw_au_fiscal_positions", "account.fiscal.position-au.csv"),
+                ("raw_au_account_tags", "account.account.tag.csv"),
+                ("raw_au_depreciation_models", "account.depreciation.model-au.csv"),
+            ]
+            for table, name in raw_sources:
+                n = await _load_raw(session, table, name)
+                logger.info("  %s: %d rows", table, n)
 
-        dep_models = await _load_depreciation_models(session)
-        logger.info("  depreciation_models (typed): %d rows", dep_models)
+            dep_models = await _load_depreciation_models(session)
+            logger.info("  depreciation_models (typed): %d rows", dep_models)
 
 
 if __name__ == "__main__":

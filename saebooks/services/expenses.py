@@ -21,7 +21,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, select
@@ -33,12 +33,12 @@ from saebooks.models.contact import Contact
 from saebooks.models.expense import Expense, ExpenseLine, ExpenseStatus
 from saebooks.models.journal import JournalOrigin
 from saebooks.models.tax_code import TaxCode
+from saebooks.money import decimal_places_for, round_money
 from saebooks.services import change_log as change_log_svc
 from saebooks.services import journal as journal_svc
 from saebooks.services import numbering
 from saebooks.services.tax_engine.ee import RC_DUAL_REPORTING_TYPES
 
-_TWOPLACES = Decimal("0.01")
 _DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 # Account types that may credit an expense at checkout. Anything else
@@ -70,8 +70,9 @@ class VersionConflict(Exception):
 # ---------------------------------------------------------------------- #
 
 
-def _q2(value: Decimal) -> Decimal:
-    return value.quantize(_TWOPLACES, rounding=ROUND_HALF_UP)
+def _q2(value: Decimal, places: int = 2) -> Decimal:
+    """ROUND_HALF_UP to a currency's minor unit (default AUD/base — 2)."""
+    return round_money(value, places)
 
 
 def _as_uuid(value: object) -> uuid.UUID:
@@ -127,12 +128,12 @@ class _LineInput:
 
 
 def _compute_line_totals(
-    line: _LineInput, tax_rate: Decimal
+    line: _LineInput, tax_rate: Decimal, places: int = 2
 ) -> tuple[Decimal, Decimal, Decimal]:
     gross = line.quantity * line.unit_price
     discount_factor = (Decimal("100") - line.discount_pct) / Decimal("100")
-    subtotal = _q2(gross * discount_factor)
-    tax = _q2(subtotal * tax_rate / Decimal("100"))
+    subtotal = _q2(gross * discount_factor, places)
+    tax = _q2(subtotal * tax_rate / Decimal("100"), places)
     total = subtotal + tax
     return subtotal, tax, total
 
@@ -318,7 +319,9 @@ async def _replace_lines(
             project_id=project_id if isinstance(project_id, uuid.UUID) else None,
         )
         tax_rate = await _resolve_tax_rate(session, line_input.tax_code_id, company_id)
-        subtotal, tax, total = _compute_line_totals(line_input, tax_rate)
+        subtotal, tax, total = _compute_line_totals(
+            line_input, tax_rate, decimal_places_for(expense.currency)
+        )
         session.add(
             ExpenseLine(
                 expense_id=expense.id,
@@ -346,8 +349,9 @@ async def _recalc(session: AsyncSession, expense: Expense) -> None:
     ).scalars().all()
     subtotal = sum((ln.line_subtotal for ln in lines), Decimal("0"))
     tax = sum((ln.line_tax for ln in lines), Decimal("0"))
-    expense.subtotal = _q2(Decimal(subtotal))
-    expense.tax_total = _q2(Decimal(tax))
+    doc_places = decimal_places_for(expense.currency)
+    expense.subtotal = _q2(Decimal(subtotal), doc_places)
+    expense.tax_total = _q2(Decimal(tax), doc_places)
     expense.total = expense.subtotal + expense.tax_total
 
     rate = Decimal(str(expense.fx_rate or Decimal("1")))

@@ -140,6 +140,81 @@ async def ensure_au_seed(session: AsyncSession, company_id: uuid.UUID) -> int:
     return inserted
 
 
+# Canonical EE käibemaks (VAT) starter set — the company-side counterpart of
+# AU_SEED, sized to the same "small starter, user can add more" bar. Codes
+# match the account-level ``tax_code_default`` values the EE chart template
+# assigns (STD / INPUT_STD / ZERO_EXPORT / INPUT_EXEMPT / NTR — see
+# jurisdictions/ee/chart.py) so a freshly-charted EE company's account defaults
+# resolve, plus the reduced rates and the EU-acquisition reverse-charge code.
+# ``reporting_type`` follows the KMD company-side convention documented in
+# seeds/jurisdictions/EE/tax_codes.yaml; ``rate`` drives posting (the EE tax
+# engine computes tax = base * rate/100, direction from account type). The
+# reverse-charge code carries ``rc_eu_acq_services`` — the tag EETaxEngine's
+# RC_DUAL_REPORTING_TYPES fans out into a self-assessed output + deductible
+# input component pair. Standard rate 24% (KMS §15, from 2025-07-01).
+EE_SEED: list[dict[str, object]] = [
+    {"code": "STD", "name": "Käibemaks 24%", "rate": Decimal("24.000"),
+     "reporting_type": "standard",
+     "description": "Standard-rate käibemaks (VAT) on domestic sales (24%)."},
+    {"code": "RED13", "name": "Käibemaks 13% (majutus)", "rate": Decimal("13.000"),
+     "reporting_type": "reduced_13",
+     "description": "Reduced-rate VAT 13% — accommodation services."},
+    {"code": "RED9", "name": "Käibemaks 9% (raamatud, ravimid)", "rate": Decimal("9.000"),
+     "reporting_type": "reduced_9",
+     "description": "Reduced-rate VAT 9% — books, press, medicines."},
+    {"code": "ZERO_EXPORT", "name": "0% — eksport / ühendusesisene käive",
+     "rate": Decimal("0.000"), "reporting_type": "zero_export",
+     "description": "Zero-rated exports and intra-Community supplies (KMS §15(3)-(4))."},
+    {"code": "EXEMPT", "name": "Maksuvaba käive", "rate": Decimal("0.000"),
+     "reporting_type": "exempt",
+     "description": "VAT-exempt supplies — financial, insurance, health (KMS §16)."},
+    {"code": "INPUT_STD", "name": "Sisendkäibemaks 24%", "rate": Decimal("24.000"),
+     "reporting_type": "input_std",
+     "description": "Deductible input VAT 24% on domestic purchases."},
+    {"code": "INPUT_EXEMPT", "name": "Maksuvaba ost", "rate": Decimal("0.000"),
+     "reporting_type": "input_exempt",
+     "description": "Exempt purchases (e.g. bank fees) — no input VAT."},
+    {"code": "RC_EU_ACQ", "name": "Pöördmaksustamine — EU teenuste soetamine",
+     "rate": Decimal("24.000"), "reporting_type": "rc_eu_acq_services",
+     "description": (
+         "Reverse-charge EU acquisition of services — recipient self-assesses "
+         "VAT (output KMD box 1 + deductible input KMD box 5)."
+     )},
+    {"code": "NTR", "name": "Ei kuulu deklareerimisele", "rate": Decimal("0.000"),
+     "reporting_type": "no_tax",
+     "description": "Outside VAT scope (wages, transfers, drawings)."},
+]
+
+
+async def ensure_ee_seed(session: AsyncSession, company_id: uuid.UUID) -> int:
+    """Idempotent: create any missing canonical EE käibemaks tax codes for
+    this company. Sibling of ``ensure_au_seed``; rows are jurisdiction-tagged
+    ``EE`` / ``tax_system=VAT``. Like ``ensure_au_seed`` these carry the model
+    DEFAULT tenant_id — the caller (the EE demo seeder) re-stamps tenant_id
+    onto them, exactly as the AU path does for RLS isolation."""
+    existing = await session.execute(
+        select(TaxCode.code).where(
+            TaxCode.company_id == company_id, TaxCode.archived_at.is_(None)
+        )
+    )
+    have = {code for (code,) in existing.all()}
+    inserted = 0
+    for row in EE_SEED:
+        if row["code"] in have:
+            continue
+        session.add(
+            TaxCode(
+                company_id=company_id,
+                tax_system="VAT",
+                jurisdiction="EE",
+                **row,
+            )
+        )
+        inserted += 1
+    await session.commit()
+    return inserted
+
+
 # ---------------------------------------------------------------------------
 # International reference tax-code set (0165).
 #

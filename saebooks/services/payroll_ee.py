@@ -8,7 +8,7 @@ there was no EE payroll compute anywhere, so a posted EE pay run could
 not honestly carry the figures TSD Lisa 1 needs. This module is the
 compute; ``services.pay_runs_v2._compute_ee`` is the caller that wires
 it into a pay-run line (parallel to the AU path's
-``services.payg``/``services.super_calc`` split).
+``jurisdictions.au.payg``/``jurisdictions.au.super_calc`` split).
 
 Rates come from the reference DB when configured — the SAME seeded rows
 KMD/TSD generation will read (``withholding_tables.ee_tsd_income_tax_paye``,
@@ -57,7 +57,7 @@ Scope-narrowing, flagged (not silently dropped):
   this scope (module docstring above) — and guessing a proration rule
   would just trade one unconfirmed behaviour for another with no
   citation. Also pre-existing/systemic: the AU path
-  (``services.payg``/``services.super_calc``) has the same gap, so this
+  (``jurisdictions.au.payg``/``jurisdictions.au.super_calc``) has the same gap, so this
   is not a regression this module introduced. Deferred to whoever
   confirms the EE ordering; do not treat the current full-floor
   behaviour as correct for a mid-month hire/termination without that
@@ -91,9 +91,10 @@ from saebooks.models.reference.social_contribution_scheme import (
     SocialContributionScheme,
 )
 from saebooks.models.reference.withholding_table import WithholdingTable
+from saebooks.money import money_quantum
 from saebooks.services.tax_return_generator import _to_reference_jurisdiction
 
-_TWO_PLACES = Decimal("0.01")
+_TWO_PLACES = money_quantum(2)
 _HUNDRED = Decimal("100")
 _ZERO = Decimal("0")
 
@@ -393,9 +394,9 @@ async def compute_ee_payroll(
 
 
 __all__ = [
+    "PILLAR_II_ELECTIVE_RATES",
     "EEPayrollResult",
     "EERates",
-    "PILLAR_II_ELECTIVE_RATES",
     "PayrollEEError",
     "compute_ee_payroll",
     "resolve_ee_rates",

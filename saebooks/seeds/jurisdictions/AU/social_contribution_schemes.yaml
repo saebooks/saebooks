@@ -1,6 +1,8 @@
 # Australian employee social-contribution schemes (M1.5 · T7).
-# jurisdiction is the 3-char code 'AUS'. This is a jurisdiction-neutral
-# canonical table alongside (not replacing) medicare_levy — see
+# jurisdiction is the 3-char code 'AUS'. This is the jurisdiction-neutral
+# canonical table; the AU-named ``medicare_levy`` table it once sat
+# alongside was dropped (M1.5 Wave 3a rename sweep — zero consumers,
+# unseeded) so this table is now the sole home for this data. See
 # social_contribution_scheme.py for the rationale.
 table: social_contribution_schemes
 key: [jurisdiction, code, effective_from]

@@ -1,0 +1,208 @@
+# United Kingdom VAT reference tax codes — feeds VAT100 box aggregation
+# (see tax_return_box_definitions.yaml in this directory) and
+# chart_template.yaml's default_tax_code assignments.
+#
+# jurisdiction is the 3-char reference-DB code 'GBR' (directory name 'UK'
+# is filesystem-only — see saebooks/services/reference/loader.py and
+# saebooks/services/tax_return_generator.py::_JURISDICTION_TO_REFERENCE_CODE
+# for the 2-char engine code <-> 3-char reference code mapping).
+#
+# Rates (primary sources, fetched 2026-07-12):
+#   20%  standard rate, since 2011-01-04 (VATA 1994 s.2 as amended)
+#    5%  reduced rate (domestic fuel/power, energy-saving materials,
+#        children's car seats, certain residential conversions), since
+#        1997-09-01
+#    0%  zero rate (most food, books/newspapers, children's clothing,
+#        exports of goods, new-build dwellings)
+#   exempt (insurance, finance, education, health, land) — NOT zero:
+#        no output VAT AND no input-credit entitlement on directly
+#        attributable inputs (partial exemption — see vat_schemes.yaml)
+#   outside the scope (wages, taxes, dividends, non-business) — appears
+#        in NO VAT100 box
+#
+# Company-side TaxCode.reporting_type convention this seed's box
+# definitions (tax_return_box_definitions.yaml) key their
+# feeder_tax_codes off:
+#   standard / reduced / zero / exempt
+#     — ordinary rate buckets; the income/purchase account-type bucket
+#       separates the sale side (boxes 1/6) from the purchase side
+#       (boxes 4/7), mirroring AU's single "taxable" tag feeding both
+#       G1 and G11.
+#   outside_scope
+#     — posts with no tax and feeds NO box (deliberately absent from
+#       every feeder_tax_codes list).
+#   rc_construction
+#     — buyer-side domestic reverse charge for construction services
+#       (VAT (Section 55A) order, in force 2021-03-01): the CUSTOMER
+#       self-assesses output VAT (box 1) and reclaims input VAT
+#       (box 4); net value feeds box 7. Two-component fan-out via
+#       jurisdictions.uk.tax.UKTaxEngine (EE rc_eu_acq_* precedent).
+#   rc_construction_supply
+#     — seller side of the same DRC supply: no VAT charged; net value
+#       feeds box 6 only.
+#   rc_services_intl
+#     — reverse charge on services received from abroad (VATA 1994
+#       s.7A/s.8): output box 1 + input box 4; per VAT Notice 700/12
+#       the net value feeds BOTH box 6 and box 7.
+#   pva_import
+#     — postponed VAT accounting on imports (since 2021-01-01):
+#       import VAT declared in box 1 and reclaimed in box 4 in the
+#       same period; goods value feeds box 7 (VAT Notice 700/12,
+#       fetched 2026-07-12: "Postponed import VAT: include in Box 1
+#       (output) and Box 4 (input reclaim)").
+#   xi_eu_acq_goods
+#     — Northern Ireland protocol: acquisitions of goods in NI from EU
+#       member states. Acquisition VAT in box 2, reclaim in box 4,
+#       value in boxes 7 and 9 (VAT Notice 700/12 box wording, fetched
+#       2026-07-12).
+#   xi_eu_dispatch
+#     — NI protocol: dispatches of goods from NI to EU member states.
+#       Zero-rated; value in boxes 6 and 8.
+#
+# Reduced-rate (5%) variants of the reverse-charge codes are NOT seeded
+# in this wave — DRC on reduced-rate construction work and 5% PVA
+# imports are real but rare; adding them is the same mechanical change
+# as the 20% rows (the UK engine derives tax from the row's own rate,
+# so no engine change would be needed). Flagged, not silently dropped.
+table: tax_codes
+key: [jurisdiction, code, effective_from]
+rows:
+  - jurisdiction: GBR
+    code: STD
+    name: VAT standard rate — sales (20%)
+    rate_percent: 20.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    gl_account_hint: VAT Payable
+    effective_from: 2011-01-04
+    report_box_keys: ["VAT100:1", "VAT100:6"]
+
+  - jurisdiction: GBR
+    code: INPUT_STD
+    name: VAT standard rate — purchases (20%)
+    rate_percent: 20.0000
+    direction: purchase
+    gl_account_hint: VAT Receivable
+    effective_from: 2011-01-04
+    report_box_keys: ["VAT100:4", "VAT100:7"]
+
+  - jurisdiction: GBR
+    code: RED
+    name: VAT reduced rate — sales (5%)
+    rate_percent: 5.0000
+    direction: sale
+    gl_account_hint: VAT Payable
+    effective_from: 1997-09-01
+    report_box_keys: ["VAT100:1", "VAT100:6"]
+
+  - jurisdiction: GBR
+    code: INPUT_RED
+    name: VAT reduced rate — purchases (5%)
+    rate_percent: 5.0000
+    direction: purchase
+    gl_account_hint: VAT Receivable
+    effective_from: 1997-09-01
+    report_box_keys: ["VAT100:4", "VAT100:7"]
+
+  # effective_from 1973-04-01 = UK VAT inception; zero/exempt/outside-
+  # scope categories have existed since then (category membership has
+  # shifted over time, but the categories themselves are original).
+  - jurisdiction: GBR
+    code: ZERO
+    name: VAT zero-rated — sales (incl. exports of goods)
+    rate_percent: 0.0000
+    direction: sale
+    gl_account_hint: VAT Payable
+    effective_from: 1973-04-01
+    report_box_keys: ["VAT100:6"]
+
+  - jurisdiction: GBR
+    code: INPUT_ZERO
+    name: VAT zero-rated — purchases
+    rate_percent: 0.0000
+    direction: purchase
+    gl_account_hint: VAT Receivable
+    effective_from: 1973-04-01
+    report_box_keys: ["VAT100:7"]
+
+  - jurisdiction: GBR
+    code: EXEMPT
+    name: VAT exempt — sales
+    rate_percent: 0.0000
+    direction: sale
+    input_credit_recoverable: false
+    effective_from: 1973-04-01
+    report_box_keys: ["VAT100:6"]
+
+  - jurisdiction: GBR
+    code: INPUT_EXEMPT
+    name: VAT exempt — purchases
+    rate_percent: 0.0000
+    direction: purchase
+    input_credit_recoverable: false
+    effective_from: 1973-04-01
+    report_box_keys: ["VAT100:7"]
+
+  - jurisdiction: GBR
+    code: OUT_OF_SCOPE
+    name: Outside the scope of UK VAT
+    rate_percent: 0.0000
+    direction: both
+    effective_from: 1973-04-01
+
+  - jurisdiction: GBR
+    code: RC_CONSTRUCTION
+    name: Domestic reverse charge — construction services received (20%)
+    rate_percent: 20.0000
+    direction: purchase
+    reverse_charge: true
+    gl_account_hint: VAT Payable
+    effective_from: 2021-03-01
+    report_box_keys: ["VAT100:1", "VAT100:4", "VAT100:7"]
+
+  - jurisdiction: GBR
+    code: RC_CONSTRUCTION_SUPPLY
+    name: Domestic reverse charge — construction services supplied (customer accounts)
+    rate_percent: 0.0000
+    direction: sale
+    effective_from: 2021-03-01
+    report_box_keys: ["VAT100:6"]
+
+  - jurisdiction: GBR
+    code: RC_SERVICES_INTL
+    name: Reverse charge — services received from abroad (20%)
+    rate_percent: 20.0000
+    direction: purchase
+    reverse_charge: true
+    gl_account_hint: VAT Payable
+    effective_from: 2010-01-01
+    report_box_keys: ["VAT100:1", "VAT100:4", "VAT100:6", "VAT100:7"]
+
+  - jurisdiction: GBR
+    code: PVA_IMPORT
+    name: Postponed VAT accounting — imports (20%)
+    rate_percent: 20.0000
+    direction: purchase
+    reverse_charge: true
+    gl_account_hint: VAT Payable
+    effective_from: 2021-01-01
+    report_box_keys: ["VAT100:1", "VAT100:4", "VAT100:7"]
+
+  - jurisdiction: GBR
+    code: XI_EU_ACQ_GOODS
+    name: NI protocol — EU acquisition of goods in Northern Ireland (20%)
+    rate_percent: 20.0000
+    direction: purchase
+    reverse_charge: true
+    gl_account_hint: VAT Payable
+    effective_from: 2021-01-01
+    report_box_keys: ["VAT100:2", "VAT100:4", "VAT100:7", "VAT100:9"]
+
+  - jurisdiction: GBR
+    code: XI_EU_DISPATCH
+    name: NI protocol — dispatch of goods from Northern Ireland to EU (zero-rated)
+    rate_percent: 0.0000
+    direction: sale
+    effective_from: 2021-01-01
+    report_box_keys: ["VAT100:6", "VAT100:8"]

@@ -1,0 +1,89 @@
+# Latvian legal-entity / business-structure types (LV jurisdiction seed).
+# Each Uzņēmumu reģistrs structure maps to a jurisdiction-neutral
+# canonical_bucket (saebooks.models.reference.entity_structure.
+# EntityStructureBucket). jurisdiction is the 3-char code 'LVA'
+# (directory name 'LV' is filesystem-only, the EE 'EE'/'EST' precedent).
+#
+# Verification status (2026-07-12 research pass): SIA minimum capital
+# (EUR 2,800 standard; mazkapitāla SIA from EUR 1) and AS minimum
+# capital (EUR 25,000, reduced from the former EUR 35,000) are VERIFIED
+# via two independent secondaries each (ur.gov.lv sub-pages 404'd — not
+# primary-confirmed). The no-capital statements for IK/partnerships/
+# filiāle/biedrība are well-established legal structure facts but were
+# NOT independently verified this pass — flagged per row.
+table: entity_structure_types
+key: [jurisdiction, code]
+rows:
+  - jurisdiction: LVA
+    code: sia
+    local_name: Sabiedrība ar ierobežotu atbildību (SIA)
+    canonical_bucket: company_limited
+    description: >-
+      Private limited company — the dominant Latvian trading vehicle.
+      Minimum share capital EUR 2,800; a reduced-capital variant
+      (mazkapitāla SIA) may register with capital from EUR 1 to
+      EUR 2,799 subject to Komerclikums conditions (natural-person
+      founders, mandatory reserve accrual). Shareholders' liability
+      limited to contributions. English: "Private Limited Company".
+
+  - jurisdiction: LVA
+    code: as
+    local_name: Akciju sabiedrība (AS)
+    canonical_bucket: company_limited
+    description: >-
+      Public limited (joint-stock) company. Minimum share capital
+      EUR 25,000 (reduced from the former EUR 35,000 by a Komerclikums
+      amendment — the amendment's exact effective date was not pinned
+      down this pass). English: "Public Limited Company /
+      Joint-Stock Company".
+
+  - jurisdiction: LVA
+    code: ik
+    local_name: Individuālais komersants (IK)
+    canonical_bucket: sole_trader
+    description: >-
+      Individual merchant — a natural person registered in the
+      Commercial Register trading in their own name; unlimited personal
+      liability, no minimum capital (no-capital statement UNVERIFIED
+      this pass — standard legal structure fact). English:
+      "Individual Merchant / Sole Trader".
+
+  - jurisdiction: LVA
+    code: ps
+    local_name: Pilnsabiedrība (PS)
+    canonical_bucket: partnership
+    description: >-
+      General partnership — all partners jointly and severally liable
+      with their whole property; no minimum capital (UNVERIFIED this
+      pass). Not a corporate income taxpayer in the ordinary sense.
+      English: "General Partnership".
+
+  - jurisdiction: LVA
+    code: ks
+    local_name: Komandītsabiedrība (KS)
+    canonical_bucket: partnership
+    description: >-
+      Limited partnership — at least one fully-liable general partner
+      (komplementārs) and one limited partner (komandīts) liable up to
+      the contribution; no minimum capital (UNVERIFIED this pass).
+      English: "Limited Partnership".
+
+  - jurisdiction: LVA
+    code: filiale
+    local_name: Filiāle
+    canonical_bucket: other
+    description: >-
+      Branch of a (foreign or domestic) company. NOT a separate legal
+      entity — the parent is fully liable; no capital requirement
+      (UNVERIFIED this pass). Registered in the Commercial Register.
+      English: "Branch".
+
+  - jurisdiction: LVA
+    code: biedriba
+    local_name: Biedrība
+    canonical_bucket: nonprofit
+    description: >-
+      Association (non-profit) — registered in the Association and
+      Foundation Register administered by Uzņēmumu reģistrs (a separate
+      register from the Commercial Register); no capital requirement
+      (UNVERIFIED this pass). English: "Association / Non-profit".

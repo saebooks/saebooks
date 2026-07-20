@@ -33,8 +33,8 @@ from saebooks.models.tax_code import TaxCode
 from saebooks.services import audit as audit_svc
 from saebooks.services import audit_log as audit_log_svc
 from saebooks.services import features as features_svc
-from saebooks.services import gst as gst_svc
-from saebooks.services.tax_engine import get_engine
+from saebooks.services import tax_posting as tax_svc
+from saebooks.services.tax_engine import resolve_engine
 from saebooks.services.tax_engine.types import PostingContext, PostingError
 
 # PostingError is defined in the leaf ``tax_engine.types`` module so the
@@ -665,7 +665,17 @@ async def _apply_tax_treatment(
     hardcoded. NZ/UK remain unbuilt stubs (``NotImplementedError``,
     unchanged); EE is now a real engine (``tax_engine.ee.EETaxEngine``).
 
-    Runs AFTER ``gst_svc.auto_post_gst_lines`` so the auto-added GST
+    Jurisdiction-module Phase 0 (zero-modules fix): dispatch is now via
+    ``resolve_engine`` rather than ``get_engine`` — the reserved
+    neutral sentinel ``"XX"`` and any UNREGISTERED jurisdiction resolve
+    to ``NeutralTaxEngine`` (null object, ``tax_engine/neutral.py``)
+    instead of crashing with ``KeyError``. A company with no
+    jurisdiction module can therefore still RECORD entries — every
+    line gets a well-formed zero-tax snapshot (rate=0, tax=0,
+    direction='none') and no jurisdiction tax is computed. Registered
+    engines (AU/EE) resolve exactly as before — byte-identical.
+
+    Runs AFTER ``tax_svc.auto_post_gst_lines`` so the auto-added GST
     Collected/Paid line gets its own snapshot too (direction='none'
     because GST liability/asset accounts aren't in the input/output
     sets — they're plumbing, not BAS-reportable themselves).
@@ -675,7 +685,7 @@ async def _apply_tax_treatment(
             select(Company.jurisdiction).where(Company.id == entry.company_id)
         )
     ).scalar_one_or_none() or "AU"
-    engine = get_engine(company_jurisdiction)
+    engine = resolve_engine(company_jurisdiction)
     # Pre-load account types + tax-code attrs for every distinct id on
     # the entry — avoids an N+1 lookup per line.
     acct_ids = {ln.account_id for ln in entry.lines}
@@ -975,8 +985,8 @@ async def post_in_txn(
     # the auto-poster adds the matching DR GST Paid / CR GST Collected
     # line so the entry balances. Pre-checking balance here would reject
     # legitimate net+gst entries (e.g. DR Telephone 100 [+gst 10] / CR Bank 110).
-    gst_lines = await gst_svc.auto_post_gst_lines(session, entry)
-    if gst_lines:
+    tax_lines = await tax_svc.auto_post_gst_lines(session, entry)
+    if tax_lines:
         await session.flush()
         # auto_post_gst_lines appends to entry.lines in-place, so no re-fetch needed.
 

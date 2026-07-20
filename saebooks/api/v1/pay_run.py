@@ -22,6 +22,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
@@ -35,7 +36,9 @@ from saebooks.api.v1.schemas import (
     PayRunListOut,
     PayRunOut,
 )
+from saebooks.models.company import Company
 from saebooks.services import pay_runs as svc
+from saebooks.services import pay_runs_v2 as svc_v2
 from saebooks.services.idempotency import ClaimStatus, claim_or_fetch, store_response
 
 router = APIRouter(
@@ -367,8 +370,59 @@ async def finalize_pay_run(
 
     tenant_id = resolve_tenant_id(request)
     # Belt-and-braces: cross-company isolation (Layer 2, 2026-05-24)
-    if await svc.get(session, pay_run_id, tenant_id=tenant_id, company_id=company_id) is None:
+    existing = await svc.get(
+        session, pay_run_id, tenant_id=tenant_id, company_id=company_id
+    )
+    if existing is None:
         raise HTTPException(404, "Pay run not found")
+
+    # Jurisdiction-aware dispatch (2026-07-11). The legacy AU flow below
+    # (``svc.finalize``) demands ABA_EXPORTED + a pre-existing journal_id
+    # and is kept byte-identical. An EE company's pay run never exports an
+    # ABA and posts its GL journal *at* finalize, so it must route through
+    # ``pay_runs_v2.finalize_with_je`` (which builds + posts the EE JE and
+    # flips FINALIZED). We dispatch ONLY on ``== "EE"`` so every other
+    # jurisdiction — including anything unexpected — stays on today's exact
+    # AU path. ``Company.jurisdiction`` resolved the same way journal.py /
+    # pay_runs_v2 resolve it (NULL defaults to "AU").
+    jurisdiction = (
+        await session.execute(
+            select(Company.jurisdiction).where(Company.id == company_id)
+        )
+    ).scalar_one_or_none() or "AU"
+
+    if jurisdiction == "EE":
+        # Preserve the route's optimistic-lock contract for EE too: the AU
+        # branch 409s on a stale If-Match (version check precedes the status
+        # check inside ``svc.finalize``), and ``finalize_with_je`` does no
+        # version check of its own, so we mirror the same version-first
+        # ordering here for a coherent cross-jurisdiction contract.
+        if existing.version != expected:
+            body = PayRunConflictBody(
+                detail="version mismatch",
+                current=PayRunOut.model_validate(existing),
+            ).model_dump(mode="json")
+            return JSONResponse(body, status_code=409)
+        try:
+            await svc_v2.finalize_with_je(
+                session,
+                pay_run_id,
+                tenant_id=tenant_id,
+                actor=f"api:{bearer[:8]}...",
+            )
+        except svc_v2.PayRunV2Error as exc:
+            msg = str(exc)
+            if "not found" in msg.lower():
+                raise HTTPException(404, msg) from exc
+            raise HTTPException(422, msg) from exc
+        # ``finalize_with_je`` returns a lines-unloaded PayRun; re-fetch via
+        # svc.get so ``_dump`` serialises without an async lazy-load
+        # (mirrors legacy ``finalize``'s ``assert refreshed is not None``).
+        refreshed = await svc.get(
+            session, pay_run_id, tenant_id=tenant_id, company_id=company_id
+        )
+        assert refreshed is not None
+        return JSONResponse(_dump(refreshed), status_code=200)
 
     try:
         pay_run = await svc.finalize(

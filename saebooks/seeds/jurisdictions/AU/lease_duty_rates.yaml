@@ -1,0 +1,27 @@
+# Australian lease / tenancy agreement duty rates (M1.5 · 5-DUTIES).
+# Rent-based lease duty was ABOLISHED by the states through the 2000s
+# (QLD for leases from 1 January 2006, NSW from 1 January 2008), and a
+# lease PREMIUM today is dutiable as ordinary transfer consideration
+# through duty_rate_schedules. Every AU row is therefore CLOSED
+# (effective_to set): AU parity is "no open lease-duty row", which is
+# what the seed test asserts. A jurisdiction that still levies lease
+# duty seeds an open row; the postable record is a
+# DutiableTransactionEvent with duty_type 'lease'.
+table: lease_duty_rates
+key: [jurisdiction, sub_jurisdiction, duty_base, effective_from]
+rows:
+  - jurisdiction: AUS
+    sub_jurisdiction: NSW
+    duty_base: rent_reserved
+    rate: 0.3500
+    effective_from: 1998-07-01
+    effective_to: 2007-12-31
+    description: NSW lease duty on rent reserved (35c per $100) — abolished for leases entered into from 1 January 2008.
+
+  - jurisdiction: AUS
+    sub_jurisdiction: QLD
+    duty_base: rent_reserved
+    rate: 0.4000
+    effective_from: 2002-03-01
+    effective_to: 2005-12-31
+    description: QLD lease duty on rent reserved (representative top rate of the pre-2006 graduated schedule) — abolished for leases from 1 January 2006.

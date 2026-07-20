@@ -29,10 +29,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.models.fx_rate_snapshot import FxRateSnapshot
+from saebooks.money import round_money
 
 log = logging.getLogger("saebooks.fx")
 
-_TWOPLACES = Decimal("0.01")
 _ONE = Decimal("1")
 
 RateFetcher = Callable[[str, str, date], Awaitable[Decimal]]
@@ -172,7 +172,7 @@ async def get_rate(
 
 
 def _q2(value: Decimal) -> Decimal:
-    return value.quantize(_TWOPLACES, rounding=ROUND_HALF_UP)
+    return round_money(value)
 
 
 def apply_document_fx(

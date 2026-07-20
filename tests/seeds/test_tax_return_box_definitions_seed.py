@@ -95,7 +95,7 @@ def test_au_tax_return_box_definitions_seed_valid() -> None:
 
     # The two GST-inclusive boxes must actually be inclusive, and the two
     # GST-exclusive ones must not — pins the exact semantics
-    # services.tax_engine.au.bas_report already tests end-to-end.
+    # jurisdictions.au.tax.bas_report already tests end-to-end.
     by_code = {r["box_code"]: r for r in rows}
     assert "gst_inclusive" in by_code["G1"]["aggregation"]
     assert "gst_inclusive" in by_code["G10"]["aggregation"]
@@ -345,6 +345,59 @@ def test_ee_kmd_formulas_have_no_dangling_box_refs() -> None:
             f"EE KMD box {r['box_code']!r} formula {r['formula']!r} "
             f"references unknown box(es) {dangling}"
         )
+
+
+# ---------------------------------------------------------------------------
+# EE-frontier build plan Module 2 — OSS-Q seed integrity (pure-unit, no DB).
+# ---------------------------------------------------------------------------
+
+_EE_OSS_Q_EXPECTED_BOX_CODES = {"MS_BREAKDOWN", "CORRECTIONS", "TOTAL_VAT_PAYABLE"}
+
+
+def _load_ee_oss_q_rows() -> list[dict]:
+    doc = yaml.safe_load(_EE_SEED.read_text())
+    rows = [r for r in doc["rows"] if r["return_type"] == "OSS-Q"]
+    assert rows, "EE OSS-Q seed rows not found"
+    return rows
+
+
+def test_ee_oss_q_box_definitions_seed_valid() -> None:
+    """OSS-Q replaces the earlier single deliberate STUB row with 3
+    manual structural rows (see tax_return_box_definitions.yaml's OSS-Q
+    header comment for why manual, not a box vector) — every row
+    round-trips through the real parser and is well-formed."""
+    rows = _load_ee_oss_q_rows()
+
+    keys = [(r["jurisdiction"], r["return_type"], r["box_code"]) for r in rows]
+    assert len(keys) == len(set(keys)), "duplicate (jurisdiction, return_type, box_code) in EE OSS-Q seed"
+
+    box_codes = {r["box_code"] for r in rows}
+    assert box_codes == _EE_OSS_Q_EXPECTED_BOX_CODES, (
+        f"EE OSS-Q seed box codes {box_codes} != expected {_EE_OSS_Q_EXPECTED_BOX_CODES}"
+    )
+
+    for r in rows:
+        assert r["jurisdiction"] == "EST"
+        # OSS-Q, like KMD-INF/TSD, has no ledger-bucket aggregation shape
+        # (a dynamic per-company member-state cell set) — every row must
+        # stay "manual", never accidentally seeded as a computed kind.
+        assert r["aggregation"] == "manual", (
+            f"EE OSS-Q box {r['box_code']!r} should be aggregation='manual' "
+            f"(no ledger-bucket shape exists for OSS-Q), got {r['aggregation']!r}"
+        )
+        assert not r.get("formula"), f"EE OSS-Q box {r['box_code']!r} is manual but carries a formula value"
+        parsed = _parse_box_definition(
+            _BoxDefRow(
+                box_code=r["box_code"],
+                box_label=r["box_label"],
+                aggregation=r["aggregation"],
+                feeder_tax_codes=r.get("feeder_tax_codes") or [],
+                display_order=r["display_order"],
+                formula=r.get("formula"),
+            )
+        )
+        assert parsed.box_code == r["box_code"]
+        assert parsed.kind == "manual"
 
 
 def test_ee_kmd_box_set_is_acyclic() -> None:

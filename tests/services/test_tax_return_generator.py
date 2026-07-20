@@ -8,7 +8,7 @@ Four groups of tests:
   3-letter jurisdiction mapping. Fast, deterministic, catch a typo in
   the parser or a seed row before either ever touches a database.
 * ``postgres_only`` — ``generate_return`` reproduces
-  ``services.tax_engine.au.bas_report``'s pre-T8 numbers exactly for a
+  ``jurisdictions.au.tax.bas_report``'s pre-T8 numbers exactly for a
   GST-inclusive taxable sale (the same scenario
   ``tests/services/test_cashbook_bas.py``'s keystone test pins), proving
   the thin-wrapper refactor is behaviour-preserving.
@@ -47,7 +47,7 @@ from saebooks.services.reports import REPORTABLE_STATUSES
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import journal as journal_svc
 from saebooks.services import settings as settings_svc
-from saebooks.services.tax_engine.au import bas_report
+from saebooks.jurisdictions.au.tax import bas_report
 from saebooks.services.tax_return_generator import (
     FormulaSyntaxError,
     TaxReturnBoxResult,

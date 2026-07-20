@@ -1,0 +1,61 @@
+# United Kingdom — Class 1 NI per-period thresholds, category letters,
+# and Employment Allowance parameters, tax year 2026-27.
+#
+# NOT a reference-DB table seed (reference_seed: false — the
+# kmdtyyp_mapping.yaml precedent): NI compute is PER PAY PERIOD against
+# weekly/monthly threshold values and a category-letter matrix that no
+# reference table models; jurisdictions/uk/payroll.py consumes this
+# (with a lock-step embedded snapshot as its fallback, the payroll_ee
+# reference-preferred/embedded-fallback convention).
+#
+# Primary source for thresholds, category-A rates and the Employment
+# Allowance (fetched raw 2026-07-12): gov.uk "Rates and thresholds for
+# employers: 2026 to 2027".
+reference_seed: false
+jurisdiction: GBR
+effective_from: 2026-04-06
+
+class1_thresholds:
+  lower_earnings_limit: {weekly: 129.00, monthly: 559.00, annual: 6708.00}
+  primary_threshold: {weekly: 242.00, monthly: 1048.00, annual: 12570.00}
+  secondary_threshold: {weekly: 96.00, monthly: 417.00, annual: 5000.00}
+  upper_earnings_limit: {weekly: 967.00, monthly: 4189.00, annual: 50270.00}
+
+class1_rates_category_a:
+  employee_main_percent: 8      # PT -> UEL
+  employee_additional_percent: 2  # above UEL
+  employer_percent: 15          # above ST
+class1a_percent: 15
+class1b_percent: 15
+
+employment_allowance:
+  annual_amount_gbp: 10500.00
+  # Exclusion (SI 2014/1265 pattern, restated annually by HMRC): a
+  # company where the ONLY employee paid above the Secondary Threshold
+  # is also a DIRECTOR of the company is not eligible. Public-sector /
+  # >50%-public-work bodies also excluded (not modelled).
+  excluded_single_director_only_employee: true
+
+# Category letters. Only category A's full rate set was primary-pulled;
+# C's "no employee contributions from state pension age" is statutory
+# (SSCBA 1992 s.6(3)). The employer zero-rate RELIEF categories
+# (under-21 / apprentice-under-25 / veteran / Freeport-Investment-Zone)
+# and reduced-rate category B are listed STRUCTURALLY here so payroll
+# records can carry the letter, but their exact 2026-27 relief
+# thresholds (UST / AUST / VUST / FUST) and the category-B reduced rate
+# were NOT primary-pulled: rates_status UNVERIFIED. The UK payroll
+# engine computes categories A and C only and HARD-REFUSES the rest
+# (never a silent wrong number).
+category_letters:
+  A: {description: "Standard", employee: standard, employer: standard, rates_status: verified}
+  B: {description: "Married women / widows reduced rate election", employee: reduced_rate, employer: standard, rates_status: UNVERIFIED}
+  C: {description: "Employee over State Pension age", employee: none, employer: standard, rates_status: verified}
+  H: {description: "Apprentice under 25", employee: standard, employer: zero_to_apprentice_upper_secondary_threshold, rates_status: UNVERIFIED}
+  J: {description: "Deferred employee NI (multiple employments)", employee: additional_rate_only, employer: standard, rates_status: UNVERIFIED}
+  M: {description: "Employee under 21", employee: standard, employer: zero_to_upper_secondary_threshold, rates_status: UNVERIFIED}
+  V: {description: "Veteran, first 12 months of civilian employment", employee: standard, employer: zero_to_veterans_upper_secondary_threshold, rates_status: UNVERIFIED}
+  Z: {description: "Employee under 21, deferred", employee: additional_rate_only, employer: zero_to_upper_secondary_threshold, rates_status: UNVERIFIED}
+  F: {description: "Freeport / Investment Zone — standard", employee: standard, employer: zero_to_freeport_upper_secondary_threshold, rates_status: UNVERIFIED}
+  I: {description: "Freeport / Investment Zone — reduced-rate election", employee: reduced_rate, employer: zero_to_freeport_upper_secondary_threshold, rates_status: UNVERIFIED}
+  S: {description: "Freeport / Investment Zone — over State Pension age", employee: none, employer: zero_to_freeport_upper_secondary_threshold, rates_status: UNVERIFIED}
+  L: {description: "Freeport / Investment Zone — deferred", employee: additional_rate_only, employer: zero_to_freeport_upper_secondary_threshold, rates_status: UNVERIFIED}

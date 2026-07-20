@@ -25,7 +25,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import date
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,10 +34,9 @@ from sqlalchemy.orm import selectinload
 from saebooks.models.account import Account
 from saebooks.models.invoice import Invoice, InvoiceLine, InvoiceStatus
 from saebooks.models.journal import JournalOrigin
+from saebooks.money import round_money
 from saebooks.services import journal as journal_svc
 from saebooks.services import settings as settings_svc
-
-_TWOPLACES = Decimal("0.01")
 
 
 class DeferredRevenueError(ValueError):
@@ -45,7 +44,7 @@ class DeferredRevenueError(ValueError):
 
 
 def _q2(v: Decimal) -> Decimal:
-    return v.quantize(_TWOPLACES, rounding=ROUND_HALF_UP)
+    return round_money(v)
 
 
 def _period_first(d: date) -> date:

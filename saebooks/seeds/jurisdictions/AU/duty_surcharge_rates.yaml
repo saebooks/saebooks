@@ -1,0 +1,61 @@
+# Australian foreign-purchaser surcharge duty rates (M1.5 · 5-DUTIES).
+# The three big-state surcharges on residential property transfers by
+# foreign persons, effective-dated (a rate change lands as a new row, the
+# superseded row gets effective_to). sub_jurisdiction uses the same
+# vocabulary as duty_rate_schedules.state. Rates are percentages of
+# dutiable value (8.0000 = 8%).
+table: duty_surcharge_rates
+key: [jurisdiction, sub_jurisdiction, transaction_type, purchaser_class, effective_from]
+rows:
+  # QLD Additional Foreign Acquirer Duty (AFAD) — 7% from 1 Jul 2018,
+  # raised to 8% from 1 Jul 2024. The closed 7% row + open 8% row prove
+  # the effective-dated series shape.
+  - jurisdiction: AUS
+    sub_jurisdiction: QLD
+    transaction_type: property_transfer
+    purchaser_class: foreign_person
+    surcharge_rate: 7.0000
+    land_use_scope: residential
+    effective_from: 2018-07-01
+    effective_to: 2024-06-30
+    description: QLD Additional Foreign Acquirer Duty (AFAD) at 7% — superseded by the 8% rate from 1 July 2024.
+
+  - jurisdiction: AUS
+    sub_jurisdiction: QLD
+    transaction_type: property_transfer
+    purchaser_class: foreign_person
+    surcharge_rate: 8.0000
+    land_use_scope: residential
+    effective_from: 2024-07-01
+    description: QLD Additional Foreign Acquirer Duty (AFAD) on residential land acquired by foreign persons.
+
+  # NSW Surcharge Purchaser Duty — 8% from 1 Jul 2017, raised to 9% from
+  # 1 Jan 2025.
+  - jurisdiction: AUS
+    sub_jurisdiction: NSW
+    transaction_type: property_transfer
+    purchaser_class: foreign_person
+    surcharge_rate: 8.0000
+    land_use_scope: residential
+    effective_from: 2017-07-01
+    effective_to: 2024-12-31
+    description: NSW Surcharge Purchaser Duty at 8% — superseded by the 9% rate from 1 January 2025.
+
+  - jurisdiction: AUS
+    sub_jurisdiction: NSW
+    transaction_type: property_transfer
+    purchaser_class: foreign_person
+    surcharge_rate: 9.0000
+    land_use_scope: residential
+    effective_from: 2025-01-01
+    description: NSW Surcharge Purchaser Duty on residential land acquired by foreign persons.
+
+  # VIC Foreign Purchaser Additional Duty — 8% from 1 Jul 2019.
+  - jurisdiction: AUS
+    sub_jurisdiction: VIC
+    transaction_type: property_transfer
+    purchaser_class: foreign_person
+    surcharge_rate: 8.0000
+    land_use_scope: residential
+    effective_from: 2019-07-01
+    description: VIC Foreign Purchaser Additional Duty on residential land acquired by foreign purchasers.

@@ -40,6 +40,7 @@ from saebooks.api.v1.schemas import (
     TaxCodeOut,
     TaxCodeUpdate,
 )
+from saebooks.models.company import Company
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import tax_codes as svc
 from saebooks.services.authz import no_additional_gate, require_permission_or_role
@@ -80,10 +81,12 @@ def _dump(tax_code: TaxCode) -> dict[str, Any]:
 async def list_tax_codes(
     tax_system: str | None = Query(default=None),
     jurisdiction: str | None = Query(
-        default="AU",
+        default=None,
         description=(
-            "Filter by jurisdiction. Defaults to 'AU' so the international "
-            "reference codes stay hidden; pass an empty string to return all."
+            "Filter by jurisdiction. Defaults to the requesting company's "
+            "own jurisdiction (Company.jurisdiction) so the international "
+            "reference codes stay hidden; pass an empty string to return "
+            "all jurisdictions, or an explicit code to override."
         ),
     ),
     limit: int = Query(default=200, ge=1, le=1000),
@@ -91,8 +94,18 @@ async def list_tax_codes(
     session: AsyncSession = Depends(get_session),
     company_id: UUID = Depends(get_active_company_id),
 ) -> TaxCodeListOut:
-    # An empty-string jurisdiction means "all jurisdictions".
-    juris = jurisdiction or None
+    # No query param at all -> default to the active company's own
+    # jurisdiction (same pattern as Company.jurisdiction resolution in
+    # pay_runs_v2 / journal.py). An explicit empty string means "all
+    # jurisdictions"; any other explicit value overrides the default.
+    if jurisdiction is None:
+        juris = (
+            await session.execute(
+                select(Company.jurisdiction).where(Company.id == company_id)
+            )
+        ).scalar_one_or_none() or "AU"
+    else:
+        juris = jurisdiction or None
     count_stmt = (
         select(func.count())
         .select_from(TaxCode)

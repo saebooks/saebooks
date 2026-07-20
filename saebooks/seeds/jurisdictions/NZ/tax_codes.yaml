@@ -1,0 +1,198 @@
+# New Zealand GST reference tax codes — feeds GST101A box aggregation
+# (see tax_return_box_definitions.yaml in this directory) and
+# chart_template.yaml's default_tax_code assignments.
+#
+# Source basis: ~/records/saebooks/nz-market-entry-strategy.md §5.1
+# (values source-verified against IRD primary pages 2026-07-12).
+#
+# Rate history (GST Act 1985 s 8):
+#   15%   from 2010-10-01 (current standard rate — single rate, NO
+#         reduced rates; verified current 2026-07-12. The 2010-10-01
+#         change date is the widely-documented 12.5%→15% step; the
+#         legacy 12.5%/10% history is NOT seeded — no NZ books in this
+#         engine predate 2010 and the research pass verified only the
+#         current value.)
+#    0%   zero-rated categories (s 11/11A): exports of goods; exported
+#         services to non-residents; going-concern sales; COMPULSORY
+#         zero-rating of land between GST-registered parties.
+#   exempt (s 14, no output tax, NO input credit): financial services;
+#         residential rent; donated goods sold by non-profits; fine metals.
+#
+# ⚠ THE "9% ACCOMMODATION" QUIRK IS NOT A RATE. GST Act s 10(6):
+# commercial-dwelling stays longer than 4 weeks are taxed on 60% OF THE
+# VALUE at the ordinary 15% rate (15% × 60% = 9% effective). It is a
+# VALUE-APPORTIONMENT rule and is modelled below (ACCOM_LT) as a
+# 15.0000-rate code whose taxable value the bookkeeper/caller reduces
+# to 60% — never as a 9% rate row. A test pins that no NZ row in this
+# file carries rate_percent 9 (tests/seeds/test_nz_jurisdiction_seed.py).
+#
+# Registration / filing metadata (documented here because no seedable
+# reference table exists for them — see the build summary flags):
+#   * Registration threshold: NZD 60,000 in any 12-month window.
+#     (consumption_tax_registration_threshold has NO unique constraint,
+#     so the idempotent seed loader cannot upsert into it — flagged,
+#     needs a reference migration owned by the engine lane.)
+#   * Filing frequencies: 6-monthly (taxable supplies <= $500k);
+#     2-monthly DEFAULT; monthly optional and MANDATORY above $24m.
+#   * Accounting bases: payments basis <= $2m; invoice basis mandatory
+#     above $2m; hybrid available.
+#   * Due date: 28th of the month following the period end, EXCEPT the
+#     March period (due 7 May) and the November period (due 15 January).
+#
+# Company-side TaxCode.reporting_type convention this jurisdiction's
+# box definitions key off (see tax_return_box_definitions.yaml):
+#   taxable    — standard-rated 15% supplies/purchases
+#   zero_rated — all four zero-rated sale categories (GST101A has one
+#                zero-rated box, Box 6 — no sub-boxes, so one leaf)
+#   exempt     — exempt supplies (NOT in Box 5/6 — see box seed header)
+#   capital    — capital/fixed-asset purchases (feeds Box 11 together
+#                with "taxable"; GST101A makes no capital split, the
+#                separate tag mirrors the AU/EE convention so a capital
+#                purchase keeps its identity for GST103B/IR10 later)
+table: tax_codes
+key: [jurisdiction, code, effective_from]
+rows:
+  # --- Standard rate ------------------------------------------------------
+  - jurisdiction: NZL
+    code: GST
+    name: "GST on sales (15%)"
+    rate_percent: 15.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "GST Payable"
+    effective_from: 2010-10-01
+    report_box_keys: ["GST101:5", "GST101:8"]
+
+  - jurisdiction: NZL
+    code: INPUT
+    name: "GST on purchases and expenses (15%)"
+    rate_percent: 15.0000
+    direction: purchase
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "GST Receivable"
+    effective_from: 2010-10-01
+    report_box_keys: ["GST101:11", "GST101:12"]
+
+  - jurisdiction: NZL
+    code: INPUT_CAP
+    name: "GST on capital / fixed-asset purchases (15%)"
+    rate_percent: 15.0000
+    direction: purchase
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "GST Receivable"
+    effective_from: 2010-10-01
+    report_box_keys: ["GST101:11", "GST101:12"]
+
+  # --- Zero-rated (0%, input credits still claimable) ----------------------
+  - jurisdiction: NZL
+    code: ZERO_EXPORT
+    name: "Zero-rated — export of goods (s 11)"
+    rate_percent: 0.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "GST Payable"
+    effective_from: 2010-10-01  # UNVERIFIED start date — zero-rating of exports long predates the 2010 rate change; 2010-10-01 used as the same seeding baseline as the standard-rate rows, not a sourced commencement.
+    report_box_keys: ["GST101:5", "GST101:6"]
+
+  - jurisdiction: NZL
+    code: ZERO_SERVICES
+    name: "Zero-rated — services supplied to non-residents (s 11A)"
+    rate_percent: 0.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "GST Payable"
+    effective_from: 2010-10-01  # UNVERIFIED start date — same baseline caveat as ZERO_EXPORT.
+    report_box_keys: ["GST101:5", "GST101:6"]
+
+  - jurisdiction: NZL
+    code: ZERO_GOING_CONCERN
+    name: "Zero-rated — supply of a going concern"
+    rate_percent: 0.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "GST Payable"
+    effective_from: 2010-10-01  # UNVERIFIED start date — same baseline caveat as ZERO_EXPORT.
+    report_box_keys: ["GST101:5", "GST101:6"]
+
+  - jurisdiction: NZL
+    code: ZERO_LAND_CZR
+    name: "Zero-rated — compulsory zero-rating of land between GST-registered parties (s 11(1)(mb))"
+    rate_percent: 0.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "GST Payable"
+    effective_from: 2011-04-01  # CZR regime commencement 1 April 2011 — widely documented; flagged as build-time-verify rather than research-doc-verified.
+    report_box_keys: ["GST101:5", "GST101:6"]
+
+  # --- Exempt (no output tax, no input credit) -----------------------------
+  - jurisdiction: NZL
+    code: EXEMPT
+    name: "Exempt supplies (s 14 — financial services, residential rent, donated goods, fine metals)"
+    rate_percent: 0.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    input_credit_recoverable: false
+    gl_account_hint: "GST Payable"
+    effective_from: 2010-10-01  # UNVERIFIED start date — s 14 exempt categories are long-standing.
+    # Deliberately NO GST101 report_box_keys: exempt supplies are outside
+    # Box 5 per the §5.2 box definitions ("Total sales & income (GST-incl.,
+    # incl. zero-rated)" — zero-rated named, exempt not).
+
+  - jurisdiction: NZL
+    code: INPUT_EXEMPT
+    name: "Exempt purchases (financial services, residential rent — e.g. bank fees)"
+    rate_percent: 0.0000
+    direction: purchase
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    input_credit_recoverable: false
+    gl_account_hint: "GST Receivable"
+    effective_from: 2010-10-01  # UNVERIFIED start date — mirrors EXEMPT (sale side).
+    # No report_box_keys — no GST101A box for exempt purchases received;
+    # exists only to give purchase-bucket accounts a direction-correct
+    # default (same convention as EE's INPUT_EXEMPT).
+
+  # --- Long-stay commercial accommodation (value apportionment, NOT a rate) -
+  - jurisdiction: NZL
+    code: ACCOM_LT
+    name: "Long-stay commercial accommodation — 15% on 60% of value (s 10(6); effective 9%, NEVER a 9% rate)"
+    rate_percent: 15.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "GST Payable"
+    effective_from: 2010-10-01  # UNVERIFIED start date — s 10(6) long predates the 2010 rate step.
+    report_box_keys: ["GST101:5", "GST101:8"]
+    # Usage: for a commercial-dwelling stay > 4 weeks the TAXABLE VALUE is
+    # 60% of the consideration; GST is then the ordinary 15% on that
+    # reduced value. The caller/bookkeeper supplies the apportioned value
+    # (or the pre-computed gst_amount); the engine applies no special rate.
+
+  # --- Not reportable -------------------------------------------------------
+  - jurisdiction: NZL
+    code: NTR
+    name: "Not reportable (outside the scope of GST)"
+    rate_percent: 0.0000
+    direction: both
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    effective_from: 2010-10-01  # UNVERIFIED — baseline placeholder; "outside GST scope" has no rate history and must resolve for any date.

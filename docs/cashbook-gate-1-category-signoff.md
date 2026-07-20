@@ -24,7 +24,7 @@ Three questions, in order of importance:
 ### 1. Are the GST defaults correct for AU sole traders?
 
 GST default is the rate baked into the picker for that category. The cashbook
-service generates a GST line iff `company.gst_registered = True` AND
+service generates a GST line iff `company.tax_registered = True` AND
 `category.gst_default > 0`. A non-registered trader never generates GST lines,
 no matter the category default.
 

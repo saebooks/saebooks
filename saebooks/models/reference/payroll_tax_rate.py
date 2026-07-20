@@ -24,6 +24,15 @@ class PayrollTaxRate(ReferenceBase):
         nullable=False,
         comment="State / region code (e.g. QLD, NSW, ENG, SCT)",
     )
+    # M1.5 · 5-SUBJURIS (reference migration 0016): FK promotion of the
+    # ad-hoc ``state`` string into the T3 jurisdiction tree. NULLABLE and
+    # additive — ``state`` stays authoritative for existing callers during
+    # the transition; AU rows are backfilled ('QLD' → 'AU-QLD').
+    sub_jurisdiction_code: Mapped[str | None] = mapped_column(
+        String(6),
+        ForeignKey("jurisdictions.code"),
+        comment="Sub-national jurisdiction node (T3 tree), e.g. 'AU-QLD'.",
+    )
     fy_year: Mapped[int] = mapped_column(Integer, nullable=False)
     threshold: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     rate: Mapped[Decimal] = mapped_column(Numeric(7, 4), nullable=False)

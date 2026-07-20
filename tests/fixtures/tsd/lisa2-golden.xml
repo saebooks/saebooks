@@ -1,0 +1,87 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<tsd_vorm>
+  <regKood>10123456</regKood>
+  <c108_Aasta>2026</c108_Aasta>
+  <c109_Kuu>4</c109_Kuu>
+  <laadimisViis>L</laadimisViis>
+  <vorm>TSD</vorm>
+  <tsd_L2_0>
+    <aIsikList>
+      <tsd_L2_A_Isik>
+        <c2000_Kood>45212181423</c2000_Kood>
+        <c2010_Nimi>OIE-MARET SOUDNITSYNA</c2010_Nimi>
+        <vmList>
+          <tsd_L2_A_Vm>
+            <c2020_RiikKood>FI</c2020_RiikKood>
+            <c2030_ValiKood>120</c2030_ValiKood>
+            <c2040_Summa>1111.00</c2040_Summa>
+            <c2070_Smvm>1111.00</c2070_Smvm>
+            <c2110_Sm>366.63</c2110_Sm>
+            <c2120_Tkvm>1111.00</c2120_Tkvm>
+            <c2140_Ttk>8.89</c2140_Ttk>
+            <c2150_Tmvm>1111.00</c2150_Tmvm>
+            <c2160_TmMaar>22.00</c2160_TmMaar>
+            <c2170_Tm>89.54</c2170_Tm>
+            <mvtList>
+              <tsd_L2_A_Mvt>
+                <c2154_TuliKood>650</c2154_TuliKood>
+                <c2155_Summa>704.00</c2155_Summa>
+              </tsd_L2_A_Mvt>
+            </mvtList>
+          </tsd_L2_A_Vm>
+        </vmList>
+      </tsd_L2_A_Isik>
+    </aIsikList>
+    <bIsikList>
+      <tsd_L2_B_Isik>
+        <c2300_Kood>34501175307</c2300_Kood>
+        <c2310_Nimi>PEEBO GERKO</c2310_Nimi>
+        <vmList>
+          <tsd_L2_B_Vm>
+            <c2320_ValiKood>120</c2320_ValiKood>
+            <c2330_Summa>5000.00</c2330_Summa>
+            <c2340_Aasta>2023</c2340_Aasta>
+            <c2350_Kuu>1</c2350_Kuu>
+            <c2360_Pohjus>VR</c2360_Pohjus>
+            <c2370_Smvm>5000.00</c2370_Smvm>
+            <c2410_Sm>1650.00</c2410_Sm>
+            <c2420_Tkvm>5000.00</c2420_Tkvm>
+            <c2440_Ttk>40.00</c2440_Ttk>
+            <c2450_Tmvm>5000.00</c2450_Tmvm>
+            <c2460_TmMaar>20.00</c2460_TmMaar>
+            <c2470_Tm>959.20</c2470_Tm>
+          </tsd_L2_B_Vm>
+        </vmList>
+      </tsd_L2_B_Isik>
+    </bIsikList>
+    <c2200_Smvm>1111.00</c2200_Smvm>
+    <c2210_Sm>366.63</c2210_Sm>
+    <c2220_Tk>0.00</c2220_Tk>
+    <c2230_Ttk>8.89</c2230_Ttk>
+    <c2240_Tmvm>1111.00</c2240_Tmvm>
+    <c2250_Tm>89.54</c2250_Tm>
+    <c2500_Smvm>5000.00</c2500_Smvm>
+    <c2510_Sm>1650.00</c2510_Sm>
+    <c2520_Tk>0.00</c2520_Tk>
+    <c2530_Ttk>40.00</c2530_Ttk>
+    <c2540_Tmvm>5000.00</c2540_Tmvm>
+    <c2550_Tm>959.20</c2550_Tm>
+    <c2800_InvTm>4466.00</c2800_InvTm>
+    <invFondList>
+      <tsd_L2_2_Inv_Fond>
+        <c2700_Kood>60004693</c2700_Kood>
+        <c2710_Nimi>LEPINGULISE INVESTEERIMISFONDI NÄIDE</c2710_Nimi>
+        <c2730_FvKood>71016977</c2730_FvKood>
+        <c2740_FvNimi>HARJU MAKSUAMET UUS</c2740_FvNimi>
+        <c2780_Osalus>15.00</c2780_Osalus>
+        <vmList>
+          <tsd_L2_2_Vm>
+            <c2760_ValiKood>198</c2760_ValiKood>
+            <c2770_Summa>20300.00</c2770_Summa>
+            <c2790_Tm>4466.00</c2790_Tm>
+          </tsd_L2_2_Vm>
+        </vmList>
+      </tsd_L2_2_Inv_Fond>
+    </invFondList>
+  </tsd_L2_0>
+</tsd_vorm>

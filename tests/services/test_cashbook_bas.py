@@ -27,11 +27,11 @@ import pytest
 from sqlalchemy import select
 
 from saebooks.db import AsyncSessionLocal
+from saebooks.jurisdictions.au.tax import BASReport, bas_report
 from saebooks.models.account import Account
 from saebooks.models.company import Company
 from saebooks.services import settings as settings_svc
 from saebooks.services.cashbook import record_cashbook_entry
-from saebooks.services.tax_engine.au import BASReport, bas_report
 
 pytestmark = pytest.mark.postgres_only
 
@@ -93,7 +93,7 @@ async def _restore_seed_company_after_module():
                 "UPDATE companies SET "
                 "bookkeeping_mode = 'full', "
                 "cashbook_default_bank_account_id = NULL, "
-                "gst_registered = false "
+                "tax_registered = false "
                 "WHERE id = :cid"
             ).bindparams(cid=co.id)
         )
@@ -101,7 +101,7 @@ async def _restore_seed_company_after_module():
 
 
 async def _seed_company_into_cashbook_mode(
-    *, gst_registered: bool = True
+    *, tax_registered: bool = True
 ) -> tuple[uuid.UUID, uuid.UUID]:
     async with AsyncSessionLocal() as session:
         co = (
@@ -124,8 +124,8 @@ async def _seed_company_into_cashbook_mode(
 
         co.bookkeeping_mode = "cashbook"
         co.cashbook_default_bank_account_id = bank.id
-        co.gst_registered = gst_registered
-        if gst_registered:
+        co.tax_registered = tax_registered
+        if tax_registered:
             await settings_svc.set(session, "gst_collected_account_code", "2-1310")
             await settings_svc.set(session, "gst_paid_account_code", "2-1330")
             await settings_svc.set(session, "gst_auto_post", "true")
@@ -170,7 +170,7 @@ async def _post(
 
 async def test_keystone_cashbook_gst_sale_flows_to_bas_g1() -> None:
     tenant_id, company_id = await _seed_company_into_cashbook_mode(
-        gst_registered=True
+        tax_registered=True
     )
     before = await _bas(company_id)
     await _post(
@@ -198,7 +198,7 @@ async def test_keystone_cashbook_gst_sale_flows_to_bas_g1() -> None:
 
 async def test_capital_purchase_flows_to_g10_not_g11() -> None:
     tenant_id, company_id = await _seed_company_into_cashbook_mode(
-        gst_registered=True
+        tax_registered=True
     )
     before = await _bas(company_id)
     await _post(
@@ -222,7 +222,7 @@ async def test_capital_purchase_flows_to_g10_not_g11() -> None:
 
 async def test_taxable_expense_flows_to_g11() -> None:
     tenant_id, company_id = await _seed_company_into_cashbook_mode(
-        gst_registered=True
+        tax_registered=True
     )
     before = await _bas(company_id)
     await _post(
@@ -242,7 +242,7 @@ async def test_taxable_expense_flows_to_g11() -> None:
 
 async def test_gst_free_super_does_not_inflate_g11_or_1b() -> None:
     tenant_id, company_id = await _seed_company_into_cashbook_mode(
-        gst_registered=True
+        tax_registered=True
     )
     before = await _bas(company_id)
     await _post(
@@ -271,7 +271,7 @@ async def test_cashbook_line_carries_tax_code_id() -> None:
     from saebooks.models.tax_code import TaxCode
 
     tenant_id, company_id = await _seed_company_into_cashbook_mode(
-        gst_registered=True
+        tax_registered=True
     )
     je_id = await _post(
         tenant_id, company_id,
@@ -313,7 +313,7 @@ async def test_migration_backfill_stamps_legacy_null_lines() -> None:
     from saebooks.models.journal import JournalLine
 
     tenant_id, company_id = await _seed_company_into_cashbook_mode(
-        gst_registered=True
+        tax_registered=True
     )
     base = await _bas(company_id)
     je_id = await _post(

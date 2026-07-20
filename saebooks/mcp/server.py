@@ -2327,7 +2327,7 @@ async def update_company(
     ctx: Context, company_id: str, version: int,
     name: str = "", legal_name: str = "", trading_name: str = "",
     abn: str = "", acn: str = "",
-    gst_registered: bool | None = None, gst_effective_date: str = "",
+    tax_registered: bool | None = None, gst_effective_date: str = "",
     address: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Edit company settings (GST registration, address, ...).
@@ -2339,7 +2339,7 @@ async def update_company(
     body = _drop_empty({
         "name": name, "legal_name": legal_name, "trading_name": trading_name,
         "abn": abn, "acn": acn,
-        "gst_registered": gst_registered, "gst_effective_date": gst_effective_date,
+        "tax_registered": tax_registered, "gst_effective_date": gst_effective_date,
         "address": address,
     })
     return await _patch(ctx, f"/api/v1/companies/{company_id}", body, if_match=version)

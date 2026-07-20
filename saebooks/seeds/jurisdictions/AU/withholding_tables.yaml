@@ -1,9 +1,12 @@
 # Australian PAYG withholding tables (M1.5 · T7).
-# jurisdiction is the 3-char code 'AUS'. This is a jurisdiction-neutral
-# canonical table alongside (not replacing) payg_withholding_scales — see
-# withholding_table.py for the rationale. Coefficients here are a small
-# illustrative set, not a full ATO scale-2 tax table; the full weekly
-# a/b-coefficient rows for every bracket live in payg_withholding_scales.
+# jurisdiction is the 3-char code 'AUS'. This is the jurisdiction-neutral
+# canonical table; the AU-named ``payg_withholding_scale`` table it once
+# sat alongside was dropped (M1.5 Wave 3a rename sweep — zero consumers,
+# unseeded). NOTE: the operative AU withholding path used by live payroll
+# is a DIFFERENT model, ``models/payg.py:PaygTaxScale`` (consumed by
+# ``jurisdictions/au/payg.py``), which is untouched by this table or the drop —
+# see withholding_table.py for the rationale. Coefficients here are a
+# small illustrative set, not a full ATO scale-2 tax table.
 table: withholding_tables
 key: [jurisdiction, code, effective_from]
 rows:

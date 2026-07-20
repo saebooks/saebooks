@@ -26,16 +26,16 @@ import pytest
 from sqlalchemy import select, text
 
 from saebooks.db import AsyncSessionLocal
+from saebooks.jurisdictions.au.tax import (
+    TaxConfigError,
+    validate_gst_account_settings,
+)
 from saebooks.models.account import Account
 from saebooks.models.company import Company
 from saebooks.models.journal import EntryStatus
 from saebooks.services import settings as settings_svc
 from saebooks.services.cashbook import record_cashbook_entry
 from saebooks.services.journal import PostingError
-from saebooks.services.tax_engine.au import (
-    TaxConfigError,
-    validate_gst_account_settings,
-)
 
 pytestmark = pytest.mark.postgres_only
 
@@ -64,7 +64,7 @@ async def _restore_seed_company_after_module():
                 "UPDATE companies SET "
                 "bookkeeping_mode = 'full', "
                 "cashbook_default_bank_account_id = NULL, "
-                "gst_registered = false "
+                "tax_registered = false "
                 "WHERE id = :cid"
             ).bindparams(cid=co.id)
         )
@@ -75,7 +75,7 @@ async def _restore_seed_company_after_module():
         await session.commit()
 
 
-async def _seed_cashbook_gst_registered(
+async def _seed_cashbook_tax_registered(
     *,
     gst_paid_code: str = "2-1330",
     gst_collected_code: str = "2-1310",
@@ -101,7 +101,7 @@ async def _seed_cashbook_gst_registered(
         assert bank is not None, "AU CoA seed missing 1-1110 Bank"
         co.bookkeeping_mode = "cashbook"
         co.cashbook_default_bank_account_id = bank.id
-        co.gst_registered = True
+        co.tax_registered = True
         await settings_svc.set(session, "gst_collected_account_code", gst_collected_code)
         await settings_svc.set(session, "gst_paid_account_code", gst_paid_code)
         await settings_svc.set(session, "gst_auto_post", "true")
@@ -120,7 +120,7 @@ def _key(prefix: str) -> str:
 
 
 async def test_taxable_expense_with_good_gst_account_balances() -> None:
-    tenant_id, company_id = await _seed_cashbook_gst_registered(
+    tenant_id, company_id = await _seed_cashbook_tax_registered(
         gst_paid_code="2-1330"
     )
     async with AsyncSessionLocal() as session:
@@ -166,7 +166,7 @@ async def test_taxable_expense_with_good_gst_account_balances() -> None:
 async def test_taxable_expense_with_bad_gst_account_raises_config_error() -> None:
     # "9-9999" does not exist in the seeded AU chart — same failure mode as
     # the production "2-1330" on the primary tenant.
-    tenant_id, company_id = await _seed_cashbook_gst_registered(
+    tenant_id, company_id = await _seed_cashbook_tax_registered(
         gst_paid_code="9-9999"
     )
     async with AsyncSessionLocal() as session:
@@ -201,7 +201,7 @@ async def test_taxable_expense_with_bad_gst_account_raises_config_error() -> Non
 async def test_gst_free_expense_unaffected_by_bad_gst_account() -> None:
     # Bad GST-paid code, but EXP_BANK is GST-free → no taxable line → no GST
     # account needed → must post cleanly as a 2-line JE.
-    tenant_id, company_id = await _seed_cashbook_gst_registered(
+    tenant_id, company_id = await _seed_cashbook_tax_registered(
         gst_paid_code="9-9999"
     )
     async with AsyncSessionLocal() as session:
@@ -230,7 +230,7 @@ async def test_gst_free_expense_unaffected_by_bad_gst_account() -> None:
 
 
 async def test_validate_gst_account_settings_flags_unresolvable_code() -> None:
-    _tenant_id, company_id = await _seed_cashbook_gst_registered(
+    _tenant_id, company_id = await _seed_cashbook_tax_registered(
         gst_paid_code="9-9999", gst_collected_code="2-1310"
     )
     async with AsyncSessionLocal() as session:
@@ -242,7 +242,7 @@ async def test_validate_gst_account_settings_flags_unresolvable_code() -> None:
 
 
 async def test_validate_gst_account_settings_clean_when_all_resolve() -> None:
-    _tenant_id, company_id = await _seed_cashbook_gst_registered(
+    _tenant_id, company_id = await _seed_cashbook_tax_registered(
         gst_paid_code="2-1330", gst_collected_code="2-1310"
     )
     async with AsyncSessionLocal() as session:

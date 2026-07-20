@@ -1,0 +1,97 @@
+# United Kingdom legal-entity / business-structure types.
+# Each local structure maps to a jurisdiction-neutral canonical_bucket
+# (EE/AU precedent). jurisdiction = 'GBR'. Descriptions carry the
+# filing-obligations matrix the strategy §5.1 asked for.
+table: entity_structure_types
+key: [jurisdiction, code]
+rows:
+  - jurisdiction: GBR
+    code: ltd
+    local_name: Private company limited by shares (Ltd)
+    canonical_bucket: company_limited
+    description: >-
+      Companies Act 2006 private company. Files: annual accounts to
+      Companies House (software-only filing mandatory from April 2028),
+      confirmation statement, CT600 corporation tax return + iXBRL
+      accounts to HMRC, PAYE/RTI if employing, VAT if registered.
+      No minimum share capital.
+
+  - jurisdiction: GBR
+    code: plc
+    local_name: Public limited company (PLC)
+    canonical_bucket: company_limited
+    description: >-
+      Public company. Minimum allotted share capital GBP 50,000 (at
+      least one quarter paid up); accounts due 6 months after year end
+      (vs 9 for private); cannot file micro/abridged accounts. Same
+      HMRC obligations as Ltd (CT600, PAYE, VAT).
+
+  - jurisdiction: GBR
+    code: llp
+    local_name: Limited liability partnership (LLP)
+    canonical_bucket: partnership
+    description: >-
+      LLP Act 2000 body corporate, TAX-TRANSPARENT: no CT600; files
+      accounts + confirmation statement at Companies House, and an
+      SA800 partnership return to HMRC with members taxed via Self
+      Assessment (or CT for corporate members).
+
+  - jurisdiction: GBR
+    code: sole_trader
+    local_name: Sole trader
+    canonical_bucket: sole_trader
+    description: >-
+      Unincorporated individual; unlimited liability. No Companies
+      House filings. Self Assessment (SA100 + SA103); MTD ITSA
+      quarterly updates from April 2026 above the qualifying-income
+      threshold (see thresholds.yaml); Class 4 NI; VAT if registered.
+
+  - jurisdiction: GBR
+    code: partnership
+    local_name: Ordinary (general) partnership
+    canonical_bucket: partnership
+    description: >-
+      Partnership Act 1890; no separate legal personality (England &
+      Wales), unlimited joint liability. No Companies House filings.
+      SA800 partnership return; partners file SA104 pages via Self
+      Assessment.
+
+  - jurisdiction: GBR
+    code: limited_partnership
+    local_name: Limited partnership (LP)
+    canonical_bucket: partnership
+    description: >-
+      Limited Partnerships Act 1907: general partner(s) with unlimited
+      liability + limited partners. Registered at Companies House
+      (registration only — no accounts filing for most LPs); SA800 to
+      HMRC; tax-transparent.
+
+  - jurisdiction: GBR
+    code: cic
+    local_name: Community interest company (CIC)
+    canonical_bucket: nonprofit
+    description: >-
+      Limited company (by shares or guarantee) with an asset lock,
+      regulated by the CIC Regulator. Files everything an Ltd files
+      PLUS the CIC34 community interest report with its accounts.
+      Fully within corporation tax (no charitable exemptions).
+
+  - jurisdiction: GBR
+    code: charitable_company
+    local_name: Charitable company (limited by guarantee)
+    canonical_bucket: nonprofit
+    description: >-
+      Company limited by guarantee registered with BOTH Companies
+      House (accounts, confirmation statement) and the Charity
+      Commission (annual return + trustees' annual report; SORP
+      accounts). CT exemptions on charitable income; Gift Aid claims
+      via HMRC.
+
+  - jurisdiction: GBR
+    code: cio
+    local_name: Charitable incorporated organisation (CIO)
+    canonical_bucket: nonprofit
+    description: >-
+      Charities Act 2011 incorporated form registered ONLY with the
+      Charity Commission — no Companies House presence. Annual return
+      + accounts to the Commission; HMRC recognition for Gift Aid.

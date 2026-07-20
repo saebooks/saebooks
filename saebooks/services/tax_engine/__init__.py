@@ -6,16 +6,28 @@ Public surface
 * ``TaxEngine`` — runtime-checkable Protocol every per-jurisdiction
   implementation satisfies.
 * ``get_engine(jurisdiction)`` — registry dispatcher; returns the
-  engine for the named jurisdiction or raises ``NotImplementedError``
-  for stubs (NZ/UK in M0; EE landed KMD-formula support Packet 3).
+  engine for the named jurisdiction (AU/EE/NZ/UK/LT/LV all live; a stub
+  factory raising ``NotImplementedError`` is the pattern for a
+  registered-but-unbuilt jurisdiction).
 * ``PostingContext`` / ``TaxTreatment`` / ``ValidationError`` — shared
   data classes (re-exported from ``types``).
 
-Adding a new jurisdiction
--------------------------
+Adding a new jurisdiction (registration inversion, Job C)
+-----------------------------------------------------------
+This module only declares ``EE`` (core-native) and the neutral ``XX``
+sentinel in-file — every OTHER jurisdiction (AU/NZ/UK/LT/LV) registers
+ITSELF by calling ``register_engine`` from its own
+``saebooks.jurisdictions.<cc>.__init__`` at import time, via
+``services.jurisdiction_modules.register_jurisdiction_module(tax=...)``.
+This module never imports a jurisdiction package — the readers below
+call ``saebooks.bootstrap.jurisdictions.ensure_loaded()`` first, which
+imports the config-selected set of jurisdiction packages and thereby
+triggers their self-registration.
 
-1. Implement the engine in a new module (e.g. ``nz.py``).
-2. Register it in ``_REGISTRY`` here.
+1. Implement the engine in the jurisdiction package (e.g.
+   ``jurisdictions/nz/tax.py``).
+2. Self-register it from ``jurisdictions/nz/__init__.py`` — see AU for
+   the reference shape.
 
 The protocol is duck-typed at runtime via ``isinstance`` — but
 practically every engine subclasses or composes from a base helper
@@ -36,6 +48,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from saebooks.services.tax_engine.neutral import NEUTRAL_JURISDICTION
 from saebooks.services.tax_engine.types import (
     PeriodWindow,
     PostingContext,
@@ -105,20 +118,21 @@ class TaxEngine(Protocol):
         ...
 
 
-def _au_factory() -> TaxEngine:
-    # Local import to avoid pulling AU code on every import of this
-    # package — we want jurisdictions to be loadable independently.
-    from saebooks.services.tax_engine.au import AUTaxEngine
-
-    return AUTaxEngine()
-
-
 def _ee_factory() -> TaxEngine:
     # KMD-formula support Packet 3 — EE is no longer a stub. Local
     # import for the same reason as AU above.
     from saebooks.services.tax_engine.ee import EETaxEngine
 
     return EETaxEngine()
+
+
+def _neutral_factory() -> TaxEngine:
+    # Jurisdiction-module Phase 0 — the null-object engine behind the
+    # reserved neutral sentinel "XX" (zero bolt-on modules). Local
+    # import for the same reason as AU above.
+    from saebooks.services.tax_engine.neutral import NeutralTaxEngine
+
+    return NeutralTaxEngine()
 
 
 def _stub(jurisdiction: str, milestone: str):
@@ -131,11 +145,24 @@ def _stub(jurisdiction: str, milestone: str):
 
 
 _REGISTRY: dict[str, Any] = {
-    "AU": _au_factory,
-    "NZ": _stub("NZ", "M1"),
-    "UK": _stub("UK", "M2"),
     "EE": _ee_factory,
+    NEUTRAL_JURISDICTION: _neutral_factory,
 }
+
+
+def register_engine(jurisdiction: str, factory: Any) -> None:
+    """Register (or replace) the tax-engine factory for a jurisdiction.
+
+    Jurisdiction-module Phase 0 — the programmatic registration hook
+    ``services.jurisdiction_modules.register_jurisdiction_module`` uses
+    so a bolt-on module can add its tax engine without editing this
+    file. EE + the neutral sentinel stay declared in ``_REGISTRY`` above
+    (EE is core-native — there is no ``jurisdictions/ee`` package; the
+    sentinel is the core-owned null object) — every other jurisdiction
+    (AU/NZ/UK/LT/LV) calls this function from its own package's
+    ``__init__`` (Job C registration inversion).
+    """
+    _REGISTRY[jurisdiction] = factory
 
 
 def get_engine(jurisdiction: str) -> TaxEngine:
@@ -143,9 +170,17 @@ def get_engine(jurisdiction: str) -> TaxEngine:
 
     Raises ``KeyError`` for an unknown jurisdiction code, and
     ``NotImplementedError`` for stub jurisdictions registered but not
-    yet built (NZ in M1, UK in M2). EE landed KMD-formula support
-    Packet 3 — no longer a stub.
+    yet built (none currently — AU/EE/NZ/UK/LT/LV all landed with their
+    jurisdiction modules). The reserved neutral sentinel ``"XX"``
+    (jurisdiction-module Phase 0) resolves to ``NeutralTaxEngine`` —
+    the zero-modules null object, see ``neutral.py``.
+
+    Callers that must NEVER raise on an unknown code (the posting path)
+    use :func:`resolve_engine` instead.
     """
+    from saebooks.bootstrap.jurisdictions import ensure_loaded
+
+    ensure_loaded()
     factory = _REGISTRY.get(jurisdiction)
     if factory is None:
         raise KeyError(
@@ -155,11 +190,36 @@ def get_engine(jurisdiction: str) -> TaxEngine:
     return factory()
 
 
+def resolve_engine(jurisdiction: str) -> TaxEngine:
+    """Like :func:`get_engine`, but degrade to ``NeutralTaxEngine`` for
+    any UNREGISTERED jurisdiction instead of raising ``KeyError``.
+
+    Jurisdiction-module Phase 0 zero-modules fix: the posting path
+    (``services.journal._apply_tax_treatment``) dispatches through this
+    so a company whose jurisdiction has no tax module can still RECORD
+    entries — the treatment snapshot is the neutral zero-tax one and no
+    jurisdiction tax is computed. A registered-but-unbuilt stub would
+    still raise ``NotImplementedError`` from its factory — an
+    explicitly promised jurisdiction failing loudly is intentional and
+    distinct from "no module bolted on".
+    """
+    from saebooks.bootstrap.jurisdictions import ensure_loaded
+
+    ensure_loaded()
+    factory = _REGISTRY.get(jurisdiction)
+    if factory is None:
+        return _neutral_factory()
+    return factory()
+
+
 __all__ = [
+    "NEUTRAL_JURISDICTION",
     "PeriodWindow",
     "PostingContext",
     "TaxEngine",
     "TaxTreatment",
     "ValidationError",
     "get_engine",
+    "register_engine",
+    "resolve_engine",
 ]

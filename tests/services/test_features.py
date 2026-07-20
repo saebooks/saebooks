@@ -35,6 +35,7 @@ from saebooks.services.features import (
     FLAG_DEV_TOOLS,
     FLAG_DOCUMENT_INBOX,
     FLAG_EDIT_FROZEN_STATE,
+    FLAG_EID_AUTH,
     FLAG_EXTENDED_AUDIT_MODES,
     FLAG_GRANULAR_PERMISSIONS,
     FLAG_HARD_DELETE,
@@ -111,6 +112,11 @@ EXPECTED_BUSINESS = EXPECTED_OFFLINE | frozenset({
     # Wave B (2026-07-10) / Richard's decision 7 — CHARTER §12.1
     # "SAE-hosted SMTP for invoice delivery" is a Business-line item.
     FLAG_SMTP_RELAY,
+    # Estonian eID login (2026-07-12) — SK ID Solutions charges per
+    # authentication transaction in production (the FLAG_AI_EXTRACTION
+    # cost model), and it is a live SK API call so no-phone-home Offline
+    # is excluded too. Business and up.
+    FLAG_EID_AUTH,
 })
 
 EXPECTED_PRO = EXPECTED_BUSINESS | frozenset({

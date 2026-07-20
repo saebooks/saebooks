@@ -1,13 +1,14 @@
 """Dutiable transaction event — a postable stamp/transfer/conveyance/
 securities/insurance duty (M1.5 · T5).
 
-Before this table ``stamp_duty_rate`` (reference DB) was a rate-lookup
-table only — nothing recorded that a jurisdiction actually assessed duty
+Before this table ``duty_rate_schedule`` (reference DB; renamed from
+``stamp_duty_rate`` — M1.5 Wave 3a) was a rate-lookup table only —
+nothing recorded that a jurisdiction actually assessed duty
 on a real transaction, and nothing posted a journal for it. This table is
 the missing company-scoped economic EVENT, the same relationship
 ``Transfer`` has to a plain account-to-account movement: one row per
 assessed duty, linked to exactly one posted journal entry via
-``services.dutiable_events.create_and_post_event`` (NEVER a hand-authored
+``jurisdictions.au.dutiable_events.create_and_post_event`` (NEVER a hand-authored
 journal entry — same posting chokepoint every other record type uses,
 ``journal.post_in_txn``).
 
@@ -26,9 +27,9 @@ the reference DB when configured.
 ``applied_concession_id`` is an opaque nullable UUID pointing at a
 ``RefDutyConcession`` row (reference DB) — also non-FK for the same
 cross-DB reason. ``computed_duty`` is caller-supplied or derived via
-``services.dutiable_events.lookup_stamp_duty_rate`` reading the existing
-``stamp_duty_rate`` reference table for AU real-property duty; this table
-does not own or require reference-DB rate data to exist.
+``jurisdictions.au.dutiable_events.lookup_stamp_duty_rate`` reading the existing
+``duty_rate_schedule`` reference table for AU real-property duty; this
+table does not own or require reference-DB rate data to exist.
 
 See ~/records/saebooks/global-reference-audit-2026-07-09.md (theme T5).
 """
@@ -57,7 +58,7 @@ from saebooks.models._scope import CompanyScoped
 
 
 class DutyType(enum.StrEnum):
-    """Kind of dutiable transaction. Mirrors ``stamp_duty_rate.transaction_type``
+    """Kind of dutiable transaction. Mirrors ``duty_rate_schedule.transaction_type``
     (kept as a plain string there, per its module docstring) so a lookup can
     map one to the other; not every ``DutyType`` has a matching rate row yet.
     """
@@ -67,6 +68,10 @@ class DutyType(enum.StrEnum):
     INSURANCE = "insurance"
     MORTGAGE = "mortgage"
     SECURITIES = "securities"  # share/unit transfer duty
+    LEASE = "lease"  # lease/tenancy grant duty (rent or premium base)
+    # indirect transfer: acquiring a significant interest in a land-rich
+    # entity, dutiable per the landholder_duty_rules reference catalog
+    LANDHOLDER_ACQUISITION = "landholder_acquisition"
 
 
 class DutiableEventStatus(enum.StrEnum):
@@ -145,9 +150,18 @@ class DutiableTransactionEvent(CompanyScoped, Base):
     )
     dutiable_value: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     computed_duty: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    # Foreign/non-resident purchaser surcharge component INCLUDED in
+    # computed_duty (informational breakdown — the JE still posts
+    # computed_duty as one amount). NULL = no surcharge applied.
+    surcharge_duty: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     # Opaque pointer at a RefDutyConcession row (reference DB) — non-FK for
     # the same cross-DB reason as jurisdiction/sub_jurisdiction above.
     applied_concession_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True)
+    )
+    # Opaque pointer at the RefDutySurchargeRate row (reference DB) the
+    # surcharge component was computed from — non-FK, same cross-DB posture.
+    applied_surcharge_rate_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True)
     )
     description: Mapped[str | None] = mapped_column(Text)

@@ -1,0 +1,29 @@
+# Australian foreign-tax relief rules (M1.5 · Wave 5-Income). The
+# foreign income tax offset (FITO, ITAA 1997 Division 770, income years
+# starting on or after 2008-07-01) is an ordinary credit: capped at the
+# Australian tax payable on the doubly-taxed amounts, claimable up to
+# AUD 1,000 without computing the cap, unbasketed, and excess offset is
+# lost (no carry-forward or carry-back). The predecessor s 160AF ITAA
+# 1936 foreign tax credit (excess credits carried forward 5 years within
+# classes of income) is closed out with effective_to.
+table: foreign_tax_relief_rules
+key: [jurisdiction, taxpayer_type, income_basket, effective_from]
+rows:
+  - jurisdiction: AUS
+    taxpayer_type: any
+    relief_method: ordinary_credit
+    income_basket: any
+    offset_de_minimis_amount: 1000.00
+    carry_forward_years: 0
+    carry_back_years: 0
+    limitation_formula: {limit: domestic_tax_on_double_taxed_amounts}
+    effective_from: 2008-07-01
+  - jurisdiction: AUS
+    taxpayer_type: any
+    relief_method: ordinary_credit
+    income_basket: any
+    carry_forward_years: 5
+    carry_back_years: 0
+    limitation_formula: {limit: domestic_tax_on_foreign_income_by_class}
+    effective_from: 1987-07-01
+    effective_to: 2008-06-30

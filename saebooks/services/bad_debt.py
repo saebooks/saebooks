@@ -37,7 +37,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import date
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,11 +46,10 @@ from sqlalchemy.orm import selectinload
 from saebooks.models.account import Account
 from saebooks.models.invoice import Invoice, InvoiceStatus
 from saebooks.models.journal import JournalEntry, JournalOrigin
+from saebooks.money import round_money
 from saebooks.services import accounts as accounts_svc
+from saebooks.services import control_accounts as control_accounts_svc
 from saebooks.services import journal as journal_svc
-
-_TWOPLACES = Decimal("0.01")
-_AR_CODE = "1-1200"
 
 
 class BadDebtError(ValueError):
@@ -58,7 +57,7 @@ class BadDebtError(ValueError):
 
 
 def _q2(value: Decimal) -> Decimal:
-    return value.quantize(_TWOPLACES, rounding=ROUND_HALF_UP)
+    return round_money(value)
 
 
 # ---------------------------------------------------------------------------
@@ -159,19 +158,11 @@ async def _get_invoice(session: AsyncSession, invoice_id: uuid.UUID) -> Invoice:
 
 
 async def _get_ar_account(session: AsyncSession, company_id: uuid.UUID) -> Account:
-    acct = (
-        await session.execute(
-            select(Account).where(
-                Account.company_id == company_id,
-                Account.code == _AR_CODE,
-            )
-        )
-    ).scalar_one_or_none()
-    if acct is None:
-        raise BadDebtError(
-            "AR control account 1-1200 Trade Debtors is missing — re-seed the CoA."
-        )
-    return acct
+    # Packet 4b: resolves companies.ar_control_account_code, falling
+    # back to the AU convention "1-1200" — see services/control_accounts.py.
+    return await control_accounts_svc.get_ar_account(
+        session, company_id, error_cls=BadDebtError
+    )
 
 
 async def _get_gst_collected_account(

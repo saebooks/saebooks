@@ -1,0 +1,17 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<tsd_vorm>
+  <regKood>10123456</regKood>
+  <c108_Aasta>2026</c108_Aasta>
+  <c109_Kuu>4</c109_Kuu>
+  <laadimisViis>L</laadimisViis>
+  <vorm>TSD</vorm>
+  <tsd_L4_0>
+    <c4000_ElKulu>500.00</c4000_ElKulu>
+    <c4010_KiKulu>100.00</c4010_KiKulu>
+    <c4030_Is>1000.00</c4030_Is>
+    <c4040_Ts>300.00</c4040_Ts>
+    <c4050_Mv>70.50</c4050_Mv>
+    <c4140_EsSumma>3111.85</c4140_EsSumma>
+    <c4180_Sm>1016.17</c4180_Sm>
+  </tsd_L4_0>
+</tsd_vorm>

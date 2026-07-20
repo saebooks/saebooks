@@ -1,0 +1,303 @@
+# Lithuania PVM (VAT) reference tax codes — feeds FR0600 box aggregation
+# (see tax_return_box_definitions.yaml in this directory) and
+# chart_template.yaml's default_tax_code assignments.
+#
+# jurisdiction is the 3-char reference-DB code 'LTU' (directory name 'LT'
+# is filesystem-only — see saebooks/services/reference/loader.py and
+# saebooks/services/tax_return_generator.py::_JURISDICTION_TO_REFERENCE_CODE).
+#
+# Rates (primary sources, fetched 2026-07-12):
+#   21%  standard rate — UNCHANGED in 2026. The 2025 defence-funding tax
+#        package (adopted June 2025) did NOT raise the standard rate; the
+#        rumoured 21% -> 23% rise conflates it with the REDUCED-rate
+#        reshuffle below. Verified: VMI 2026-changes hub + KPMG Baltics
+#        2025-12-04 newsflash + the FR0600(3) form mapping all carry 21%.
+#        The 2009-09-01 date for the 19% -> 21% step is the widely-
+#        documented history; only the CURRENT value was primary-verified
+#        (the NZ seed's history convention).
+#   12%  NEW reduced rate from 2026-01-01 (Law No XV-287, 2025-06-17,
+#        amending PVM įstatymo Art 19; e-TAR + VMI Art 19 commentary):
+#        accommodation services, regular-route passenger/baggage
+#        transport, admission to art/culture institutions and events.
+#        Transitional: services booked on/before 2025-12-31 keep 9%.
+#   9%   ABOLISHED for new supplies from 2026-01-01 (same law). Until
+#        2025-12-31 it covered accommodation, passenger transport,
+#        culture/sport events, books/publications, district heating and
+#        firewood for households. From 2026: books -> 5%; heating/hot
+#        water/firewood -> 21% (standard); the rest -> 12%. The FR0600(3)
+#        form keeps output box 30 (9%) for transitional adjustments and
+#        pre-2026 credit notes, so the legacy code stays seeded.
+#    5%  reduced rate (continuing): prescription/reimbursed medicines,
+#        medical aids, disability equipment, periodicals; PLUS (from
+#        2026-01-01, Law XV-287) books and non-periodical publications
+#        (printed and electronic), moved down from 9%.
+#    0%  zero-rated: export of goods (Art 41 — FR0600 box 17); intra-EU
+#        supplies of goods to EU VAT payers (Art 49(1) — box 18); other
+#        zero-rated supplies (Arts 42-48, 49(2)-(3), 51-53 — box 19).
+#   exempt (Arts 20-33: health, education, insurance, finance, certain
+#        real estate...) — no output VAT AND no input credit on directly
+#        attributable inputs; FR0600 box 13.
+#
+# Registration threshold: EUR 45,000 (computed per CALENDAR YEAR since
+# 2025-05-01, EU SME-scheme transposition — VMI primary). The staged
+# rise to EUR 60,000 (2026) is a parliamentary initiative, NOT enacted —
+# watch-flag, do not seed.
+#
+# Company-side TaxCode.reporting_type convention this seed's box
+# definitions (tax_return_box_definitions.yaml) key their
+# feeder_tax_codes off:
+#   standard / reduced_12 / reduced_9_legacy / reduced_5
+#     — ordinary rate buckets. FR0600's SALES-side taxable value is a
+#       single combined box (11) while the OUTPUT-VAT side is rate-split
+#       (29 / 29A / 30 / 31) — the opposite of EE's KMD (rate-split
+#       bases, formula-derived VAT), which is why the rate-specific
+#       reporting_type TAG (not an @rate pin) is the discriminator here.
+#   exempt
+#     — box 13 (sale side); purchases attributable to exempt supplies
+#       carry no input credit (input_credit_recoverable: false).
+#   zero_export / zero_ic_goods / zero_other
+#     — boxes 17 / 18 / 19 respectively.
+#   outside_lt
+#     — supplies outside Lithuania / not an LT VAT object (incl. OSS-
+#       declared distance sales taxed in other member states): box 20
+#       ONLY. Note this differs from out_of_scope below.
+#   out_of_scope
+#     — wages, taxes, dividends, non-business: appears in NO FR0600 box.
+#   rc_domestic_supply
+#     — SELLER side of the Art 96 domestic reverse charge (construction
+#       works, metal waste/scrap per Gov. Resolution No 900): no VAT
+#       charged; taxable value feeds box 12 only.
+#   rc_domestic_acq
+#     — BUYER side of the Art 96 domestic reverse charge: two-component
+#       fan-out via jurisdictions.lt.tax.LTTaxEngine (EE rc_eu_acq_*
+#       precedent) — self-assessed output VAT feeds box 33, the
+#       deductible input component feeds box 25 (internal 25_RC) and
+#       therefore box 35.
+#   rc_eu_acq_goods
+#     — intra-EU acquisition of goods: taxable value feeds box 21
+#       (purchase bucket); fan-out output VAT feeds box 34; input
+#       component feeds 25_RC/35.
+#   rc_eu_acq_services
+#     — services from EU VAT payers, place of supply LT, buyer
+#       self-assesses under Art 95: value feeds boxes 23 AND 24; fan-out
+#       output VAT feeds box 32; input component feeds 25_RC/35.
+#   rc_services_noneu
+#     — Art 95 services from NON-EU persons: value feeds box 23 only;
+#       output VAT box 32; input component 25_RC/35.
+#   input_import
+#     — import VAT paid/payable to customs: box 26 (and box 35 via the
+#       deduction formula). The POSTPONED-accounting variant (box 27,
+#       "importo PVM įskaitymas", settlement controlled by VMI) is NOT
+#       given a posting tag this wave — box 27 is manual; see the box-27
+#       row comment in tax_return_box_definitions.yaml.
+#
+# Margin schemes (box 16), private-use consumption (box 14) and
+# self-produced fixed assets (box 15) have no reporting_type tags this
+# wave — their boxes are manual (see the box seed). Flagged, not
+# silently dropped.
+table: tax_codes
+key: [jurisdiction, code, effective_from]
+rows:
+  - jurisdiction: LTU
+    code: STD
+    name: PVM standard rate — sales (21%)
+    rate_percent: 21.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    gl_account_hint: VAT Payable
+    effective_from: 2009-09-01
+    report_box_keys: ["FR0600:11", "FR0600:29"]
+
+  - jurisdiction: LTU
+    code: INPUT_STD
+    name: PVM standard rate — purchases (21%)
+    rate_percent: 21.0000
+    direction: purchase
+    gl_account_hint: VAT Receivable
+    effective_from: 2009-09-01
+    report_box_keys: ["FR0600:25", "FR0600:35"]
+
+  - jurisdiction: LTU
+    code: RED12
+    name: PVM reduced rate — sales (12%, from 2026 — accommodation, passenger transport, culture admission)
+    rate_percent: 12.0000
+    direction: sale
+    gl_account_hint: VAT Payable
+    effective_from: 2026-01-01
+    report_box_keys: ["FR0600:11", "FR0600:29A"]
+
+  - jurisdiction: LTU
+    code: INPUT_RED12
+    name: PVM reduced rate — purchases (12%)
+    rate_percent: 12.0000
+    direction: purchase
+    gl_account_hint: VAT Receivable
+    effective_from: 2026-01-01
+    report_box_keys: ["FR0600:25", "FR0600:35"]
+
+  # 9% legacy — abolished for new supplies 2026-01-01 (Law XV-287);
+  # kept for pre-2026 periods and transitional/credit-note adjustments
+  # (FR0600(3) retains output box 30 precisely for these). The
+  # 2009-09-01 start is the widely-documented history point, not
+  # primary-verified (only the abolition is).
+  - jurisdiction: LTU
+    code: RED9
+    name: PVM reduced rate — sales (9%, legacy — abolished for new supplies from 2026)
+    rate_percent: 9.0000
+    direction: sale
+    gl_account_hint: VAT Payable
+    effective_from: 2009-09-01
+    report_box_keys: ["FR0600:11", "FR0600:30"]
+
+  - jurisdiction: LTU
+    code: INPUT_RED9
+    name: PVM reduced rate — purchases (9%, legacy)
+    rate_percent: 9.0000
+    direction: purchase
+    gl_account_hint: VAT Receivable
+    effective_from: 2009-09-01
+    report_box_keys: ["FR0600:25", "FR0600:35"]
+
+  # 5% — long-standing reduced rate (medicines, medical aids, disability
+  # equipment, periodicals; books/non-periodicals join 2026-01-01).
+  # effective_from uses the 2019-01-01 permanence point of the 5%
+  # medicine rate as a conservative anchor; the category history is in
+  # the header comment, not per-row (UNVERIFIED before the current
+  # value, which is primary-verified).
+  - jurisdiction: LTU
+    code: RED5
+    name: PVM reduced rate — sales (5%, medicines/medical aids/periodicals; + books from 2026)
+    rate_percent: 5.0000
+    direction: sale
+    gl_account_hint: VAT Payable
+    effective_from: 2019-01-01
+    report_box_keys: ["FR0600:11", "FR0600:31"]
+
+  - jurisdiction: LTU
+    code: INPUT_RED5
+    name: PVM reduced rate — purchases (5%)
+    rate_percent: 5.0000
+    direction: purchase
+    gl_account_hint: VAT Receivable
+    effective_from: 2019-01-01
+    report_box_keys: ["FR0600:25", "FR0600:35"]
+
+  # effective_from 1994-05-01 = the PVM įstatymas' original regime era;
+  # the exempt/zero/out-of-scope CATEGORIES are original even though
+  # membership has shifted (the UK seed's 1973-04-01 convention).
+  - jurisdiction: LTU
+    code: EXPORT_0
+    name: PVM zero-rated — export of goods (Art 41)
+    rate_percent: 0.0000
+    direction: sale
+    gl_account_hint: VAT Payable
+    effective_from: 1994-05-01
+    report_box_keys: ["FR0600:17"]
+
+  - jurisdiction: LTU
+    code: IC_SUPPLY_0
+    name: PVM zero-rated — intra-EU supply of goods to EU VAT payers (Art 49(1))
+    rate_percent: 0.0000
+    direction: sale
+    gl_account_hint: VAT Payable
+    effective_from: 2004-05-01
+    report_box_keys: ["FR0600:18"]
+
+  - jurisdiction: LTU
+    code: ZERO_OTHER
+    name: PVM zero-rated — other 0% supplies (Arts 42-48, 49(2)-(3), 51-53)
+    rate_percent: 0.0000
+    direction: sale
+    gl_account_hint: VAT Payable
+    effective_from: 1994-05-01
+    report_box_keys: ["FR0600:19"]
+
+  - jurisdiction: LTU
+    code: EXEMPT
+    name: PVM exempt — supplies (Arts 20-33)
+    rate_percent: 0.0000
+    direction: sale
+    input_credit_recoverable: false
+    effective_from: 1994-05-01
+    report_box_keys: ["FR0600:13"]
+
+  - jurisdiction: LTU
+    code: INPUT_EXEMPT
+    name: PVM exempt — purchases (no input credit)
+    rate_percent: 0.0000
+    direction: purchase
+    input_credit_recoverable: false
+    effective_from: 1994-05-01
+
+  - jurisdiction: LTU
+    code: OUTSIDE_LT
+    name: Supplies outside Lithuania / not an LT VAT object (incl. OSS-declared distance sales)
+    rate_percent: 0.0000
+    direction: sale
+    effective_from: 2004-05-01
+    report_box_keys: ["FR0600:20"]
+
+  - jurisdiction: LTU
+    code: OUT_OF_SCOPE
+    name: Outside the scope of PVM (wages, taxes, dividends, non-business)
+    rate_percent: 0.0000
+    direction: both
+    effective_from: 1994-05-01
+
+  - jurisdiction: LTU
+    code: RC_DOM_SUPPLY
+    name: Art 96 domestic reverse charge — supply (construction works, metal waste/scrap; customer accounts)
+    rate_percent: 0.0000
+    direction: sale
+    effective_from: 2002-07-01
+    report_box_keys: ["FR0600:12"]
+
+  - jurisdiction: LTU
+    code: RC_DOM_ACQ
+    name: Art 96 domestic reverse charge — acquisition (buyer self-assesses, 21%)
+    rate_percent: 21.0000
+    direction: purchase
+    reverse_charge: true
+    gl_account_hint: VAT Payable
+    effective_from: 2002-07-01
+    report_box_keys: ["FR0600:33", "FR0600:25", "FR0600:35"]
+
+  - jurisdiction: LTU
+    code: EU_ACQ_GOODS
+    name: Intra-EU acquisition of goods (buyer self-assesses, 21%)
+    rate_percent: 21.0000
+    direction: purchase
+    reverse_charge: true
+    gl_account_hint: VAT Payable
+    effective_from: 2004-05-01
+    report_box_keys: ["FR0600:21", "FR0600:34", "FR0600:25", "FR0600:35"]
+
+  - jurisdiction: LTU
+    code: EU_ACQ_SERVICES
+    name: Art 95 reverse charge — services from EU VAT payers (buyer self-assesses, 21%)
+    rate_percent: 21.0000
+    direction: purchase
+    reverse_charge: true
+    gl_account_hint: VAT Payable
+    effective_from: 2010-01-01
+    report_box_keys: ["FR0600:23", "FR0600:24", "FR0600:32", "FR0600:25", "FR0600:35"]
+
+  - jurisdiction: LTU
+    code: RC_SERVICES_NONEU
+    name: Art 95 reverse charge — services from non-EU persons (buyer self-assesses, 21%)
+    rate_percent: 21.0000
+    direction: purchase
+    reverse_charge: true
+    gl_account_hint: VAT Payable
+    effective_from: 2004-05-01
+    report_box_keys: ["FR0600:23", "FR0600:32", "FR0600:25", "FR0600:35"]
+
+  - jurisdiction: LTU
+    code: IMPORT_VAT
+    name: Import VAT paid/payable to customs (box 26)
+    rate_percent: 21.0000
+    direction: purchase
+    gl_account_hint: VAT Receivable
+    effective_from: 2004-05-01
+    report_box_keys: ["FR0600:26", "FR0600:35"]

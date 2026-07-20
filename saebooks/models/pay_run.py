@@ -31,6 +31,15 @@ class PayRunStatus(enum.StrEnum):
     DRAFT = "draft"
     ABA_EXPORTED = "aba_exported"
     FINALIZED = "finalized"
+    # Packet 1 (EE GL posting) — reached only from FINALIZED, via
+    # ``services.pay_runs_v2.void_pay_run``. Reverses the posted journal
+    # (``journal_svc.reverse``) and marks the pay run VOIDED; the
+    # ``journal_id`` column keeps pointing at the ORIGINAL (now REVERSED)
+    # entry — the reversal is found via that entry's own
+    # ``reversal_of_id``, not a new column, so no migration was needed.
+    # ``status`` is a plain String(16) with no DB check constraint (see
+    # migration history for pay_runs), so this app-side addition is safe.
+    VOIDED = "voided"
 
 
 class PayRun(CompanyScoped, Base):
@@ -180,6 +189,17 @@ class PayRunLine(Base):
     ee_unemployment_employer: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     ee_social_tax: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     ee_pillar_ii: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    # ---------------------------------------------------------------------- #
+
+    # --- EE fringe-benefit compute (0197_ee_fringe_benefit_cols) ---------- #
+    # A SEPARATE EE tax event from ordinary wage withholding above — see
+    # services.fringe_benefits_ee module docstring. [] / NULL for every
+    # line with no fringe benefit (the common case, incl. every AU line).
+    ee_fringe_benefits: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
+    ee_fringe_benefit_income_tax: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    ee_fringe_benefit_social_tax: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     # ---------------------------------------------------------------------- #
 
     created_at: Mapped[datetime] = mapped_column(

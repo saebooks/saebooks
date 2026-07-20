@@ -1,4 +1,4 @@
-"""Tests for ``saebooks.services.payg`` and ``services.super_calc``.
+"""Tests for ``saebooks.jurisdictions.au.payg`` and ``jurisdictions.au.super_calc``.
 
 These tests verify the FORMULA APPLICATION + scale resolution against
 the seeded ``payg_tax_scales`` / ``stsl_coefficients`` rows. The
@@ -38,19 +38,19 @@ import pytest
 from sqlalchemy import select
 
 from saebooks.db import AsyncSessionLocal
-from saebooks.models.employee import TfnStatus
-from saebooks.models.payg import PaygTaxScale, StslCoefficient
-from saebooks.services.payg import (
+from saebooks.jurisdictions.au.payg import (
     PaygDataMissing,
     apply_formula,
     compute_withholding,
     resolve_scale_no,
 )
-from saebooks.services.super_calc import (
+from saebooks.jurisdictions.au.super_calc import (
     compute_super,
     current_sg_rate,
     quarterly_cap,
 )
+from saebooks.models.employee import TfnStatus
+from saebooks.models.payg import PaygTaxScale, StslCoefficient
 
 # --------------------------------------------------------------------- #
 # Fixtures                                                              #
@@ -486,17 +486,18 @@ class TestSuperCalc:
 
     def test_mscb_cap_applied_per_quarter(self) -> None:
         """Weekly OTE above MSCB / 13 → cap kicks in."""
-        # FY25-26 MSCB = $65,070 / quarter → $5,005.38 / wk
+        # FY25-26 MSCB = $62,500 / quarter → $4,807.69 / wk
+        # (derived from the concessional cap: 30,000 / 12% / 4)
         result = compute_super(
             ote=Decimal("10000.00"),  # well above cap
             period="WEEKLY",
             effective_date=_FY25_26_DATE,
         )
         assert result.cap_applied
-        # 12% × $5,005.38 ≈ $600.65
-        assert result.sg_amount == Decimal("600.65")
-        # Total weekly cap should match 65070 / 13 = 5005.3846… → 5005.38
-        assert result.period_cap == Decimal("5005.38")
+        # 12% × $4,807.69 ≈ $576.92
+        assert result.sg_amount == Decimal("576.92")
+        # Total weekly cap should match 62500 / 13 = 4807.6923… → 4807.69
+        assert result.period_cap == Decimal("4807.69")
 
     def test_no_cap_under_threshold(self) -> None:
         result = compute_super(
@@ -513,10 +514,10 @@ class TestSuperCalc:
             period="MONTHLY",
             effective_date=_FY25_26_DATE,
         )
-        # Monthly cap = 65070 / 3 = $21,690
-        assert result.period_cap == Decimal("21690.00")
+        # Monthly cap = 62500 / 3 = $20,833.33
+        assert result.period_cap == Decimal("20833.33")
         assert result.cap_applied
-        assert result.sg_amount == Decimal("2602.80")  # 12% × 21,690
+        assert result.sg_amount == Decimal("2500.00")  # 12% × 20,833.33
 
     def test_negative_ote_rejected(self) -> None:
         with pytest.raises(ValueError):
@@ -551,7 +552,7 @@ class TestSuperCalc:
         assert current_sg_rate(date(2024, 7, 1)) == Decimal("0.1150")
 
     def test_quarterly_cap_helper(self) -> None:
-        assert quarterly_cap(date(2025, 7, 1)) == Decimal("65070")
+        assert quarterly_cap(date(2025, 7, 1)) == Decimal("62500")
         assert quarterly_cap(date(2024, 7, 1)) == Decimal("65070")
         assert quarterly_cap(date(2023, 7, 1)) == Decimal("62270")
 

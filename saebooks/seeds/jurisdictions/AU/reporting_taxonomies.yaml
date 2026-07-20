@@ -1,0 +1,20 @@
+# Australian regulatory e-filing / reporting taxonomies (M1.5 · T10b).
+# One row: the SBR AU taxonomy. The live AU lodgement path
+# (saebooks/services/lodgement/sbr/xbrl.py) already renders Activity
+# Statement and PAYEVNT payloads as XBRL instances under this taxonomy,
+# so registering it here is a pure vocabulary addition — AU behaviour is
+# unchanged (parity by construction).
+table: reporting_taxonomies
+key: [jurisdiction, code]
+rows:
+  - jurisdiction: AUS
+    code: sbr_au
+    name: Standard Business Reporting (SBR) AU Taxonomy
+    taxonomy_format: xbrl
+    authority: Australian Taxation Office / Treasury (SBR)
+    description: >-
+      The XBRL taxonomy behind Australia's Standard Business Reporting
+      channel (sbr.gov.au) — Activity Statements (BAS/IAS) and STP pay
+      events lodge as XBRL instances whose concepts come from this
+      taxonomy. Consumed today by the SBR lodgement path; account-level
+      element tagging is a future company-side mapping.

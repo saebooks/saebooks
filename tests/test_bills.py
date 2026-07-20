@@ -637,7 +637,7 @@ async def test_post_bill_rejects_reverse_charge_eu_acquisition() -> None:
         )
         ap_acct = Account(
             company_id=company_id,
-            code="2-1200",
+            code="2100",
             name="Trade Creditors",
             account_type=AccountType.LIABILITY,
         )

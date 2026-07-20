@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- (c) XBRL International.  See http://www.xbrl.org/legal -->
+<xs:schema 
+	targetNamespace="https://xbrl.eesti.ee/gl/plt/2026-03-31" 
+	attributeFormDefault="unqualified" elementFormDefault="qualified" 
+	xmlns:xs="http://www.w3.org/2001/XMLSchema"
+	xmlns:xlink="http://www.w3.org/1999/xlink" 
+	xmlns:link="http://www.xbrl.org/2003/linkbase">
+	<xs:annotation>
+		<xs:appinfo>
+			<link:linkbaseRef xlink:type="simple" xlink:role="http://www.xbrl.org/2003/role/labelLinkbaseRef" xlink:arcrole="http://www.w3.org/1999/xlink/properties/linkbase" xlink:href="../../cor/lang/gl-cor-2015-03-25-label.xml" xlink:title="Label Links, all"/>
+			<link:linkbaseRef xlink:type="simple" xlink:role="http://www.xbrl.org/2003/role/labelLinkbaseRef" xlink:arcrole="http://www.w3.org/1999/xlink/properties/linkbase" xlink:href="../../bus/lang/gl-bus-2015-03-25-label.xml" xlink:title="Label Links, all"/>
+			<link:linkbaseRef xlink:type="simple" xlink:role="http://www.xbrl.org/2003/role/labelLinkbaseRef" xlink:arcrole="http://www.w3.org/1999/xlink/properties/linkbase" xlink:href="../../ext/lang/gl-ext-2026-03-31-label.xml" xlink:title="Label Links, all"/>
+		</xs:appinfo>
+	</xs:annotation>
+	<xs:import namespace="http://www.xbrl.org/int/gl/cor/2015-03-25" schemaLocation="gl-cor-content-2026-03-31.xsd"/>
+</xs:schema>

@@ -9,11 +9,11 @@ import pytest
 from sqlalchemy import select
 
 from saebooks.db import AsyncSessionLocal
+from saebooks.jurisdictions.au import tpar as svc
 from saebooks.models.account import Account
 from saebooks.models.contact import Contact, ContactType
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import bills as bill_svc
-from saebooks.services import tpar as svc
 from saebooks.services.companies import ensure_seed_company
 
 pytestmark = pytest.mark.postgres_only

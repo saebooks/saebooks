@@ -16,6 +16,24 @@ from typing import Any
 
 from saebooks.models.account import AccountType
 
+# Jurisdiction-NEUTRAL classification of a GL account into purchase-side
+# ("input") vs sale-side ("output") direction, from double-entry account
+# semantics alone (debit-normal expense/asset = input; credit-normal income =
+# output). This is bookkeeping structure, NOT a GST/VAT rule — every
+# jurisdiction's tax engine reuses it to decide whether a line's tax component
+# feeds the paid-side or collected-side bucket. Lives in the neutral core so no
+# jurisdiction module has to reach into another's package for it.
+INPUT_ACCOUNT_TYPES: frozenset[AccountType] = frozenset({
+    AccountType.EXPENSE,
+    AccountType.COST_OF_SALES,
+    AccountType.OTHER_EXPENSE,
+    AccountType.ASSET,
+})
+OUTPUT_ACCOUNT_TYPES: frozenset[AccountType] = frozenset({
+    AccountType.INCOME,
+    AccountType.OTHER_INCOME,
+})
+
 
 class PostingError(Exception):
     """A journal entry cannot be posted.

@@ -9,7 +9,7 @@ Why bytes for the envelope
 --------------------------
 
 The customer-side STP/BAS module already generates SBR3 envelope XML
-(or SuperStream MIG XML); that builder lives in ``services/ato_sbr/``
+(or SuperStream MIG XML); that builder lives in ``jurisdictions/au/ato_sbr/``
 today and is orthogonal to this relay. Keeping the interface as raw
 bytes means this service makes no assumption about envelope schema
 or version — the lodge-server validates by hashing what it receives.

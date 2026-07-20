@@ -1,0 +1,88 @@
+# New Zealand legal-entity / business-structure types.
+#
+# Source: ~/records/saebooks/nz-market-entry-strategy.md §5.6. Each
+# local structure maps to a jurisdiction-neutral canonical_bucket.
+#
+# The look-through company (LTC) is the NZ-specific structure with no
+# AU/EE analogue: corporate form + ELECTIVE flow-through taxation
+# (<= 5 NZ-resident owners, files IR7). The existing taxonomy covers it
+# cleanly: EntityStructureBucket.PASS_THROUGH is documented as
+# "US LLC / S-corp — corporate form, pass-through tax", which is exactly
+# the LTC's shape — no taxonomy strain (noted in the build summary as a
+# contract FIT, checked per the brief).
+table: entity_structure_types
+key: [jurisdiction, code]
+rows:
+  - jurisdiction: NZL
+    code: company
+    local_name: Company (NZ Limited Company)
+    canonical_bucket: company_limited
+    description: >-
+      Company registered under the Companies Act 1993; separate legal
+      entity, 28% flat income tax, files IR4, may attach imputation
+      credits to dividends.
+
+  - jurisdiction: NZL
+    code: sole_trader
+    local_name: Sole Trader
+    canonical_bucket: sole_trader
+    description: >-
+      An individual trading in their own right — uses their personal IRD
+      number, no separate registration; income taxed at individual rates
+      (IR3).
+
+  - jurisdiction: NZL
+    code: partnership
+    local_name: Partnership
+    canonical_bucket: partnership
+    description: >-
+      Two or more persons carrying on business together; flow-through —
+      files an IR7 partnership return, income taxed in the partners'
+      hands.
+
+  - jurisdiction: NZL
+    code: limited_partnership
+    local_name: Limited Partnership
+    canonical_bucket: partnership
+    description: >-
+      Registered under the Limited Partnerships Act 2008 — separate
+      legal personality, at least one general partner (unlimited
+      liability) and limited partners; flow-through taxation.
+
+  - jurisdiction: NZL
+    code: trust
+    local_name: Trust
+    canonical_bucket: trust
+    description: >-
+      Trustee income taxed at 39% (33% where trustee income <= NZD
+      10,000 — see corporate_tax_rates.yaml); beneficiary income taxed
+      in the beneficiary's hands; files IR6.
+
+  - jurisdiction: NZL
+    code: ltc
+    local_name: Look-Through Company (LTC)
+    canonical_bucket: pass_through
+    description: >-
+      NZ-specific ELECTIVE regime: a company (corporate form, limited
+      liability) whose income/losses flow through to <= 5 NZ-resident
+      look-through owners in proportion to their interests; files IR7.
+      Excluded from AIM provisional tax. The election is made to Inland
+      Revenue; revocation returns the company to ordinary 28% treatment.
+
+  - jurisdiction: NZL
+    code: incorporated_society
+    local_name: Incorporated Society
+    canonical_bucket: nonprofit
+    description: >-
+      Membership body incorporated under the Incorporated Societies Act
+      2022; not-for-profit, taxable unless income-tax-exempt (e.g.
+      registered charity).
+
+  - jurisdiction: NZL
+    code: charitable_trust
+    local_name: Charitable Trust (Charities-registered)
+    canonical_bucket: nonprofit
+    description: >-
+      Trust (or board incorporated under the Charitable Trusts Act 1957)
+      registered with Charities Services — income-tax-exempt while
+      registered.

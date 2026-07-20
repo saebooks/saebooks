@@ -8,3 +8,9 @@ rows:
   - {code: USD, name: United States Dollar, decimal_places: 2, symbol: "$"}
   - {code: INR, name: Indian Rupee, decimal_places: 2, symbol: "₹"}
   - {code: CAD, name: Canadian Dollar, decimal_places: 2, symbol: "$"}
+  # Non-2-place minor units — exercise Currency.decimal_places
+  # (mirrored in saebooks/money.py _NON_DEFAULT_MINOR_UNITS)
+  - {code: JPY, name: Japanese Yen,     decimal_places: 0, symbol: "¥"}
+  - {code: KRW, name: South Korean Won, decimal_places: 0, symbol: "₩"}
+  - {code: BHD, name: Bahraini Dinar,   decimal_places: 3, symbol: "BD"}
+  - {code: KWD, name: Kuwaiti Dinar,    decimal_places: 3, symbol: "KD"}

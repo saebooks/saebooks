@@ -1,0 +1,135 @@
+# United Kingdom PAYE income-tax withholding + student-loan deduction
+# tables, tax year 2026-27 (6 Apr 2026 – 5 Apr 2027).
+#
+# jurisdiction is the 3-char reference-DB code 'GBR'. Mirrors the
+# AU/EE withholding_tables.yaml shape: a formula_type tag + a
+# free-shape parameters JSONB blob interpreted by the consuming
+# service (jurisdictions/uk/payroll.py).
+#
+# THREE-NATION BANDING: income tax on employment income is devolved.
+# The tax-code PREFIX selects the table — no prefix = England/Northern
+# Ireland (rUK), 'S' = Scotland (Scottish Rate resolution — SIX bands
+# 19–48%), 'C' = Wales (Cymru — rates currently at parity with rUK but
+# separately set). All three share the £12,570 personal allowance
+# (frozen to 2031; tapered £1 per £2 of income over £100,000 — the
+# taper is administered through HMRC-issued tax codes, NOT computed by
+# the payroll engine).
+#
+# Primary source (fetched raw 2026-07-12 per §5.3): gov.uk "Rates and
+# thresholds for employers: 2026 to 2027" — PA £12,570; rUK bands
+# £0–£37,700 @20%, £37,701–£125,140 @40%, above @45%; Scottish bands
+# (taxable income above PA): starter to £3,967 @19%, basic to £16,956
+# @20%, intermediate to £31,092 @21%, higher to £62,430 @42%, advanced
+# to £125,140 @45%, top above @48%; Wales same structure as rUK.
+# Emergency codes 2026-27: 1257L W1 / 1257L M1 / 1257L X.
+#
+# Student loans (same primary pull): Plan 1 £26,900, Plan 2 £29,385,
+# Plan 4 £33,795, Plan 5 £25,000 — all 9%; Postgraduate Loan £21,000
+# at 6%. Deductions are NON-cumulative (each pay period stands alone)
+# and round DOWN to the whole pound.
+#
+# Bracket convention: bounds are ANNUAL taxable income ABOVE the
+# personal allowance (i.e. after free pay), 'upper: null' = unbounded.
+table: withholding_tables
+key: [jurisdiction, code, effective_from]
+rows:
+  - jurisdiction: GBR
+    code: uk_paye_ruk
+    name: "PAYE income tax — England & Northern Ireland (rUK bands)"
+    withholding_type: wage_paye
+    formula_type: bracketed
+    parameters:
+      nation: england_ni
+      tax_code_prefix: ""
+      personal_allowance_annual: 12570.00
+      personal_allowance_taper_start: 100000.00
+      emergency_code: "1257L"
+      brackets:
+        - {name: basic, lower: 0, upper: 37700, rate_percent: 20}
+        - {name: higher, lower: 37700, upper: 125140, rate_percent: 40}
+        - {name: additional, lower: 125140, upper: null, rate_percent: 45}
+    effective_from: 2026-04-06
+
+  - jurisdiction: GBR
+    code: uk_paye_scotland
+    name: "PAYE income tax — Scotland (S-prefix codes, six bands)"
+    withholding_type: wage_paye
+    formula_type: bracketed
+    parameters:
+      nation: scotland
+      tax_code_prefix: "S"
+      personal_allowance_annual: 12570.00
+      personal_allowance_taper_start: 100000.00
+      emergency_code: "S1257L"
+      brackets:
+        - {name: starter, lower: 0, upper: 3967, rate_percent: 19}
+        - {name: basic, lower: 3967, upper: 16956, rate_percent: 20}
+        - {name: intermediate, lower: 16956, upper: 31092, rate_percent: 21}
+        - {name: higher, lower: 31092, upper: 62430, rate_percent: 42}
+        - {name: advanced, lower: 62430, upper: 125140, rate_percent: 45}
+        - {name: top, lower: 125140, upper: null, rate_percent: 48}
+    effective_from: 2026-04-06
+
+  - jurisdiction: GBR
+    code: uk_paye_wales
+    name: "PAYE income tax — Wales (C-prefix codes, parity with rUK)"
+    withholding_type: wage_paye
+    formula_type: bracketed
+    parameters:
+      nation: wales
+      tax_code_prefix: "C"
+      personal_allowance_annual: 12570.00
+      personal_allowance_taper_start: 100000.00
+      emergency_code: "C1257L"
+      brackets:
+        - {name: basic, lower: 0, upper: 37700, rate_percent: 20}
+        - {name: higher, lower: 37700, upper: 125140, rate_percent: 40}
+        - {name: additional, lower: 125140, upper: null, rate_percent: 45}
+    effective_from: 2026-04-06
+
+  # -------------------------------------------------------------------
+  # Student loans. withholding_type stays wage_paye: they are deducted
+  # from employment income through the payroll alongside PAYE (the
+  # 'plan' key in parameters is the discriminator). Non-cumulative;
+  # deduction = rate x (period earnings - period threshold), rounded
+  # DOWN to the whole pound.
+  # -------------------------------------------------------------------
+  - jurisdiction: GBR
+    code: uk_student_loan_plan1
+    name: "Student loan — Plan 1"
+    withholding_type: wage_paye
+    formula_type: flat_rate
+    parameters: {plan: PLAN_1, rate_percent: 9, annual_threshold: 26900.00, rounding: floor_whole_pound}
+    effective_from: 2026-04-06
+
+  - jurisdiction: GBR
+    code: uk_student_loan_plan2
+    name: "Student loan — Plan 2"
+    withholding_type: wage_paye
+    formula_type: flat_rate
+    parameters: {plan: PLAN_2, rate_percent: 9, annual_threshold: 29385.00, rounding: floor_whole_pound}
+    effective_from: 2026-04-06
+
+  - jurisdiction: GBR
+    code: uk_student_loan_plan4
+    name: "Student loan — Plan 4 (Scottish)"
+    withholding_type: wage_paye
+    formula_type: flat_rate
+    parameters: {plan: PLAN_4, rate_percent: 9, annual_threshold: 33795.00, rounding: floor_whole_pound}
+    effective_from: 2026-04-06
+
+  - jurisdiction: GBR
+    code: uk_student_loan_plan5
+    name: "Student loan — Plan 5"
+    withholding_type: wage_paye
+    formula_type: flat_rate
+    parameters: {plan: PLAN_5, rate_percent: 9, annual_threshold: 25000.00, rounding: floor_whole_pound}
+    effective_from: 2026-04-06
+
+  - jurisdiction: GBR
+    code: uk_postgraduate_loan
+    name: "Postgraduate loan"
+    withholding_type: wage_paye
+    formula_type: flat_rate
+    parameters: {plan: POSTGRAD, rate_percent: 6, annual_threshold: 21000.00, rounding: floor_whole_pound}
+    effective_from: 2026-04-06

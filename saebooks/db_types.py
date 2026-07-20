@@ -48,7 +48,9 @@ intact. Verified 2026-05-14 against the default seed tenant.
 """
 from __future__ import annotations
 
-from sqlalchemy import JSON
+from decimal import Decimal
+
+from sqlalchemy import JSON, Numeric, TypeDecorator
 from sqlalchemy.dialects.postgresql import ARRAY, INET, JSONB, UUID
 from sqlalchemy.ext.compiler import compiles
 
@@ -113,4 +115,47 @@ def _inet_sqlite(element, compiler, **kw):  # type: ignore[no-untyped-def]
     return "VARCHAR"
 
 
-__all__ = ["ARRAY", "INET", "JSONB", "UUID"]
+# --------------------------------------------------------------------------- #
+# Money — Numeric(18, 4) storage, minor-unit presentation on read             #
+# --------------------------------------------------------------------------- #
+
+_MONEY_TRIM_QUANTA = (Decimal("0.01"), Decimal("0.001"))
+
+
+class Money(TypeDecorator):
+    """Monetary column: ``Numeric(18, 4)`` storage, trimmed on read.
+
+    Storage is widened to 4 decimal places so sub-cent minor units
+    (mils, three-decimal dinars) fit, but the DB pads every value to
+    the column scale — an AUD ``1.23`` written by a service comes back
+    as ``Decimal("1.2300")``, and API serialization (pydantic renders
+    ``Decimal`` as a JSON string) would present ``"1.2300"`` where the
+    pre-widening schema produced ``"1.23"``.
+
+    ``process_result_value`` therefore strips value-preserving trailing
+    zeros down to a floor of 2 decimal places. Services quantize on
+    write to the currency's ISO-4217 minor unit (``saebooks.money``),
+    so a stored value never carries non-zero digits beyond its
+    currency's places: AU/2-place reads reproduce the pre-widening
+    bytes exactly, 3/4-place currencies keep their full precision, and
+    the trim never *rounds* (a quantum is only applied when it leaves
+    the value unchanged).
+    """
+
+    impl = Numeric(18, 4)
+    cache_ok = True
+
+    def process_result_value(self, value, dialect):  # type: ignore[no-untyped-def]
+        if value is None:
+            return None
+        exponent = value.as_tuple().exponent
+        if not isinstance(exponent, int) or exponent >= -2:
+            return value
+        for quantum in _MONEY_TRIM_QUANTA:
+            trimmed = value.quantize(quantum)
+            if trimmed == value:
+                return trimmed
+        return value
+
+
+__all__ = ["ARRAY", "INET", "JSONB", "UUID", "Money"]

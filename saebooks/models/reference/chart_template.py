@@ -32,3 +32,23 @@ class ChartTemplate(ReferenceBase):
     )
     default_tax_code: Mapped[str | None] = mapped_column(String(32))
     display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # M1.5 · T10b — statutory-framework scoping (all nullable; AU rows stay
+    # NULL because Australia mandates no chart-of-accounts numbering plan).
+    # statutory_framework_code is a RefStatutoryAccountFramework.code within
+    # the same jurisdiction (matched by (jurisdiction, code), not by id).
+    statutory_framework_code: Mapped[str | None] = mapped_column(
+        String(32),
+        comment="Framework this template row belongs to, e.g. 'skr03'; NULL = jurisdiction default chart.",
+    )
+    statutory_account_code: Mapped[str | None] = mapped_column(
+        String(32),
+        comment="Mandated account number under the framework, e.g. SKR03 '4400'.",
+    )
+    statutory_account_label_local: Mapped[str | None] = mapped_column(
+        String(255),
+        comment="Local-language statutory label, e.g. 'Erlöse 19 % USt'.",
+    )
+    statutory_parent_class: Mapped[str | None] = mapped_column(
+        String(64),
+        comment="Framework class/group the account sits under, e.g. 'Klasse 4'.",
+    )

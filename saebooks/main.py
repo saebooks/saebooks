@@ -48,6 +48,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     import asyncio
 
     logger.info("SAE Books starting (edition=%s)", settings.edition)
+
+    # Job C registration inversion — explicit eager bootstrap so
+    # jurisdiction-module registration happens deterministically at
+    # startup rather than lazily on first request (the six registry
+    # readers also call this, so it is a no-op belt-and-braces call if
+    # something races it, but startup is the right place to surface a
+    # config error loudly instead of on a live request).
+    from saebooks.bootstrap.jurisdictions import ensure_loaded as _ensure_jurisdictions_loaded
+
+    _ensure_jurisdictions_loaded()
+
     if settings.edition == "community":
         await _assert_single_company()
 

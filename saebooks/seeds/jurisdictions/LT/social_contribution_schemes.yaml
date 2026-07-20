@@ -1,0 +1,128 @@
+# Lithuania state social insurance (Sodra) contribution schemes,
+# calendar year 2026. jurisdiction = 'LTU'.
+#
+# Primary basis (fetched 2026-07-12): Sodra's published 2026 rate
+# documents ("Aktuali informacija draudėjams 2026 metais" +
+# "Įmokų tarifai nuo 2026-01-01") plus >=2 agreeing secondaries —
+# sodra.lt blocks direct scraping, so the figures were extracted from
+# Sodra-published PDFs surfaced through search; flagged in the build
+# report for a one-time browser eyeball.
+#
+# EMPLOYEE side (withheld from gross) — 19.5% total:
+#   pension (VSD)            8.72%
+#   sickness (VSD)           1.99%
+#   maternity (VSD)          1.81%
+#   health insurance (PSD)   6.98%
+# II-pillar participants additionally 3.00% (see
+# mandatory_contribution_rules.yaml — voluntary participation from
+# 2026, withheld through payroll for participants).
+#
+# EMPLOYER side — 1.77% standard total:
+#   unemployment insurance   1.31%  (fixed-term contracts: 2.03% —
+#                                    employer total 2.49%)
+#   accident/occupational    0.14%  (risk Group I — higher-risk groups
+#                                    pay more; only Group I is seeded)
+#   Guarantee Fund           0.16%
+#   Long-term Employment
+#   Benefit Fund             0.16%
+#
+# CEILING ("Sodros lubos") 2026: 60 VDU = EUR 138,729/year
+# (60 x 2,312.15). Applies ONLY to the employee VSD components
+# (pension + sickness + maternity = 12.52%); PSD 6.98% does NOT cap,
+# and employer contributions have not capped since 2021. The
+# scheme table's wage_base_cap carries the annual figure on the capped
+# rows; the uncapped rows carry null.
+table: social_contribution_schemes
+key: [jurisdiction, code, effective_from]
+rows:
+  # ---- employee (withheld) --------------------------------------------
+  - jurisdiction: LTU
+    code: lt_vsd_pension_employee
+    name: "Sodra VSD — pension insurance (employee)"
+    payer: employee
+    rate_percent: 8.7200
+    wage_base_floor: null
+    wage_base_cap: 138729.00
+    collection_mechanism: payroll_withholding
+    effective_from: 2026-01-01
+
+  - jurisdiction: LTU
+    code: lt_vsd_sickness_employee
+    name: "Sodra VSD — sickness insurance (employee)"
+    payer: employee
+    rate_percent: 1.9900
+    wage_base_floor: null
+    wage_base_cap: 138729.00
+    collection_mechanism: payroll_withholding
+    effective_from: 2026-01-01
+
+  - jurisdiction: LTU
+    code: lt_vsd_maternity_employee
+    name: "Sodra VSD — maternity insurance (employee)"
+    payer: employee
+    rate_percent: 1.8100
+    wage_base_floor: null
+    wage_base_cap: 138729.00
+    collection_mechanism: payroll_withholding
+    effective_from: 2026-01-01
+
+  - jurisdiction: LTU
+    code: lt_psd_health_employee
+    name: "Sodra PSD — compulsory health insurance (employee, NO ceiling)"
+    payer: employee
+    rate_percent: 6.9800
+    wage_base_floor: null
+    wage_base_cap: null
+    collection_mechanism: payroll_withholding
+    effective_from: 2026-01-01
+
+  # ---- employer --------------------------------------------------------
+  - jurisdiction: LTU
+    code: lt_unemployment_employer
+    name: "Sodra — unemployment insurance (employer, open-ended contracts)"
+    payer: employer
+    rate_percent: 1.3100
+    wage_base_floor: null
+    wage_base_cap: null
+    collection_mechanism: payroll_withholding
+    effective_from: 2026-01-01
+
+  - jurisdiction: LTU
+    code: lt_unemployment_er_fixed_term
+    name: "Sodra — unemployment insurance (employer, FIXED-TERM contracts)"
+    payer: employer
+    rate_percent: 2.0300
+    wage_base_floor: null
+    wage_base_cap: null
+    collection_mechanism: payroll_withholding
+    effective_from: 2026-01-01
+
+  - jurisdiction: LTU
+    code: lt_accident_employer_group1
+    name: "Sodra — accident/occupational-disease insurance (employer, risk Group I)"
+    payer: employer
+    rate_percent: 0.1400
+    wage_base_floor: null
+    wage_base_cap: null
+    collection_mechanism: payroll_withholding
+    effective_from: 2026-01-01
+
+  - jurisdiction: LTU
+    code: lt_guarantee_fund_employer
+    name: "Guarantee Fund (Garantinis fondas) — employer"
+    payer: employer
+    rate_percent: 0.1600
+    wage_base_floor: null
+    wage_base_cap: null
+    collection_mechanism: payroll_withholding
+    effective_from: 2026-01-01
+
+  - jurisdiction: LTU
+    code: lt_ldu_fund_employer
+    name: "Long-term Employment Benefit Fund (Ilgalaikio darbo išmokų fondas) — employer"
+    payer: employer
+    rate_percent: 0.1600
+    wage_base_floor: null
+    wage_base_cap: null
+    collection_mechanism: payroll_withholding
+    effective_from: 2026-01-01

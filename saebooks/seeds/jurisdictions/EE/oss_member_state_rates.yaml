@@ -1,0 +1,102 @@
+# Per-EU-member-state STANDARD VAT rates for the Union OSS scheme
+# (EE-frontier build plan, Module 2 — OSS-Q).
+#
+# Consumed by services.lodgement.oss_q.generator to compute the
+# destination-country VAT payable on a B2C cross-border supply reported
+# under the Union OSS return (return_type "OSS-Q" — see
+# tax_return_box_definitions.yaml's OSS-Q section for why that seed only
+# carries structural/manual rows, not a fixed box vector).
+#
+# SCOPE (flagged, not silently narrowed — mirrors 0011's migration
+# docstring): only the 17 EU member states already present in
+# _global/countries.yaml with in_oss: true (18 in_oss rows total, minus
+# Estonia itself — OSS reports cross-border B2C supply *to another*
+# member state; EST is never its own OSS destination). The other 9
+# current EU member states (Croatia HRV, Slovenia SVN, Slovakia SVK,
+# Hungary HUN, Romania ROU, Bulgaria BGR, Greece GRC, Cyprus CYP, Malta
+# MLT — 18 + 9 = the full 27) have no `countries` row yet, so cannot be
+# FK-targeted here — extending `countries.yaml` with those 9 first is a
+# named follow-up, not done in this pass.
+#
+# RATES: standard (top) VAT rate only — the widely-published current rate
+# for each member state, a single dated-from row (not a full historical
+# series; earlier rate changes for these states are out of scope of this
+# pass). This is general EU public-record knowledge, not EE-specific
+# research, but is NOT independently re-verified against each member
+# state's own gazette this pass — treat every row as UNVERIFIED against a
+# primary source until confirmed, per this codebase's existing discipline
+# (see tax_codes.yaml's own "UNVERIFIED DATES" header for the precedent).
+# Reduced/parking rates are out of scope — a company whose OSS supply is
+# reduced-rated must provision its own OSS TaxCode with an explicit rate
+# override rather than rely on this table (see generator.py).
+table: oss_member_state_rates
+key: [country_code, effective_from]
+rows:
+  - country_code: DEU
+    standard_vat_rate_percent: 19.0000
+    effective_from: 2021-07-01
+    source_note: "Germany standard VAT rate — UNVERIFIED against primary source this pass."
+  - country_code: FRA
+    standard_vat_rate_percent: 20.0000
+    effective_from: 2021-07-01
+    source_note: "France standard VAT rate — UNVERIFIED against primary source this pass."
+  - country_code: ITA
+    standard_vat_rate_percent: 22.0000
+    effective_from: 2021-07-01
+    source_note: "Italy standard VAT rate — UNVERIFIED against primary source this pass."
+  - country_code: ESP
+    standard_vat_rate_percent: 21.0000
+    effective_from: 2021-07-01
+    source_note: "Spain standard VAT rate — UNVERIFIED against primary source this pass."
+  - country_code: PRT
+    standard_vat_rate_percent: 23.0000
+    effective_from: 2021-07-01
+    source_note: "Portugal standard VAT rate — UNVERIFIED against primary source this pass."
+  - country_code: NLD
+    standard_vat_rate_percent: 21.0000
+    effective_from: 2021-07-01
+    source_note: "Netherlands standard VAT rate — UNVERIFIED against primary source this pass."
+  - country_code: BEL
+    standard_vat_rate_percent: 21.0000
+    effective_from: 2021-07-01
+    source_note: "Belgium standard VAT rate — UNVERIFIED against primary source this pass."
+  - country_code: LUX
+    standard_vat_rate_percent: 17.0000
+    effective_from: 2024-01-01
+    source_note: "Luxembourg reverted to 17% from 2024-01-01 after a temporary 16% 2023 rate cut — UNVERIFIED against primary source this pass."
+  - country_code: AUT
+    standard_vat_rate_percent: 20.0000
+    effective_from: 2021-07-01
+    source_note: "Austria standard VAT rate — UNVERIFIED against primary source this pass."
+  - country_code: IRL
+    standard_vat_rate_percent: 23.0000
+    effective_from: 2021-07-01
+    source_note: "Ireland standard VAT rate — UNVERIFIED against primary source this pass."
+  - country_code: FIN
+    standard_vat_rate_percent: 25.5000
+    effective_from: 2024-09-01
+    source_note: "Finland raised its standard rate 24% -> 25.5% from 2024-09-01 — UNVERIFIED against primary source this pass."
+  - country_code: SWE
+    standard_vat_rate_percent: 25.0000
+    effective_from: 2021-07-01
+    source_note: "Sweden standard VAT rate — UNVERIFIED against primary source this pass."
+  - country_code: DNK
+    standard_vat_rate_percent: 25.0000
+    effective_from: 2021-07-01
+    source_note: "Denmark standard VAT rate — UNVERIFIED against primary source this pass."
+  - country_code: POL
+    standard_vat_rate_percent: 23.0000
+    effective_from: 2021-07-01
+    source_note: "Poland standard VAT rate — UNVERIFIED against primary source this pass."
+  - country_code: CZE
+    standard_vat_rate_percent: 21.0000
+    effective_from: 2024-01-01
+    source_note: "Czechia unified its rate structure to 21%/12% from 2024-01-01 (this row is the 21% top rate) — UNVERIFIED against primary source this pass."
+  - country_code: LVA
+    standard_vat_rate_percent: 21.0000
+    effective_from: 2021-07-01
+    source_note: "Latvia standard VAT rate — UNVERIFIED against primary source this pass."
+  - country_code: LTU
+    standard_vat_rate_percent: 21.0000
+    effective_from: 2021-07-01
+    source_note: "Lithuania standard VAT rate — UNVERIFIED against primary source this pass."

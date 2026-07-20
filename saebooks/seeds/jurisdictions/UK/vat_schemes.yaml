@@ -1,0 +1,52 @@
+# United Kingdom — VAT special-scheme parameters.
+#
+# NOT a reference-DB table seed (reference_seed: false): no reference
+# table models VAT scheme membership; these are UK-module data the
+# engine reads when scheme support is built. This file carries SCHEME
+# PARAMETERS ONLY.
+#
+# ⚠ PARKED: the full Flat Rate Scheme A–Z trade-sector percentage table
+# (HMRC FRS7200 / VAT Notice 733 appendix) is deliberately NOT seeded —
+# the UK market-entry strategy §5.1 flags it as "only sampled" and §5.3
+# requires a raw FRS7200 pull before it is written. Do not add sector
+# rows here from memory or a secondary source.
+#
+# Primary sources (fetched raw 2026-07-12):
+# * gov.uk "How VAT works: VAT thresholds" — FRS entry "£150,000 or
+#   less", exit "exceeding £230,000"; Cash Accounting entry "£1.35
+#   million or less", exit "surpassing £1.6 million"; Annual Accounting
+#   the same two figures.
+# * Limited-cost-trader 16.5% and the first-year -1% discount are per
+#   the market-entry strategy §5.1 (verified 2026-07-12; VAT Notice 733).
+# * Partial-exemption de minimis per strategy §5.1 (VAT Notice 706:
+#   average <=£625/month AND <=50% of total input tax).
+reference_seed: false
+jurisdiction: GBR
+
+flat_rate_scheme:
+  join_threshold_annual_taxable_turnover_ex_vat_gbp: 150000
+  leave_threshold_annual_flat_rate_turnover_inc_vat_gbp: 230000
+  limited_cost_trader_rate_percent: 16.5
+  limited_cost_trader_test:
+    goods_cost_below_percent_of_turnover: 2
+    or_goods_cost_below_annual_gbp: 1000
+  first_year_discount_percentage_points: 1
+  sector_rate_table: PARKED  # raw FRS7200 pull required before seeding — see header
+
+cash_accounting_scheme:
+  join_threshold_annual_taxable_turnover_gbp: 1350000
+  leave_threshold_annual_taxable_turnover_gbp: 1600000
+
+annual_accounting_scheme:
+  join_threshold_annual_taxable_turnover_gbp: 1350000
+  leave_threshold_annual_taxable_turnover_gbp: 1600000
+
+partial_exemption:
+  de_minimis_monthly_average_input_tax_gbp: 625
+  de_minimis_max_share_of_total_input_tax_percent: 50
+
+margin_schemes:
+  status: named_placeholder  # second-hand goods / art / antiques — margin basis, not modelled this wave
+
+retail_schemes:
+  status: named_placeholder  # point-of-sale / apportionment / direct calculation — not modelled this wave

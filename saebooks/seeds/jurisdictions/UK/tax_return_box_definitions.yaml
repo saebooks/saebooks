@@ -1,0 +1,196 @@
+# United Kingdom VAT100 (VAT Return) box definitions — the 9-box return
+# filed through Making Tax Digital for VAT.
+#
+# Box wording is HMRC's own, pulled raw 2026-07-12 from "How to fill in
+# and submit your VAT Return (VAT Notice 700/12)" (gov.uk) per the UK
+# market-entry strategy §5.3 primary re-pull list.
+#
+# Grammar: see saebooks/seeds/jurisdictions/AU/tax_return_box_definitions.yaml
+# for the full ``aggregation`` grammar this file uses
+# (sum_taxable_for_codes:<bucket>:<gst_inclusive|gst_exclusive>,
+# sum_tax_amount_for_codes:<bucket>, and the ``formula`` kind), parsed by
+# saebooks.services.tax_return_generator._parse_box_definition.
+# feeder_tax_codes are company-side TaxCode.reporting_type tags (NOT
+# RefTaxCode.code strings) — this directory's tax_codes.yaml header
+# defines the UK convention: standard / reduced / zero / exempt /
+# outside_scope / rc_construction / rc_construction_supply /
+# rc_services_intl / pva_import / xi_eu_acq_goods / xi_eu_dispatch.
+#
+# Reverse-charge / PVA box routing (the EE KMD "1_RC"/"5_RC" precedent):
+# jurisdictions.uk.tax.UKTaxEngine emits TWO tax components (output +
+# input) for a line tagged rc_construction / rc_services_intl /
+# pva_import / xi_eu_acq_goods. The output-role component feeds box 1
+# (or box 2 for NI-protocol EU acquisitions) via a role-keyed
+# ("output") internal box; the input-role component feeds box 4 via an
+# "input" internal box. Unlike EE's KMD, VAT100's output boxes are NOT
+# rate-split, so the role buckets here carry no "@<rate>" pin — any
+# rate routes correctly, which is why the UK engine needs no
+# supported-rate refusal (contrast EETaxEngine._RC_SUPPORTED_RATES).
+#
+# Box 6 note: per VAT Notice 700/12 the net value of reverse-charge
+# SERVICES RECEIVED from abroad is included in box 6 as well as box 7 —
+# a purchase-account line feeding an income-side box, hence the
+# purchase-bucket internal box "6_RC_SERVICES" summed into box 6's
+# formula. DRC construction purchases feed box 7 only.
+#
+# Box 5 note: HMRC's rule is "Take the figures in boxes 3 and 4. Deduct
+# the smaller from the larger" — an absolute difference, encoded as
+# max(0, 3-4) + max(0, 4-3) (exactly one term is non-zero; the EE
+# box-12/13 max() precedent).
+#
+# Internal-only ledger legs use display_order >= 100 (the EE
+# "_DOMESTIC"/"_RC" convention) — they are not real HMRC box codes.
+table: tax_return_box_definitions
+key: [jurisdiction, return_type, box_code]
+rows:
+  - jurisdiction: GBR
+    return_type: VAT100
+    box_code: "1"
+    box_label: "VAT due in the period on sales and other outputs"
+    aggregation: formula
+    formula: "VAT100:1_DOMESTIC + VAT100:1_RC"
+    display_order: 1
+
+  - jurisdiction: GBR
+    return_type: VAT100
+    box_code: "1_DOMESTIC"
+    box_label: "(internal) output VAT on ordinary standard/reduced-rate sales"
+    aggregation: "sum_tax_amount_for_codes:income"
+    feeder_tax_codes: ["standard", "reduced"]
+    display_order: 101
+
+  - jurisdiction: GBR
+    return_type: VAT100
+    box_code: "1_RC"
+    box_label: "(internal) self-assessed output VAT — DRC construction, intl services reverse charge, PVA imports"
+    aggregation: "sum_tax_amount_for_codes:output"
+    feeder_tax_codes: ["rc_construction", "rc_services_intl", "pva_import"]
+    display_order: 102
+
+  - jurisdiction: GBR
+    return_type: VAT100
+    box_code: "2"
+    box_label: "VAT due in the period on acquisitions of goods made in Northern Ireland from EU member states"
+    aggregation: "sum_tax_amount_for_codes:output"
+    feeder_tax_codes: ["xi_eu_acq_goods"]
+    display_order: 2
+
+  - jurisdiction: GBR
+    return_type: VAT100
+    box_code: "3"
+    box_label: "Total VAT due (the sum of boxes 1 and 2)"
+    aggregation: formula
+    formula: "VAT100:1 + VAT100:2"
+    display_order: 3
+
+  - jurisdiction: GBR
+    return_type: VAT100
+    box_code: "4"
+    box_label: "VAT reclaimed in the period on purchases and other inputs (including acquisitions from the EU)"
+    aggregation: formula
+    formula: "VAT100:4_DOMESTIC + VAT100:4_RC"
+    display_order: 4
+
+  - jurisdiction: GBR
+    return_type: VAT100
+    box_code: "4_DOMESTIC"
+    box_label: "(internal) input VAT on ordinary standard/reduced-rate purchases"
+    aggregation: "sum_tax_amount_for_codes:purchase"
+    feeder_tax_codes: ["standard", "reduced"]
+    display_order: 103
+
+  - jurisdiction: GBR
+    return_type: VAT100
+    box_code: "4_RC"
+    box_label: "(internal) reclaimable input VAT — reverse-charge fan-out legs (DRC, intl services, PVA, NI-EU acquisitions)"
+    aggregation: "sum_tax_amount_for_codes:input"
+    feeder_tax_codes: ["rc_construction", "rc_services_intl", "pva_import", "xi_eu_acq_goods"]
+    display_order: 104
+
+  - jurisdiction: GBR
+    return_type: VAT100
+    box_code: "5"
+    box_label: "Net VAT to pay to HMRC or reclaim (difference between boxes 3 and 4)"
+    aggregation: formula
+    formula: "max(0, VAT100:3 - VAT100:4) + max(0, VAT100:4 - VAT100:3)"
+    display_order: 5
+
+  - jurisdiction: GBR
+    return_type: VAT100
+    box_code: "6"
+    box_label: "Total value of sales and all other outputs excluding any VAT"
+    aggregation: formula
+    formula: "VAT100:6_DOMESTIC + VAT100:6_RC_SERVICES"
+    display_order: 6
+
+  - jurisdiction: GBR
+    return_type: VAT100
+    box_code: "6_DOMESTIC"
+    box_label: "(internal) net value of sales/outputs — all rate buckets incl. exempt, DRC supplies and NI-EU dispatches"
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["standard", "reduced", "zero", "exempt", "rc_construction_supply", "xi_eu_dispatch"]
+    display_order: 105
+
+  - jurisdiction: GBR
+    return_type: VAT100
+    box_code: "6_RC_SERVICES"
+    box_label: "(internal) net value of reverse-charge services received from abroad (700/12: value in boxes 6 AND 7)"
+    aggregation: "sum_taxable_for_codes:purchase:gst_exclusive"
+    feeder_tax_codes: ["rc_services_intl"]
+    display_order: 106
+
+  - jurisdiction: GBR
+    return_type: VAT100
+    box_code: "7"
+    box_label: "Total value of purchases and all other inputs excluding any VAT"
+    aggregation: "sum_taxable_for_codes:purchase:gst_exclusive"
+    feeder_tax_codes: ["standard", "reduced", "zero", "exempt", "rc_construction", "rc_services_intl", "pva_import", "xi_eu_acq_goods"]
+    display_order: 7
+
+  - jurisdiction: GBR
+    return_type: VAT100
+    box_code: "8"
+    box_label: "Total value of all supplies of goods and related costs, excluding any VAT, to EU member states"
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["xi_eu_dispatch"]
+    display_order: 8
+
+  - jurisdiction: GBR
+    return_type: VAT100
+    box_code: "9"
+    box_label: "Total value of all acquisitions of goods and related costs, excluding any VAT, from EU member states"
+    aggregation: "sum_taxable_for_codes:purchase:gst_exclusive"
+    feeder_tax_codes: ["xi_eu_acq_goods"]
+    display_order: 9
+
+  # =====================================================================
+  # MTD ITSA — quarterly update + final declaration. Seeded as MANUAL
+  # structural rows only (the KMD-INF/TSD/OSS-Q convention in the EE
+  # seed): the quarterly update is a cumulative income/expense category
+  # listing whose full SA103-derived category set comes from the HMRC
+  # ITSA API spec — that raw pull is PARKED (out-of-scope list: "ITSA
+  # final-declaration structures beyond a named placeholder"). The two
+  # summary totals below name the return's top-level shape (cumulative
+  # basis — each in-year update supersedes the last with year-to-date
+  # figures) without inventing unverified category codes.
+  # =====================================================================
+  - jurisdiction: GBR
+    return_type: ITSA_QU
+    box_code: "TOTAL_INCOME"
+    box_label: "Cumulative year-to-date business income (quarterly update — category breakdown pending HMRC ITSA API spec pull)"
+    aggregation: manual
+    display_order: 1
+
+  - jurisdiction: GBR
+    return_type: ITSA_QU
+    box_code: "TOTAL_EXPENSES"
+    box_label: "Cumulative year-to-date business expenses (quarterly update — category breakdown pending HMRC ITSA API spec pull)"
+    aggregation: manual
+    display_order: 2
+
+  - jurisdiction: GBR
+    return_type: ITSA_FINAL
+    box_code: "FINAL_DECLARATION"
+    box_label: "ITSA final declaration — named placeholder only (structure deliberately not modelled this wave)"
+    aggregation: manual
+    display_order: 1

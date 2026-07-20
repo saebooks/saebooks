@@ -9,8 +9,11 @@ AU is the only jurisdiction wired end-to-end at M0 — routes ``stp``,
 existing ``RemoteLodgementService`` / ``NullLodgementService`` chain
 (licence-gated, see ``adapters.au``).
 
-NZ/UK/EE adapters are stubs that raise ``NotImplementedError`` keyed
-to M1/M2/M3.
+UK/EE adapters are stubs that raise ``NotImplementedError`` keyed to
+M2/M3. The NZ adapter lives in its jurisdiction package
+(``saebooks/jurisdictions/nz/lodgement.py``) and self-registers via
+``registry.register_lodgement_adapter`` — the destination shape for
+every adapter here.
 """
 from __future__ import annotations
 

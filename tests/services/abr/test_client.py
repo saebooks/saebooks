@@ -1,4 +1,4 @@
-"""Unit tests for saebooks.services.abr.client.
+"""Unit tests for saebooks.jurisdictions.au.abr.client.
 
 respx-mocks the ABR JSON endpoint. We don't hit the public ABR API.
 """
@@ -9,7 +9,7 @@ import pytest
 import respx
 
 from saebooks.config import Settings
-from saebooks.services.abr.client import (
+from saebooks.jurisdictions.au.abr.client import (
     AbrError,
     AbrNotConfiguredError,
     _normalise_abn,

@@ -1,0 +1,47 @@
+# Australian landholder (land-rich entity) duty trigger rules
+# (M1.5 · 5-DUTIES). Acquiring a "significant interest" in an entity
+# whose in-state landholdings meet the threshold is dutiable as an
+# indirect land transfer — the postable record is a
+# DutiableTransactionEvent with duty_type 'landholder_acquisition'.
+# Representative rules for the three big states, showing the three rule
+# shapes: private company at 50%, listed entity at 90% with the 10%
+# concessional basis, and Victoria's lower 20% private-unit-trust trigger.
+table: landholder_duty_rules
+key: [jurisdiction, sub_jurisdiction, entity_class, effective_from]
+rows:
+  - jurisdiction: AUS
+    sub_jurisdiction: QLD
+    entity_class: private_company
+    landholding_value_threshold: 2000000.00
+    significant_interest_pct: 50.00
+    duty_basis: transfer_rates
+    effective_from: 2011-07-01
+    description: QLD landholder duty — 50%+ acquisition in a private company holding QLD land worth $2m+, at transfer rates on the land-value share.
+
+  - jurisdiction: AUS
+    sub_jurisdiction: QLD
+    entity_class: listed_entity
+    landholding_value_threshold: 2000000.00
+    significant_interest_pct: 90.00
+    duty_basis: fraction_of_transfer_duty
+    basis_fraction: 0.1000
+    effective_from: 2011-07-01
+    description: QLD listed landholder duty — 90%+ acquisition in a listed landholder, charged at 10% of the duty otherwise payable.
+
+  - jurisdiction: AUS
+    sub_jurisdiction: NSW
+    entity_class: private_company
+    landholding_value_threshold: 2000000.00
+    significant_interest_pct: 50.00
+    duty_basis: transfer_rates
+    effective_from: 2009-07-01
+    description: NSW landholder duty — 50%+ acquisition in a private landholder with NSW landholdings worth $2m+.
+
+  - jurisdiction: AUS
+    sub_jurisdiction: VIC
+    entity_class: private_unit_trust
+    landholding_value_threshold: 1000000.00
+    significant_interest_pct: 20.00
+    duty_basis: transfer_rates
+    effective_from: 2012-07-01
+    description: VIC landholder duty — private unit trust trigger is 20% (vs 50% for private companies), $1m landholding threshold.

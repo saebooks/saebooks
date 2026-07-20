@@ -4,8 +4,11 @@ Covers:
 
 - AU returns a fully-wired adapter that delegates to the existing
   licence-gated relay chain.
-- NZ/UK/EE return stub adapters whose every call raises
-  ``NotImplementedError`` keyed to M1/M2/M3.
+- UK returns a stub adapter whose every call raises
+  ``NotImplementedError`` keyed to M2.
+- NZ returns the shaped, live-gated adapter (NZ jurisdiction module):
+  known targets validated, then ``NZLiveCredentialsMissing`` before any
+  socket (no IR gateway credentials are provisioned).
 - Unknown jurisdiction raises ``UnknownJurisdiction`` (KeyError).
 - Unknown AU route raises ``UnknownRoute`` (LookupError).
 """
@@ -13,6 +16,7 @@ from __future__ import annotations
 
 import pytest
 
+from saebooks.jurisdictions.nz.lodgement import NZLodgementAdapter
 from saebooks.services.licence import LicenseService
 from saebooks.services.lodgement import (
     NullLodgementService,
@@ -23,7 +27,6 @@ from saebooks.services.lodgement import (
 )
 from saebooks.services.lodgement.adapters.au import AULodgementAdapter
 from saebooks.services.lodgement.adapters.ee import EELodgementAdapter
-from saebooks.services.lodgement.adapters.nz import NZLodgementAdapter
 from saebooks.services.lodgement.adapters.uk import UKLodgementAdapter
 
 
@@ -69,34 +72,54 @@ def test_get_adapter_nz_returns_stub() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_adapter_nz_lodge_raises_not_implemented_m1() -> None:
+async def test_get_adapter_nz_lodge_gates_loudly_before_any_socket() -> None:
+    # NZ jurisdiction module: the target is validated, then the live
+    # gate fires (no IR gateway credentials are provisioned) — the
+    # ee.py fail-loud pattern, zero network egress.
+    from saebooks.services.lodgement.exceptions import NZLiveCredentialsMissing
+
     adapter = get_adapter("NZ")
-    with pytest.raises(NotImplementedError, match="M1"):
+    with pytest.raises(NZLiveCredentialsMissing):
         await adapter.lodge("gst101", b"<xml/>", "id-1", {})
 
 
 @pytest.mark.asyncio
 async def test_get_adapter_nz_route_arg_passes_through() -> None:
-    """Per-route validation is intentionally lax for stub jurisdictions —
-    any route string accepted at registry level; adapter raises on call."""
+    """Per-route validation at registry level is applied only to AU —
+    the NZ adapter validates its own targets at call time."""
+    from saebooks.services.lodgement.exceptions import NZLiveCredentialsMissing
+
     adapter = get_adapter("NZ", route="gst101")
-    with pytest.raises(NotImplementedError, match="M1"):
+    with pytest.raises(NZLiveCredentialsMissing):
         await adapter.lodge("gst101", b"<xml/>", "id-1", {})
 
 
 @pytest.mark.asyncio
-async def test_get_adapter_uk_lodge_raises_not_implemented_m2() -> None:
+async def test_get_adapter_uk_lodge_gated_on_live_creds() -> None:
+    """The UK jurisdiction module reshaped the M2 stub: the adapter is
+    wired with named targets, but with no HMRC credentials (and no UK
+    transport built this wave) a live ``lodge`` fails loud with
+    ``UKLiveCredentialsMissing`` (before any network) instead of the old
+    M2 ``NotImplementedError`` stub — the same shape as EE's live gate
+    below."""
+    from saebooks.services.lodgement.exceptions import UKLiveCredentialsMissing
+
     adapter = get_adapter("UK")
     assert isinstance(adapter, UKLodgementAdapter)
-    with pytest.raises(NotImplementedError, match="M2"):
+    with pytest.raises(UKLiveCredentialsMissing):
         await adapter.lodge("vat100", b"<xml/>", "id-1", {})
 
 
 @pytest.mark.asyncio
-async def test_get_adapter_ee_lodge_raises_not_implemented_m3() -> None:
+async def test_get_adapter_ee_lodge_gated_on_live_creds() -> None:
+    """M3 is now real: the EE adapter is wired, but with no X-Road mTLS creds
+    provisioned a live ``lodge`` fails loud with ``EELiveCredentialsMissing``
+    (before any network) instead of the old M3 ``NotImplementedError`` stub."""
+    from saebooks.services.lodgement import EELiveCredentialsMissing
+
     adapter = get_adapter("EE")
     assert isinstance(adapter, EELodgementAdapter)
-    with pytest.raises(NotImplementedError, match="M3"):
+    with pytest.raises(EELiveCredentialsMissing):
         await adapter.lodge("vat_kmd", b"<xml/>", "id-1", {})
 
 

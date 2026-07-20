@@ -41,7 +41,7 @@ pytestmark = pytest.mark.postgres_only
 
 async def _seed_company_into_cashbook_mode(
     *,
-    gst_registered: bool = False,
+    tax_registered: bool = False,
 ) -> tuple[uuid.UUID, uuid.UUID]:
     """Flip the test seed company into cashbook mode. Returns
     ``(tenant_id, company_id)``. Mirrors the helper used by the service
@@ -69,10 +69,10 @@ async def _seed_company_into_cashbook_mode(
 
         co.bookkeeping_mode = "cashbook"
         co.cashbook_default_bank_account_id = bank.id
-        co.gst_registered = gst_registered
+        co.tax_registered = tax_registered
         co.cashbook_categories = None  # reset overrides between tests
 
-        if gst_registered:
+        if tax_registered:
             await settings_svc.set(session, "gst_collected_account_code", "2-1310")
             await settings_svc.set(session, "gst_paid_account_code", "2-1330")
             await settings_svc.set(session, "gst_auto_post", "true")
@@ -149,7 +149,7 @@ async def test_unauth_requests_rejected(unauth_client: AsyncClient) -> None:
 
 
 async def test_create_entry_201_returns_cashbook_shape(api_client: AsyncClient) -> None:
-    await _seed_company_into_cashbook_mode(gst_registered=False)
+    await _seed_company_into_cashbook_mode(tax_registered=False)
     body = {
         "entry_date": "2026-05-08",
         "description": "Bunnings — drill bits",
@@ -173,7 +173,7 @@ async def test_create_entry_201_returns_cashbook_shape(api_client: AsyncClient) 
 
 
 async def test_create_entry_idempotency_replay(api_client: AsyncClient) -> None:
-    await _seed_company_into_cashbook_mode(gst_registered=False)
+    await _seed_company_into_cashbook_mode(tax_registered=False)
     key = _new_key()
     body = {
         "entry_date": "2026-05-08",
@@ -195,7 +195,7 @@ async def test_create_entry_idempotency_replay(api_client: AsyncClient) -> None:
 async def test_create_entry_missing_idempotency_key_400(
     api_client: AsyncClient,
 ) -> None:
-    await _seed_company_into_cashbook_mode(gst_registered=False)
+    await _seed_company_into_cashbook_mode(tax_registered=False)
     body = {
         "entry_date": "2026-05-08",
         "description": "no key",
@@ -210,7 +210,7 @@ async def test_create_entry_missing_idempotency_key_400(
 
 
 async def test_create_entry_unknown_category_400(api_client: AsyncClient) -> None:
-    await _seed_company_into_cashbook_mode(gst_registered=False)
+    await _seed_company_into_cashbook_mode(tax_registered=False)
     body = {
         "entry_date": "2026-05-08",
         "description": "bad cat",
@@ -230,7 +230,7 @@ async def test_create_entry_unknown_category_400(api_client: AsyncClient) -> Non
 
 async def test_create_entry_wrong_direction_400(api_client: AsyncClient) -> None:
     """Income category submitted on the expense side."""
-    await _seed_company_into_cashbook_mode(gst_registered=False)
+    await _seed_company_into_cashbook_mode(tax_registered=False)
     body = {
         "entry_date": "2026-05-08",
         "description": "income code on expense side",
@@ -274,7 +274,7 @@ async def test_create_entry_company_not_in_cashbook_mode_409(
         )
     finally:
         # Restore cashbook mode for any later test in the session.
-        await _seed_company_into_cashbook_mode(gst_registered=False)
+        await _seed_company_into_cashbook_mode(tax_registered=False)
 
 
 # ---------------------------------------------------------------------------
@@ -283,7 +283,7 @@ async def test_create_entry_company_not_in_cashbook_mode_409(
 
 
 async def test_create_entry_zero_amount_422(api_client: AsyncClient) -> None:
-    await _seed_company_into_cashbook_mode(gst_registered=False)
+    await _seed_company_into_cashbook_mode(tax_registered=False)
     body = {
         "entry_date": "2026-05-08",
         "description": "zero",
@@ -300,7 +300,7 @@ async def test_create_entry_zero_amount_422(api_client: AsyncClient) -> None:
 
 
 async def test_create_entry_bad_direction_422(api_client: AsyncClient) -> None:
-    await _seed_company_into_cashbook_mode(gst_registered=False)
+    await _seed_company_into_cashbook_mode(tax_registered=False)
     body = {
         "entry_date": "2026-05-08",
         "description": "bad direction",
@@ -322,7 +322,7 @@ async def test_create_entry_bad_direction_422(api_client: AsyncClient) -> None:
 
 
 async def test_list_entries_returns_cashbook_only(api_client: AsyncClient) -> None:
-    await _seed_company_into_cashbook_mode(gst_registered=False)
+    await _seed_company_into_cashbook_mode(tax_registered=False)
 
     # Create two cashbook entries.
     for i in range(2):
@@ -351,7 +351,7 @@ async def test_list_entries_returns_cashbook_only(api_client: AsyncClient) -> No
 
 
 async def test_list_entries_filters_direction(api_client: AsyncClient) -> None:
-    await _seed_company_into_cashbook_mode(gst_registered=False)
+    await _seed_company_into_cashbook_mode(tax_registered=False)
 
     inc_body = {
         "entry_date": "2026-05-08",
@@ -383,7 +383,7 @@ async def test_list_entries_filters_direction(api_client: AsyncClient) -> None:
 
 
 async def test_list_entries_filters_category(api_client: AsyncClient) -> None:
-    await _seed_company_into_cashbook_mode(gst_registered=False)
+    await _seed_company_into_cashbook_mode(tax_registered=False)
     body_a = {
         "entry_date": "2026-05-08",
         "description": "tools",
@@ -415,7 +415,7 @@ async def test_list_entries_filters_category(api_client: AsyncClient) -> None:
 
 
 async def test_get_entry_returns_cashbook_shape(api_client: AsyncClient) -> None:
-    await _seed_company_into_cashbook_mode(gst_registered=False)
+    await _seed_company_into_cashbook_mode(tax_registered=False)
     body = {
         "entry_date": "2026-05-08",
         "description": "single",
@@ -435,7 +435,7 @@ async def test_get_entry_returns_cashbook_shape(api_client: AsyncClient) -> None
 
 
 async def test_get_entry_unknown_404(api_client: AsyncClient) -> None:
-    await _seed_company_into_cashbook_mode(gst_registered=False)
+    await _seed_company_into_cashbook_mode(tax_registered=False)
     r = await api_client.get(f"/api/v1/cashbook/entries/{uuid.uuid4()}")
     assert r.status_code == 404
 
@@ -448,7 +448,7 @@ async def test_get_entry_unknown_404(api_client: AsyncClient) -> None:
 async def test_categories_endpoint_returns_full_picker(
     api_client: AsyncClient,
 ) -> None:
-    await _seed_company_into_cashbook_mode(gst_registered=False)
+    await _seed_company_into_cashbook_mode(tax_registered=False)
     await _set_company_overrides(None)
     r = await api_client.get("/api/v1/cashbook/categories")
     assert r.status_code == 200
@@ -466,7 +466,7 @@ async def test_categories_endpoint_returns_full_picker(
 
 
 async def test_categories_label_override_applied(api_client: AsyncClient) -> None:
-    await _seed_company_into_cashbook_mode(gst_registered=False)
+    await _seed_company_into_cashbook_mode(tax_registered=False)
     await _set_company_overrides(
         {"version": 1, "overrides": {"EXP_VEHICLE": {"label": "Ute & fuel"}}}
     )
@@ -480,7 +480,7 @@ async def test_categories_label_override_applied(api_client: AsyncClient) -> Non
 
 
 async def test_categories_hidden_dropped(api_client: AsyncClient) -> None:
-    await _seed_company_into_cashbook_mode(gst_registered=False)
+    await _seed_company_into_cashbook_mode(tax_registered=False)
     await _set_company_overrides(
         {"version": 1, "overrides": {"INC_INTEREST": {"hidden": True}}}
     )
@@ -502,7 +502,7 @@ async def test_summary_aggregates_income_expense(api_client: AsyncClient) -> Non
     """Summary aggregates correctly. Asserted as deltas so any DB state
     left by prior runs (the dev DB persists across pytest sessions) is
     tolerated — what the test owns is the *change* it caused."""
-    await _seed_company_into_cashbook_mode(gst_registered=False)
+    await _seed_company_into_cashbook_mode(tax_registered=False)
 
     # Future date — no other test currently writes in 2099-Q1.
     target_date = "2099-01-15"
@@ -560,7 +560,7 @@ async def test_summary_aggregates_income_expense(api_client: AsyncClient) -> Non
 
 
 async def test_summary_bad_range_400(api_client: AsyncClient) -> None:
-    await _seed_company_into_cashbook_mode(gst_registered=False)
+    await _seed_company_into_cashbook_mode(tax_registered=False)
     r = await api_client.get(
         "/api/v1/cashbook/summary",
         params={"from": "2099-01-31", "to": "2099-01-01"},
@@ -594,7 +594,7 @@ async def _create_entry(api_client: AsyncClient, **overrides) -> dict:
 async def test_delete_entry_returns_204_and_hides_from_list(
     api_client: AsyncClient,
 ) -> None:
-    await _seed_company_into_cashbook_mode(gst_registered=False)
+    await _seed_company_into_cashbook_mode(tax_registered=False)
     created = await _create_entry(api_client)
     entry_id = created["id"]
 
@@ -614,7 +614,7 @@ async def test_delete_entry_returns_204_and_hides_from_list(
 
 
 async def test_delete_entry_idempotent(api_client: AsyncClient) -> None:
-    await _seed_company_into_cashbook_mode(gst_registered=False)
+    await _seed_company_into_cashbook_mode(tax_registered=False)
     created = await _create_entry(api_client)
     entry_id = created["id"]
 
@@ -625,7 +625,7 @@ async def test_delete_entry_idempotent(api_client: AsyncClient) -> None:
 
 
 async def test_delete_unknown_entry_404(api_client: AsyncClient) -> None:
-    await _seed_company_into_cashbook_mode(gst_registered=False)
+    await _seed_company_into_cashbook_mode(tax_registered=False)
     r = await api_client.delete(f"/api/v1/cashbook/entries/{uuid.uuid4()}")
     assert r.status_code == 404
 
@@ -638,7 +638,7 @@ async def test_delete_unknown_entry_404(api_client: AsyncClient) -> None:
 async def test_patch_entry_creates_replacement_with_link(
     api_client: AsyncClient,
 ) -> None:
-    await _seed_company_into_cashbook_mode(gst_registered=False)
+    await _seed_company_into_cashbook_mode(tax_registered=False)
     created = await _create_entry(
         api_client,
         amount="100.00",
@@ -675,7 +675,7 @@ async def test_patch_entry_creates_replacement_with_link(
 
 
 async def test_patch_entry_idempotent_on_replay(api_client: AsyncClient) -> None:
-    await _seed_company_into_cashbook_mode(gst_registered=False)
+    await _seed_company_into_cashbook_mode(tax_registered=False)
     created = await _create_entry(api_client)
     original_id = created["id"]
     key = _new_key("patch-idem")
@@ -703,7 +703,7 @@ async def test_patch_entry_idempotent_on_replay(api_client: AsyncClient) -> None
 async def test_patch_entry_missing_idempotency_key_400(
     api_client: AsyncClient,
 ) -> None:
-    await _seed_company_into_cashbook_mode(gst_registered=False)
+    await _seed_company_into_cashbook_mode(tax_registered=False)
     created = await _create_entry(api_client)
     body = {
         "entry_date": "2026-05-08",
@@ -721,7 +721,7 @@ async def test_patch_entry_missing_idempotency_key_400(
 
 
 async def test_patch_unknown_entry_404(api_client: AsyncClient) -> None:
-    await _seed_company_into_cashbook_mode(gst_registered=False)
+    await _seed_company_into_cashbook_mode(tax_registered=False)
     body = {
         "entry_date": "2026-05-08",
         "description": "no entry",
@@ -767,7 +767,7 @@ async def _bank_account_id() -> uuid.UUID:
 async def test_setup_idempotent_when_already_cashbook(api_client: AsyncClient) -> None:
     """Re-running /setup on a cashbook company just re-pins the bank
     account — no error, version still bumps."""
-    await _seed_company_into_cashbook_mode(gst_registered=False)
+    await _seed_company_into_cashbook_mode(tax_registered=False)
     bank_id = await _bank_account_id()
     r = await api_client.post(
         "/api/v1/cashbook/setup",
@@ -812,11 +812,11 @@ async def test_setup_refuses_full_company_with_existing_je(
         assert isinstance(detail, dict)
         assert detail.get("code") == "cashbook_setup_refused"
     finally:
-        await _seed_company_into_cashbook_mode(gst_registered=False)
+        await _seed_company_into_cashbook_mode(tax_registered=False)
 
 
 async def test_setup_unknown_bank_account_409(api_client: AsyncClient) -> None:
-    await _seed_company_into_cashbook_mode(gst_registered=False)
+    await _seed_company_into_cashbook_mode(tax_registered=False)
     r = await api_client.post(
         "/api/v1/cashbook/setup",
         json={"bank_account_id": str(uuid.uuid4())},
@@ -828,13 +828,13 @@ async def test_setup_unknown_bank_account_409(api_client: AsyncClient) -> None:
 
 
 async def test_setup_missing_body_422(api_client: AsyncClient) -> None:
-    await _seed_company_into_cashbook_mode(gst_registered=False)
+    await _seed_company_into_cashbook_mode(tax_registered=False)
     r = await api_client.post("/api/v1/cashbook/setup", json={})
     assert r.status_code == 422
 
 
 async def test_upgrade_to_full_flips_mode(api_client: AsyncClient) -> None:
-    await _seed_company_into_cashbook_mode(gst_registered=False)
+    await _seed_company_into_cashbook_mode(tax_registered=False)
     try:
         r = await api_client.post("/api/v1/cashbook/upgrade-to-full")
         assert r.status_code == 200, r.text
@@ -842,7 +842,7 @@ async def test_upgrade_to_full_flips_mode(api_client: AsyncClient) -> None:
         assert body["bookkeeping_mode"] == "full"
         assert body["version"] >= 2
     finally:
-        await _seed_company_into_cashbook_mode(gst_registered=False)
+        await _seed_company_into_cashbook_mode(tax_registered=False)
 
 
 async def test_upgrade_refuses_when_already_full(api_client: AsyncClient) -> None:
@@ -854,7 +854,7 @@ async def test_upgrade_refuses_when_already_full(api_client: AsyncClient) -> Non
         assert isinstance(detail, dict)
         assert detail.get("code") == "cashbook_setup_refused"
     finally:
-        await _seed_company_into_cashbook_mode(gst_registered=False)
+        await _seed_company_into_cashbook_mode(tax_registered=False)
 
 
 async def test_companies_endpoint_exposes_bookkeeping_mode(
@@ -863,7 +863,7 @@ async def test_companies_endpoint_exposes_bookkeeping_mode(
     """CompanyOut surfaces bookkeeping_mode + cashbook_default_bank_account_id
     so the web UI can hide full-edition menu items in cashbook mode.
     """
-    _, company_id = await _seed_company_into_cashbook_mode(gst_registered=False)
+    _, company_id = await _seed_company_into_cashbook_mode(tax_registered=False)
     bank_id = await _bank_account_id()
     r = await api_client.get(f"/api/v1/companies/{company_id}")
     assert r.status_code == 200, r.text

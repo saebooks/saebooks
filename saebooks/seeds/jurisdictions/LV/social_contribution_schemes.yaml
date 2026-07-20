@@ -1,0 +1,62 @@
+# Latvian social-contribution schemes (VSAOI — valsts sociālās
+# apdrošināšanas obligātās iemaksas) + solidaritātes nodoklis.
+# jurisdiction is the 3-char code 'LVA'. Mirrors the EE
+# social_contribution_schemes.yaml shape.
+#
+# 2026 values:
+#   * VSAOI standard total 34.09%: employer 23.59%, employee 10.50% —
+#     VERIFIED via two independent secondaries (PwC Latvija 2026 payroll
+#     cheat sheet + CORVUS/gramatvedisriga.lv); the VID rates page
+#     exists but did not render for a primary pull — flagged, not
+#     primary-confirmed.
+#   * Cap (maximum contribution object): EUR 105,300/year, aligned with
+#     the IIN band threshold — VERIFIED PRIMARY (vid.gov.lv solidarity
+#     tax page states the figure directly).
+#   * Solidarity tax: 25% on income above the cap — VERIFIED (vid.gov.lv
+#     for threshold + 2 secondaries for rate/mechanics). Administration:
+#     the employer KEEPS withholding at the full 34.09% on the excess
+#     during the year; VID reconciles the difference between the 34.09%
+#     collected and the 25% solidarity tax due after year-end (refunded
+#     employer-side; the precise refund date is UNVERIFIED). Payroll
+#     therefore applies the ordinary VSAOI rates every month with no cap
+#     logic — see LVPayrollEngine's docstring.
+#   * Minimum monthly wage 2026: EUR 780 (was 740 in 2025) — VERIFIED
+#     PRIMARY (lm.gov.lv). Minimum-contribution top-up rules (quarterly
+#     VSAA assessment against the minimum object) are NOT modelled this
+#     wave — flagged in the module docstring.
+#   * Reduced pensioner/disability rates (reported 31.70% total):
+#     UNVERIFIED (single source) — NOT seeded; the payroll engine
+#     refuses those employee categories rather than guessing.
+#
+# wage_base_cap semantics: annual EUR amount (the reference column is
+# unit-agnostic; the EE seed uses a monthly floor, this seed uses the
+# annual cap — each row documents its own unit).
+table: social_contribution_schemes
+key: [jurisdiction, code, effective_from]
+rows:
+  - jurisdiction: LVA
+    code: lv_vsaoi_employer
+    name: "VSAOI — darba devēja daļa"
+    payer: employer
+    rate_percent: 23.5900
+    wage_base_cap: 105300.00  # ANNUAL maximum contribution object (EUR/year); monthly payroll applies no cap (solidarity tax continues at the same rates above it).
+    collection_mechanism: payroll_withholding
+    effective_from: 2025-01-01
+
+  - jurisdiction: LVA
+    code: lv_vsaoi_employee
+    name: "VSAOI — darba ņēmēja daļa"
+    payer: employee
+    rate_percent: 10.5000
+    wage_base_cap: 105300.00  # ANNUAL (see employer row's comment).
+    collection_mechanism: payroll_withholding
+    effective_from: 2025-01-01
+
+  - jurisdiction: LVA
+    code: lv_solidarity_tax
+    name: "Solidaritātes nodoklis (ienākumam virs VSAOI maksimālā objekta)"
+    payer: both
+    rate_percent: 25.0000
+    wage_base_cap: null  # applies ABOVE the EUR 105,300 cap; collected as ordinary 34.09% VSAOI in-year, reconciled to 25% by VID after year-end.
+    collection_mechanism: payroll_withholding
+    effective_from: 2025-01-01

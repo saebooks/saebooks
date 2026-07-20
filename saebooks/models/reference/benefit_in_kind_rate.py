@@ -1,19 +1,18 @@
 """Per-jurisdiction benefit-in-kind (BIK) rates — generalises FBT (M1.5 · T11).
 
-AU Fringe Benefits Tax (``fbt_rate.py``) is one instance of a broader
-family: many jurisdictions tax non-cash employment benefits (a company
-car, health insurance, housing, entertainment), but *who* is taxed on
-them differs — AU taxes the employer directly (FBT); many other
-jurisdictions instead add the benefit's value to the employee's taxable
-wages (employee-taxed), and some split liability (hybrid). This table
-generalises that family so a non-AU jurisdiction's benefit-in-kind rules
-can be represented without inventing an AU-shaped table per country.
+AU Fringe Benefits Tax is one instance of a broader family: many
+jurisdictions tax non-cash employment benefits (a company car, health
+insurance, housing, entertainment), but *who* is taxed on them differs —
+AU taxes the employer directly (FBT); many other jurisdictions instead
+add the benefit's value to the employee's taxable wages (employee-taxed),
+and some split liability (hybrid). This table generalises that family so
+a non-AU jurisdiction's benefit-in-kind rules can be represented without
+inventing an AU-shaped table per country.
 
-Additive only — ``fbt_rate`` / ``FbtRate`` is untouched (the hard rule
-forbids renaming/dropping existing tables); AU FBT is seeded into this
-new table alongside it as one ``benefit_category`` row. A future,
-coordinated pass may migrate AU services onto this table; that rename
-(K7 in the audit) is explicitly deferred.
+The AU-named table this generalised, ``fbt_rate`` / ``FbtRate``, had zero
+consumers and no seed data, and was dropped (M1.5 Wave 3a rename sweep —
+K7 in the audit); AU FBT is seeded into this table as one
+``benefit_category`` row.
 
 See ~/records/saebooks/global-reference-audit-2026-07-09.md (theme T11,
 domain "Income, corporate & capital taxes").
@@ -56,6 +55,7 @@ class BenefitInKindValuationMethod(enum.StrEnum):
     COST_BASIS = "cost_basis"                # actual employer cost of providing the benefit
     MARKET_VALUE = "market_value"            # open-market value of the benefit
     ACTUAL_COST = "actual_cost"              # AU FBT "operating cost" method — logged actual running costs
+    AMOUNT_PER_UNIT = "amount_per_unit"      # EE company car: EUR/kW/month (0012_bik_amount_per_unit)
 
 
 BENEFIT_IN_KIND_VALUATION_METHODS = tuple(m.value for m in BenefitInKindValuationMethod)
@@ -108,6 +108,20 @@ class BenefitInKindRate(ReferenceBase):
         nullable=False,
         comment="Rate as a percentage (47.0000 = 47% for AU FBT) applied to the valued benefit.",
     )
+    # --- 0012_bik_amount_per_unit (EE Packet 2, company-car erisoodustus) - #
+    # For an amount-shaped (not percentage-shaped) valuation, e.g. EE's
+    # EUR-per-kW-per-month company-car basis. Both NULL for every
+    # percentage-shaped row (rate_percent carries the rate there instead);
+    # ``services.fringe_benefits_ee`` reads these two for the car case and
+    # does NOT consult rate_percent for it (rate_percent is still populated
+    # on those rows too, for schema consistency with the seeded ``general``
+    # row — see the migration docstring).
+    rate_amount_per_unit: Mapped[Decimal | None] = mapped_column(Numeric(9, 4))
+    rate_unit: Mapped[str | None] = mapped_column(
+        String(32),
+        comment="Unit label for rate_amount_per_unit, e.g. 'eur_per_kw_per_month'.",
+    )
+    # ------------------------------------------------------------------- #
     filing_period_start_month: Mapped[int] = mapped_column(
         Integer,
         nullable=False,

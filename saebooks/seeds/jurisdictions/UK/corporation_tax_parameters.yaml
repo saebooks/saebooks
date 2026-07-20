@@ -1,0 +1,60 @@
+# United Kingdom Corporation Tax — marginal relief, dividend taxation
+# and capital-allowance parameters, FY2026 / tax year 2026-27.
+#
+# NOT a reference-DB table seed (reference_seed: false): thresholds,
+# fractions and per-band dividend rates have no reference-table shape;
+# corporate_tax_rates.yaml carries the two headline CT rates for the
+# loader and this file carries the rest for the UK module.
+#
+# Verification status per item (raw pulls 2026-07-12 per §5.3):
+# * Limits £50,000 / £250,000, associated-company divisor
+#   (limits ÷ (1 + number of associated companies)), and short-period
+#   proration: PULLED raw (gov.uk marginal-relief guidance, quoted in
+#   corporate_tax_rates.yaml's header).
+# * Standard marginal relief fraction 3/200: the statute pull
+#   (CTA 2010 s.18B via FA 2021 Sch 1) confirmed the F x (U - A) x N/A
+#   formula SHAPE but the numeric fraction is set by Parliament per
+#   financial year (FA 2021 s.7(2) set 3/200) — the gov.uk page defers
+#   to a calculator. Treat the 3/200 value as statute-set,
+#   strategy-verified, NOT re-pulled raw. Flagged.
+# * Dividend rates 2026-27 10.75% / 35.75% / 39.35% + £500 allowance:
+#   PULLED raw (gov.uk "Tax on dividends"). Note the +2pp change on
+#   basic/higher this year — flag prominently in any UI copy.
+# * WDA main pool 18% -> 14%: PULLED raw (gov.uk capital-allowance
+#   rates: 14% from 1 April 2026 for CT, 6 April 2026 for IT); special
+#   rate pool 6% (same pull).
+# * AIA £1m, full expensing (100% main-rate FYA for companies), 40%
+#   FYA from 1 Jan 2026: strategy §5.1 values (verified there
+#   2026-07-12); the raw capital-allowance page pulled did not carry
+#   AIA/FYA figures — flagged as strategy-verified, not re-pulled.
+reference_seed: false
+jurisdiction: GBR
+effective_from: 2026-04-01
+
+marginal_relief:
+  lower_limit_gbp: 50000
+  upper_limit_gbp: 250000
+  standard_fraction: {numerator: 3, denominator: 200}   # FA 2021 s.7(2); see header
+  formula: "relief = F x (U - A) x (N / A), A = augmented profits, N = taxable total profits"
+  associated_companies_rule: "both limits divided by (1 + number of associated companies)"
+  short_period_rule: "limits proportionately reduced for accounting periods under 12 months"
+
+dividend_tax_2026_27:
+  allowance_gbp: 500
+  rates_percent:
+    basic: 10.75      # +2pp vs 2025-26 — flag prominently
+    higher: 35.75     # +2pp vs 2025-26 — flag prominently
+    additional: 39.35
+
+capital_allowances:
+  annual_investment_allowance_gbp: 1000000        # strategy-verified
+  full_expensing_main_rate_fya_percent: 100       # companies, new main-rate plant & machinery; strategy-verified
+  first_year_allowance_40_percent:                # strategy-verified
+    rate_percent: 40
+    effective_from: 2026-01-01
+  writing_down_allowance_main_pool:
+    rate_percent_before: 18
+    rate_percent: 14
+    effective_from_corporation_tax: 2026-04-01    # pulled raw
+    effective_from_income_tax: 2026-04-06         # pulled raw
+  writing_down_allowance_special_rate_pool_percent: 6   # pulled raw

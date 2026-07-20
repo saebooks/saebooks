@@ -1,7 +1,7 @@
 """End-to-end: clean reference DB -> load EE -> verify row counts.
 
 Mirrors tests/seeds/test_jurisdiction_loader.py's AU shape. Proves the
-EE seed set (all 14 files) loads through the real loader, is idempotent,
+EE seed set (all 15 files) loads through the real loader, is idempotent,
 and that the directory-name (EE) -> reference-code (EST) resolution the
 task's TRAP asked for actually round-trips through a live database.
 """
@@ -45,6 +45,7 @@ async def test_load_ee_idempotent() -> None:
         "EE/duty_concessions.yaml",
         "EE/chart_template.yaml",
         "EE/fiscal_year_definitions.yaml",
+        "EE/oss_member_state_rates.yaml",
     }
     assert expected_files.issubset(set(counts1)), (
         f"Loader skipped expected EE seed files: missing={expected_files - set(counts1)}"
@@ -84,6 +85,18 @@ async def test_load_ee_idempotent() -> None:
         # RC_DOMESTIC_ACQ + EE_ACQ_FOREIGN + INSTALL_OTHER_MS (4). 26+7=33.
         assert n_tax_codes == 33, f"Expected 33 EE tax codes, got {n_tax_codes}"
 
+        n_oss_rates = (
+            await s.execute(
+                text("SELECT count(*) FROM oss_member_state_rates")
+            )
+        ).scalar_one()
+        # EE-frontier Module 2 (0011_oss_member_state_rates): 17 EU
+        # member-state destination rates — every countries.yaml row with
+        # in_oss=true EXCEPT Estonia itself (never its own OSS
+        # destination). See oss_member_state_rates.yaml's header for the
+        # named gap (9 EU states not yet in countries.yaml).
+        assert n_oss_rates == 17, f"Expected 17 OSS member-state rates, got {n_oss_rates}"
+
         n_entities = (
             await s.execute(
                 text("SELECT count(*) FROM entity_structure_types WHERE jurisdiction = 'EST'")
@@ -105,7 +118,12 @@ async def test_load_ee_idempotent() -> None:
         # EU-acquisition reverse charge lands in the correct rate box, not
         # box 1. All eight are internal legs (display_order >= 100), not
         # real EMTA box codes: 40 + 4 + 4 = 48.
-        assert n_boxes == 48, f"Expected 48 EE tax-return box definitions, got {n_boxes}"
+        # EE-frontier Module 2: OSS-Q's single deliberate STUB row was
+        # replaced with 3 manual structural rows (MS_BREAKDOWN/
+        # CORRECTIONS/TOTAL_VAT_PAYABLE — see tax_return_box_definitions.
+        # yaml's OSS-Q header comment for why it's 3 manual rows, not a
+        # box vector): net +2. 48 - 1 + 3 = 50.
+        assert n_boxes == 50, f"Expected 50 EE tax-return box definitions, got {n_boxes}"
 
         # KMD-formula support Packet 2 (see
         # ~/.claude/plans/kmd-formula-support-scope.md §2/§7) flips 14 of

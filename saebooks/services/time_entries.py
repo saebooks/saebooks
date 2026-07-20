@@ -24,7 +24,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,12 +33,12 @@ from saebooks.models.account import Account, AccountType
 from saebooks.models.contact import Contact
 from saebooks.models.invoice import Invoice, InvoiceStatus
 from saebooks.models.time_entry import TimeEntry, TimeEntryApprovalStatus
+from saebooks.money import round_money
 from saebooks.services import idempotency as idem_svc
 from saebooks.services import preaccounting_client as _preacct
 from saebooks.services import preaccounting_facades as _pf
 from saebooks.services.idempotency import ClaimStatus
 
-_TWOPLACES = Decimal("0.01")
 _DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
@@ -54,7 +54,7 @@ class TimeEntryError(Exception):
 
 
 def _q2(value: Decimal) -> Decimal:
-    return value.quantize(_TWOPLACES, rounding=ROUND_HALF_UP)
+    return round_money(value)
 
 
 def _is_editable(entry: TimeEntry) -> bool:

@@ -1,6 +1,29 @@
-# UK personal/corp tax FY starts 6 April. Quarter anchors below match
-# the most common VAT staggered-quarter group (April–June, …); MTD
-# customers can override per company once we wire that in.
+# United Kingdom fiscal-year definition. jurisdiction = 'GBR'.
+#
+# The seeded row is the PERSONAL/PAYE tax year: 6 April – 5 April
+# (2026-27 = 6 Apr 2026 – 5 Apr 2027). Quarter anchors follow the most
+# common VAT stagger group (Apr–Jun, Jul–Sep, Oct–Dec, Jan–Mar); MTD
+# customers can override per company once per-company staggers are
+# wired in.
+#
+# Facts this single-row table CANNOT carry (the model has one row per
+# jurisdiction: fy_start_month/day + quarter_anchors only) — recorded
+# here and consumed as module knowledge by jurisdictions/uk:
+#
+# * CORPORATION TAX financial year runs 1 April – 31 March (FY2026 =
+#   1 Apr 2026); a company's own accounting period is set by its
+#   Companies House ACCOUNTING REFERENCE DATE (ARD — last day of the
+#   incorporation-anniversary month by default, movable within limits),
+#   and CT rates are apportioned across financial years when an
+#   accounting period straddles 1 April.
+# * PAYROLL WEEK 53 (weekly-paid; 54/56 for fortnightly/four-weekly):
+#   a tax year of 371+ days of weekly pay dates yields a 53rd week
+#   whose PAYE is computed NON-cumulatively with an extra week's free
+#   pay. jurisdictions/uk/payroll.py HARD-REFUSES week-53/54/56
+#   periods this wave rather than approximate them.
+# * TAX-YEAR BASIS for the self-employed (basis period reform) applies
+#   from 2024-25; transitional overlap-relief spreading runs to
+#   ~2027-28 (strategy §5.1) — not modelled in-engine.
 table: fiscal_year_definitions
 key: [jurisdiction]
 rows:

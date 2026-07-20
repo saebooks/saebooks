@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<operationAccepted>
+  <requestId>c99bbd83-28f8-48a8-ad2e-02fcad97804f</requestId>
+  <taxPayerRegCode>10123456</taxPayerRegCode>
+  <submitterPersonCode>38001010000</submitterPersonCode>
+  <year>2027</year>
+  <month>1</month>
+  <declarationType>1</declarationType>
+  <declarationState>SUBMITTED</declarationState>
+  <vatPayable>1234.56</vatPayable>
+  <functionalError>
+    <errorPointer>KMD_9</errorPointer>
+    <originalAttributeValue>0.00</originalAttributeValue>
+    <errorDescription>Informational: box 9 is zero for the period.</errorDescription>
+  </functionalError>
+</operationAccepted>

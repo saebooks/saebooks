@@ -1,0 +1,28 @@
+# United Kingdom statutory chart-of-accounts framework registry.
+#
+# The UK mandates NO chart of accounts (verified — strategy §5.1): what
+# IS mandated is the PRESENTATION of statutory accounts per the
+# Companies Act 2006 formats in SI 2008/410 Schedule 1 (large/medium)
+# and SI 2008/409 (small companies regime; FRS 105 for micro). The
+# single GBR row records the Format 1 P&L/balance-sheet line taxonomy
+# that this directory's chart_template rows tag their accounts to via
+# statutory_account_code — a MAPPING convention, not a numbering
+# mandate (is_legally_mandated refers to the presentation format, and
+# even that only binds entities preparing Companies Act accounts).
+table: statutory_account_frameworks
+key: [jurisdiction, code]
+rows:
+  - jurisdiction: GBR
+    code: uk_si_2008_410_f1
+    display_name: Companies Act 2006 — SI 2008/410 Sch 1, Format 1
+    is_legally_mandated: true
+    mandating_authority: Companies Act 2006 / SI 2008/410 (presentation format only — no account numbering plan exists in the UK)
+    version: "Format 1"
+    description: >-
+      Format 1 profit-and-loss (turnover, cost of sales, gross profit,
+      distribution costs, administrative expenses, ...) and balance
+      sheet (A-K lettered headings). The chart_template rows in this
+      directory carry Sage-convention nominal codes (the interchange
+      layer UK accountants expect) tagged to these Format 1 lines.
+      Small/micro entities may instead apply SI 2008/409 or FRS 105 —
+      not separately modelled.

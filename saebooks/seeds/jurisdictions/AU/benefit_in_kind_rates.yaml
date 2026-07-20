@@ -1,9 +1,9 @@
 # Australian Fringe Benefits Tax (FBT) as a benefit-in-kind rate (M1.5 · T11).
 # AU is employer_taxed (the employer pays FBT on the value of benefits
-# provided, not the employee). FBT year runs 1 April - 31 March. See
-# ``fbt_rate.py`` / ``fbt_rates`` for the existing detailed AU-shaped
-# gross-up-factor table this generalises alongside (additive, not a
-# replacement).
+# provided, not the employee). FBT year runs 1 April - 31 March. The
+# AU-shaped ``fbt_rate`` / ``fbt_rates`` gross-up-factor table this
+# generalised was dropped (M1.5 Wave 3a rename sweep — zero consumers,
+# unseeded); this table is now the sole home for this data.
 table: benefit_in_kind_rates
 key: [jurisdiction, benefit_category, effective_from]
 rows:

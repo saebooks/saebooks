@@ -1,0 +1,68 @@
+# United Kingdom tax / registry identifier formats and validation data.
+#
+# NOT a reference-DB table seed (reference_seed: false): the
+# tax_id_validation_patterns reference table has no natural-key unique
+# constraint the idempotent loader can upsert on, and the UK validators
+# are compute + data (check-digit algorithms live in
+# jurisdictions/uk/identifiers.py, which loads this file — the
+# kmdtyyp_mapping.yaml "module data off disk" precedent).
+#
+# Verification status:
+# * VAT number check digits — DUAL algorithm, mod-97 (older
+#   registrations) and mod-9755 (issued since ~2010): weighted sum of
+#   the first 7 digits (weights 8,7,6,5,4,3,2), then subtract 97 until
+#   non-positive; mod-9755 adds 55 to the sum first. A number is valid
+#   if it passes EITHER (implement both, accept either — strategy
+#   §5.1). Algorithm confirmed against multiple published sources
+#   2026-07-12; HMRC's own spec is distributed on request only —
+#   flagged as secondary-confirmed, not HMRC-primary.
+# * UTR check digit — PARKED: the 10-digit UTR carries a check digit
+#   whose algorithm is UNVERIFIED against any HMRC spec (§5.1 flag).
+#   FORMAT-ONLY validation (10 digits) until the spec is obtained. Do
+#   NOT implement a guessed algorithm.
+# * NINO format + disallowed prefixes: HMRC NIM39110 rules (stable,
+#   long-published).
+# * CRN / PAYE ref / Accounts Office ref: format-only (no check digit
+#   exists); CRN validity is a Companies House LOOKUP question, not a
+#   checksum one.
+reference_seed: false
+jurisdiction: GBR
+
+vat_number:
+  # 9 digits (standard) or 12 digits (branch traders: 9 + 3-digit
+  # suffix); GB prefix, or XI for Northern Ireland protocol traders.
+  # GD (government departments) / HA (health authorities) ranges are
+  # format-listed but NOT checksum-validated (different scheme).
+  regex_standard: "^(GB|XI)?\\s?(\\d{3})\\s?(\\d{4})\\s?(\\d{2})(\\s?\\d{3})?$"
+  regex_gd_ha: "^(GB|XI)?(GD[0-4]\\d{2}|HA[5-9]\\d{2})$"
+  checksum: dual_mod97_mod9755   # implemented in jurisdictions/uk/identifiers.py
+  weights: [8, 7, 6, 5, 4, 3, 2]
+
+company_registration_number:
+  # 8 digits (England & Wales), or a 2-letter prefix + 6 digits.
+  # Prefix map (the lookup-only set the strategy names + common
+  # others): SC Scotland, NI Northern Ireland, OC England/Wales LLP,
+  # SO Scottish LLP, NC NI LLP, LP limited partnership, SL Scottish
+  # limited partnership, CE/CS charitable incorporated organisation.
+  regex: "^(\\d{8}|(SC|NI|OC|SO|NC|LP|SL|CE|CS)\\d{6})$"
+  validation: format_and_registry_lookup_only   # no checksum exists; verify via Companies House API
+
+national_insurance_number:
+  # Two letters + six digits + suffix letter A-D. First letter never
+  # D/F/I/Q/U/V; second letter never D/F/I/O/Q/U/V; prefix pairs
+  # BG/GB/KN/NK/NT/TN/ZZ are not allocated (NIM39110).
+  regex: "^[A-CEGHJ-PR-TW-Z][A-CEGHJ-NPR-TW-Z]\\d{6}[A-D]$"
+  banned_prefixes: [BG, GB, KN, NK, NT, TN, ZZ]
+
+paye_employer_reference:
+  # NNN/XXXXX — 3-digit tax-office number, slash, up to 10 alnum.
+  regex: "^\\d{3}/[A-Z0-9]{1,10}$"
+
+accounts_office_reference:
+  # 13 characters: 3-digit tax-office number, 'P', a letter, 7 digits,
+  # final digit or 'X'. The PAYMENT identifier (vs the PAYE ref above).
+  regex: "^\\d{3}P[A-Z]\\d{7}[0-9X]$"
+
+unique_taxpayer_reference:
+  regex: "^\\d{10}$"
+  checksum: PARKED_UNVERIFIED   # format-only until the HMRC spec is pulled

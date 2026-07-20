@@ -1,0 +1,165 @@
+# New Zealand GST101A box definitions (GST return, return_type "GST101").
+#
+# Source: ~/records/saebooks/nz-market-entry-strategy.md §5.2 — verified
+# box-by-box against the GST101A form + IR375 guide (2026-07-12). Eleven
+# filable boxes (5–15) plus two engine-internal aggregation legs
+# (display_order >= 100 — the same convention the EE KMD seed uses;
+# ``tax_return_generator.persist_return`` excludes them from persisted
+# figures).
+#
+# Grammar: see saebooks/seeds/jurisdictions/AU/tax_return_box_definitions.yaml
+# for the full ``aggregation`` grammar (sum_taxable_for_codes:<bucket>:
+# <gst_inclusive|gst_exclusive>, sum_tax_amount_for_codes:<bucket>,
+# manual, formula), parsed by
+# saebooks.services.tax_return_generator._parse_box_definition.
+# feeder_tax_codes are company-side TaxCode.reporting_type tags — the NZ
+# convention is: taxable / zero_rated / exempt / capital (see
+# tax_codes.yaml's header in this directory).
+#
+# Filing frequencies / due dates (metadata, no seedable table — see
+# tax_codes.yaml header): 2-monthly default, 6-monthly <= $500k, monthly
+# mandatory > $24m; due 28th of following month except Mar → 7 May and
+# Nov → 15 Jan.
+#
+# THE 3/23 FRACTION (boxes 8 and 12): the form's arithmetic is
+# "× 3 ÷ 23" — extracting the 15% GST content from a GST-INCLUSIVE
+# total (15/115 = 3/23). The formula grammar has NO division operator
+# (by design — see tax_return_generator's closed grammar), so 3/23 is
+# written as a 34-digit decimal coefficient. Error analysis: Decimal
+# arithmetic runs at 28 significant digits, so the relative error is
+# ~1e-28 — sub-cent for any conceivable amount — AND an exact half-cent
+# tie is arithmetically IMPOSSIBLE for x·3/23 when x has 2dp (a tie
+# needs 600 | 23·(2k+1), and 23·odd is never divisible by 6), so the
+# truncated coefficient can never flip a rounding boundary. Asserted by
+# tests/services/test_tax_engine_nz.py's golden cases.
+#
+# Box 15 is a SIGNED single box (pay if positive, refund if negative) —
+# the GST101A form has one net box, unlike KMD's max(0,·) 12/13 split.
+#
+# GST103B (GST + provisional tax combined, boxes 16-28) is deliberately
+# NOT seeded: the research pass marked its box-level detail UNVERIFIED
+# (the PDF resisted extraction) — a manual read of gst103b-2023.pdf is
+# required before seeding. Parked, not built.
+table: tax_return_box_definitions
+key: [jurisdiction, return_type, box_code]
+rows:
+  - jurisdiction: NZL
+    return_type: GST101
+    box_code: "5"
+    box_label: "Total sales and income for the period (including GST and any zero-rated supplies)"
+    # BOX-FORMULA summing two internal legs: standard-rated sales are
+    # GST-INCLUSIVE (net + tax) while zero-rated sales carry no GST
+    # (exclusive == inclusive) — one box cannot mix the two inclusive
+    # modifiers, so the same two-summed-boxes pattern as EE KMD box 1.
+    # Exempt supplies are NOT included (see tax_codes.yaml EXEMPT note).
+    aggregation: formula
+    formula: "GST101:5_TAXABLE + GST101:5_ZERO"
+    display_order: 1
+
+  - jurisdiction: NZL
+    return_type: GST101
+    box_code: "5_TAXABLE"
+    box_label: "(internal) standard-rated sales and income, GST-inclusive — feeds Box 5"
+    aggregation: "sum_taxable_for_codes:income:gst_inclusive"
+    feeder_tax_codes: ["taxable"]
+    display_order: 101
+
+  - jurisdiction: NZL
+    return_type: GST101
+    box_code: "5_ZERO"
+    box_label: "(internal) zero-rated supplies — feeds Box 5 and Box 6"
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["zero_rated"]
+    display_order: 102
+
+  - jurisdiction: NZL
+    return_type: GST101
+    box_code: "6"
+    box_label: "Zero-rated supplies included in Box 5"
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["zero_rated"]
+    display_order: 2
+
+  - jurisdiction: NZL
+    return_type: GST101
+    box_code: "7"
+    box_label: "Subtract Box 6 from Box 5"
+    aggregation: formula
+    formula: "GST101:5 - GST101:6"
+    display_order: 3
+
+  - jurisdiction: NZL
+    return_type: GST101
+    box_code: "8"
+    box_label: "Multiply Box 7 by 3 and divide by 23 (GST content of Box 7)"
+    # 3/23 as a decimal coefficient — see this file's header for why and
+    # for the proof this can never flip a cent.
+    aggregation: formula
+    formula: "GST101:7 * 0.1304347826086956521739130434782609"
+    display_order: 4
+
+  - jurisdiction: NZL
+    return_type: GST101
+    box_code: "9"
+    box_label: "Adjustments from your calculation sheet (output tax adjustments)"
+    # MANUAL by design: calculation-sheet adjustments (private use,
+    # change-of-use, barter etc.) are filer-entered, not a GL bucket.
+    # An absent value is an explicit 0 in Box 10's formula; a supplied
+    # value flows in via generate_return(manual_values=...) — same
+    # mechanic as EE KMD boxes 4-1/10/11.
+    aggregation: manual
+    display_order: 5
+
+  - jurisdiction: NZL
+    return_type: GST101
+    box_code: "10"
+    box_label: "Total GST collected on sales and income (Box 8 plus Box 9)"
+    aggregation: formula
+    formula: "GST101:8 + GST101:9"
+    display_order: 6
+
+  - jurisdiction: NZL
+    return_type: GST101
+    box_code: "11"
+    box_label: "Total purchases and expenses (including GST) for which tax invoicing requirements are met, excluding imported goods"
+    # "capital" feeds here alongside "taxable" — GST101A makes no
+    # capital/non-capital split (unlike AU G10/G11); the separate tag
+    # exists so capital purchases keep their identity (tax_codes.yaml).
+    aggregation: "sum_taxable_for_codes:purchase:gst_inclusive"
+    feeder_tax_codes: ["taxable", "capital"]
+    display_order: 7
+
+  - jurisdiction: NZL
+    return_type: GST101
+    box_code: "12"
+    box_label: "Multiply Box 11 by 3 and divide by 23 (GST content of Box 11)"
+    aggregation: formula
+    formula: "GST101:11 * 0.1304347826086956521739130434782609"
+    display_order: 8
+
+  - jurisdiction: NZL
+    return_type: GST101
+    box_code: "13"
+    box_label: "Credit adjustments from your calculation sheet (including bad debts written off x 3/23)"
+    # MANUAL by design — filer-entered credit adjustments; the bad-debt
+    # 3/23 conversion happens on the calculation sheet, not here.
+    aggregation: manual
+    display_order: 9
+
+  - jurisdiction: NZL
+    return_type: GST101
+    box_code: "14"
+    box_label: "Total GST credit for purchases and expenses (Box 12 plus Box 13)"
+    aggregation: formula
+    formula: "GST101:12 + GST101:13"
+    display_order: 10
+
+  - jurisdiction: NZL
+    return_type: GST101
+    box_code: "15"
+    box_label: "GST to pay or refund (Box 10 minus Box 14; pay if positive, refund if negative)"
+    # SIGNED single box — the form has one net figure, not a KMD-style
+    # payable/refund pair, so no max(0,·) split.
+    aggregation: formula
+    formula: "GST101:10 - GST101:14"
+    display_order: 11

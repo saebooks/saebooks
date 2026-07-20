@@ -1,0 +1,51 @@
+# Australian thin-capitalisation / interest-limitation parameters (M1.5 ·
+# Wave 5-Income). For income years starting on or after 2023-07-01,
+# general class investors are limited by the fixed ratio test (30% of tax
+# EBITDA, ITAA 1997 Division 820 as amended 2024) with group-ratio and
+# third-party-debt elections and a 15-year carry-forward of FRT-denied
+# amounts. The pre-2023 general safe-harbour (1.5:1 debt:equity, i.e. 60%
+# of assets) row is closed out with effective_to. Financial entities keep
+# the 15:1 safe harbour; ADIs remain under capital-based rules. The
+# AUD 2m de-minimis (s 820-35, total debt deductions) carves small
+# entities out of the whole regime.
+table: thin_capitalisation_rules
+key: [jurisdiction, entity_scope, mechanic_type, effective_from]
+rows:
+  - jurisdiction: AUS
+    entity_scope: general
+    mechanic_type: safe_harbour_debt_ratio
+    safe_harbour_ratio: 1.5
+    ratio_base: equity
+    de_minimis_threshold: 2000000.00
+    group_ratio_election_allowed: false
+    effective_from: 2001-07-01
+    effective_to: 2023-06-30
+  - jurisdiction: AUS
+    entity_scope: general
+    mechanic_type: fixed_ratio_ebitda
+    fixed_ratio_pct: 30.0
+    ratio_base: tax_ebitda
+    de_minimis_threshold: 2000000.00
+    group_ratio_election_allowed: true
+    disallowed_carryforward_years: 15
+    effective_from: 2023-07-01
+  - jurisdiction: AUS
+    entity_scope: general
+    mechanic_type: third_party_debt
+    de_minimis_threshold: 2000000.00
+    group_ratio_election_allowed: false
+    effective_from: 2023-07-01
+  - jurisdiction: AUS
+    entity_scope: financial_entity
+    mechanic_type: safe_harbour_debt_ratio
+    safe_harbour_ratio: 15.0
+    ratio_base: equity
+    de_minimis_threshold: 2000000.00
+    group_ratio_election_allowed: false
+    effective_from: 2001-07-01
+  - jurisdiction: AUS
+    entity_scope: adi
+    mechanic_type: capital_based
+    de_minimis_threshold: 2000000.00
+    group_ratio_election_allowed: false
+    effective_from: 2001-07-01

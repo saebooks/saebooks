@@ -1,0 +1,110 @@
+# SAE Books — Community edition, single-command self-host (SQLite).
+# =============================================================================
+# The everyday-person path: no Postgres, no roles, no migrations to run.
+# Two small containers — the API engine (with an embedded SQLite "Cashbook"
+# database on a mounted volume) and the Jinja/HTMX web UI — brought up with
+# ONE command:
+#
+#     docker compose -f docker-compose.community.yml up -d
+#
+# Then open  http://127.0.0.1:18960  and sign in with the starter books
+# (see SAEBOOKS_DEMO_* below). Double-entry bookkeeping is the CORE engine and
+# is fully available in Community; paid integrations (bank feeds, ABR/LEI
+# lookups, ATO SBR e-lodgement, Stripe, AI extraction, multi-company, …) are
+# licence-gated and simply return 404 on this edition.
+#
+# Why SQLite and no Postgres:
+#   The engine's SQLite backend builds its schema from the ORM metadata
+#   (saebooks.db.bootstrap_schema) instead of the 100+ Postgres/RLS Alembic
+#   migrations — see saebooks/db.py and alembic/env.py. One device = one user =
+#   one company file; there is no multi-tenant RLS to enforce. This is the same
+#   backend the Cashbook mobile app uses. `alembic upgrade head` in the image
+#   entrypoint transparently short-circuits to bootstrap_schema on a SQLite URL.
+#
+# SECURITY NOTE (read before exposing to a network):
+#   The secret defaults below are LOCAL-ONLY placeholders so the stack runs with
+#   zero setup on a single device that listens on 127.0.0.1. If you bind this to
+#   a LAN/public address, you MUST override SAEBOOKS_SECRET_KEY,
+#   SAEBOOKS_FIELD_ENCRYPTION_KEY and SAEBOOKS_WEB_SECRET_KEY with your own
+#   random values (e.g. `openssl rand -hex 32`, and a Fernet key for the
+#   field-encryption one) and change the starter password.
+# =============================================================================
+name: saebooks-community
+
+services:
+  api:
+    # Edition-agnostic engine image (edition is chosen at runtime by
+    # SAEBOOKS_EDITION). Defaults to the published public image so a first-time
+    # user needs no local build. To build your own instead:
+    #   docker build -t saebooks-community-api:local .
+    #   SAEBOOKS_API_IMAGE=saebooks-community-api:local docker compose ... up -d
+    image: ${SAEBOOKS_API_IMAGE:-saebooks/saebooks-community-api:latest}
+    restart: unless-stopped
+    # SQLite lives on a Docker-managed named volume. Running as root keeps
+    # the freshly-created (root-owned) volume directory writable without a
+    # host-side chown — acceptable for a single-device local install. Drop
+    # this and pre-own the volume if you harden the deployment.
+    user: "0:0"
+    ports:
+      # API is published on localhost only. The web UI (below) is the surface
+      # an everyday user opens; this port is here for API/CLI/MCP access.
+      - "127.0.0.1:18961:8000"
+    environment:
+      # --- SQLite Cashbook backend (no Postgres) ---
+      DATABASE_URL: "sqlite+aiosqlite:////data/saebooks.db"
+      # --- Edition: free community feature set (paid flags -> 404) ---
+      SAEBOOKS_EDITION: community
+      SAEBOOKS_BIND_HOST: "0.0.0.0"
+      # SQLite is a single-writer store — one uvicorn worker avoids write
+      # contention ("database is locked").
+      SAEBOOKS_UVICORN_WORKERS: "1"
+      # --- Local-only secret defaults (override for any network exposure) ---
+      SAEBOOKS_SECRET_KEY: "${SAEBOOKS_SECRET_KEY:-local-only-community-jwt-signing-key-change-me}"
+      SAEBOOKS_FIELD_ENCRYPTION_KEY: "${SAEBOOKS_FIELD_ENCRYPTION_KEY:-2sThE1n2n3l0c4a5l6O7n8l9yFernetKeyBase64Pad0=}"
+      SAEBOOKS_DEV_API_TOKEN: "${SAEBOOKS_DEV_API_TOKEN:-}"
+      # --- Starter books: seed a ready-to-use example company + login so a
+      #     first-time user opens the browser to working books. Turn off
+      #     (set to "false") once you have your own data and prefer /signup. ---
+      SAEBOOKS_RUN_CASHBOOK_DEMO_SEED: "${SAEBOOKS_RUN_CASHBOOK_DEMO_SEED:-true}"
+      SAEBOOKS_DEMO_EMAIL: "${SAEBOOKS_DEMO_EMAIL:-you@example.com}"
+      SAEBOOKS_DEMO_PASSWORD: "${SAEBOOKS_DEMO_PASSWORD:-change-me-now}"
+      SAEBOOKS_DEMO_COMPANY_NAME: "${SAEBOOKS_DEMO_COMPANY_NAME:-My Business}"
+      # community edition needs no jurisdiction reference DB — the AU chart of
+      # accounts + GST codes are bundled with the seed.
+    volumes:
+      - books_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/v1/healthz"]
+      interval: 15s
+      timeout: 5s
+      start_period: 45s
+      retries: 5
+
+  web:
+    # Defaults to the published public image. To build your own instead
+    # (in the saebooks-web repo):
+    #   docker build -t saebooks-community-web:local .
+    #   SAEBOOKS_WEB_IMAGE=saebooks-community-web:local docker compose ... up -d
+    image: ${SAEBOOKS_WEB_IMAGE:-saebooks/saebooks-community-web:latest}
+    restart: unless-stopped
+    ports:
+      # Open this in your browser.
+      - "127.0.0.1:18960:8080"
+    environment:
+      SAEBOOKS_WEB_API_URL: "http://api:8000"
+      SAEBOOKS_EDITION: community
+      SAEBOOKS_BRAND: "${SAEBOOKS_BRAND:-saebooks}"
+      SAEBOOKS_WEB_SECRET_KEY: "${SAEBOOKS_WEB_SECRET_KEY:-local-only-community-web-session-key-change-me}"
+      SAEBOOKS_OAUTH_ENABLED: "false"
+      SAEBOOKS_WEBAUTHN_ENABLED: "false"
+      # CSRF origin allow-list. The web app rejects any POST whose Origin/Referer
+      # is not in this list (default is the SAE-hosted books.* domains), which
+      # would block login on a localhost self-host. Point it at the URL you open
+      # in the browser. Change these if you publish this on a real hostname.
+      SAEBOOKS_WEB_SITE_ORIGIN: "${SAEBOOKS_WEB_SITE_ORIGIN:-http://127.0.0.1:18960,http://localhost:18960}"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  books_data:

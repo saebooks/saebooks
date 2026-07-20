@@ -1,0 +1,43 @@
+# Latvian e-invoicing mandate parameters — MODULE DATA, not a
+# reference-DB table (reference_seed: false, the EE kmdtyyp_mapping /
+# UK thresholds.yaml precedent: loaded off disk by the LV module when
+# needed; skipped by services.reference.loader).
+#
+# ⚠ KEY FINDING (2026-07-12 research pass, VERIFIED — EC eInvoicing
+# country page + EDICOM + Fiscal Solutions + VATupdate all agree): the
+# widely-reported "mandatory B2B structured e-invoicing from 2026-01-01"
+# is STALE. The Saeima's Budget and Finance Committee POSTPONED the B2B
+# mandate to 2028-01-01 (rejecting a mere one-year delay). Do not build
+# a 2026 B2B enforcement gate.
+#
+# Legal basis: amendments to the Grāmatvedības likums (Accounting Law);
+# B2G implementation via Cabinet Regulation No. 154 (EU Directive
+# 2014/55/EU). Standard: EN 16931. Delivery: decentralised — the state
+# eAddress (e-adrese, VDAA) platform or commercial Peppol service
+# providers (Peppol is an accepted channel, not mandated exclusively).
+# E-invoice DATA REPORTING to VID accompanies each mandate stage.
+#
+# The existing generic e-invoice work (services/einvoice, EN 16931 /
+# Peppol-shaped) is the substrate — this file is the LV parameter
+# placeholder it reads when an LV enforcement/formatting pass is built.
+reference_seed: false
+jurisdiction: LVA
+standard: EN16931
+channels: [eaddress, peppol]
+milestones:
+  - scope: b2g
+    mandatory_from: 2025-01-01
+    status: in_force
+    note: "Structured e-invoices to public-sector recipients (MK noteikumi Nr. 154; Directive 2014/55/EU). VERIFIED (EC eInvoicing Latvia page)."
+  - scope: g2g_b2g_g2b_reporting
+    mandatory_from: 2026-01-01
+    status: in_force
+    note: "Mandatory structured e-invoicing + e-invoice data reporting to VID for public-sector-involving transactions (G2G/B2G/G2B). VERIFIED."
+  - scope: b2b_voluntary
+    mandatory_from: 2026-03-30
+    status: optional_window
+    note: "Optional B2B e-invoicing + VID data reporting early-adoption window opens. VERIFIED."
+  - scope: b2b
+    mandatory_from: 2028-01-01
+    status: legislated_future
+    note: "Mandatory B2B e-invoicing + VID reporting — POSTPONED from the originally-announced 2026-01-01. VERIFIED (EC page + 3 independent trade-compliance sources)."

@@ -1,0 +1,87 @@
+# Australian sub-national jurisdiction nodes (M1.5 · 5-SUBJURIS, K5).
+# The eight state/territory children of AUS in the T3 jurisdiction tree
+# (reference migration 0002 hierarchy columns, widened by 0016).
+#
+# Code vocabulary: sub-national nodes key on their ISO 3166-2 code
+# ("AU-QLD"), the same value as iso_subdivision_code — globally unique by
+# construction and collision-free against the ISO 3166-1 alpha-3 country
+# space that owns the 3-char codes ("AUS" blocks a hypothetical "AUS" =
+# South Australia; "AUT" = Austria blocks Tasmania). The four promoted
+# sub_jurisdiction_code FK columns (holiday_calendars,
+# bank_routing_directory, payroll_tax_rates, duty_rate_schedules)
+# reference these rows; their legacy state strings ('QLD') map on the
+# ISO suffix. Migration 0016 also inserts these rows idempotently on
+# already-seeded DBs so its backfill has targets; this file is the
+# canonical owner from then on (loader upserts converge both paths).
+#
+# NT and the ACT are territories, not states, but the T3 level
+# vocabulary (country|state|province|county|city) models one sub-national
+# tier — 'state' is the AU tier, matching how every duty/payroll table
+# already treats the eight as peers.
+table: jurisdictions
+key: [code]
+rows:
+  - code: AU-NSW
+    name: New South Wales
+    currency_default: AUD
+    decimal_places: 2
+    active: true
+    parent_code: AUS
+    level: state
+    iso_subdivision_code: AU-NSW
+  - code: AU-VIC
+    name: Victoria
+    currency_default: AUD
+    decimal_places: 2
+    active: true
+    parent_code: AUS
+    level: state
+    iso_subdivision_code: AU-VIC
+  - code: AU-QLD
+    name: Queensland
+    currency_default: AUD
+    decimal_places: 2
+    active: true
+    parent_code: AUS
+    level: state
+    iso_subdivision_code: AU-QLD
+  - code: AU-SA
+    name: South Australia
+    currency_default: AUD
+    decimal_places: 2
+    active: true
+    parent_code: AUS
+    level: state
+    iso_subdivision_code: AU-SA
+  - code: AU-WA
+    name: Western Australia
+    currency_default: AUD
+    decimal_places: 2
+    active: true
+    parent_code: AUS
+    level: state
+    iso_subdivision_code: AU-WA
+  - code: AU-TAS
+    name: Tasmania
+    currency_default: AUD
+    decimal_places: 2
+    active: true
+    parent_code: AUS
+    level: state
+    iso_subdivision_code: AU-TAS
+  - code: AU-NT
+    name: Northern Territory
+    currency_default: AUD
+    decimal_places: 2
+    active: true
+    parent_code: AUS
+    level: state
+    iso_subdivision_code: AU-NT
+  - code: AU-ACT
+    name: Australian Capital Territory
+    currency_default: AUD
+    decimal_places: 2
+    active: true
+    parent_code: AUS
+    level: state
+    iso_subdivision_code: AU-ACT

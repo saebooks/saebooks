@@ -32,7 +32,6 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
-    Numeric,
     String,
     Text,
     func,
@@ -41,6 +40,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from saebooks.db import Base
+from saebooks.db_types import Money
 from saebooks.models._scope import CompanyScoped
 
 _DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
@@ -140,9 +140,9 @@ class FixedAsset(CompanyScoped, Base):
         nullable=False,
         comment="Depreciation clock starts from here; defaults to purchase_date",
     )
-    cost: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    cost: Mapped[Decimal] = mapped_column(Money(), nullable=False)
     residual_value: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2),
+        Money(),
         nullable=False,
         default=Decimal("0"),
         server_default="0",
@@ -162,7 +162,7 @@ class FixedAsset(CompanyScoped, Base):
         comment="active | disposed | archived",
     )
     disposal_date: Mapped[date | None] = mapped_column(Date)
-    disposal_proceeds: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+    disposal_proceeds: Mapped[Decimal | None] = mapped_column(Money())
     disposal_journal_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("journal_entries.id", ondelete="SET NULL"),

@@ -1,0 +1,33 @@
+# New Zealand statutory chart-of-accounts framework registry.
+#
+# New Zealand mandates NO chart-of-accounts numbering plan (same posture
+# as AU and EE — a convenience default, never a mandate claim). The
+# compliance-shaped MAPPING TARGET is the IR10 Financial Statements
+# Summary — Inland Revenue's coarse category set for tax-return
+# financials (~/records/saebooks/nz-market-entry-strategy.md §5.8) —
+# dramatically simpler than XBRL taxonomies. is_legally_mandated is
+# false: the IR10 is a return annex most businesses file, not an
+# account-numbering law, and NZ companies keep
+# companies.statutory_framework_code NULL unless they opt into the
+# IR10-mapped template.
+#
+# Ordinary SMEs file nothing publicly; "large" thresholds (assets >
+# $112.57m / revenue > $56.29m, doubled 29 Sep 2025; overseas companies
+# large at > $22m assets / $11m revenue) are documentation only here.
+table: statutory_account_frameworks
+key: [jurisdiction, code]
+rows:
+  - jurisdiction: NZL
+    code: ir10
+    display_name: "New Zealand — IR10 Financial Statements Summary mapping (no mandated numbering plan)"
+    is_legally_mandated: false
+    mandating_authority: "Inland Revenue (IR10 return annex — reporting categories only, no mandated account numbering)"
+    description: >-
+      New Zealand has no statutory chart-of-accounts numbering plan. The
+      NZ chart_template rows are the engine's recommended default chart,
+      mapped at the coarse-category level to the IR10 Financial
+      Statements Summary parts (income / expenses / balance-sheet
+      sections). Per-box IR10 field codes are NOT yet recorded — the
+      research pass did not extract the IR10 box numbering, and inventing
+      it is prohibited; a manual read of the current IR10 form adds
+      statutory_account_code values later (parked with GST103B).

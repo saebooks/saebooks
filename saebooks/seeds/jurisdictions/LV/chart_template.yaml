@@ -1,0 +1,61 @@
+# LV recommended chart of accounts — used at company creation.
+#
+# NOT a state mandate — no statutory chart of accounts for private
+# Latvian companies was verified in this research pass (the Soviet-era /
+# 1990s unified kontu plāns regulations are repealed; modern practice
+# under the Grāmatvedības likums is entity-defined, as in Estonia). This
+# is a CONVENIENCE template following the de-facto Latvian SME numbering
+# convention (1xxx ilgtermiņa ieguldījumi / long-term assets, 2xxx
+# apgrozāmie līdzekļi / current assets, 3xxx pašu kapitāls / equity,
+# 5xxx kreditori / liabilities, 6xxx ieņēmumi / revenue, 7xxx izdevumi /
+# expenses) — a company may freely deviate. To keep the engine's chart
+# semantics simple this template uses the EE template's 1xxx-6xxx
+# layout with Latvian names (the numbering convention claim above is
+# therefore NOT reproduced in the codes — no statutory-CoA claim is
+# made either way).
+#
+# Tax-code defaults reference the codes seeded in tax_codes.yaml.
+# Names given as "Latvian (English)".
+table: chart_template
+key: [jurisdiction, account_code]
+rows:
+  - {jurisdiction: LVA, account_code: "1100", account_name: "Banka — norēķinu konts (Bank — operating)", account_type: ASSET, display_order: 10}
+  - {jurisdiction: LVA, account_code: "1200", account_name: "Norēķini ar pircējiem (Accounts Receivable)", account_type: ASSET, display_order: 20}
+  - {jurisdiction: LVA, account_code: "1300", account_name: "Krājumi (Inventory)", account_type: ASSET, display_order: 30}
+  - {jurisdiction: LVA, account_code: "1400", account_name: "PVN (VAT) Receivable — priekšnodoklis", account_type: ASSET, display_order: 40}
+  - {jurisdiction: LVA, account_code: "1500", account_name: "Nākamo periodu izdevumi (Prepayments)", account_type: ASSET, display_order: 50}
+  - {jurisdiction: LVA, account_code: "1700", account_name: "Pamatlīdzekļi — sākotnējā vērtība (Property, Plant & Equipment — at cost)", account_type: ASSET, display_order: 70}
+  - {jurisdiction: LVA, account_code: "1710", account_name: "Pamatlīdzekļi — uzkrātais nolietojums (PP&E — accumulated depreciation)", account_type: ASSET, display_order: 71}
+  - {jurisdiction: LVA, account_code: "2100", account_name: "Norēķini ar piegādātājiem (Accounts Payable)", account_type: LIABILITY, display_order: 100}
+  - {jurisdiction: LVA, account_code: "2200", account_name: "PVN (VAT) Payable — maksājamais nodoklis", account_type: LIABILITY, display_order: 110}
+  # 2300 carries BOTH withheld IIN and the employee VSAOI share — every
+  # payroll tax is remitted into VID's vienotais nodokļu konts (unified
+  # tax account, 2021+), so one withheld-taxes control is the LV shape
+  # (see jurisdictions/lv/__init__.py PAYROLL_POSTING).
+  - {jurisdiction: LVA, account_code: "2300", account_name: "Ieturētie nodokļi — IIN un VSAOI darba ņēmēja daļa (Withheld Payroll Taxes — VID unified account)", account_type: LIABILITY, display_order: 120}
+  - {jurisdiction: LVA, account_code: "2310", account_name: "VSAOI saistības (State Social Insurance Contributions Payable)", account_type: LIABILITY, display_order: 121}
+  - {jurisdiction: LVA, account_code: "2400", account_name: "Darba algas saistības (Wages Payable)", account_type: LIABILITY, display_order: 130}
+  - {jurisdiction: LVA, account_code: "2500", account_name: "UIN saistības — sadalītā peļņa (Corporate Income Tax Payable — Distributed Profit)", account_type: LIABILITY, display_order: 140}
+  - {jurisdiction: LVA, account_code: "2700", account_name: "Aizņēmumi no kredītiestādēm (Bank Loan)", account_type: LIABILITY, display_order: 160}
+  - {jurisdiction: LVA, account_code: "3100", account_name: "Pamatkapitāls (Share Capital)", account_type: EQUITY, display_order: 200}
+  - {jurisdiction: LVA, account_code: "3200", account_name: "Nesadalītā peļņa (iepriekšējie gadi) (Retained Earnings)", account_type: EQUITY, display_order: 210}
+  - {jurisdiction: LVA, account_code: "3300", account_name: "Pārskata gada peļņa/zaudējumi (Current Year Earnings)", account_type: EQUITY, display_order: 220}
+  - {jurisdiction: LVA, account_code: "4100", account_name: "Ieņēmumi — pakalpojumi (Sales — Services)", account_type: INCOME, default_tax_code: STD, display_order: 300}
+  - {jurisdiction: LVA, account_code: "4200", account_name: "Ieņēmumi — preces (Sales — Goods)", account_type: INCOME, default_tax_code: STD, display_order: 310}
+  - {jurisdiction: LVA, account_code: "4300", account_name: "Pārējie saimnieciskās darbības ieņēmumi (Other Operating Income)", account_type: OTHER_INCOME, default_tax_code: STD, display_order: 320}
+  # ZERO_EXPORT picked as the more common default for a domestic SME's
+  # export/IC account — a bookkeeper overrides per-transaction for the
+  # intra-Community case (ZERO_IC_GOODS / ZERO_SERVICES), the EE 4400
+  # precedent. default_tax_code is a free-text prefill hint, not an FK.
+  - {jurisdiction: LVA, account_code: "4400", account_name: "Eksports un piegādes ES teritorijā (Export & Intra-Community Supply)", account_type: INCOME, default_tax_code: ZERO_EXPORT, display_order: 325}
+  - {jurisdiction: LVA, account_code: "4900", account_name: "Procentu ieņēmumi (Interest Income)", account_type: OTHER_INCOME, default_tax_code: NTR, display_order: 330}
+  - {jurisdiction: LVA, account_code: "5100", account_name: "Pārdoto preču izmaksas (Cost of Goods Sold)", account_type: COST_OF_SALES, default_tax_code: INPUT_STD, display_order: 400}
+  - {jurisdiction: LVA, account_code: "6100", account_name: "Darba algas (Wages & Salaries)", account_type: EXPENSE, default_tax_code: NTR, display_order: 500}
+  - {jurisdiction: LVA, account_code: "6110", account_name: "VSAOI izmaksas — darba devēja daļa (Employer Social Insurance Expense)", account_type: EXPENSE, default_tax_code: NTR, display_order: 510}
+  - {jurisdiction: LVA, account_code: "6200", account_name: "Telpu noma (Rent)", account_type: EXPENSE, default_tax_code: INPUT_STD, display_order: 520}
+  - {jurisdiction: LVA, account_code: "6300", account_name: "Komunālie pakalpojumi (Utilities)", account_type: EXPENSE, default_tax_code: INPUT_STD, display_order: 530}
+  - {jurisdiction: LVA, account_code: "6400", account_name: "Sakaru un interneta pakalpojumi (Telephone & Internet)", account_type: EXPENSE, default_tax_code: INPUT_STD, display_order: 540}
+  - {jurisdiction: LVA, account_code: "6500", account_name: "Transporta izmaksas (Motor Vehicle)", account_type: EXPENSE, default_tax_code: INPUT_STD, display_order: 550}
+  - {jurisdiction: LVA, account_code: "6600", account_name: "Bankas komisijas (Bank Fees)", account_type: EXPENSE, default_tax_code: NTR, display_order: 560}
+  - {jurisdiction: LVA, account_code: "6700", account_name: "Nolietojums (Depreciation)", account_type: EXPENSE, default_tax_code: NTR, display_order: 570}
+  - {jurisdiction: LVA, account_code: "6900", account_name: "UIN izmaksas — sadalītā peļņa (Corporate Income Tax Expense — Distributed Profit)", account_type: OTHER_EXPENSE, default_tax_code: NTR, display_order: 590}

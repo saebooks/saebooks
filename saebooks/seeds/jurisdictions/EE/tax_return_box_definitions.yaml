@@ -126,9 +126,33 @@
 # income/purchase-bucket-and-tax-code model. Both are seeded as "manual"
 # structural/descriptive rows (return layout only), not computed boxes.
 #
-# OSS-Q is seeded as a single deliberate STUB row — see tax_codes.yaml's
-# OSS_EU/IOSS_IMPORT header comment. A full per-member-state OSS/IOSS
-# rate table was out of scope of the supplied research for this pass.
+# OSS-Q (EE-frontier build plan, Module 2) — REPLACES the earlier single
+# deliberate STUB row. Corrected understanding (do not re-derive the old
+# "already seeded" premise): the Union OSS return is a per-(member-state
+# x VAT-rate) repeating listing, exactly like KMD-INF's Part A/B and TSD's
+# Lisa annexes — NOT a fixed box vector. It has NO ledger-bucket
+# aggregation shape tax_return_generator's box engine can express (a
+# dynamic, company-and-period-dependent set of member-state cells cannot
+# be enumerated as static box_code rows the way KMD's 28 boxes can), so —
+# mirroring the KMD-INF/TSD convention this same file already establishes
+# a few sections up — OSS-Q is seeded as MANUAL structural/section rows
+# only. The real per-cell figures (member state x rate x taxable base x
+# VAT amount) are computed by services.lodgement.oss_q.generator and
+# persisted list-shaped via persist_oss_return (mirroring
+# persist_tsd_return's "figures.lisa1: [...]" shape), not through this
+# engine's box-vector path. See tax_codes.yaml's OSS_EU/IOSS_IMPORT header
+# comment for the company-side marker-code convention, and
+# alembic_reference/versions/0011_oss_member_state_rates.py +
+# EE/oss_member_state_rates.yaml for the new per-member-state VAT-rate
+# reference table this generator reads.
+#
+# The wire-format XML submitted through EMTA's OSS portal is a SEPARATE,
+# Commission-defined (not e-MTA-national) schema that is not in-tree —
+# services.lodgement.oss_q.serializer's XML builder is a deliberate,
+# clearly-marked NotImplementedError stub pending that schema; these box
+# rows describe the RETURN'S STRUCTURE (sourced confidently from the
+# well-documented Union-scheme return layout — Council Implementing
+# Regulation (EU) 2020/194 Annex III), not the wire element names.
 table: tax_return_box_definitions
 key: [jurisdiction, return_type, box_code]
 rows:
@@ -709,16 +733,38 @@ rows:
     display_order: 9
 
   # =====================================================================
-  # OSS-Q — deliberate stub only. See tax_codes.yaml OSS_EU/IOSS_IMPORT
-  # header comment: full per-member-state OSS/IOSS rate table is out of
-  # scope of the supplied research for this pass.
+  # OSS-Q — Liidu erikord (Union One-Stop-Shop), kvartaalne, deklareeritakse
+  # eraldi KMD-st EMTA OSS-portaali kaudu. Structural/section rows only —
+  # see this file's header comment above for why (per-member-state x rate
+  # listing, not a box vector).
   # =====================================================================
   - jurisdiction: EST
     return_type: OSS-Q
-    box_code: "1"
+    box_code: MS_BREAKDOWN
     box_label: >-
-      Liidu erikord (Union OSS) — käive liikmesriigi ja määra kaupa
-      (kvartaalne, deklareeritakse väljaspool KMD-d). STUB: per-liikmesriigi
-      määratabel ei ole selle seedi ulatuses uuritud/seeditud.
+      Käive ja käibemaks liikmesriigi ja määra kaupa (member state × VAT-rate
+      breakdown; repeating listing — one row per (member state, rate) cell,
+      taxable base + VAT). Computed by services.lodgement.oss_q.generator.
     aggregation: manual
     display_order: 1
+
+  - jurisdiction: EST
+    return_type: OSS-Q
+    box_code: CORRECTIONS
+    box_label: >-
+      Eelnevate perioodide deklareeritud summade parandused (corrections to
+      amounts declared in an earlier OSS-Q period; manual/filer-entered — no
+      correction-tracking source model yet, mirrors the KMD "manual by design"
+      boxes).
+    aggregation: manual
+    display_order: 2
+
+  - jurisdiction: EST
+    return_type: OSS-Q
+    box_code: TOTAL_VAT_PAYABLE
+    box_label: >-
+      Kokku tasumisele kuuluv käibemaks (total VAT payable this period, summed
+      across every MS_BREAKDOWN cell plus CORRECTIONS; computed directly by
+      services.lodgement.oss_q.generator, not the fixed-box formula grammar).
+    aggregation: manual
+    display_order: 3

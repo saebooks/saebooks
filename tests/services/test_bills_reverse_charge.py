@@ -58,7 +58,7 @@ async def _make_ee_rc_company() -> tuple[uuid.UUID, dict[str, uuid.UUID], uuid.U
             session, bills_svc.RC_PAYABLE_ACCOUNT_SETTING_KEY, "2-1350"
         )
         accounts = {
-            "ap": Account(company_id=company_id, tenant_id=DEFAULT_TENANT_ID, code="2-1200", name="Trade Creditors", account_type=AccountType.LIABILITY),
+            "ap": Account(company_id=company_id, tenant_id=DEFAULT_TENANT_ID, code="2100", name="Trade Creditors", account_type=AccountType.LIABILITY),
             "expense": Account(company_id=company_id, tenant_id=DEFAULT_TENANT_ID, code="5-1000", name="Purchases", account_type=AccountType.EXPENSE),
             "gst_paid": Account(company_id=company_id, tenant_id=DEFAULT_TENANT_ID, code="2-1330", name="GST Paid", account_type=AccountType.ASSET),
             "gst_collected": Account(company_id=company_id, tenant_id=DEFAULT_TENANT_ID, code="2-1310", name="GST Collected", account_type=AccountType.LIABILITY),

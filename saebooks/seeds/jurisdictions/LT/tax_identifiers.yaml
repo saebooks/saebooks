@@ -1,0 +1,46 @@
+# Lithuania tax / registry identifier formats. NOT a reference-DB
+# table seed (reference_seed: false — the UK tax_identifiers.yaml
+# precedent). The check-digit COMPUTE lives in
+# saebooks/jurisdictions/lt/identifiers.py; this file is the format
+# catalogue + provenance record.
+#
+# All three algorithms primary-verified 2026-07-12:
+# * Company code — OECD AEOI TIN sheet for Lithuania (authored by the
+#   Lithuanian authorities; Registrų centras contact): 9 digits,
+#   weights 1..8 over the first 8, sum mod 11 = the 9th (check) digit;
+#   a code whose remainder would be 10 is never issued (registry
+#   redraws) -> remainder 10 is invalid. Worked check: Telia Lietuva
+#   121215434 -> 103 mod 11 = 4. Historic 7-digit codes exist but are
+#   NOT validated (format lore only, UNVERIFIED).
+# * PVM code — the EU VIES national routine (two independent
+#   open-source implementations agree; validated against the real
+#   published number LT212154314): "LT" + 9 digits (legal entities,
+#   8th digit must be 1) or "LT" + 12 digits (temporarily registered /
+#   natural persons, 11th digit must be 1); two-pass mod-11 with
+#   first-pass weights 1+(i mod 9) and second-pass 1+((i+2) mod 9);
+#   check = result mod 11 mod 10.
+# * Asmens kodas — OECD AEOI TIN sheet: 11 digits
+#   C1(1-6) YY MM DD NNN C11; weights 1,2,3,4,5,6,7,8,9,1 mod 11; on
+#   remainder 10 reweigh 3,4,5,6,7,8,9,1,2,3 mod 11; on 10 again the
+#   check digit is 0. Sheet's own worked example: 33309240064 -> 4.
+#   The conventional century/gender meaning of C1 is UNVERIFIED (the
+#   sheet states only 1-6) — the validator checks membership only.
+reference_seed: false
+jurisdiction: LTU
+
+identifiers:
+  - scheme: lt_company_code
+    local_name: "Juridinio asmens kodas"
+    issuer: "Registrų centras (Register of Legal Entities, JAR)"
+    format: "9 digits"
+    check_digit: "weights 1-8, mod 11; remainder 10 never issued"
+  - scheme: lt_vat
+    local_name: "PVM mokėtojo kodas"
+    issuer: "VMI (Valstybinė mokesčių inspekcija)"
+    format: "LT + 9 digits (8th digit = 1) or LT + 12 digits (11th digit = 1)"
+    check_digit: "VIES two-pass mod-11 (weights 1+(i mod 9) / 1+((i+2) mod 9)), mod 10 fold"
+  - scheme: lt_personal_code
+    local_name: "Asmens kodas"
+    issuer: "Registrų centras (population register)"
+    format: "11 digits: C1(1-6) YY MM DD NNN C11"
+    check_digit: "two-pass mod-11 (1,2,...,9,1 then 3,4,...,1,2,3); double-10 -> 0"

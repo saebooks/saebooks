@@ -1,0 +1,39 @@
+# United Kingdom Construction Industry Scheme (CIS) — deduction rates
+# and scheme parameters.
+#
+# NOT a reference-DB table seed (reference_seed: false): CIS deductions
+# are contractor-withholding from subcontractor payments — the
+# withholding_tables model's WithholdingType enum has no CIS member and
+# widening a shared core enum is outside this module's surface, so the
+# rates live here as UK-module data (kmdtyyp precedent).
+#
+# Rates and base per strategy §5.1 (verified 2026-07-12; CIS340):
+# * 20% — registered (net-status) subcontractors
+# * 30% — unverified / unregistered subcontractors
+# *  0% — gross-payment-status subcontractors
+# Deduction base is the LABOUR element only: the cost of materials,
+# plant hire, fuel (except travel), and VAT charged are excluded
+# before applying the rate.
+reference_seed: false
+jurisdiction: GBR
+
+deduction_rates:
+  registered_percent: 20
+  unverified_percent: 30
+  gross_status_percent: 0
+
+deduction_base:
+  basis: labour_only
+  excluded: [materials_cost, plant_hire, fuel_except_travel, vat_charged]
+
+returns:
+  cis300_frequency: monthly
+  cis300_due: "19th of the month following the tax month (tax months run 6th to 5th)"
+
+gross_status_tests:
+  compliance: "filing + payment record clean over the qualifying period"
+  turnover:
+    sole_trader_net_construction_turnover_gbp: 30000
+    partnership_or_company_per_partner_or_director_gbp: 30000
+    company_alternative_whole_business_gbp: 100000
+  business: "construction work carried out in the UK, bank account operated for the business"

@@ -48,6 +48,13 @@ class ContactBase(BaseModel):
     payment_terms_days: int | None = Field(
         default=None, ge=0, le=365, description="Days component of the default payment terms"
     )
+    # E-invoicing (M3, migration 0197). Buyer is a registered e-invoice
+    # recipient (EE Accounting Act) and, optionally, the Peppol network
+    # routing address in 'scheme:value' wire form. No format validator is
+    # invented here — the only 'scheme:value' check lives inline in
+    # services.einvoice.generator._buyer_endpoint, applied at generation time.
+    e_invoice_recipient: bool = False
+    peppol_participant_id: str | None = Field(default=None, max_length=64)
 
 
 class ContactCreate(ContactBase):
@@ -82,6 +89,8 @@ class ContactUpdate(BaseModel):
     is_tpar_supplier: bool | None = None
     payment_terms_basis: PaymentTermsBasis | None = None
     payment_terms_days: int | None = Field(default=None, ge=0, le=365)
+    e_invoice_recipient: bool | None = None
+    peppol_participant_id: str | None = Field(default=None, max_length=64)
 
 
 class ContactOut(ContactBase):
@@ -222,7 +231,7 @@ class CompanyOut(BaseModel):
     base_currency: str
     fin_year_start_month: int
     audit_mode: str
-    gst_registered: bool = False
+    tax_registered: bool = False
     gst_effective_date: date | None = None
     psi_status: str = "unsure"
     # Bad-debt write-off & recovery policy (Phase 2 settings).
@@ -230,6 +239,22 @@ class CompanyOut(BaseModel):
     writeoff_threshold_days: int = 90
     recovery_mode: str = "smart_prompt"
     bad_debt_recovery_account: str | None = None
+    # AR/AP control-account override (0198, Packet 4b). NULL = engine
+    # resolves the AU convention codes ("1-1200"/"2-1200") — see
+    # services/control_accounts.py.
+    ar_control_account_code: str | None = None
+    ap_control_account_code: str | None = None
+    # Multi-jurisdiction routing key + CoA/reference-data template key.
+    # Read-through from the Company columns; the web previously probed
+    # tax_codes as a workaround because CompanyOut lacked jurisdiction.
+    jurisdiction: str = "AU"
+    coa_template_key: str = "au/default"
+    # EE company-registry identifiers — read-through from the
+    # ee_regcode/ee_vat business identifiers (Company.registrikood /
+    # kmv_number hybrids), exactly as abn/acn read au_abn/au_acn above.
+    # NULL for non-EE companies.
+    registrikood: str | None = None
+    kmv_number: str | None = None
     # Letterhead contact details (0171) — rendered in the PDF document header.
     phone: str | None = None
     email: str | None = None
@@ -282,7 +307,7 @@ class CompanyUpdate(BaseModel):
     base_currency: str | None = Field(default=None, min_length=3, max_length=3)
     fin_year_start_month: int | None = Field(default=None, ge=1, le=12)
     audit_mode: str | None = None
-    gst_registered: bool | None = None
+    tax_registered: bool | None = None
     gst_effective_date: date | None = None
     psi_status: str | None = None
     # Bad-debt write-off & recovery policy (Phase 2 settings).
@@ -290,6 +315,15 @@ class CompanyUpdate(BaseModel):
     writeoff_threshold_days: int | None = None
     recovery_mode: str | None = None
     bad_debt_recovery_account: str | None = None
+    # AR/AP control-account override (0198, Packet 4b).
+    ar_control_account_code: str | None = None
+    ap_control_account_code: str | None = None
+    # EE company-registry identifiers. No jurisdiction field on this schema
+    # (jurisdiction is immutable via PATCH) — format is enforced here when a
+    # value is supplied; the EE-only guard lives in services.companies.update.
+    # A blank value is allowed through so update()'s clear-to-None path works.
+    registrikood: str | None = None
+    kmv_number: str | None = None
     # Letterhead contact details (0171).
     phone: str | None = None
     email: str | None = None
@@ -376,6 +410,27 @@ class CompanyUpdate(BaseModel):
             )
         return v
 
+    @field_validator("registrikood")
+    @classmethod
+    def registrikood_format(cls, v: str | None) -> str | None:
+        # A blank string is the clear-to-None signal (update() does
+        # ".strip() or None") — let it through unvalidated; only a
+        # non-blank value is format-checked at the EE module surface.
+        if v is None or not v.strip():
+            return v
+        from saebooks.jurisdictions.ee.validators import validate_registrikood
+
+        return validate_registrikood(v.strip())
+
+    @field_validator("kmv_number")
+    @classmethod
+    def kmv_number_format(cls, v: str | None) -> str | None:
+        if v is None or not v.strip():
+            return v
+        from saebooks.jurisdictions.ee.validators import validate_kmv_number
+
+        return validate_kmv_number(v.strip())
+
 
 class CompanyCreate(BaseModel):
     """POST body for creating a new company."""
@@ -389,10 +444,104 @@ class CompanyCreate(BaseModel):
     acn: str | None = None
     base_currency: str = Field(default="AUD", min_length=3, max_length=3)
     fin_year_start_month: int = Field(default=7, ge=1, le=12)
+    # Multi-jurisdiction routing key + CoA/reference-data template key.
+    # jurisdiction is validated against the engine's creatable set
+    # (services.templates.known_jurisdictions); coa_template_key must match
+    # the jurisdiction and be a registered, implemented template (see the
+    # model_validator below).
+    jurisdiction: str = "AU"
+    coa_template_key: str = "au/default"
+    # EE company-registry identifiers — required (registrikood) / optional
+    # (kmv_number) only when jurisdiction == "EE"; rejected otherwise (see
+    # the model_validator below).
+    registrikood: str | None = None
+    kmv_number: str | None = None
     # Legal-entity model
     entity_type: str = "COMPANY"
     trades: bool = True
     trustee_company_id: uuid.UUID | None = None
+
+    @field_validator("jurisdiction")
+    @classmethod
+    def jurisdiction_known(cls, v: str) -> str:
+        from saebooks.services.templates import known_jurisdictions
+
+        known = known_jurisdictions()
+        if v not in known:
+            raise ValueError(f"jurisdiction must be one of: {known}")
+        return v
+
+    # registrikood/kmv_number FORMAT is validated per-field (mirrors
+    # CompanyUpdate) so the 422 error carries the right field location; the
+    # CROSS-field rules (required-for-EE, forbidden-off-EE) are in the
+    # model_validator below.
+    @field_validator("registrikood")
+    @classmethod
+    def registrikood_format(cls, v: str | None) -> str | None:
+        if v is None or not v.strip():
+            return v
+        from saebooks.jurisdictions.ee.validators import validate_registrikood
+
+        return validate_registrikood(v.strip())
+
+    @field_validator("kmv_number")
+    @classmethod
+    def kmv_number_format(cls, v: str | None) -> str | None:
+        if v is None or not v.strip():
+            return v
+        from saebooks.jurisdictions.ee.validators import validate_kmv_number
+
+        return validate_kmv_number(v.strip())
+
+    @model_validator(mode="after")
+    def ee_fields_valid_for_jurisdiction(self) -> "CompanyCreate":
+        if self.jurisdiction == "EE":
+            # registrikood (the äriregistri kood) is mandatory for every EE
+            # company — the engine, as system of record, enforces it rather
+            # than trusting callers. kmv_number (VAT) stays optional (not
+            # every EE company is VAT-registered on creation).
+            if not self.registrikood or not self.registrikood.strip():
+                raise ValueError("registrikood is required for an EE company")
+        else:
+            # registrikood/kmv_number are EE-only regardless of entry point
+            # (mirrors services.companies.update's guard).
+            if self.registrikood is not None:
+                raise ValueError("registrikood can only be set on an EE company")
+            if self.kmv_number is not None:
+                raise ValueError("kmv_number can only be set on an EE company")
+
+        # coa_template_key's class default ("au/default") is AU-specific.
+        # For every real jurisdiction (EE included) an omitted key
+        # deliberately 422s below — callers must say which chart they want.
+        # The one exception is "XX", the neutral zero-modules sentinel: it
+        # has exactly one valid template, so demanding an explicit key would
+        # defeat the "zero modules" property. Derive it only for XX, only
+        # when not explicitly supplied.
+        if self.jurisdiction == "XX" and "coa_template_key" not in self.model_fields_set:
+            self.coa_template_key = "xx/default"
+
+        # jurisdiction/coa_template_key must agree — prefix match against
+        # the template key's namespace (e.g. "ee/default" -> "EE"). Catches
+        # an EE-chart key on a non-EE company AND a non-EE key (typically
+        # the "au/default" default) left in place on an EE company.
+        template_jurisdiction = self.coa_template_key.split("/", 1)[0].upper()
+        if template_jurisdiction != self.jurisdiction:
+            raise ValueError(
+                f"coa_template_key {self.coa_template_key!r} does not match "
+                f"jurisdiction {self.jurisdiction!r}"
+            )
+
+        # The prefix check above matches "ee/defualt" (typo) against "EE" —
+        # it never checks the key is actually a registered template. Reject
+        # anything not in the templates registry here, at the schema layer,
+        # before a Company row is ever created.
+        from saebooks.services.templates import known_templates
+
+        if self.coa_template_key not in known_templates():
+            raise ValueError(
+                f"coa_template_key must be one of: {known_templates()}"
+            )
+        return self
 
 
 class CompanyConflictBody(BaseModel):

@@ -61,11 +61,12 @@ from saebooks.models.reference.tax_code import RefTaxCode, TaxFamily
 from saebooks.models.reference.tax_return_box_definition import TaxReturnBoxDefinition
 from saebooks.models.tax_code import TaxCode
 from saebooks.models.tax_return import TaxReturn, TaxReturnStatus
-from saebooks.services.tax_engine.au import (
-    _BAS_INCOME_TYPES as _INCOME_ACCOUNT_TYPES,
+from saebooks.money import money_quantum
+from saebooks.services.tax_engine.types import (
+    INPUT_ACCOUNT_TYPES as _PURCHASE_ACCOUNT_TYPES,
 )
-from saebooks.services.tax_engine.au import (  # aliased import, see comment above
-    _BAS_PURCHASE_TYPES as _PURCHASE_ACCOUNT_TYPES,
+from saebooks.services.tax_engine.types import (
+    OUTPUT_ACCOUNT_TYPES as _INCOME_ACCOUNT_TYPES,
 )
 
 logger = logging.getLogger("saebooks.tax_return_generator")
@@ -86,6 +87,8 @@ _JURISDICTION_TO_REFERENCE_CODE: dict[str, str] = {
     "NZ": "NZL",
     "UK": "GBR",
     "EE": "EST",
+    "LT": "LTU",
+    "LV": "LVA",
 }
 
 
@@ -669,19 +672,19 @@ class _FBoxRef:
 
 @dataclass(frozen=True, slots=True)
 class _FNeg:
-    operand: "_FNode"
+    operand: _FNode
 
 
 @dataclass(frozen=True, slots=True)
 class _FMaxZero:
-    operand: "_FNode"
+    operand: _FNode
 
 
 @dataclass(frozen=True, slots=True)
 class _FBinOp:
     op: str  # '+' | '-' | '*'
-    left: "_FNode"
-    right: "_FNode"
+    left: _FNode
+    right: _FNode
 
 
 _FNode = _FNum | _FBoxRef | _FNeg | _FMaxZero | _FBinOp
@@ -951,7 +954,7 @@ def _find_cycle_path(deps: dict[str, frozenset[str]], remaining: set[str]) -> li
     return sorted(remaining)  # pragma: no cover — defensive fallback
 
 
-_TWO_PLACES = Decimal("0.01")
+_TWO_PLACES = money_quantum(2)
 
 # Rounding DIRECTION is UNVERIFIED (scope §3.2): the source confirms cent
 # PRECISION ("sendi täpsusega") but not the half-cent tie-break rule.
@@ -1105,7 +1108,7 @@ async def generate_return(
     ``tests/integration/test_cross_db_join.py``).
 
     ``tenant_id``/``statuses``/``exclude_archived`` default to
-    ``services.tax_engine.au.bas_report``'s existing filter shape
+    ``jurisdictions.au.tax.bas_report``'s existing filter shape
     (no tenant filter, POSTED only, archived included) so the AU thin
     wrapper reproduces its pre-T8 numbers exactly. Callers with a
     stricter scope (e.g. ``api/v1/reports.py``, which also filters by

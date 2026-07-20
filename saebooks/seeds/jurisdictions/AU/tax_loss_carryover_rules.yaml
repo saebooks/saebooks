@@ -1,0 +1,59 @@
+# Australian tax-loss carry-forward / carry-back rules (M1.5 · Wave
+# 5-Income). AU losses carry forward indefinitely (carry_forward_years
+# null) with no carry-back and no annual offset cap; capital losses are
+# quarantined to the capital basket for every taxpayer type. Company
+# revenue-loss deduction is gated by the continuity-of-ownership test
+# (ITAA 1997 s 165-12) or, failing that, the business-continuity test
+# (s 165-13 / s 165-211); trust losses are gated by the Schedule 2F
+# ITAA 1936 tests. The temporary FY2020-21..2022-23 refundable
+# loss-carry-back offset is a lapsed election, not the standing rule,
+# so it is deliberately not seeded.
+table: tax_loss_carryover_rules
+key: [jurisdiction, taxpayer_type, loss_basket, effective_from]
+rows:
+  - jurisdiction: AUS
+    taxpayer_type: company
+    loss_basket: revenue
+    carry_forward_years: null
+    carry_back_years: 0
+    quarantined_to_basket: false
+    continuity_tests: [continuity_of_ownership, business_continuity]
+    effective_from: 1997-07-01
+  - jurisdiction: AUS
+    taxpayer_type: company
+    loss_basket: capital
+    carry_forward_years: null
+    carry_back_years: 0
+    quarantined_to_basket: true
+    continuity_tests: [continuity_of_ownership, business_continuity]
+    effective_from: 1997-07-01
+  - jurisdiction: AUS
+    taxpayer_type: individual
+    loss_basket: revenue
+    carry_forward_years: null
+    carry_back_years: 0
+    quarantined_to_basket: false
+    effective_from: 1997-07-01
+  - jurisdiction: AUS
+    taxpayer_type: individual
+    loss_basket: capital
+    carry_forward_years: null
+    carry_back_years: 0
+    quarantined_to_basket: true
+    effective_from: 1997-07-01
+  - jurisdiction: AUS
+    taxpayer_type: trust
+    loss_basket: revenue
+    carry_forward_years: null
+    carry_back_years: 0
+    quarantined_to_basket: false
+    continuity_tests: [fifty_percent_stake, pattern_of_distributions, control, income_injection]
+    effective_from: 1997-07-01
+  - jurisdiction: AUS
+    taxpayer_type: trust
+    loss_basket: capital
+    carry_forward_years: null
+    carry_back_years: 0
+    quarantined_to_basket: true
+    continuity_tests: [fifty_percent_stake, pattern_of_distributions, control, income_injection]
+    effective_from: 1997-07-01

@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, date, datetime
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,6 +45,8 @@ from saebooks.models.payment import (
     PaymentMethod,
     PaymentStatus,
 )
+from saebooks.money import round_money
+from saebooks.services import control_accounts as control_accounts_svc
 from saebooks.services import journal as journal_svc
 from saebooks.services import numbering
 
@@ -53,15 +55,13 @@ class PaymentError(ValueError):
     """Raised on payment validation or state-transition failure."""
 
 
-_AR_CODE = "1-1200"
-_AP_CODE = "2-1200"
 _FX_GAIN_CODE = "6-1640"  # Exchange Rate Gain (INCOME per seed)
 _FX_LOSS_CODE = "6-1630"  # Exchange Rate Loss (EXPENSE per seed)
-_TWOPLACES = Decimal("0.01")
 
 
-def _q2(value: Decimal) -> Decimal:
-    return value.quantize(_TWOPLACES, rounding=ROUND_HALF_UP)
+def _q2(value: Decimal, places: int = 2) -> Decimal:
+    """ROUND_HALF_UP to a currency's minor unit (default AUD/base — 2)."""
+    return round_money(value, places)
 
 
 async def _get_control_account(
@@ -447,6 +447,13 @@ async def _compute_control_credit(
 
     Caller derives unallocated = ``pay.amount - allocated_doc_amount``.
     """
+    # Packet 4b: AR/AP codes resolve companies.ar_control_account_code /
+    # ap_control_account_code, falling back to the AU convention codes —
+    # see services/control_accounts.py. Resolved once per payment, since
+    # every allocation on one payment belongs to the same company.
+    ar_code = await control_accounts_svc.resolve_ar_code(session, pay.company_id)
+    ap_code = await control_accounts_svc.resolve_ap_code(session, pay.company_id)
+
     allocated_doc = Decimal("0")
     per_control: dict[str, Decimal] = {}
 
@@ -458,14 +465,14 @@ async def _compute_control_credit(
                 continue
             allocated_doc += amt
             base = _q2(amt * Decimal(str(inv.fx_rate)))
-            per_control[_AR_CODE] = per_control.get(_AR_CODE, Decimal("0")) + base
+            per_control[ar_code] = per_control.get(ar_code, Decimal("0")) + base
         elif a.bill_id is not None:
             bill = await session.get(Bill, a.bill_id)
             if bill is None:
                 continue
             allocated_doc += amt
             base = _q2(amt * Decimal(str(bill.fx_rate)))
-            per_control[_AP_CODE] = per_control.get(_AP_CODE, Decimal("0")) + base
+            per_control[ap_code] = per_control.get(ap_code, Decimal("0")) + base
         elif a.credit_note_id is not None:
             # Credit notes are customer-side (AR). They have no fx_rate
             # of their own (AUD-only) — translate at the payment's rate.
@@ -474,7 +481,7 @@ async def _compute_control_credit(
                 continue
             allocated_doc += amt
             base = _q2(amt * Decimal(str(pay.fx_rate)))
-            per_control[_AR_CODE] = per_control.get(_AR_CODE, Decimal("0")) + base
+            per_control[ar_code] = per_control.get(ar_code, Decimal("0")) + base
 
     # Unallocated remainder lands on the default control for the
     # direction (AR for INCOMING, AP for OUTGOING) at the payment's
@@ -482,9 +489,9 @@ async def _compute_control_credit(
     unallocated_doc = Decimal(str(pay.amount)) - allocated_doc
     if unallocated_doc != Decimal("0"):
         default_code = (
-            _AR_CODE
+            ar_code
             if pay.direction == PaymentDirection.INCOMING
-            else _AP_CODE
+            else ap_code
         )
         base = _q2(unallocated_doc * Decimal(str(pay.fx_rate)))
         per_control[default_code] = (

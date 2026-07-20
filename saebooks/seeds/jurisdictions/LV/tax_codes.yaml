@@ -1,0 +1,321 @@
+# Latvian pievienotās vērtības nodoklis (PVN / VAT) reference tax codes —
+# feeds PVN declaration row aggregation (see tax_return_box_definitions.yaml
+# in this directory) and chart_template.yaml's default_tax_code assignments.
+#
+# LV jurisdiction module (sibling of AU/EE/NZ/UK — built fresh against the
+# jurisdiction-module contract, design doc §2). Latvia is the second Baltic
+# module; it shares Estonia's distributed-profits corporate model but its
+# VAT return routes reverse charge DIFFERENTLY (dedicated EU-acquisition
+# rows 50/51/51.1 + 55/56/56.1, NOT folded into the domestic output rows
+# the way EE KMD box 1 folds them) — do not copy EE box routing here.
+#
+# Rates (PVN likums Art. 41-43, primary: likumi.lv/ta/id/253451 +
+# vid.gov.lv/lv/pievienotas-vertibas-nodokla-likmes, pulled 2026-07-12):
+#   21%  standard rate (Art. 41(1)(1) "nodokļa standartlikme 21 procenta
+#        apmērā") — VERIFIED (likumi.lv + vid.gov.lv)
+#   12%  reduced (Art. 42): registered medicines/medical devices, specified
+#        infant food, domestic passenger transport, wood fuel/heat to
+#        households, tourist accommodation, fresh fruit/berries/vegetables
+#        typical to Latvia (PERMANENT from 2026-01-01); temporary pilot
+#        2026-07-01..2027-06-30 adds bread/fresh milk/poultry/eggs —
+#        VERIFIED (likumi.lv Art. 42 + KPMG + LSM)
+#    5%  reduced (Art. 42): books, educational materials, maps, press —
+#        from 2026 restricted to Latvian/Latgalian/Livonian or official
+#        EU/EEA/OECD-language publications. The 5% rate does NOT cover
+#        fresh produce in 2026 (that moved to 12%) — VERIFIED
+#    0%  exports, intra-EU supplies to EU-registered persons, international
+#        transport, free-zone supplies, etc. (Art. 43-50) — VERIFIED
+#   exempt  Art. 52 (finance, insurance, medical, education, postal,
+#        used real estate, investment gold, ...) — no input deduction —
+#        VERIFIED (partial primary read + 2 secondaries)
+#
+# Registration threshold: EUR 50,000 domestic turnover per calendar year
+# (grace buffer to EUR 55,000 defers to next year); EU SME cross-border
+# scheme ceiling EUR 100,000 — VERIFIED (vid.gov.lv + EC SME portal).
+# Filing: monthly (default; half-year/quarterly tiers exist for small
+# turnover — tier boundaries UNVERIFIED at primary level, see the
+# tax_return_box_definitions.yaml header). Return due the 20th, payment
+# the 23rd of the following month via EDS — VERIFIED (vid.gov.lv).
+#
+# UNVERIFIED DATES: this seed carries CURRENT-LAW rates only. The
+# effective_from 2013-01-01 on the standing codes is a placeholder
+# sentinel (the year MK noteikumi Nr. 40 was adopted), NOT the researched
+# commencement of each rate/regime — flagged '# UNVERIFIED' per row. Rate
+# history (e.g. the 2012 22%→21% step) was not researched; do not rely on
+# these dates for pre-2026 periods.
+#
+# Company-side TaxCode.reporting_type convention this seed's box
+# definitions key their feeder_tax_codes off (the EE Packet-2 pattern —
+# reporting_type is a COMPANY-side TaxCode column, not a RefTaxCode
+# column; see the EE tax_codes.yaml CRITIC-ROUND-3 note, which applies
+# here identically):
+#   standard / reduced_12 / reduced_5 / exempt / capital
+#     — domestic sale/purchase rate buckets (rows 41/42/42.1/49; input 62)
+#   rc_domestic_supply
+#     — SELLER-side domestic reverse charge (PVN likums Art. 141-143.4:
+#       timber, scrap metal, construction services, mobile devices/ICs/
+#       consoles, grain, precious metals, semi-finished metals — the
+#       building-materials and household-appliance categories were
+#       REPEALED 2020-01-01, do not add codes for them). Feeds row 41.1.
+#   rc_domestic_acq
+#     — BUYER-side domestic reverse charge. PARKED: deductible-side row
+#       62 routing is primary-verified (reg. 17.24.6) but the OUTPUT-side
+#       row for the buyer's self-assessed VAT was NOT primary-verified in
+#       this pass, so the LV tax engine REFUSES to post this tag rather
+#       than guess (LVTaxEngine docstring) — no code row below carries it.
+#   rc_eu_acq_goods / rc_eu_acq_services
+#     — EU acquisitions of goods / services received from EU-registered
+#       suppliers. BOTH feed rows 50/51/51.1 (base, by rate) — reg. text
+#       for row 50 verbatim includes "un par pakalpojumu saņemšanu no
+#       citas dalībvalsts reģistrēta nodokļa maksātāja" — with the
+#       self-assessed VAT in 55/56/56.1 (rate formulas) and the
+#       deductible side in row 64. Two-component fan-out via LVTaxEngine.
+#   rc_third_country_services
+#     — services received from third-country/third-territory suppliers
+#       (Art. 19(1)/20(1)/25): output VAT row 54, deductible row 63.
+#       Two-component fan-out via LVTaxEngine.
+#   zero_ic_goods / zero_export / zero_services
+#     — 0% leaves: intra-EU goods supplies (row 45), goods exports
+#       (row 48.1), 0% services under Arts. 46-48/50 (row 48).
+#   zero_fz / zero_art42_16 / zero_not_free_circ / zero_new_vehicles
+#     — rows 44/45.1/46/47 leaves; documented for completeness but NO
+#       code row below carries them yet (niche regimes) — those rows
+#       correctly read 0 until a company provisions such a code.
+#   outside_scope_supply
+#     — supplies outside Latvia (Arts. 12, 16(4), 19-25) — row 48.2.
+#   input_import
+#     — import VAT paid/payable — row 61.
+#
+# OSS/IOSS: marker codes only (rate 0), same convention as EE's OSS_EU /
+# IOSS_IMPORT header note — destination-member-state VAT reported through
+# the OSS return, not a Latvian domestic rate. Latvia participates in all
+# three EU schemes (Union/non-Union/import) — VERIFIED (vid.gov.lv + EC).
+table: tax_codes
+key: [jurisdiction, code, effective_from]
+rows:
+  # --- Sale-side rate codes -------------------------------------------
+  - jurisdiction: LVA
+    code: STD
+    name: "PVN — standartlikme 21%"
+    rate_percent: 21.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "PVN (VAT) Payable"
+    effective_from: 2013-01-01  # UNVERIFIED — placeholder sentinel; rate history not researched.
+    report_box_keys: ["PVN:41", "PVN:52"]
+
+  - jurisdiction: LVA
+    code: RED12
+    name: "PVN — samazinātā likme 12%"
+    rate_percent: 12.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "PVN (VAT) Payable"
+    effective_from: 2013-01-01  # UNVERIFIED — placeholder sentinel; category list is the 2026 one.
+    report_box_keys: ["PVN:42", "PVN:53"]
+
+  - jurisdiction: LVA
+    code: RED5
+    name: "PVN — samazinātā likme 5% (grāmatas, prese — valodu ierobežojums no 2026)"
+    rate_percent: 5.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "PVN (VAT) Payable"
+    effective_from: 2013-01-01  # UNVERIFIED — placeholder sentinel; 5% scope shown is the 2026 one.
+    report_box_keys: ["PVN:42.1", "PVN:53.1"]
+
+  - jurisdiction: LVA
+    code: RC_DOM_SUPPLY
+    name: "PVN — iekšzemes apgrieztā maksāšana, pārdevēja puse (Art. 141-143.4)"
+    rate_percent: 0.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: true
+    tax_family: vat_gst
+    gl_account_hint: "PVN (VAT) Payable"
+    effective_from: 2013-01-01  # UNVERIFIED — placeholder sentinel; sector list is the 2026 one.
+    report_box_keys: ["PVN:41.1"]
+
+  - jurisdiction: LVA
+    code: ZERO_IC_GOODS
+    name: "PVN 0% — preču piegāde ES reģistrētam nodokļa maksātājam"
+    rate_percent: 0.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: null
+    effective_from: 2013-01-01  # UNVERIFIED — placeholder sentinel.
+    report_box_keys: ["PVN:43", "PVN:45"]
+
+  - jurisdiction: LVA
+    code: ZERO_EXPORT
+    name: "PVN 0% — preču eksports"
+    rate_percent: 0.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: null
+    effective_from: 2013-01-01  # UNVERIFIED — placeholder sentinel.
+    report_box_keys: ["PVN:43", "PVN:48.1"]
+
+  - jurisdiction: LVA
+    code: ZERO_SERVICES
+    name: "PVN 0% — pakalpojumi (Art. 46-48, 50)"
+    rate_percent: 0.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: null
+    effective_from: 2013-01-01  # UNVERIFIED — placeholder sentinel.
+    report_box_keys: ["PVN:43", "PVN:48"]
+
+  - jurisdiction: LVA
+    code: OUT_OF_SCOPE
+    name: "Darījumi ārpus Latvijas (Art. 12, 16(4), 19-25)"
+    rate_percent: 0.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: null
+    effective_from: 2013-01-01  # UNVERIFIED — placeholder sentinel.
+    report_box_keys: ["PVN:48.2"]
+
+  - jurisdiction: LVA
+    code: EXEMPT
+    name: "Ar PVN neapliekamie darījumi (Art. 52, t.sk. ieguldījumu zelts)"
+    rate_percent: 0.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: null
+    effective_from: 2013-01-01  # UNVERIFIED — placeholder sentinel.
+    report_box_keys: ["PVN:49"]
+
+  # --- Purchase-side codes ---------------------------------------------
+  - jurisdiction: LVA
+    code: INPUT_STD
+    name: "Priekšnodoklis — iekšzemes pirkumi 21%"
+    rate_percent: 21.0000
+    direction: purchase
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "PVN (VAT) Receivable"
+    effective_from: 2013-01-01  # UNVERIFIED — placeholder sentinel.
+    report_box_keys: ["PVN:62"]
+
+  - jurisdiction: LVA
+    code: INPUT_RED12
+    name: "Priekšnodoklis — iekšzemes pirkumi 12%"
+    rate_percent: 12.0000
+    direction: purchase
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "PVN (VAT) Receivable"
+    effective_from: 2013-01-01  # UNVERIFIED — placeholder sentinel.
+    report_box_keys: ["PVN:62"]
+
+  - jurisdiction: LVA
+    code: INPUT_RED5
+    name: "Priekšnodoklis — iekšzemes pirkumi 5%"
+    rate_percent: 5.0000
+    direction: purchase
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "PVN (VAT) Receivable"
+    effective_from: 2013-01-01  # UNVERIFIED — placeholder sentinel.
+    report_box_keys: ["PVN:62"]
+
+  - jurisdiction: LVA
+    code: INPUT_IMPORT
+    name: "Priekšnodoklis — importa PVN"
+    rate_percent: 21.0000
+    direction: purchase
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: "PVN (VAT) Receivable"
+    effective_from: 2013-01-01  # UNVERIFIED — placeholder sentinel.
+    report_box_keys: ["PVN:61"]
+
+  # --- Reverse-charge acquisition codes (two-component fan-out) --------
+  # One RefTaxCode row per reporting_type tag (the EE RC_EU_ACQ single-row
+  # goods/services ambiguity is deliberately NOT reproduced — LV ships a
+  # discriminated pair from day one).
+  - jurisdiction: LVA
+    code: RC_EU_GOODS
+    name: "PVN — preču iegāde ES teritorijā (apgrieztā maksāšana, 21%)"
+    rate_percent: 21.0000
+    direction: purchase
+    is_inclusive: false
+    reverse_charge: true
+    tax_family: vat_gst
+    gl_account_hint: "PVN (VAT) Payable"
+    effective_from: 2013-01-01  # UNVERIFIED — placeholder sentinel.
+    report_box_keys: ["PVN:50", "PVN:55", "PVN:64"]
+
+  - jurisdiction: LVA
+    code: RC_EU_SERVICES
+    name: "PVN — pakalpojumi no ES reģistrēta nodokļa maksātāja (apgrieztā maksāšana, 21%)"
+    rate_percent: 21.0000
+    direction: purchase
+    is_inclusive: false
+    reverse_charge: true
+    tax_family: vat_gst
+    gl_account_hint: "PVN (VAT) Payable"
+    effective_from: 2013-01-01  # UNVERIFIED — placeholder sentinel.
+    report_box_keys: ["PVN:50", "PVN:55", "PVN:64"]
+
+  - jurisdiction: LVA
+    code: RC_3C_SERVICES
+    name: "PVN — pakalpojumi no trešo valstu nodokļa maksātājiem (Art. 19/20/25, 21%)"
+    rate_percent: 21.0000
+    direction: purchase
+    is_inclusive: false
+    reverse_charge: true
+    tax_family: vat_gst
+    gl_account_hint: "PVN (VAT) Payable"
+    effective_from: 2013-01-01  # UNVERIFIED — placeholder sentinel.
+    report_box_keys: ["PVN:54", "PVN:63"]
+
+  # --- Marker / neutral codes ------------------------------------------
+  - jurisdiction: LVA
+    code: OSS_EU
+    name: "OSS — Savienības režīms (galamērķa dalībvalsts PVN, deklarē OSS deklarācijā)"
+    rate_percent: 0.0000
+    direction: sale
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: null
+    effective_from: 2021-07-01  # EU-wide OSS commencement — VERIFIED (EU e-commerce package).
+    report_box_keys: []
+
+  - jurisdiction: LVA
+    code: NTR
+    name: "Nav PVN objekta (ārpus PVN tvēruma)"
+    rate_percent: 0.0000
+    direction: both
+    is_inclusive: false
+    reverse_charge: false
+    tax_family: vat_gst
+    gl_account_hint: null
+    # UNVERIFIED — placeholder sentinel (1995 = the pre-2013 VAT law era).
+    # Deliberately EARLIER than the rate codes' 2013 sentinel: NTR
+    # ("outside VAT scope") has no rate history and must resolve for any
+    # transaction date (the EE NTR row's own lesson).
+    effective_from: 1995-01-01
+    report_box_keys: []

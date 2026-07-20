@@ -15,8 +15,24 @@ Routes
 GET    /api/v1/tax_returns                     — list (filter by period, type, status)
 GET    /api/v1/tax_returns/{id}                — detail (with lodgement_record if any)
 POST   /api/v1/tax_returns                     — create a DRAFT
+POST   /api/v1/tax_returns/generate            — compute + persist a real return (Packet 4c)
+GET    /api/v1/tax_returns/{id}/export         — render the filable document (Packet 4c)
+POST   /api/v1/tax_returns/{id}/file           — mark FILED, manual file-and-confirm (Packet 4c)
 POST   /api/v1/tax_returns/{id}/lodge          — dispatch to the lodge-server
 GET    /api/v1/tax_returns/{id}/lodgement      — fetch the lodgement_record (if any)
+
+Packet 4c note — ``/generate`` and ``/export`` cover box-vector return
+types (``tax_return_generator.generate_return``'s box-definition model —
+AU's BAS/IAS, EE's KMD) PLUS the Estonian **TSD** list-shaped return,
+which has its own dedicated generator (``services/lodgement/tsd``:
+``generate_tsd`` + ``persist_tsd_return`` + ``build_tsd_xml_document``)
+reading FINALIZED EE pay runs. TSD is dispatched to that path
+(``_generate_tsd_return`` / ``_build_tsd_envelope``) rather than the box
+model. The OTHER list-shaped types (KMD-INF's invoice/credit-note
+listing, KMD-2027's XBRL detail rows) remain unwired — ``/generate``
+raises 422 (from the same "no box definitions" ``ValueError``
+``generate_return`` raises) and ``/export`` raises 501 for any
+return_type without a document builder — loud, not silent.
 """
 from __future__ import annotations
 
@@ -24,13 +40,14 @@ import uuid
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_active_company_id, get_session
+from saebooks.services import business_identifiers
 from saebooks.services.authz import require_permission_or_role_inline, require_user
 
 router = APIRouter(
@@ -72,13 +89,10 @@ async def _build_bas_envelope(
     if prow is None:
         raise HTTPException(422, "Tax period not found for this return")
 
-    crow = (
-        await session.execute(
-            text("SELECT abn FROM companies WHERE id = :c"),
-            {"c": str(company_id)},
-        )
-    ).first()
-    abn = crow[0] if crow else None
+    # The lodging entity's ABN, read from its ``au_abn`` business identifier
+    # (the legacy ``companies.abn`` column was dropped in 0204).
+    _abn_ident = await business_identifiers.get(session, company_id, "au_abn")
+    abn = _abn_ident.value if _abn_ident is not None else None
     if not abn:
         raise HTTPException(
             422,
@@ -88,6 +102,120 @@ async def _build_bas_envelope(
     figs = BasFigures.from_figures_json(figures)
     ctx = ReportingContext(abn=abn, period_start=prow[0], period_end=prow[1])
     return build_bas_document(figs, ctx)
+
+
+async def _generate_tsd_return(
+    session: AsyncSession,
+    *,
+    company_id: UUID,
+    tenant_id: uuid.UUID,
+    period_id: UUID,
+    period_start: Any,
+    period_end: Any,
+) -> JSONResponse:
+    """Compute + persist an Estonian TSD return (Packet 4c, list-shaped path).
+
+    TSD is NOT a box vector — it is a per-person payment listing (MAIN
+    roll-up + Lisa-1 rows) assembled from FINALIZED EE pay runs by
+    ``services.lodgement.tsd.generate_tsd``, so it deliberately bypasses
+    ``generate_return``'s box-definition model (which raises "no box
+    definitions" for it — the guarded set this branch moves TSD OUT of).
+
+    Guards / semantics:
+
+    * **Non-EE company -> 422.** Keyed on the company's OWN
+      ``jurisdiction`` (authoritative), not the request payload's — a TSD
+      is inherently Estonian and is sourced from the company's EE pay runs.
+    * **Empty period -> valid nil declaration, not 422.** ``generate_tsd``
+      returns an all-zero ``TsdListing`` when there are no posted EE pay
+      runs; that is a real filable nil TSD (mirrors the generator's own
+      contract), persisted like any other rather than rejected.
+    * **Duplicate period -> no dedup.** Matches the box-vector path, which
+      also just inserts a fresh row — there is no unique constraint on
+      ``tax_returns`` and no replace-draft/409 precedent to mirror.
+    """
+    from saebooks.services.lodgement.tsd import generate_tsd, persist_tsd_return
+
+    jrow = (
+        await session.execute(
+            text("SELECT jurisdiction FROM companies WHERE id = :c"),
+            {"c": str(company_id)},
+        )
+    ).first()
+    company_jurisdiction = jrow[0] if jrow is not None else None
+    if company_jurisdiction != "EE":
+        raise HTTPException(
+            422,
+            "TSD is an Estonian (EE) return type; the active company's "
+            f"jurisdiction is {company_jurisdiction!r}. Only EE companies "
+            "can generate a TSD.",
+        )
+
+    listing = await generate_tsd(
+        session,
+        company_id=company_id,
+        period_start=period_start,
+        period_end=period_end,
+    )
+    row = await persist_tsd_return(
+        session, listing, tenant_id=tenant_id, period_id=period_id,
+    )
+    await session.commit()
+    return JSONResponse(
+        {
+            "id": str(row.id),
+            "jurisdiction": row.jurisdiction,
+            "period_id": str(row.period_id),
+            "return_type": row.return_type,
+            "status": row.status.value,
+            "figures": row.figures,
+        },
+        status_code=201,
+    )
+
+
+async def _build_tsd_envelope(
+    session: AsyncSession,
+    *,
+    company_id: UUID,
+    period_start: Any,
+    period_end: Any,
+) -> bytes:
+    """Render a persisted TSD return's filable e-MTA ``tsd_vorm`` XML.
+
+    Unlike the KMD export branch (which reconstructs ``KmdFigures`` from the
+    persisted ``figures`` JSONB), TSD is **re-generated from its source
+    FINALIZED pay runs** here, not rebuilt from ``figures``. Reason:
+    ``persist_tsd_return`` MASKS the isikukood in the JSONB copy
+    (``serializer._mask_isikukood`` — the plaintext national ID must not sit
+    in a plain JSONB column that the read API echoes verbatim), but the
+    filed XML needs the REAL isikukood as each Lisa-1 row key. The plaintext
+    lives only in the live employee/pay-run data, so the document is built
+    by re-running ``generate_tsd`` against the (locked, FINALIZED) pay runs
+    — the one place the real isikukood is authoritatively available. The
+    source rows are write-locked at FINALIZED, so this re-generation is
+    stable for a given period.
+    """
+    from saebooks.services.lodgement.tsd import (
+        TsdReportingContext,
+        build_tsd_xml_document,
+        generate_tsd,
+    )
+
+    # Estonian äriregistri kood, read from its own ``ee_regcode`` business
+    # identifier — same explicit lookup the KMD export branch uses.
+    _ident = await business_identifiers.get(session, company_id, "ee_regcode")
+    regcode = (_ident.value if _ident is not None else "") or ""
+    listing = await generate_tsd(
+        session,
+        company_id=company_id,
+        period_start=period_start,
+        period_end=period_end,
+    )
+    ctx = TsdReportingContext(
+        regcode=regcode, period_start=period_start, period_end=period_end,
+    )
+    return build_tsd_xml_document(listing, ctx)
 
 
 def _serialise_return(row: Any) -> dict[str, Any]:
@@ -103,6 +231,9 @@ def _serialise_return(row: Any) -> dict[str, Any]:
         "generated_by_user_id": str(row[8]) if row[8] else None,
         "status": row[9],
         "lodgement_record_id": str(row[10]) if row[10] else None,
+        # 0199 (Packet 4c) — trailing column, appended not inserted, so
+        # every existing positional index above is untouched.
+        "filed_at": row[11].isoformat() if len(row) > 11 and row[11] else None,
     }
 
 
@@ -132,7 +263,7 @@ async def list_tax_returns(
         f"""
         SELECT id, company_id, tenant_id, jurisdiction, period_id,
                return_type, figures, generated_at, generated_by_user_id,
-               status, lodgement_record_id
+               status, lodgement_record_id, filed_at
           FROM tax_returns
          WHERE {" AND ".join(where)}
          ORDER BY generated_at DESC
@@ -157,7 +288,7 @@ async def get_tax_return(
                 """
                 SELECT id, company_id, tenant_id, jurisdiction, period_id,
                        return_type, figures, generated_at, generated_by_user_id,
-                       status, lodgement_record_id
+                       status, lodgement_record_id, filed_at
                   FROM tax_returns
                  WHERE id = :id AND company_id = :c AND tenant_id = :t
                 """
@@ -221,6 +352,290 @@ async def create_tax_return(
         "return_type": return_type,
         "status": "draft",
     }, status_code=201)
+
+
+@router.post("/generate", status_code=201)
+async def generate_tax_return(
+    request: Request,
+    payload: dict = Body(...),
+    bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> JSONResponse:
+    """Compute a real return from the ledger and persist it (status READY).
+
+    Unlike ``POST /tax_returns`` (a bare DRAFT shell for hand-built
+    figures), this actually aggregates the company's ledger against the
+    jurisdiction/return_type's box definitions via
+    ``tax_return_generator.generate_return`` + ``persist_return`` — the
+    same path ``reports.bas_summary`` uses for AU BAS, generalised to
+    any box-vector return type (e.g. EE's KMD).
+
+    Body:
+        {
+            "jurisdiction": "EE",
+            "period_id":    "<UUID of tax_periods row>",
+            "return_type":  "KMD" | "BAS" | "IAS" | ...
+        }
+
+    Box-vector return types (with ``tax_return_box_definitions`` rows)
+    plus the Estonian TSD (``return_type == "TSD"``, dispatched to
+    ``_generate_tsd_return`` — its own pay-run-listing generator) are
+    supported. The remaining list-shaped types (KMD-INF, KMD-2027) raise
+    422 here; use their own dedicated generator functions directly.
+    """
+    from saebooks.services import tax_return_generator as generator_svc
+
+    tenant_id = resolve_tenant_id(request)
+    try:
+        jurisdiction = str(payload["jurisdiction"])[:3]
+        period_id = UUID(str(payload["period_id"]))
+        return_type = str(payload["return_type"])[:32]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(422, f"missing or invalid field: {exc}") from exc
+
+    prow = (
+        await session.execute(
+            text(
+                "SELECT period_start, period_end FROM tax_periods "
+                "WHERE id = :p AND company_id = :c"
+            ),
+            {"p": str(period_id), "c": str(company_id)},
+        )
+    ).first()
+    if prow is None:
+        raise HTTPException(422, "Tax period not found for this return")
+
+    # TSD is list-shaped (per-person pay-run rows), not a box vector — it
+    # has moved OUT of the guarded set into its own dedicated generator
+    # path (``_generate_tsd_return``), rather than the box-definition model
+    # below that raises the "no box definitions" 422 for it.
+    if return_type == "TSD":
+        return await _generate_tsd_return(
+            session,
+            company_id=company_id,
+            tenant_id=tenant_id,
+            period_id=period_id,
+            period_start=prow[0],
+            period_end=prow[1],
+        )
+
+    try:
+        result = await generator_svc.generate_return(
+            session,
+            company_id,
+            jurisdiction=jurisdiction,
+            return_type=return_type,
+            from_date=prow[0],
+            to_date=prow[1],
+            tenant_id=tenant_id,
+        )
+    except ValueError as exc:
+        # No box definitions for this jurisdiction/return_type — a real
+        # config gap (e.g. a list-shaped type like TSD), not a bug.
+        # Loud 422, never a silently-empty return.
+        raise HTTPException(422, str(exc)) from exc
+
+    row = await generator_svc.persist_return(
+        session,
+        result,
+        company_id=company_id,
+        tenant_id=tenant_id,
+        period_id=period_id,
+    )
+    await session.commit()
+    return JSONResponse(
+        {
+            "id": str(row.id),
+            "jurisdiction": row.jurisdiction,
+            "period_id": str(row.period_id),
+            "return_type": row.return_type,
+            "status": row.status.value,
+            "figures": row.figures,
+        },
+        status_code=201,
+    )
+
+
+@router.get("/{return_id}/export")
+async def export_tax_return(
+    return_id: UUID,
+    request: Request,
+    bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> Response:
+    """Render the persisted return's filable document (XML/CSV bytes).
+
+    Dispatches by (jurisdiction, return_type) to the matching document
+    builder:
+
+    * AU BAS/IAS   -> ``services.lodgement.sbr.build_bas_document``
+      (same builder ``/lodge`` uses, reused here for a plain download —
+      no lodge-server round trip).
+    * EE KMD       -> ``services.lodgement.kmd.serializer.build_kmd_xml_document``,
+      reconstructing ``KmdFigures`` from the persisted ``figures`` JSONB
+      (the exact round-trip ``persist_return``'s docstring documents).
+    * EE TSD       -> ``_build_tsd_envelope`` (``services.lodgement.tsd.
+      build_tsd_xml_document``), RE-GENERATED from the source FINALIZED
+      pay runs rather than the persisted ``figures`` — the JSONB copy masks
+      the isikukood, which the filed XML needs in full (see that helper).
+
+    Any other (jurisdiction, return_type) — including the remaining
+    list-shaped types (KMD-INF, KMD-2027) that have no
+    ``figures``->typed-object reconstruction today — raises 501, not a
+    best-effort guess.
+    """
+    tenant_id = resolve_tenant_id(request)
+    row = (
+        await session.execute(
+            text(
+                """
+                SELECT id, jurisdiction, period_id, return_type, figures
+                  FROM tax_returns
+                 WHERE id = :id AND company_id = :c AND tenant_id = :t
+                """
+            ),
+            {"id": str(return_id), "c": str(company_id), "t": str(tenant_id)},
+        )
+    ).first()
+    if row is None:
+        raise HTTPException(404, "Tax return not found")
+
+    jurisdiction, period_id, return_type, figures = row[1], row[2], row[3], row[4]
+    figures = figures if isinstance(figures, dict) else {}
+
+    if jurisdiction == "AU" and return_type in ("BAS", "IAS"):
+        body = await _build_bas_envelope(
+            session, company_id=company_id, period_id=period_id, figures=figures
+        )
+        media_type = "application/xml"
+    elif jurisdiction == "EE" and return_type == "KMD":
+        from saebooks.services.lodgement.kmd.serializer import (
+            KmdFigures,
+            KmdReportingContext,
+            build_kmd_xml_document,
+        )
+
+        prow = (
+            await session.execute(
+                text(
+                    "SELECT period_start, period_end FROM tax_periods "
+                    "WHERE id = :p AND company_id = :c"
+                ),
+                {"p": str(period_id), "c": str(company_id)},
+            )
+        ).first()
+        if prow is None:
+            raise HTTPException(422, "Tax period not found for this return")
+        # The Estonian registry code (äriregistri kood) for a KMD filer, read
+        # explicitly from its own ``ee_regcode`` business identifier. The
+        # legacy ``companies.abn`` column that overloaded this (an ABN for AU
+        # companies, the regcode for EE) was dropped in 0198; each code now
+        # lives under its correctly-typed scheme. Same explicit lookup that
+        # services.lodgement.kmd_2027.generator.generate_kmd_2027 uses.
+        _ident = await business_identifiers.get(session, company_id, "ee_regcode")
+        regcode = (_ident.value if _ident is not None else "") or ""
+        kmd_figures = KmdFigures.from_figures_json(figures)
+        ctx = KmdReportingContext(
+            regcode=regcode, period_start=prow[0], period_end=prow[1]
+        )
+        body = build_kmd_xml_document(kmd_figures, ctx)
+        media_type = "application/xml"
+    elif jurisdiction == "EE" and return_type == "TSD":
+        prow = (
+            await session.execute(
+                text(
+                    "SELECT period_start, period_end FROM tax_periods "
+                    "WHERE id = :p AND company_id = :c"
+                ),
+                {"p": str(period_id), "c": str(company_id)},
+            )
+        ).first()
+        if prow is None:
+            raise HTTPException(422, "Tax period not found for this return")
+        body = await _build_tsd_envelope(
+            session, company_id=company_id,
+            period_start=prow[0], period_end=prow[1],
+        )
+        media_type = "application/xml"
+    else:
+        raise HTTPException(
+            501,
+            f"Export not implemented for jurisdiction={jurisdiction!r} "
+            f"return_type={return_type!r}.",
+        )
+
+    filename = f"{return_type}_{return_id}.xml"
+    return Response(
+        content=body,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/{return_id}/file")
+async def file_tax_return(
+    return_id: UUID,
+    request: Request,
+    payload: dict = Body(default={}),
+    bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> JSONResponse:
+    """Mark a persisted return FILED — the manual file-and-confirm path.
+
+    Distinct from ``/lodge`` (which dispatches to the automated SBR/
+    X-Road rail and sets status ``lodged``): this is for a return the
+    accountant filed themselves outside any automated rail (e.g. via
+    EMTA's e-service portal for a KMD/TSD the engine doesn't yet lodge
+    automatically). Stamps ``filed_at`` and sets ``status='filed'``.
+
+    Body (all optional): ``{"reference": "<filer's own confirmation
+    reference/receipt number>"}`` — stored as-is in ``figures.filed_reference``
+    if supplied; no schema on it, this is a free-text confirmation note.
+    """
+    tenant_id = resolve_tenant_id(request)
+    row = (
+        await session.execute(
+            text(
+                """
+                SELECT id, status, figures FROM tax_returns
+                 WHERE id = :id AND company_id = :c AND tenant_id = :t
+                """
+            ),
+            {"id": str(return_id), "c": str(company_id), "t": str(tenant_id)},
+        )
+    ).first()
+    if row is None:
+        raise HTTPException(404, "Tax return not found")
+    if row[1] == "filed":
+        raise HTTPException(422, f"Tax return {return_id} is already filed")
+
+    reference = payload.get("reference")
+    figures = row[2] if isinstance(row[2], dict) else {}
+    if reference:
+        figures = {**figures, "filed_reference": str(reference)}
+
+    result = (
+        await session.execute(
+            text(
+                """
+                UPDATE tax_returns
+                   SET status = 'filed', filed_at = now(), figures = CAST(:f AS jsonb)
+                 WHERE id = :id
+             RETURNING filed_at
+                """
+            ),
+            {"id": str(return_id), "f": __import__("json").dumps(figures)},
+        )
+    ).first()
+    await session.commit()
+    return JSONResponse({
+        "return_id": str(return_id),
+        "status": "filed",
+        "filed_at": result[0].isoformat() if result and result[0] else None,
+    })
 
 
 @router.post("/{return_id}/lodge")

@@ -19,7 +19,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.config import settings
 from saebooks.models.company import Company
+from saebooks.services import business_identifiers as biz_ident
 from saebooks.services import change_log as change_log_svc
+from saebooks.services.control_accounts import default_ap_code, default_ar_code
 from saebooks.services.licence import check_company, resolve_licence
 
 
@@ -43,13 +45,15 @@ _COMPANY_COLUMNS: tuple[str, ...] = (
     "base_currency",
     "fin_year_start_month",
     "audit_mode",
-    "gst_registered",
+    "tax_registered",
     "gst_effective_date",
     "psi_status",
     "writeoff_mode",
     "writeoff_threshold_days",
     "recovery_mode",
     "bad_debt_recovery_account",
+    "ar_control_account_code",
+    "ap_control_account_code",
     "costing_method",
     "phone",
     "email",
@@ -107,6 +111,52 @@ async def count_active_companies(session: AsyncSession) -> int:
     return int((await session.execute(stmt)).scalar_one())
 
 
+async def _set_company_registry_id(
+    session: AsyncSession, company: Company, scheme: str, value: str | None
+) -> None:
+    """Route a legacy AU registry field (``abn``/``acn``) onto its business
+    identifier scheme (``au_abn``/``au_acn``).
+
+    The physical ``companies.abn`` (0204) and ``companies.acn`` (0205) columns
+    were dropped; ``business_identifiers`` is the single source of truth. A
+    non-empty value upserts the scheme row; an empty string clears it. Reloads
+    the company's cached ``identifiers`` collection so the ``Company.abn`` /
+    ``Company.acn`` hybrids re-read the new value (change_log serialisation,
+    CompanyOut, etc.). The caller owns the surrounding transaction / commit.
+    """
+    # A freshly-constructed company has no id until it is flushed (the uuid
+    # primary-key default is applied at INSERT time), and the identifier's
+    # company_id / the tenant-coherence trigger need it. Flush so it exists.
+    if company.id is None:
+        await session.flush()
+    cleaned = (value or "").strip()
+    if cleaned:
+        # enforce_unique: the sanctioned company write path enforces
+        # per-tenant value uniqueness for the EE registry schemes
+        # (registrikood/KMV) — a duplicate raises DuplicateIdentifier ->
+        # 409. Direct biz_ident.upsert callers (test fixtures, registry
+        # sync) stay unconstrained (the primitive's default).
+        await biz_ident.upsert(
+            session,
+            company.id,
+            scheme,
+            cleaned,
+            tenant_id=company.tenant_id,
+            enforce_unique=True,
+        )
+    else:
+        existing = await biz_ident.get(session, company.id, scheme)
+        if existing is not None:
+            await session.delete(existing)
+    await session.flush()
+    # Awaited reload (NOT session.expire): the ``Company.abn`` hybrid is read
+    # synchronously downstream (change_log ``_serialise``, CompanyOut). With
+    # expire_on_commit=False an expired relationship would trigger a lazy load
+    # from that sync context and raise MissingGreenlet; refreshing here leaves
+    # the collection loaded and current.
+    await session.refresh(company, ["identifiers"])
+
+
 async def ensure_seed_company(session: AsyncSession) -> Company:
     """Idempotent: create the default company from env if none exists."""
     name = settings.seed_company_name or "Default Company"
@@ -117,17 +167,28 @@ async def ensure_seed_company(session: AsyncSession) -> Company:
     if existing is not None:
         return existing
 
+    # The core Company model now defaults jurisdiction/currency/template to
+    # the neutral "XX"/"XXX"/"xx/default" sentinels, so the seed company must
+    # state its jurisdiction explicitly (from config, default AU) — otherwise
+    # Richard's home books would seed as a chart-less XX company.
+    seed_jurisdiction = settings.seed_company_jurisdiction
     company = Company(
         tenant_id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
         name=name,
         legal_name=settings.seed_company_legal_name or None,
         trading_name=settings.seed_company_trading_name or None,
-        abn=settings.seed_company_abn or None,
-        acn=settings.seed_company_acn or None,
         base_currency=settings.seed_company_base_currency,
         fin_year_start_month=settings.seed_company_fin_year_start_month,
+        jurisdiction=seed_jurisdiction,
+        coa_template_key=f"{seed_jurisdiction.lower()}/default",
     )
     session.add(company)
+    await _set_company_registry_id(
+        session, company, "au_abn", settings.seed_company_abn or None
+    )
+    await _set_company_registry_id(
+        session, company, "au_acn", settings.seed_company_acn or None
+    )
     await session.commit()
     await session.refresh(company)
     return company
@@ -144,14 +205,22 @@ async def create_company(
     trading_name: str | None = None,
     abn: str | None = None,
     acn: str | None = None,
-    base_currency: str = "AUD",
+    base_currency: str = "XXX",
     fin_year_start_month: int = 7,
+    jurisdiction: str = "XX",
+    coa_template_key: str = "xx/default",
+    registrikood: str | None = None,
+    kmv_number: str | None = None,
     tenant_id: uuid.UUID = _DEFAULT_TENANT_ID,
 ) -> Company:
     """Create a new company, enforcing the edition cap.
 
-    Raises ``CompanyCapExceeded`` when the active edition is already
-    at its company cap.
+    Raises ``CompanyCapExceeded`` when the active edition is already at its
+    company cap. ``jurisdiction`` / ``coa_template_key`` / EE-field format
+    validation happens at the schema layer (``CompanyCreate``) before this
+    is called — this function trusts its caller. Raises
+    ``business_identifiers.DuplicateIdentifier`` if ``registrikood`` /
+    ``kmv_number`` is already held by another company in the tenant.
     """
     licence = resolve_licence()
     current = await count_active_companies(session)
@@ -169,14 +238,42 @@ async def create_company(
         name=name,
         legal_name=legal_name,
         trading_name=trading_name,
-        abn=abn,
-        acn=acn,
         base_currency=base_currency,
         fin_year_start_month=fin_year_start_month,
+        jurisdiction=jurisdiction,
+        coa_template_key=coa_template_key,
         version=1,
     )
     session.add(company)
-    await session.commit()
+    # Full-attempt atomicity (donor round 2/3): the Company row must not be
+    # committed BEFORE its chart template is applied, or a failure applying
+    # the template would leave an orphaned, chart-less company already
+    # durable (jurisdiction/coa_template_key are immutable via PATCH) and
+    # consuming an edition cap slot. Write the registry identifiers, flush
+    # (not commit) so the row gets its id, apply the template, commit once.
+    # A DuplicateIdentifier from the EE registry pre-check, or any applier
+    # failure, rolls the whole attempt back. au/default is skipped here (its
+    # chart is loaded by the seed script / CLI, unchanged); every other key
+    # dispatches through the generic templates registry so a bad key fails
+    # loudly instead of persisting a chart-less company. Note the EE applier
+    # (chart_ee) commits internally — by the time apply_template returns for
+    # ee/default the company + chart + identifiers are already durable, so a
+    # failure in the trailing commit has nothing left to roll back.
+    try:
+        await _set_company_registry_id(session, company, "au_abn", abn)
+        await _set_company_registry_id(session, company, "au_acn", acn)
+        await _set_company_registry_id(session, company, "ee_regcode", registrikood)
+        await _set_company_registry_id(session, company, "ee_vat", kmv_number)
+        await session.flush()
+        if coa_template_key != "au/default":
+            from saebooks.services.templates import apply_template
+
+            await apply_template(session, company.id, coa_template_key)
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
+
     await session.refresh(company)
     return company
 
@@ -202,16 +299,20 @@ async def update(
     trading_name: str | None = None,
     abn: str | None = None,
     acn: str | None = None,
+    registrikood: str | None = None,
+    kmv_number: str | None = None,
     base_currency: str | None = None,
     fin_year_start_month: int | None = None,
     audit_mode: str | None = None,
-    gst_registered: bool | None = None,
+    tax_registered: bool | None = None,
     gst_effective_date: date | None = None,
     psi_status: str | None = None,
     writeoff_mode: str | None = None,
     writeoff_threshold_days: int | None = None,
     recovery_mode: str | None = None,
     bad_debt_recovery_account: str | None = None,
+    ar_control_account_code: str | None = None,
+    ap_control_account_code: str | None = None,
     costing_method: str | None = None,
     phone: str | None = None,
     email: str | None = None,
@@ -242,9 +343,24 @@ async def update(
     if trading_name is not None:
         company.trading_name = trading_name.strip() or None
     if abn is not None:
-        company.abn = abn.strip() or None
+        await _set_company_registry_id(session, company, "au_abn", abn)
     if acn is not None:
-        company.acn = acn.strip() or None
+        await _set_company_registry_id(session, company, "au_acn", acn)
+    # EE registry identifiers (registrikood -> ee_regcode, kmv_number ->
+    # ee_vat). EE-only regardless of entry point — mirrors CompanyCreate's
+    # model_validator guard. A blank value clears the identifier (schema
+    # lets blanks through for exactly this). jurisdiction is immutable via
+    # PATCH, so company.jurisdiction is authoritative here. A duplicate
+    # value raises business_identifiers.DuplicateIdentifier (pre-flush) ->
+    # 409 at the router.
+    if registrikood is not None:
+        if company.jurisdiction != "EE":
+            raise ValueError("registrikood can only be set on an EE company")
+        await _set_company_registry_id(session, company, "ee_regcode", registrikood)
+    if kmv_number is not None:
+        if company.jurisdiction != "EE":
+            raise ValueError("kmv_number can only be set on an EE company")
+        await _set_company_registry_id(session, company, "ee_vat", kmv_number)
     if base_currency is not None:
         company.base_currency = base_currency.strip().upper()
     if fin_year_start_month is not None:
@@ -270,8 +386,8 @@ async def update(
         if audit_mode not in valid_modes:
             raise ValueError(f"audit_mode must be one of: {', '.join(sorted(valid_modes))}")
         company.audit_mode = audit_mode
-    if gst_registered is not None:
-        company.gst_registered = gst_registered
+    if tax_registered is not None:
+        company.tax_registered = tax_registered
     if gst_effective_date is not None:
         company.gst_effective_date = gst_effective_date
     if psi_status is not None:
@@ -297,6 +413,12 @@ async def update(
         company.bad_debt_recovery_account = (
             bad_debt_recovery_account.strip() or None
         )
+    # AR/AP control-account override (0198, Packet 4b) — same
+    # optional-string-column pattern as bad_debt_recovery_account above.
+    if ar_control_account_code is not None:
+        company.ar_control_account_code = ar_control_account_code.strip() or None
+    if ap_control_account_code is not None:
+        company.ap_control_account_code = ap_control_account_code.strip() or None
     if costing_method is not None:
         valid_cm = {"weighted_average", "fifo", "quantity_only"}
         if costing_method not in valid_cm:
@@ -328,6 +450,26 @@ async def update(
         company.terms_url = terms_url.strip() or None
     if address is not None:
         company.address = address
+
+    # Critic round 2/3: a PATCH that leaves AR/AP control accounts pointing
+    # at the same GL account silently blends receivables and payables
+    # into one balance (resolve_ar_code/resolve_ap_code both then
+    # resolve identically, so every invoice's Dr-AR leg and every bill's
+    # Cr-AP leg land in the same Account row). Checked against the FINAL
+    # *resolved* state -- a NULL side falls back to AR_DEFAULT_CODE /
+    # AP_DEFAULT_CODE exactly as resolve_ar_code/resolve_ap_code do at
+    # posting time -- not just the two raw stored columns, so a partial
+    # PATCH that sets only one side to a value the OTHER side would
+    # implicitly resolve to (its unset default, or a value the DB
+    # already holds) is caught too.
+    effective_ar = company.ar_control_account_code or default_ar_code(company.jurisdiction)
+    effective_ap = company.ap_control_account_code or default_ap_code(company.jurisdiction)
+    if effective_ar == effective_ap:
+        raise ValueError(
+            "ar_control_account_code and ap_control_account_code must be "
+            f"different accounts (both resolve to {effective_ar!r}) "
+            "-- a shared control account would blend receivables and payables."
+        )
 
     company.version = company.version + 1
 

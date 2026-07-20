@@ -18,8 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer
 from saebooks.api.v1.deps import get_active_company_id, get_session
+from saebooks.jurisdictions.au import stp as svc
 from saebooks.models.stp_submission import StpSubmission
-from saebooks.services import stp as svc
 
 router = APIRouter(
     prefix="/stp-submissions",

@@ -17,6 +17,7 @@ from saebooks.api.v1.tax_returns import _build_bas_envelope
 from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 from saebooks.models.tax_period import TaxPeriod, TaxPeriodType
+from saebooks.services import business_identifiers
 from saebooks.services.lodgement.sbr import bas as _sbr_bas
 
 pytestmark = pytest.mark.postgres_only
@@ -47,7 +48,16 @@ async def _seed_company_and_period(
             await s.execute(select(Company).where(Company.jurisdiction == "AU").limit(1))
         ).scalars().first()
         assert co is not None, "expected a seed AU company"
-        co.abn = abn
+        # ABN recorded under its ``au_abn`` business identifier (the legacy
+        # ``companies.abn`` column was dropped in 0204). None clears it.
+        if abn:
+            await business_identifiers.upsert(
+                s, co.id, "au_abn", abn, tenant_id=co.tenant_id
+            )
+        else:
+            _bi = await business_identifiers.get(s, co.id, "au_abn")
+            if _bi is not None:
+                await s.delete(_bi)
         period = (
             await s.execute(
                 select(TaxPeriod).where(

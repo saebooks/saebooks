@@ -40,6 +40,11 @@ from saebooks.models.employee import Employee, EmploymentBasis, PayBasis, PayFre
 from saebooks.models.journal import JournalEntry, JournalLine
 from saebooks.models.tenant import Tenant
 from saebooks.services.jwt_tokens import create_access_token
+from tests.services.test_pay_runs_v2_ee_finalize import (
+    _make_golden_month,
+    _seed_ee_payroll_accounts,
+)
+from tests.services.test_tax_return_generator import _make_ee_company
 
 pytestmark = pytest.mark.postgres_only
 
@@ -633,6 +638,84 @@ async def test_finalize_version_conflict_409(api_client: AsyncClient) -> None:
         headers={"If-Match": "99"},
     )
     assert r2.status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# Finalize — EE jurisdiction (routes through pay_runs_v2.finalize_with_je,
+# which posts the GL journal AT finalize; no ABA-export precondition).
+# ---------------------------------------------------------------------------
+
+
+async def test_finalize_ee_draft_posts_journal(api_client: AsyncClient) -> None:
+    """An EE company's DRAFT pay run finalizes via the route → 200 with the
+    GL journal posted and balanced (the demo E2E gap: this used to 422
+    'must be in aba_exported status')."""
+    company_id = await _make_ee_company(jurisdiction="EE")
+    await _seed_ee_payroll_accounts(company_id)
+    pay_run, _e1, _e2 = await _make_golden_month(company_id)
+    headers = {"X-Company-Id": str(company_id)}
+
+    g = await api_client.get(f"/api/v1/pay-runs/{pay_run.id}", headers=headers)
+    assert g.status_code == 200, g.text
+    assert g.json()["status"] == "draft"
+    version = g.json()["version"]
+
+    r = await api_client.put(
+        f"/api/v1/pay-runs/{pay_run.id}/finalize",
+        headers={**headers, "If-Match": str(version)},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "finalized"
+    journal_id = body["journal_id"]
+    assert journal_id is not None, "EE finalize must post a GL journal"
+
+    # The posted journal exists and balances.
+    async with AsyncSessionLocal() as session:
+        lines = (
+            await session.execute(
+                select(JournalLine).where(
+                    JournalLine.entry_id == uuid.UUID(journal_id)
+                )
+            )
+        ).scalars().all()
+    assert lines, "journal has no lines"
+    total_dr = sum((ln.debit for ln in lines), Decimal("0"))
+    total_cr = sum((ln.credit for ln in lines), Decimal("0"))
+    assert total_dr == total_cr, f"journal unbalanced: {total_dr} != {total_cr}"
+    assert total_dr > Decimal("0")
+
+
+async def test_finalize_ee_already_finalized_short_circuits(
+    api_client: AsyncClient,
+) -> None:
+    """Re-finalizing an already-FINALIZED EE run is the existing no-op
+    short-circuit — 200, same journal_id, no second posting."""
+    company_id = await _make_ee_company(jurisdiction="EE")
+    await _seed_ee_payroll_accounts(company_id)
+    pay_run, _e1, _e2 = await _make_golden_month(company_id)
+    headers = {"X-Company-Id": str(company_id)}
+
+    v1 = (
+        await api_client.get(f"/api/v1/pay-runs/{pay_run.id}", headers=headers)
+    ).json()["version"]
+    r1 = await api_client.put(
+        f"/api/v1/pay-runs/{pay_run.id}/finalize",
+        headers={**headers, "If-Match": str(v1)},
+    )
+    assert r1.status_code == 200, r1.text
+    journal_id = r1.json()["journal_id"]
+
+    v2 = (
+        await api_client.get(f"/api/v1/pay-runs/{pay_run.id}", headers=headers)
+    ).json()["version"]
+    r2 = await api_client.put(
+        f"/api/v1/pay-runs/{pay_run.id}/finalize",
+        headers={**headers, "If-Match": str(v2)},
+    )
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["status"] == "finalized"
+    assert r2.json()["journal_id"] == journal_id, "short-circuit posted a 2nd JE"
 
 
 # ---------------------------------------------------------------------------

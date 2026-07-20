@@ -1,0 +1,535 @@
+# Latvian tax return box definitions — PVN deklarācija (VAT return),
+# PVN1/PVN2 appendices (transaction listings), DDZ (darba devēja
+# ziņojums — the monthly employer report, Latvia's TSD analogue) and the
+# UIN deklarācija (corporate income tax return), modelled as separate
+# return_type values (the EE KMD / KMD-INF / TSD convention).
+#
+# Grammar: see saebooks/seeds/jurisdictions/AU/tax_return_box_definitions.yaml
+# for the aggregation grammar (sum_taxable_for_codes:<bucket>[@rate]:
+# <gst_inclusive|gst_exclusive>, sum_tax_amount_for_codes:<bucket>,
+# formula, manual), parsed by
+# saebooks.services.tax_return_generator._parse_box_definition.
+# feeder_tax_codes are company-side TaxCode.reporting_type tags (NOT
+# RefTaxCode.code strings) — the LV convention is documented in this
+# directory's tax_codes.yaml header.
+#
+# ======================================================================
+# PVN deklarācija — primary source: Ministru kabineta noteikumi Nr. 40
+# (2013-01-15) "Noteikumi par pievienotās vērtības nodokļa deklarācijām",
+# consolidated text likumi.lv/ta/id/254279, read directly 2026-07-12.
+# Row semantics below quote/paraphrase that regulation; per-row comments
+# note anything not primary-verified.
+#
+# Filing: via EDS; return due the 20th, payment the 23rd of the month
+# following the taxation period (vid.gov.lv due-dates page — VERIFIED).
+# Taxation period: monthly by default; half-year/quarterly tiers exist
+# for small turnover with no intra-EU supplies (the EUR 14,228.72 tier
+# boundary is UNVERIFIED at primary level — strong secondary agreement
+# only; flagged, not relied on by any box below).
+#
+# Reverse-charge routing (differs from EE — do not copy KMD):
+#   * EU acquisitions of goods AND services received from EU-registered
+#     suppliers: base in rows 50/51/51.1 by rate (row 50's text verbatim
+#     includes services — "un par pakalpojumu saņemšanu no citas
+#     dalībvalsts reģistrēta nodokļa maksātāja"), self-assessed VAT in
+#     rows 55/56/56.1 (rate formulas on 50/51/51.1), deductible side in
+#     row 64. NOT folded into row 41.
+#   * Services from third countries/territories (Arts. 19(1)/20(1)/25):
+#     self-assessed VAT in row 54 (the regulation declares no separate
+#     base row in the 40s block), deductible side in row 63.
+#   * Domestic reverse charge (Arts. 141-143.4): SELLER side is row 41.1
+#     (supported). BUYER side: the deductible leg is primary-verified to
+#     row 62 (reg. 17.24.6) but the output leg's row was NOT
+#     primary-verified in this pass — the LV engine refuses to post
+#     rc_domestic_acq rather than guess (see tax_codes.yaml header).
+#
+# Aggregation kinds mirror the EE/UK precedent: rate-bucketed ledger
+# boxes; rate formulas for the computed-VAT rows (52/53/53.1, 55/56/56.1
+# — the regulation's own "rinda x likme : 100" definitions); role-based
+# ("output"/"input") buckets for the reverse-charge legs; box formulas
+# for the totals (40, 43, 60, S, P) and the payable/overpay split
+# (80/70, the max(0, ±N) pattern from EE boxes 12/13).
+# ======================================================================
+table: tax_return_box_definitions
+key: [jurisdiction, return_type, box_code]
+rows:
+  # --- Turnover block (rows 40-49) -------------------------------------
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "40"
+    box_label: "Kopējā darījumu vērtība (41+41.1+42+42.1+43+48.2+49)"
+    # Reg. 17.x verbatim: "40. rindā – taksācijas perioda kopējo darījumu
+    # vērtību bez nodokļa (41., 41.1, 42., 42.1, 43., 48.2 un 49. rindas
+    # kopsumma)" — VERIFIED primary.
+    aggregation: formula
+    formula: "PVN:41 + PVN:41.1 + PVN:42 + PVN:42.1 + PVN:43 + PVN:48.2 + PVN:49"
+    display_order: 1
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "41"
+    box_label: "Ar standartlikmi (21%) apliekamie darījumi"
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["standard"]
+    display_order: 2
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "41.1"
+    box_label: "Darījumi, par kuriem nodokli maksā preču/pakalpojumu saņēmējs (Art. 141-143.5, pārdevēja puse)"
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["rc_domestic_supply"]
+    display_order: 3
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "42"
+    box_label: "Ar samazināto likmi (12%) apliekamie darījumi"
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["reduced_12"]
+    display_order: 4
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "42.1"
+    box_label: "Ar samazināto likmi (5%) apliekamie darījumi"
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["reduced_5"]
+    display_order: 5
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "43"
+    box_label: "Ar 0% likmi apliekamie darījumi (44+45+45.1+46+47+48+48.1)"
+    # Reg. verbatim: "43. rindā – ar nodokļa 0 procentu likmi apliekamo
+    # darījumu vērtību, tajā iekļaujot arī 44., 45., 45.1, 46., 47., 48.
+    # un 48.1 rindā norādīto darījumu vērtību" — VERIFIED primary.
+    aggregation: formula
+    formula: "PVN:44 + PVN:45 + PVN:45.1 + PVN:46 + PVN:47 + PVN:48 + PVN:48.1"
+    display_order: 6
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "44"
+    box_label: "Preču piegādes brīvostās un SEZ (0%)"
+    # CODES-SEED with a documented tag (zero_fz) that no seeded LV tax
+    # code carries yet — reads 0 until a company provisions a free-zone
+    # code (the EE box 6/7 "reads 0, correctly" precedent).
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["zero_fz"]
+    display_order: 7
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "45"
+    box_label: "Preču piegādes ES teritorijā citas dalībvalsts reģistrētam nodokļa maksātājam (0%)"
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["zero_ic_goods"]
+    display_order: 8
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "45.1"
+    box_label: "Art. 42(16) preču piegādes citas dalībvalsts reģistrētam nodokļa maksātājam (0%)"
+    # Tag documented, no seeded code — reads 0 (see box 44's comment).
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["zero_art42_16"]
+    display_order: 9
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "46"
+    box_label: "Preces, kas ievestas, bet nav izlaistas brīvam apgrozījumam (0%)"
+    # Tag documented, no seeded code — reads 0 (see box 44's comment).
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["zero_not_free_circ"]
+    display_order: 10
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "47"
+    box_label: "Jauni transportlīdzekļi nereģistrētām personām ārpus ES (0%)"
+    # Tag documented, no seeded code — reads 0 (see box 44's comment).
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["zero_new_vehicles"]
+    display_order: 11
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "48"
+    box_label: "Ar 0% likmi apliekamie pakalpojumi (Art. 46-48, 50)"
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["zero_services"]
+    display_order: 12
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "48.1"
+    box_label: "Eksportēto preču vērtība (0%)"
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["zero_export"]
+    display_order: 13
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "48.2"
+    box_label: "Darījumi ārpus Latvijas (Art. 12, 16(4), 19-25)"
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["outside_scope_supply"]
+    display_order: 14
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "49"
+    box_label: "Ar nodokli neapliekamo darījumu vērtība (Art. 52, t.sk. ieguldījumu zelts)"
+    # Reg. verbatim: "ar nodokli neapliekamo darījumu vērtību saskaņā ar
+    # likuma 52.pantu. Šajā rindā norāda arī no nodokļa atbrīvotu
+    # ieguldījumu zelta piegāžu vērtību" — VERIFIED primary.
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["exempt"]
+    display_order: 15
+
+  # --- EU acquisition bases (rows 50-51.1) ------------------------------
+  # Role-based ("output") rate-pinned buckets, the EE 1_RC/2_RC pattern:
+  # a purchase-account EU-acquisition line's OUTPUT-role component (the
+  # LVTaxEngine reverse-charge fan-out) contributes its base here
+  # regardless of the posting account's type. Rate discriminates the row.
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "50"
+    box_label: "Preču iegāde ES teritorijā un pakalpojumi no ES reģistrēta nodokļa maksātāja — standartlikme (21%)"
+    aggregation: "sum_taxable_for_codes:output@21:gst_exclusive"
+    feeder_tax_codes: ["rc_eu_acq_goods", "rc_eu_acq_services"]
+    display_order: 16
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "51"
+    box_label: "Preču iegāde ES teritorijā un pakalpojumi no ES reģistrēta nodokļa maksātāja — samazinātā likme (12%)"
+    aggregation: "sum_taxable_for_codes:output@12:gst_exclusive"
+    feeder_tax_codes: ["rc_eu_acq_goods", "rc_eu_acq_services"]
+    display_order: 17
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "51.1"
+    box_label: "Preču iegāde ES teritorijā un pakalpojumi no ES reģistrēta nodokļa maksātāja — samazinātā likme (5%)"
+    aggregation: "sum_taxable_for_codes:output@5:gst_exclusive"
+    feeder_tax_codes: ["rc_eu_acq_goods", "rc_eu_acq_services"]
+    display_order: 18
+
+  # --- Computed output VAT (rows 52-57) ---------------------------------
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "52"
+    box_label: "Aprēķinātais PVN pēc standartlikmes = 41. rinda × 21%"
+    # RATE-FORMULA — the regulation's own definition (rinda × likme :
+    # 100), the EE box-4 convention. Note row 41.1 is deliberately NOT
+    # taxed here: the seller charges no VAT on a domestic reverse-charge
+    # supply — the buyer self-assesses.
+    aggregation: formula
+    formula: "0.21*PVN:41"
+    display_order: 19
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "53"
+    box_label: "Aprēķinātais PVN pēc samazinātās likmes = 42. rinda × 12%"
+    aggregation: formula
+    formula: "0.12*PVN:42"
+    display_order: 20
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "53.1"
+    box_label: "Aprēķinātais PVN pēc samazinātās likmes = 42.1 rinda × 5%"
+    aggregation: formula
+    formula: "0.05*PVN:42.1"
+    display_order: 21
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "54"
+    box_label: "PVN par pakalpojumiem no trešo valstu/teritoriju nodokļa maksātājiem (Art. 19(1)/20(1)/25)"
+    # Role-based ("output") TAX bucket — the self-assessed VAT amount
+    # itself (the regulation's row 54 is a tax figure, not a base). Any
+    # supported rate contributes; no rate pin needed because the box sums
+    # tax, and the deductible mirror (row 63) sums the SAME line's
+    # input-role tax — symmetric by construction.
+    aggregation: "sum_tax_amount_for_codes:output"
+    feeder_tax_codes: ["rc_third_country_services"]
+    display_order: 22
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "55"
+    box_label: "Aprēķinātais PVN par iegādēm ES teritorijā = 50. rinda × 21%"
+    aggregation: formula
+    formula: "0.21*PVN:50"
+    display_order: 23
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "56"
+    box_label: "Aprēķinātais PVN par iegādēm ES teritorijā = 51. rinda × 12%"
+    aggregation: formula
+    formula: "0.12*PVN:51"
+    display_order: 24
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "56.1"
+    box_label: "Aprēķinātais PVN par iegādēm ES teritorijā = 51.1 rinda × 5%"
+    aggregation: formula
+    formula: "0.05*PVN:51.1"
+    display_order: 25
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "57"
+    box_label: "Iepriekšējos periodos atskaitītās priekšnodokļa summas, kas jāiemaksā budžetā"
+    # MANUAL by design — prior-period input-VAT clawbacks (bad-debt
+    # reversals, deduction adjustments). No ledger-bucket shape; a
+    # filer-entered correction, the EE box 10/11 pattern. An absent
+    # value is an explicit 0 in the S formula below.
+    aggregation: manual
+    display_order: 26
+
+  # --- Input VAT block (rows 60-67) --------------------------------------
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "60"
+    box_label: "Priekšnodoklis kopā (61+62+63+64+65)"
+    aggregation: formula
+    formula: "PVN:61 + PVN:62 + PVN:63 + PVN:64 + PVN:65"
+    display_order: 27
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "61"
+    box_label: "Importa PVN (samaksātais vai maksājamais)"
+    aggregation: "sum_tax_amount_for_codes:purchase"
+    feeder_tax_codes: ["input_import"]
+    display_order: 28
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "62"
+    box_label: "PVN par iekšzemē iegādātajām precēm un saņemtajiem pakalpojumiem"
+    # Domestic input VAT (reg. 17.24.1). "capital" is included so an
+    # AU-convention capital-acquisition tag lands here rather than
+    # nowhere (LV's form has no separate capital box). Buyer-side
+    # domestic reverse charge (reg. 17.24.6) would ALSO deduct here, but
+    # rc_domestic_acq is not postable (engine refusal — see the header).
+    aggregation: "sum_tax_amount_for_codes:purchase"
+    feeder_tax_codes: ["standard", "reduced_12", "reduced_5", "capital"]
+    display_order: 29
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "63"
+    box_label: "Aprēķinātais PVN par pakalpojumiem no trešajām valstīm (atskaitāmā daļa)"
+    # Role-based ("input") bucket — the deductible mirror of row 54,
+    # the EE 5_RC pattern. Full deduction only this wave
+    # (deductible_fraction default 1 in LVTaxEngine).
+    aggregation: "sum_tax_amount_for_codes:input"
+    feeder_tax_codes: ["rc_third_country_services"]
+    display_order: 30
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "64"
+    box_label: "Aprēķinātais PVN par preču iegādi ES teritorijā un ES pakalpojumiem (atskaitāmā daļa)"
+    aggregation: "sum_tax_amount_for_codes:input"
+    feeder_tax_codes: ["rc_eu_acq_goods", "rc_eu_acq_services"]
+    display_order: 31
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "65"
+    box_label: "Kompensācija lauksaimniekiem (Art. 135, 14%)"
+    # MANUAL by design — the flat-rate agricultural compensation paid to
+    # unregistered farmers has no tax-component ledger shape (it is a
+    # compensation embedded in the purchase price, not a posted VAT
+    # amount).
+    aggregation: manual
+    display_order: 32
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "66"
+    box_label: "Neatskaitāmā priekšnodokļa daļa (pašpatēriņš, reprezentācija, atsevišķi transportlīdzekļi)"
+    # MANUAL by design — a policy apportionment (partial-deduction
+    # proportion, representation-cost caps, car rules) the ledger
+    # aggregation grammar does not express; the EE box 5.4 rationale.
+    aggregation: manual
+    display_order: 33
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "67"
+    box_label: "Iepriekšējo periodu korekcijas priekšnodoklim (t.sk. zaudētie parādi)"
+    # MANUAL by design — prior-period corrections in the taxpayer's
+    # favour; the mirror of row 57.
+    aggregation: manual
+    display_order: 34
+
+  # --- Net position (S/P intermediates + rows 80/70) ---------------------
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "S"
+    box_label: "Aprēķinātā nodokļa summa kopā = 52+53+53.1+54+55+56+56.1+57"
+    aggregation: formula
+    formula: "PVN:52 + PVN:53 + PVN:53.1 + PVN:54 + PVN:55 + PVN:56 + PVN:56.1 + PVN:57"
+    display_order: 35
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "P"
+    box_label: "Atskaitāmā priekšnodokļa summa kopā = 60 - 66 + 67"
+    aggregation: formula
+    formula: "PVN:60 - PVN:66 + PVN:67"
+    display_order: 36
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "80"
+    box_label: "Budžetā maksājamā nodokļa summa (S - P, ja pozitīva)"
+    # Reg. verbatim: "80.rindā – skaitli, par kādu aprēķinātā nodokļa
+    # summa ir lielāka nekā priekšnodokļa summa" — VERIFIED primary.
+    # The EE box 12/13 max(0, ±N) split: exactly one of 80/70 is
+    # non-zero.
+    aggregation: formula
+    formula: "max(0, PVN:S - PVN:P)"
+    display_order: 37
+
+  - jurisdiction: LVA
+    return_type: PVN
+    box_code: "70"
+    box_label: "Pārmaksātā nodokļa summa (P - S, ja pozitīva)"
+    # Reg. verbatim: "70.rindā – skaitli, par kādu priekšnodokļa summa ir
+    # lielāka nekā aprēķinātā nodokļa summa" — VERIFIED primary.
+    aggregation: formula
+    formula: "max(0, PVN:P - PVN:S)"
+    display_order: 38
+
+  # =====================================================================
+  # PVN1 — pārskats par priekšnodokļa un nodokļa summām (the domestic /
+  # per-counterparty transaction listing filed WITH the declaration —
+  # Latvia's KMD-INF analogue). Per-invoice detail threshold: EUR 150
+  # ex-VAT (VERIFIED primary — reduced FROM the historical EUR 1,430;
+  # it did NOT move to EUR 1,000); documents under the threshold may be
+  # grouped under summary codes "V"/"T" (and "X" in Part III). No ledger
+  # aggregation shape exists for an invoice-level listing annex —
+  # structural/descriptive "manual" rows, the EE KMD-INF convention.
+  # =====================================================================
+  #   Part I columns: darījuma partnera reģ. nr./PVN nr., nosaukums,
+  #   darījuma veida kods (I=imports, A=iekšzemes reģistrēts piegādātājs,
+  #   N=nereģistrēta persona, K=Art. 135 kompensācija, Z=zaudētie parādi,
+  #   R1-R7=apgrieztās maksāšanas pirkumi Art. 141-143.4, M=izsoles
+  #   preces), dokumenta nr./datums, vērtība bez PVN, PVN summa.
+  - jurisdiction: LVA
+    return_type: PVN1
+    box_code: I
+    box_label: >-
+      I daļa — priekšnodoklis par iekšzemē iegādātajām precēm un
+      saņemtajiem pakalpojumiem un importu (>= EUR 150 pa dokumentiem;
+      zem sliekšņa — kopsummas kodi V/T)
+    aggregation: manual
+    display_order: 1
+
+  #   Part II columns: ES piegādātāja PVN nr. + valsts kods, veida kods
+  #   (P=pakalpojumi, G=preces, C=pārvietošana pēc importa), vērtība,
+  #   PVN, valūta, dokumenta nr./datums. NO threshold — every EU supplier
+  #   is listed individually (unlike Parts I/III).
+  - jurisdiction: LVA
+    return_type: PVN1
+    box_code: II
+    box_label: >-
+      II daļa — preču iegādes un saņemtie pakalpojumi no ES dalībvalstīm
+      (katrs piegādātājs atsevišķi, bez sliekšņa)
+    aggregation: manual
+    display_order: 2
+
+  #   Part III columns: darījuma partnera reģ. nr., nosaukums, veida
+  #   kods, vērtība bez PVN, PVN. Supports declaration rows 41, 41.1,
+  #   42, 42.1, 44, 48.2. "X" groups sales to unidentifiable recipients.
+  - jurisdiction: LVA
+    return_type: PVN1
+    box_code: III
+    box_label: >-
+      III daļa — aprēķinātais nodoklis par piegādātajām precēm un
+      sniegtajiem pakalpojumiem (>= EUR 150 pa dokumentiem; zem
+      sliekšņa — kopsummas kodi V/T/X)
+    aggregation: manual
+    display_order: 3
+
+  # =====================================================================
+  # PVN2 — pārskats par preču piegādēm un sniegtajiem pakalpojumiem ES
+  # teritorijā (the EC Sales List analogue, Art. 34 reporting). Filed
+  # via EDS with the declaration. Repeating per-customer listing —
+  # structural "manual" row, the EE KMD-INF/OSS-Q convention. There is
+  # NO PVN3 form (verified absence — treat any "PVN3" reference as
+  # another country's naming).
+  # =====================================================================
+  - jurisdiction: LVA
+    return_type: PVN2
+    box_code: LISTING
+    box_label: >-
+      Preču piegādes un pakalpojumi ES reģistrētiem nodokļa maksātājiem —
+      pa klientiem (valsts kods, PVN nr., veida kods S/P/G/C/E/N,
+      vērtība)
+    aggregation: manual
+    display_order: 1
+
+  # =====================================================================
+  # DDZ — darba devēja ziņojums (monthly employer report to VID via EDS,
+  # due the 17th of the following month — VERIFIED vid.gov.lv; the
+  # salary-tax PAYMENT into the unified tax account is a distinct 23rd
+  # deadline, do not conflate). Latvia's TSD analogue: a per-employee
+  # repeating listing (VSAOI object, VSAOI, IIN withheld, hours), NOT a
+  # box vector — structural "manual" rows, the EE TSD convention.
+  # =====================================================================
+  - jurisdiction: LVA
+    return_type: DDZ
+    box_code: MAIN
+    box_label: >-
+      Darba devēja ziņojums — darba ņēmēju VSAOI objekts, aprēķinātās
+      obligātās iemaksas (darba devēja + darba ņēmēja daļa) un
+      ieturētais IIN pa darbiniekiem
+    aggregation: manual
+    display_order: 1
+
+  # =====================================================================
+  # UIN — uzņēmumu ienākuma nodokļa deklarācija (corporate income tax
+  # return, EDS). Monthly taxation period; a return is filed ONLY for
+  # months with a taxable object, except the final month of the
+  # financial year (always filed) — VERIFIED vid.gov.lv. Due the 20th of
+  # the following month. The taxable base is the DISTRIBUTION-period
+  # gross-up (÷0.8 standard; ÷0.85 under the 2026 elective regime) — see
+  # corporate_tax_rates.yaml. A distribution-events data model, not a
+  # ledger box vector — structural "manual" rows (the EE TSD Lisa 7
+  # convention); the arithmetic helpers live in
+  # saebooks.jurisdictions.lv.tax.
+  # =====================================================================
+  - jurisdiction: LVA
+    return_type: UIN
+    box_code: MAIN
+    box_label: >-
+      UIN deklarācija — ar nodokli apliekamā bāze (sadalītā peļņa un
+      nosacīti sadalītā peļņa), nodoklis 20% no bāzes (bāze = neto ÷
+      0,8); alternatīvais režīms no 2026: 15% (bāze = neto ÷ 0,85) +
+      6% IIN ieturējums
+    aggregation: manual
+    display_order: 1
+
+  - jurisdiction: LVA
+    return_type: UIN
+    box_code: DEEMED
+    box_label: >-
+      Nosacīti sadalītā peļņa — ar saimniecisko darbību nesaistītie
+      izdevumi, transferta cenu korekcijas, palielinātie procenti,
+      aizdevumi saistītām personām, reprezentācijas izdevumu pārsniegums
+      (5% no iepriekšējā gada bruto algu fonda), likvidācijas kvota
+    aggregation: manual
+    display_order: 2

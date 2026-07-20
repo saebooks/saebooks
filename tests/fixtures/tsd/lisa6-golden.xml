@@ -1,0 +1,35 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<tsd_vorm>
+  <regKood>10123456</regKood>
+  <c108_Aasta>2026</c108_Aasta>
+  <c109_Kuu>4</c109_Kuu>
+  <laadimisViis>L</laadimisViis>
+  <vorm>TSD</vorm>
+  <tsd_L6_0>
+    <c6000_TVahe>45000.00</c6000_TVahe>
+    <c6010_Trsr>4800.00</c6010_Trsr>
+    <c6150_SumKokku>17469.00</c6150_SumKokku>
+    <c6160_Tasutav>6353.79</c6160_Tasutav>
+    <tsd_L6_1List>
+      <tsd_L6_1>
+        <c6141_Kuu>5</c6141_Kuu>
+        <c6142_Aasta>2023</c6142_Aasta>
+        <c6143_Summa>44000.00</c6143_Summa>
+      </tsd_L6_1>
+      <tsd_L6_1>
+        <c6141_Kuu>2</c6141_Kuu>
+        <c6142_Aasta>2024</c6142_Aasta>
+        <c6143_Summa>511.00</c6143_Summa>
+      </tsd_L6_1>
+    </tsd_L6_1List>
+    <tsd_L6_2List>
+      <tsd_L6_2>
+        <c6200_Kood>556016-0680</c6200_Kood>
+        <c6210_Nimi>Ericsson AB</c6210_Nimi>
+        <c6220_RiikKood>SE</c6220_RiikKood>
+        <c6230_MSumma>40000.00</c6230_MSumma>
+        <c6240_ValiKood>621</c6240_ValiKood>
+      </tsd_L6_2>
+    </tsd_L6_2List>
+  </tsd_L6_0>
+</tsd_vorm>

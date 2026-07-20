@@ -224,8 +224,8 @@ async def test_kmd_inf_golden_period() -> None:
         # journal entries and never needed these; invoices_svc/bills_svc
         # (real record-type posting, required so KMD-INF can read real
         # Invoice/Bill rows) both hard-require them.
-        session.add(Account(company_id=company_id, code="1-1200", name="Trade Debtors", account_type=AccountType.ASSET))
-        session.add(Account(company_id=company_id, code="2-1200", name="Trade Creditors", account_type=AccountType.LIABILITY))
+        session.add(Account(company_id=company_id, code="1200", name="Trade Debtors", account_type=AccountType.ASSET))
+        session.add(Account(company_id=company_id, code="2100", name="Trade Creditors", account_type=AccountType.LIABILITY))
         await session.commit()
         nd_tax_code_id = nd_tc.id
 
@@ -331,7 +331,7 @@ async def test_kmd_inf_period_basis_uses_settlement_date_override() -> None:
     the main golden test above never sets settlement_date at all."""
     company_id = await _make_ee_company(jurisdiction="EE")
     async with AsyncSessionLocal() as session:
-        session.add(Account(company_id=company_id, code="1-1200", name="Trade Debtors", account_type=AccountType.ASSET))
+        session.add(Account(company_id=company_id, code="1200", name="Trade Debtors", account_type=AccountType.ASSET))
         await session.commit()
         by_code = {
             code: aid for code, aid in (
@@ -382,7 +382,7 @@ async def test_kmd_inf_untagged_lines_surface_data_quality_error_not_silent_drop
     ``KmdInfDataQualityError`` instead."""
     company_id = await _make_ee_company(jurisdiction="EE")
     async with AsyncSessionLocal() as session:
-        session.add(Account(company_id=company_id, code="1-1200", name="Trade Debtors", account_type=AccountType.ASSET))
+        session.add(Account(company_id=company_id, code="1200", name="Trade Debtors", account_type=AccountType.ASSET))
         await session.commit()
         by_code = {
             code: aid for code, aid in (
@@ -417,7 +417,7 @@ async def test_kmd_inf_credit_note_only_partner_surfaces_data_quality_error() ->
     ``KmdInfDataQualityError``."""
     company_id = await _make_ee_company(jurisdiction="EE")
     async with AsyncSessionLocal() as session:
-        session.add(Account(company_id=company_id, code="1-1200", name="Trade Debtors", account_type=AccountType.ASSET))
+        session.add(Account(company_id=company_id, code="1200", name="Trade Debtors", account_type=AccountType.ASSET))
         await session.commit()
         by_code = {
             code: aid for code, aid in (
@@ -472,8 +472,8 @@ async def test_kmd_inf_converts_foreign_currency_lines_to_base_currency() -> Non
     test on the converted sum."""
     company_id = await _make_ee_company(jurisdiction="EE")
     async with AsyncSessionLocal() as session:
-        session.add(Account(company_id=company_id, code="1-1200", name="Trade Debtors", account_type=AccountType.ASSET))
-        session.add(Account(company_id=company_id, code="2-1200", name="Trade Creditors", account_type=AccountType.LIABILITY))
+        session.add(Account(company_id=company_id, code="1200", name="Trade Debtors", account_type=AccountType.ASSET))
+        session.add(Account(company_id=company_id, code="2100", name="Trade Creditors", account_type=AccountType.LIABILITY))
         await session.commit()
         by_code = {
             code: aid for code, aid in (

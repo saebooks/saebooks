@@ -1,0 +1,70 @@
+# Lithuania corporate income tax (pelno mokestis) rates — CLASSICAL
+# annual CIT on taxable profit (unlike EE/LV distribution-based
+# regimes; the UK seed is the shape precedent). jurisdiction = 'LTU'.
+# tax_year = the calendar year the tax period begins in (LT default
+# tax period = calendar year; a substitute 12-month year is available
+# on application to VMI — PMĮ Art. 6).
+#
+# Primary sources (fetched 2026-07-12):
+# * VMI current-rates page (vmi.lt/evmi/5724) + KPMG 2025-12-04
+#   newsflash: standard rate 16% for tax periods beginning in 2025
+#   (up from 15%, defence-funding package), **17% for tax periods
+#   beginning in 2026 and later**. VERIFIED.
+# * Small-company reduced rate: 6% (2025), **7% from 2026**. 2026
+#   conditions: tax-period income <= EUR 300,000 and not caught by the
+#   PMĮ Art. 5(3) anti-fragmentation rule (>50% common control with
+#   combined indicators over the limits). ⚠ The <=10-employee test was
+#   ABOLISHED from 2026 (VMI + KPMG; PwC/Lawhill pages still showing it
+#   are stale) — income is the sole size indicator. VERIFIED.
+# * 0% new-company relief: from 2026 applies to the FIRST AND SECOND
+#   tax periods (previously first only) — conditions: income <=
+#   EUR 300,000 per period, all participants natural persons, not
+#   Art. 5(3)-caught, and activity not suspended / entity not
+#   liquidated or reorganised during three consecutive periods.
+#   VERIFIED (VMI 5724 + KPMG).
+# * Advance CIT (avansinis pelno mokestis, form FR0430): exempt in the
+#   first tax year and when prior-period taxable income <= EUR 300,000;
+#   two methods (prior-results, or forecast >= 80% of actual);
+#   quarterly payments by the 15th of the quarter's last month. Carried
+#   as module knowledge here — the rate table has no columns for it.
+# * Annual return: form PLN204, filing + payment by the 15th day of the
+#   6th month after period end (15 June for calendar-year filers).
+table: corporate_tax_rates
+key: [jurisdiction, sub_jurisdiction, tax_year, entity_scope]
+rows:
+  # ---- tax periods beginning 2025 (16% / 6% era) ----------------------
+  - jurisdiction: LTU
+    tax_year: 2025
+    entity_scope: standard
+    rate_percent: 16.0000
+    effective_from: 2025-01-01
+
+  - jurisdiction: LTU
+    tax_year: 2025
+    entity_scope: small_company
+    rate_percent: 6.0000
+    effective_from: 2025-01-01
+
+  # ---- tax periods beginning 2026 (17% / 7% era) ----------------------
+  - jurisdiction: LTU
+    tax_year: 2026
+    entity_scope: standard
+    rate_percent: 17.0000
+    effective_from: 2026-01-01
+
+  - jurisdiction: LTU
+    tax_year: 2026
+    entity_scope: small_company
+    rate_percent: 7.0000
+    effective_from: 2026-01-01
+
+  # 0% relief for qualifying NEW companies (from 2026: first AND second
+  # tax periods; all participants natural persons; see header). The
+  # eligibility conditions have no columns here — documented above and
+  # enforced by any consuming compute, not by this rate row (the NZ
+  # trustee de-minimis convention).
+  - jurisdiction: LTU
+    tax_year: 2026
+    entity_scope: new_company_relief
+    rate_percent: 0.0000
+    effective_from: 2026-01-01

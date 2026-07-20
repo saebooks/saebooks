@@ -33,6 +33,7 @@ from sqlalchemy.orm import selectinload
 
 from saebooks.models.depreciation_model import DepreciationModel
 from saebooks.models.fixed_asset import FixedAsset
+from saebooks.money import money_quantum
 from saebooks.services import change_log as change_log_svc
 from saebooks.services.numbering import next_number
 
@@ -268,9 +269,9 @@ async def create(
         dep_expense_account_id=dep_expense_account_id,
         purchase_date=purchase_date,
         in_service_date=in_service_date or purchase_date,
-        cost=Decimal(str(cost)).quantize(Decimal("0.01")),
+        cost=Decimal(str(cost)).quantize(money_quantum(2)),
         residual_value=(
-            Decimal(str(residual_value)).quantize(Decimal("0.01"))
+            Decimal(str(residual_value)).quantize(money_quantum(2))
             if residual_value is not None
             else Decimal("0.00")
         ),
@@ -338,7 +339,7 @@ async def update(
                     f"depreciation_model_id '{value}' does not exist"
                 )
         if value is not None and key in ("cost", "residual_value"):
-            value = Decimal(str(value)).quantize(Decimal("0.01"))
+            value = Decimal(str(value)).quantize(money_quantum(2))
         if value is not None and key == "name":
             value = value.strip()
         if value is not None and key == "description":
@@ -438,7 +439,7 @@ async def dispose(
 
     asset.status = "disposed"
     asset.disposal_date = disposal_date
-    asset.disposal_proceeds = Decimal(str(proceeds)).quantize(Decimal("0.01"))
+    asset.disposal_proceeds = Decimal(str(proceeds)).quantize(money_quantum(2))
     asset.version = asset.version + 1
     await session.flush()
     await session.refresh(asset)
@@ -506,12 +507,12 @@ async def convert_to_inventory(
 
     # Step 3: compute NBV.
     accum_dep = await assets_svc.cumulative_depreciation_through(session, asset, conversion_date)
-    nbv = (asset.cost - accum_dep).quantize(Decimal("0.01"))
+    nbv = (asset.cost - accum_dep).quantize(money_quantum(2))
     if nbv < Decimal("0"):
         nbv = Decimal("0.00")
 
     # Step 4: post conversion journal.
-    _CENT = Decimal("0.01")
+    _CENT = money_quantum(2)
     lines: list[dict[str, object]] = [
         {
             "account_id": inventory_account_id,

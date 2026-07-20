@@ -1,0 +1,55 @@
+# UK recommended chart of accounts — used at company creation.
+#
+# NO statutory chart of accounts exists in the UK (verified — see
+# statutory_account_frameworks.yaml). This template is a convenience
+# default following the SAGE-CONVENTION nominal-code ranges (0001-9999)
+# that UK accountants and bureau software treat as the de-facto
+# interchange layer: 00xx fixed assets, 1xxx current assets, 2xxx
+# liabilities, 3xxx capital, 4xxx sales, 5xxx purchases, 7xxx
+# overheads, 8xxx depreciation/sundries. Each row is tagged to its
+# SI 2008/410 Sch 1 Format 1 statutory line via statutory_account_code
+# (P&L lines by number, balance-sheet headings by letter).
+#
+# Tax-code defaults reference the codes seeded in tax_codes.yaml.
+# Payroll-control accounts (2210/2220/2230, 7000/7006/7007) are the
+# accounts jurisdictions/uk/__init__.py's PAYROLL_POSTING profile maps
+# the neutral payroll roles onto.
+table: chart_template
+key: [jurisdiction, account_code]
+rows:
+  - {jurisdiction: GBR, account_code: "0020", account_name: "Plant and machinery — at cost", account_type: ASSET, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "B.II", statutory_parent_class: "Fixed assets — tangible", display_order: 10}
+  - {jurisdiction: GBR, account_code: "0021", account_name: "Plant and machinery — accumulated depreciation", account_type: ASSET, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "B.II", statutory_parent_class: "Fixed assets — tangible", display_order: 11}
+  - {jurisdiction: GBR, account_code: "0030", account_name: "Office equipment — at cost", account_type: ASSET, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "B.II", statutory_parent_class: "Fixed assets — tangible", display_order: 12}
+  - {jurisdiction: GBR, account_code: "1001", account_name: "Stock", account_type: ASSET, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "C.I", statutory_parent_class: "Current assets — stocks", display_order: 20}
+  - {jurisdiction: GBR, account_code: "1100", account_name: "Debtors control account (Accounts Receivable)", account_type: ASSET, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "C.II", statutory_parent_class: "Current assets — debtors", display_order: 30}
+  - {jurisdiction: GBR, account_code: "1103", account_name: "Prepayments", account_type: ASSET, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "D", statutory_parent_class: "Prepayments and accrued income", display_order: 31}
+  - {jurisdiction: GBR, account_code: "1200", account_name: "Bank current account", account_type: ASSET, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "C.IV", statutory_parent_class: "Current assets — cash at bank and in hand", display_order: 40}
+  - {jurisdiction: GBR, account_code: "1210", account_name: "Bank deposit account", account_type: ASSET, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "C.IV", statutory_parent_class: "Current assets — cash at bank and in hand", display_order: 41}
+  - {jurisdiction: GBR, account_code: "2100", account_name: "Creditors control account (Accounts Payable)", account_type: LIABILITY, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "E", statutory_parent_class: "Creditors: amounts falling due within one year", display_order: 100}
+  - {jurisdiction: GBR, account_code: "2200", account_name: "VAT on sales (output tax control)", account_type: LIABILITY, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "E", statutory_parent_class: "Creditors: amounts falling due within one year", display_order: 110}
+  - {jurisdiction: GBR, account_code: "2201", account_name: "VAT on purchases (input tax control)", account_type: LIABILITY, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "E", statutory_parent_class: "Creditors: amounts falling due within one year", display_order: 111}
+  - {jurisdiction: GBR, account_code: "2202", account_name: "VAT liability (net, due to/from HMRC)", account_type: LIABILITY, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "E", statutory_parent_class: "Creditors: amounts falling due within one year", display_order: 112}
+  - {jurisdiction: GBR, account_code: "2210", account_name: "PAYE, NI and student loan payable (HMRC)", account_type: LIABILITY, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "E", statutory_parent_class: "Creditors: amounts falling due within one year", display_order: 120}
+  - {jurisdiction: GBR, account_code: "2220", account_name: "Net wages control", account_type: LIABILITY, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "E", statutory_parent_class: "Creditors: amounts falling due within one year", display_order: 121}
+  - {jurisdiction: GBR, account_code: "2230", account_name: "Pension contributions payable", account_type: LIABILITY, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "E", statutory_parent_class: "Creditors: amounts falling due within one year", display_order: 122}
+  - {jurisdiction: GBR, account_code: "2240", account_name: "CIS deductions payable", account_type: LIABILITY, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "E", statutory_parent_class: "Creditors: amounts falling due within one year", display_order: 123}
+  - {jurisdiction: GBR, account_code: "2300", account_name: "Corporation tax payable", account_type: LIABILITY, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "E", statutory_parent_class: "Creditors: amounts falling due within one year", display_order: 130}
+  - {jurisdiction: GBR, account_code: "2310", account_name: "Bank loan", account_type: LIABILITY, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "H", statutory_parent_class: "Creditors: amounts falling due after more than one year", display_order: 140}
+  - {jurisdiction: GBR, account_code: "3000", account_name: "Called up share capital", account_type: EQUITY, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "K.I", statutory_parent_class: "Capital and reserves", display_order: 200}
+  - {jurisdiction: GBR, account_code: "3200", account_name: "Profit and loss account (retained earnings)", account_type: EQUITY, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "K.V", statutory_parent_class: "Capital and reserves", display_order: 210}
+  - {jurisdiction: GBR, account_code: "4000", account_name: "Sales — services", account_type: INCOME, default_tax_code: STD, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "1", statutory_parent_class: "Turnover", display_order: 300}
+  - {jurisdiction: GBR, account_code: "4001", account_name: "Sales — goods", account_type: INCOME, default_tax_code: STD, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "1", statutory_parent_class: "Turnover", display_order: 301}
+  - {jurisdiction: GBR, account_code: "4900", account_name: "Other operating income", account_type: OTHER_INCOME, default_tax_code: STD, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "6", statutory_parent_class: "Other operating income", display_order: 320}
+  - {jurisdiction: GBR, account_code: "4906", account_name: "Bank interest received", account_type: OTHER_INCOME, default_tax_code: OUT_OF_SCOPE, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "9", statutory_parent_class: "Income from other investments", display_order: 321}
+  - {jurisdiction: GBR, account_code: "5000", account_name: "Purchases — materials", account_type: COST_OF_SALES, default_tax_code: INPUT_STD, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "2", statutory_parent_class: "Cost of sales", display_order: 400}
+  - {jurisdiction: GBR, account_code: "6000", account_name: "Subcontractor costs (CIS)", account_type: COST_OF_SALES, default_tax_code: INPUT_STD, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "2", statutory_parent_class: "Cost of sales", display_order: 410}
+  - {jurisdiction: GBR, account_code: "7000", account_name: "Gross wages", account_type: EXPENSE, default_tax_code: OUT_OF_SCOPE, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "5", statutory_parent_class: "Administrative expenses", display_order: 500}
+  - {jurisdiction: GBR, account_code: "7006", account_name: "Employer's National Insurance", account_type: EXPENSE, default_tax_code: OUT_OF_SCOPE, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "5", statutory_parent_class: "Administrative expenses", display_order: 501}
+  - {jurisdiction: GBR, account_code: "7007", account_name: "Employer's pension contributions", account_type: EXPENSE, default_tax_code: OUT_OF_SCOPE, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "5", statutory_parent_class: "Administrative expenses", display_order: 502}
+  - {jurisdiction: GBR, account_code: "7100", account_name: "Rent", account_type: EXPENSE, default_tax_code: INPUT_EXEMPT, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "5", statutory_parent_class: "Administrative expenses", display_order: 510}
+  - {jurisdiction: GBR, account_code: "7300", account_name: "Motor expenses and mileage", account_type: EXPENSE, default_tax_code: INPUT_STD, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "5", statutory_parent_class: "Administrative expenses", display_order: 520}
+  - {jurisdiction: GBR, account_code: "7500", account_name: "Office costs and software", account_type: EXPENSE, default_tax_code: INPUT_STD, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "5", statutory_parent_class: "Administrative expenses", display_order: 530}
+  - {jurisdiction: GBR, account_code: "7901", account_name: "Bank charges", account_type: EXPENSE, default_tax_code: INPUT_EXEMPT, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "5", statutory_parent_class: "Administrative expenses", display_order: 540}
+  - {jurisdiction: GBR, account_code: "8000", account_name: "Depreciation", account_type: EXPENSE, default_tax_code: OUT_OF_SCOPE, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "5", statutory_parent_class: "Administrative expenses", display_order: 600}
+  - {jurisdiction: GBR, account_code: "8100", account_name: "Bad debt write-off", account_type: EXPENSE, default_tax_code: OUT_OF_SCOPE, statutory_framework_code: uk_si_2008_410_f1, statutory_account_code: "5", statutory_parent_class: "Administrative expenses", display_order: 610}
+  - {jurisdiction: GBR, account_code: "9998", account_name: "Suspense", account_type: EXPENSE, default_tax_code: OUT_OF_SCOPE, display_order: 900}

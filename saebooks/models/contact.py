@@ -3,7 +3,18 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -152,4 +163,17 @@ class Contact(CompanyScoped, Base):
     # through ``saebooks.api.v1``; legacy Jinja writes also route
     # through the same service layer so the counter stays authoritative.
     version: Mapped[int] = mapped_column(default=1, nullable=False)
+    # E-invoicing (M3, migration 0197). Buyer is a registered e-invoice
+    # recipient (EE Accounting Act, enacted 2025-07-01) — see
+    # services.einvoice.buyer_requirement for the surfacing this flag
+    # drives. Default false: byte-identical behaviour for every existing
+    # contact until explicitly set.
+    e_invoice_recipient: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    # Peppol network routing address, 'scheme:value' wire form (e.g.
+    # '0191:10137025') — see services.einvoice.operator.PeppolParticipantId
+    # .as_string(). NULL = flagged as a recipient but no routing address on
+    # file yet.
+    peppol_participant_id: Mapped[str | None] = mapped_column(String(64))
 

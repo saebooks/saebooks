@@ -25,15 +25,33 @@
 # field understates a compound two-tax mechanic), not implemented here.
 #
 # Company-car benefit (EUR 1.96/kW/month standard, EUR 1.47/kW/month for
-# cars over 5 years old) is DELIBERATELY NOT SEEDED here: rate_percent is
-# percentage-shaped, and the car benefit's statutory valuation is a
-# EUR-per-kW-per-month AMOUNT, not a percentage — forcing it into this
-# field would misrepresent the unit, exactly the kind of silent bug this
-# seed is required to avoid. The underlying fact is also marked
-# verified=false (single secondary-source corroboration, not
-# independently re-checked against a live EMTA page) in the supplied
-# research. Skipped; flag for a future amount_per_unit-shaped field if
-# company-car BIK needs to be reference-data-driven.
+# cars over 5 years old) — GAP CLOSED (M1.5 · T11 fringe-benefit compute,
+# Packet 2): ``0012_bik_amount_per_unit`` added ``rate_amount_per_unit``/
+# ``rate_unit`` (amount-shaped, not percentage-shaped) columns precisely
+# for this case, so the two rows below now carry it directly instead of
+# being skipped. rate_percent is still populated (22.0000, same
+# convention as the ``general`` row) for schema consistency, but
+# ``services.fringe_benefits_ee`` does NOT read it for these two rows —
+# it reads ``rate_amount_per_unit`` and applies the SAME 22/78 + 33%
+# compound formula as ``general`` (via ``services.payroll_ee``'s shared
+# income_tax_rate_percent/social_tax_rate_percent — the two-tax
+# mechanic is one engine-wide EE fact, not car-specific).
+#
+# Verified directly against EMTA (WebFetch/WebSearch, 2026-07-11):
+# https://www.emta.ee/en/business-client/taxes-and-payment/income-and-
+# social-taxes/fringe-benefits — "fringe benefits provided by the
+# employer to the employee are subject to income tax at a rate of 22/78
+# and social tax at a rate of 33%" (confirms the compound formula above)
+# and "[the price] is 1.96 euros a month per engine power unit (kW) ...
+# In the event of an automobile older than five years, the price ... is
+# 1.47 euros per engine power unit (kW)" (confirms both rates and the
+# ">5 years" boundary — a car exactly 5 years old still uses the
+# standard 1.96 rate, only STRICTLY older than 5 years drops to 1.47).
+# The worked example on the same page (960 taxable value -> income tax
+# 270.77, social tax 406.15) is used as this packet's formula golden
+# (tests/services/test_fringe_benefits_ee.py) — it also fixes the
+# rounding ORDER: income tax is rounded to 2dp BEFORE being added into
+# the social-tax base, not computed from the unrounded figure.
 table: benefit_in_kind_rates
 key: [jurisdiction, benefit_category, effective_from]
 rows:
@@ -42,6 +60,26 @@ rows:
     incidence: employer_taxed
     valuation_method: cost_basis
     rate_percent: 22.0000
+    filing_period_start_month: 1
+    filing_period_end_month: 12
+    effective_from: 2025-01-01
+  - jurisdiction: EST
+    benefit_category: motor_vehicle
+    incidence: employer_taxed
+    valuation_method: amount_per_unit
+    rate_percent: 22.0000
+    rate_amount_per_unit: 1.9600
+    rate_unit: eur_per_kw_per_month
+    filing_period_start_month: 1
+    filing_period_end_month: 12
+    effective_from: 2025-01-01
+  - jurisdiction: EST
+    benefit_category: motor_vehicle_aged
+    incidence: employer_taxed
+    valuation_method: amount_per_unit
+    rate_percent: 22.0000
+    rate_amount_per_unit: 1.4700
+    rate_unit: eur_per_kw_per_month
     filing_period_start_month: 1
     filing_period_end_month: 12
     effective_from: 2025-01-01

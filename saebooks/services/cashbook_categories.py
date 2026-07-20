@@ -353,6 +353,74 @@ DEFAULT_CATEGORIES: tuple[CashbookCategory, ...] = (
 )
 
 
+# ---------------------------------------------------------------------------
+# Per-jurisdiction cashbook profiles (registration inversion, Job C shape).
+#
+# The cashbook was AU-only in v1; the taxonomy above is the signed-off AU
+# contract (Gate 1) and STAYS here unchanged. Other jurisdictions register a
+# profile from their ``saebooks.jurisdictions.<cc>`` package (see
+# ``jurisdictions/ee/cashbook.py``) — the core never imports a jurisdiction.
+# A jurisdiction with no registered profile has NO cashbook (typed error at
+# the service layer), which preserves the v1 behaviour for everything that
+# isn't AU. Relocating the AU table itself into ``jurisdictions/au/`` is a
+# follow-up (contract file; byte-identical guardrail applies).
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CashbookJurisdictionProfile:
+    """One jurisdiction's cashbook wiring: home currency + picker taxonomy."""
+
+    jurisdiction: str
+    currency: str
+    categories: tuple[CashbookCategory, ...]
+
+    @property
+    def by_code(self) -> dict[str, CashbookCategory]:
+        return {c.code: c for c in self.categories}
+
+
+_PROFILES: dict[str, CashbookJurisdictionProfile] = {}
+
+
+def register_cashbook_profile(profile: CashbookJurisdictionProfile) -> None:
+    """Register a jurisdiction's cashbook profile (called by jurisdiction
+    packages at import time; re-registration overwrites, idempotent)."""
+    _PROFILES[profile.jurisdiction] = profile
+
+
+register_cashbook_profile(
+    CashbookJurisdictionProfile(
+        jurisdiction="AU", currency="AUD", categories=DEFAULT_CATEGORIES
+    )
+)
+
+
+class CashbookUnsupportedJurisdiction(KeyError):
+    """Raised when a jurisdiction has no registered cashbook profile."""
+
+
+def profile_for(jurisdiction: str) -> CashbookJurisdictionProfile:
+    """Return the cashbook profile for ``jurisdiction``.
+
+    Lazy ``ensure_loaded()`` guard (Job C shape): packaged jurisdictions
+    register on import, so load the enabled set before concluding the
+    jurisdiction has no cashbook.
+    """
+    profile = _PROFILES.get(jurisdiction)
+    if profile is None:
+        from saebooks.bootstrap.jurisdictions import ensure_loaded
+
+        ensure_loaded()
+        profile = _PROFILES.get(jurisdiction)
+    if profile is None:
+        raise CashbookUnsupportedJurisdiction(
+            f"Cashbook is not available for jurisdiction {jurisdiction!r} "
+            f"(registered: {sorted(_PROFILES)})"
+        )
+    return profile
+
+
 # Index by code for O(1) lookup. Built at import time.
 _BY_CODE: dict[str, CashbookCategory] = {c.code: c for c in DEFAULT_CATEGORIES}
 
@@ -361,24 +429,30 @@ class UnknownCashbookCategory(KeyError):
     """Raised when a category code does not exist in defaults or overrides."""
 
 
-def get_default(code: str) -> CashbookCategory:
-    """Look up a default category by code. Raise on unknown."""
+def get_default(code: str, jurisdiction: str = "AU") -> CashbookCategory:
+    """Look up a default category by code within a jurisdiction's profile.
+    Raise on unknown."""
     try:
-        return _BY_CODE[code]
+        if jurisdiction == "AU":
+            return _BY_CODE[code]
+        return profile_for(jurisdiction).by_code[code]
     except KeyError as e:
         raise UnknownCashbookCategory(
             f"Unknown cashbook category code: {code!r}"
         ) from e
 
 
-def all_defaults() -> tuple[CashbookCategory, ...]:
+def all_defaults(jurisdiction: str = "AU") -> tuple[CashbookCategory, ...]:
     """Return the canonical default list in picker order."""
-    return DEFAULT_CATEGORIES
+    if jurisdiction == "AU":
+        return DEFAULT_CATEGORIES
+    return profile_for(jurisdiction).categories
 
 
 def resolve_for_company(
     code: str,
     overrides: dict | None,
+    jurisdiction: str = "AU",
 ) -> CashbookCategory:
     """Return the effective category for a company, applying overrides.
 
@@ -399,7 +473,7 @@ def resolve_for_company(
     Account-id overrides are honoured by the cashbook service at JE
     creation time — this resolver only carries the override forward.
     """
-    base = get_default(code)
+    base = get_default(code, jurisdiction)
     if not overrides:
         return base
     table = overrides.get("overrides") if isinstance(overrides, dict) else None

@@ -84,7 +84,7 @@ async def _seed_company_cashbook() -> tuple[uuid.UUID, uuid.UUID]:
 
         co.bookkeeping_mode = "cashbook"
         co.cashbook_default_bank_account_id = bank.id
-        co.gst_registered = False
+        co.tax_registered = False
         await session.commit()
 
     # Clean slate for this company's invoice ledger so the auto-numbered

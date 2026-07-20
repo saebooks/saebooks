@@ -38,6 +38,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from saebooks.db import Base
+from saebooks.db_types import Money
 from saebooks.models._scope import CompanyScoped
 
 if TYPE_CHECKING:
@@ -120,7 +121,7 @@ class Payment(CompanyScoped, Base):
     )
     payment_date: Mapped[date]
     amount: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     # --- Foreign-currency header (Batch GG/2) ------------------------------
     # The payment may settle a foreign-currency invoice/bill at a
@@ -134,7 +135,7 @@ class Payment(CompanyScoped, Base):
         Numeric(18, 8), nullable=False, default=Decimal("1")
     )
     base_amount: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     reference: Mapped[str | None] = mapped_column(String(128))
     notes: Mapped[str | None] = mapped_column(Text)
@@ -223,7 +224,7 @@ class PaymentAllocation(Base):
         UUID(as_uuid=True),
         ForeignKey("bills.id", ondelete="RESTRICT"),
     )
-    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Money(), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

@@ -1,18 +1,16 @@
 """Canonical per-jurisdiction employee/employer social-insurance schemes
 (M1.5 · T7).
 
-AU's Medicare levy lives under an AU noun (``medicare_levy``, see
-``medicare_levy.py``) and is really one instance of a much broader family:
-a mandatory wage-based contribution collected alongside payroll, sometimes
-by withholding (US FICA Social Security/Medicare, UK employee National
+AU's Medicare levy is one instance of a much broader family: a mandatory
+wage-based contribution collected alongside payroll, sometimes by
+withholding (US FICA Social Security/Medicare, UK employee National
 Insurance) and sometimes by year-end assessment (AU Medicare levy). This
 table generalises that family so other jurisdictions' social-insurance
 schemes can be represented without inventing an AU-shaped table per
 country.
 
-Additive only — ``medicare_levy`` is untouched; a future pass may migrate
-AU onto this table, but that is a deferred, coordinated rename, not part
-of this change.
+The AU-named table this generalised, ``medicare_levy``, had zero
+consumers and no seed data, and was dropped (M1.5 Wave 3a rename sweep).
 
 See ~/records/saebooks/global-reference-audit-2026-07-09.md (theme T7).
 """

@@ -29,7 +29,6 @@ from sqlalchemy import (
     TIMESTAMP,
     Date,
     ForeignKey,
-    Numeric,
     String,
     Text,
     func,
@@ -38,6 +37,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from saebooks.db import Base
+from saebooks.db_types import Money
 from saebooks.models._scope import CompanyScoped
 
 
@@ -111,8 +111,8 @@ class SupplierStatement(CompanyScoped, Base):
     customer_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
     statement_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     terms: Mapped[str | None] = mapped_column(Text, nullable=True)
-    opening_balance: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
-    closing_balance: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    opening_balance: Mapped[Decimal | None] = mapped_column(Money(), nullable=True)
+    closing_balance: Mapped[Decimal | None] = mapped_column(Money(), nullable=True)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, server_default="AUD")
 
     # Reconciliation outputs.
@@ -121,8 +121,8 @@ class SupplierStatement(CompanyScoped, Base):
         nullable=False,
         server_default=StatementStatus.PENDING_EXTRACT.value,
     )
-    our_ap_as_at: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
-    balance_delta: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    our_ap_as_at: Mapped[Decimal | None] = mapped_column(Money(), nullable=True)
+    balance_delta: Mapped[Decimal | None] = mapped_column(Money(), nullable=True)
     # Extraction provenance: model used, whether opus-escalated, anomalies, gate results.
     extraction_meta: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
@@ -172,7 +172,7 @@ class SupplierStatementLine(Base):
     )
     reference: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Money(), nullable=False)
 
     match_status: Mapped[str] = mapped_column(
         String(_MATCH_LEN), nullable=False,

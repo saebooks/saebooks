@@ -78,6 +78,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from saebooks.db import Base
+from saebooks.db_types import Money
 from saebooks.models._scope import CompanyScoped
 
 if TYPE_CHECKING:
@@ -147,13 +148,13 @@ class Quote(CompanyScoped, Base):
         String(3), nullable=False, default="AUD"
     )
     subtotal: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     tax_total: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     total: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
 
     # SAE canonical quote parameters (used at PDF render time)
@@ -243,7 +244,7 @@ class QuoteLine(Base):
         ForeignKey("tax_codes.id", ondelete="SET NULL"),
     )
     line_total: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     # Posting hint: which income account this line maps to when
     # convert-to-invoice runs. NULL is permitted at the schema level

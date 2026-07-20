@@ -1,0 +1,36 @@
+# United Kingdom workplace-pension automatic enrolment — full parameter
+# set, tax year 2026-27.
+#
+# NOT a reference-DB table seed (reference_seed: false): the trigger /
+# band-lower / deferral / re-enrolment parameters have no reference
+# table; mandatory_contribution_rules.yaml carries the two statutory
+# minimum contribution RATE rows for the loader, and this file carries
+# everything else for jurisdictions/uk/payroll.py.
+#
+# Values per strategy §5.1 (verified 2026-07-12; DWP annual review).
+reference_seed: false
+jurisdiction: GBR
+effective_from: 2026-04-06
+
+earnings_trigger_annual_gbp: 10000.00
+qualifying_earnings_band:
+  lower_annual_gbp: 6240.00
+  upper_annual_gbp: 50270.00
+eligibility:
+  min_age: 22
+  max_age: state_pension_age
+minimum_contributions:
+  total_percent_of_qualifying_earnings: 8
+  employer_minimum_percent: 3
+postponement:
+  max_deferral_months: 3
+re_enrolment:
+  cycle_years: 3
+tax_relief:
+  # Relief mechanics are scheme-dependent: relief at source (member
+  # pays 80%, provider claims 25% top-up) vs net pay arrangement
+  # (contribution reduces taxable pay). jurisdictions/uk/payroll.py
+  # models RELIEF AT SOURCE only and hard-refuses net-pay-arrangement
+  # schemes this wave (they change the PAYE taxable base).
+  supported: relief_at_source
+  refused: net_pay_arrangement

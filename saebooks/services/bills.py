@@ -30,6 +30,8 @@ from saebooks.models.contact import Contact
 from saebooks.models.item import Item
 from saebooks.models.journal import JournalOrigin
 from saebooks.models.tax_code import TaxCode
+from saebooks.money import decimal_places_for, round_money
+from saebooks.services import control_accounts as control_accounts_svc
 from saebooks.services import items as items_svc
 from saebooks.services import journal as journal_svc
 from saebooks.services import numbering
@@ -45,7 +47,6 @@ from saebooks.services.tax_engine.ee import RC_DUAL_REPORTING_TYPES
 # output-role liability here and an input-role receivable via GST Paid.
 RC_PAYABLE_ACCOUNT_SETTING_KEY = "gst_reverse_charge_payable_account_code"
 
-_TWOPLACES = Decimal("0.01")
 _FOURPLACES = Decimal("0.0001")
 
 
@@ -58,8 +59,9 @@ class BillError(ValueError):
 # ---------------------------------------------------------------------- #
 
 
-def _q2(value: Decimal) -> Decimal:
-    return value.quantize(_TWOPLACES, rounding=ROUND_HALF_UP)
+def _q2(value: Decimal, places: int = 2) -> Decimal:
+    """ROUND_HALF_UP to a currency's minor unit (default AUD/base — 2)."""
+    return round_money(value, places)
 
 
 def _q4(value: Decimal) -> Decimal:
@@ -81,13 +83,16 @@ class _LineInput:
 
 
 def _compute_line_totals(
-    line: _LineInput, tax_rate: Decimal
+    line: _LineInput, tax_rate: Decimal, places: int = 2
 ) -> tuple[Decimal, Decimal, Decimal]:
-    """Return (subtotal, tax, total) — add-on (ex-GST) tax treatment."""
+    """Return (subtotal, tax, total) — add-on (ex-GST) tax treatment.
+
+    Amounts round to ``places`` — the document currency's minor unit.
+    """
     gross = line.quantity * line.unit_price
     discount_factor = (Decimal("100") - line.discount_pct) / Decimal("100")
-    subtotal = _q2(gross * discount_factor)
-    tax = _q2(subtotal * tax_rate / Decimal("100"))
+    subtotal = _q2(gross * discount_factor, places)
+    tax = _q2(subtotal * tax_rate / Decimal("100"), places)
     total = subtotal + tax
     return subtotal, tax, total
 
@@ -301,7 +306,9 @@ async def _replace_lines(
             tracking_vehicle_id=tracking_vehicle_id or None,
         )
         tax_rate = await _resolve_tax_rate(session, line_input.tax_code_id, company_id)
-        subtotal, tax, total = _compute_line_totals(line_input, tax_rate)
+        subtotal, tax, total = _compute_line_totals(
+            line_input, tax_rate, decimal_places_for(bill.currency)
+        )
         session.add(
             BillLine(
                 bill_id=bill.id,
@@ -330,10 +337,11 @@ async def _recalc(session: AsyncSession, bill: Bill) -> None:
             select(BillLine).where(BillLine.bill_id == bill.id)
         )
     ).scalars().all()
+    doc_places = decimal_places_for(bill.currency)
     subtotal = sum((ln.line_subtotal for ln in lines), Decimal("0"))
     tax = sum((ln.line_tax for ln in lines), Decimal("0"))
-    bill.subtotal = _q2(Decimal(subtotal))
-    bill.tax_total = _q2(Decimal(tax))
+    bill.subtotal = _q2(Decimal(subtotal), doc_places)
+    bill.tax_total = _q2(Decimal(tax), doc_places)
     bill.total = bill.subtotal + bill.tax_total
 
     # Foreign-currency shadow totals. Same pattern as invoices — sum
@@ -453,19 +461,11 @@ async def update_draft(
 async def _get_ap_account(
     session: AsyncSession, company_id: uuid.UUID
 ) -> Account:
-    result = await session.execute(
-        select(Account).where(
-            Account.company_id == company_id,
-            Account.code == "2-1200",
-        )
+    # Packet 4b: resolves companies.ap_control_account_code, falling
+    # back to the AU convention "2-1200" — see services/control_accounts.py.
+    return await control_accounts_svc.get_ap_account(
+        session, company_id, error_cls=BillError
     )
-    acct = result.scalar_one_or_none()
-    if acct is None:
-        raise BillError(
-            "AP control account 2-1200 Trade Creditors is missing — "
-            "re-run the CoA seed."
-        )
-    return acct
 
 
 async def _get_retentions_payable_account(

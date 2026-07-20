@@ -1,0 +1,123 @@
+# Lithuania legal-entity / business-structure types.
+# Each local structure maps to a jurisdiction-neutral canonical_bucket
+# (EE/AU/NZ precedent). jurisdiction = 'LTU'.
+#
+# Verified 2026-07-12 (statute text + official sources; see the LT
+# module build report for the pull list):
+# * UAB minimum capital EUR 1,000 (Akcinių bendrovių įstatymas Art. 2(4),
+#   as amended by Law XIV-1540, in force 2023-05-01 — NOT reduced to
+#   EUR 0; the pre-2023 figure was EUR 2,500).
+# * AB minimum capital EUR 25,000 (Art. 2(3), in force 2017-07-13 —
+#   secondary pages still showing EUR 40,000 are stale).
+# * NO tax-transparent registered business forms exist in Lithuania:
+#   every registered Lithuanian legal person — including the unlimited-
+#   liability IĮ/TŪB/KŪB and the non-profits — is a corporate income
+#   tax payer (Pelno mokesčio įstatymas Art. 3(1), official VMI English
+#   translation; unlimited-liability entities and non-profits have
+#   special computation rules, not transparency).
+# * MB (mažoji bendrija) is the LT-specific small-partnership form —
+#   a limited-liability legal person with NO capital requirement,
+#   natural-person members only, max 10 (Law on Small Partnerships, in
+#   force 2012-09-01). It is a CIT payer, so canonical_bucket is
+#   company_limited (limited liability + entity-level tax), NOT
+#   partnership — the LT-specific shape rides in the description, the
+#   way NZ's LTC rode pass_through.
+table: entity_structure_types
+key: [jurisdiction, code]
+rows:
+  - jurisdiction: LTU
+    code: uab
+    local_name: Uždaroji akcinė bendrovė (UAB — private limited company)
+    canonical_bucket: company_limited
+    description: >-
+      Private limited company; minimum authorised capital EUR 1,000
+      (since 2023-05-01); >=1 shareholder; shares not publicly traded.
+      CIT payer (17% standard / 7% small-company from 2026). Files
+      annual financial statements to Registrų centras (JAR), PLN204
+      CIT return, FR0600 if VAT-registered, GPM313 + Sodra SAM if
+      employing.
+
+  - jurisdiction: LTU
+    code: ab
+    local_name: Akcinė bendrovė (AB — public limited company)
+    canonical_bucket: company_limited
+    description: >-
+      Public limited company; minimum authorised capital EUR 25,000
+      (since 2017-07-13); shares may be publicly offered/traded;
+      initial contribution >=1/4 of subscribed nominal value in cash.
+      Same VMI/Sodra obligations as UAB, plus securities-market rules
+      when listed.
+
+  - jurisdiction: LTU
+    code: mb
+    local_name: Mažoji bendrija (MB — small partnership)
+    canonical_bucket: company_limited
+    description: >-
+      LT-specific small-company form (Law on Small Partnerships, since
+      2012-09-01): limited-liability legal person, NO minimum capital,
+      members are natural persons only, maximum 10. Flexible
+      governance (members' meeting alone or with a manager); profit
+      may be distributed in advance during the year. A corporate
+      income tax payer in its own right — NOT transparent.
+
+  - jurisdiction: LTU
+    code: ii
+    local_name: Individuali įmonė (IĮ — individual enterprise)
+    canonical_bucket: sole_trader
+    description: >-
+      Single natural-person owner with UNLIMITED civil liability
+      (personal assets); no capital requirement. A registered legal
+      person (JAR) and — unusually for the bucket — a corporate income
+      tax payer (unlimited-liability entities are CIT payers under PMĮ
+      Art. 3(1); distributions to the owner are then not re-taxed as
+      profit distribution).
+
+  - jurisdiction: LTU
+    code: tub
+    local_name: Tikroji ūkinė bendrija (TŪB — general partnership)
+    canonical_bucket: partnership
+    description: >-
+      Legal person of unlimited civil liability (all partners jointly
+      liable); no minimum capital. A corporate income tax payer (PMĮ
+      regulates unlimited-liability CIT payers explicitly) — NOT
+      tax-transparent, unlike UK/NZ general partnerships.
+
+  - jurisdiction: LTU
+    code: kub
+    local_name: Komanditinė ūkinė bendrija (KŪB — limited partnership)
+    canonical_bucket: partnership
+    description: >-
+      Partnership with general partner(s) of unlimited liability and
+      limited partners liable up to contribution; no minimum capital.
+      A corporate income tax payer — NOT tax-transparent.
+
+  - jurisdiction: LTU
+    code: vsi
+    local_name: Viešoji įstaiga (VšĮ — public institution)
+    canonical_bucket: nonprofit
+    description: >-
+      Non-profit limited-liability legal person; may not distribute
+      profit to founders/members. A CIT payer on commercial-activity
+      profit, with relief for funds allocated (current period or next
+      two) to public-interest activities (PMĮ Art. 46-3).
+
+  - jurisdiction: LTU
+    code: asociacija
+    local_name: Asociacija (association)
+    canonical_bucket: nonprofit
+    description: >-
+      Membership non-profit legal person; no profit distribution. Same
+      non-profit CIT treatment as VšĮ (taxed on commercial-activity
+      profit with the public-interest allocation relief).
+
+  - jurisdiction: LTU
+    code: filialas
+    local_name: Filialas (branch of a foreign company)
+    canonical_bucket: other
+    description: >-
+      NOT a separate legal person — an organisational subdivision of
+      the foreign parent (which bears direct liability), registered in
+      JAR at Registrų centras; may conduct commercial activity (unlike
+      a representative office). Taxed as a permanent establishment of
+      the foreign entity (foreign entities are CIT payers, PMĮ
+      Art. 3(1)(2)).

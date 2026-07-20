@@ -1,0 +1,92 @@
+# United Kingdom National Insurance contribution schemes, tax year
+# 2026-27 (6 Apr 2026 – 5 Apr 2027). jurisdiction = 'GBR'.
+#
+# Primary source (fetched raw 2026-07-12 per §5.3): gov.uk "Rates and
+# thresholds for employers: 2026 to 2027" —
+#   Lower Earnings Limit (LEL)      £129/wk   £559/mo    £6,708/yr
+#   Primary Threshold (PT)          £242/wk   £1,048/mo  £12,570/yr
+#   Secondary Threshold (ST)        £96/wk    £417/mo    £5,000/yr
+#   Upper Earnings Limit (UEL)      £967/wk   £4,189/mo  £50,270/yr
+#   Employee (Class 1 primary, cat A): 8% PT→UEL, 2% above UEL
+#   Employer (Class 1 secondary, cat A): 15% above ST
+#   Class 1A and Class 1B: 15%
+#   Employment Allowance: £10,500
+#
+# The scheme table carries ANNUALISED floor/cap figures (its columns
+# are single floor + cap per row); the per-period weekly/monthly
+# thresholds and the NI CATEGORY-LETTER matrix live in
+# ni_thresholds.yaml (reference_seed: false) beside this file, and the
+# per-period compute (NI is assessed PER PAY PERIOD, not cumulatively)
+# is jurisdictions/uk/payroll.py.
+#
+# Employment Allowance (£10,500/yr against the employer's total Class 1
+# secondary bill) is a COMPANY-level offset, not a per-employee scheme
+# row — parameters + the exclusion rule (a company whose only employee
+# paid above the ST is also its sole director is NOT eligible) live in
+# ni_thresholds.yaml and jurisdictions/uk/payroll.py.
+#
+# Class 2 (voluntary, self-employed) is OMITTED: its 2026-27 weekly
+# rate was not on the pulled page and no primary figure was obtained —
+# omitted rather than seeded unverified.
+table: social_contribution_schemes
+key: [jurisdiction, code, effective_from]
+rows:
+  - jurisdiction: GBR
+    code: uk_ni_class1_employee_main
+    name: "Class 1 NI — employee (primary), main rate, category A"
+    payer: employee
+    rate_percent: 8.0000
+    wage_base_floor: 12570.00   # Primary Threshold, annualised
+    wage_base_cap: 50270.00     # Upper Earnings Limit, annualised
+    collection_mechanism: payroll_withholding
+    effective_from: 2026-04-06
+
+  - jurisdiction: GBR
+    code: uk_ni_class1_employee_upper
+    name: "Class 1 NI — employee (primary), additional rate above UEL, category A"
+    payer: employee
+    rate_percent: 2.0000
+    wage_base_floor: 50270.00
+    wage_base_cap: null
+    collection_mechanism: payroll_withholding
+    effective_from: 2026-04-06
+
+  - jurisdiction: GBR
+    code: uk_ni_class1_employer
+    name: "Class 1 NI — employer (secondary), category A"
+    payer: employer
+    rate_percent: 15.0000
+    wage_base_floor: 5000.00    # Secondary Threshold, annualised
+    wage_base_cap: null
+    collection_mechanism: payroll_withholding
+    effective_from: 2026-04-06
+
+  - jurisdiction: GBR
+    code: uk_ni_class1a
+    name: "Class 1A NI — employer, on benefits in kind (P11D(b)) and termination awards"
+    payer: employer
+    rate_percent: 15.0000
+    wage_base_floor: null
+    wage_base_cap: null
+    collection_mechanism: assessment   # annual P11D(b), due 19/22 July
+    effective_from: 2026-04-06
+
+  - jurisdiction: GBR
+    code: uk_ni_class4_main
+    name: "Class 4 NI — self-employed, main rate"
+    payer: employee
+    rate_percent: 6.0000
+    wage_base_floor: 12570.00
+    wage_base_cap: 50270.00
+    collection_mechanism: assessment   # via Self Assessment
+    effective_from: 2026-04-06
+
+  - jurisdiction: GBR
+    code: uk_ni_class4_upper
+    name: "Class 4 NI — self-employed, additional rate above upper profits limit"
+    payer: employee
+    rate_percent: 2.0000
+    wage_base_floor: 50270.00
+    wage_base_cap: null
+    collection_mechanism: assessment
+    effective_from: 2026-04-06

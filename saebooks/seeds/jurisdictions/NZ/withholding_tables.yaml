@@ -1,0 +1,185 @@
+# New Zealand withholding rules — PAYE (incl. ACC earner's levy),
+# ESCT, student loan, RWT and NRWT.
+#
+# Source: ~/records/saebooks/nz-market-entry-strategy.md §5.3-§5.5
+# (source-verified 2026-07-12 unless marked). Mirrors the AU/EE
+# withholding_tables.yaml shape: a formula_type tag + a free-shape
+# parameters JSONB blob. The OPERATIVE NZ payroll compute path is
+# ``saebooks/jurisdictions/nz/payroll.py`` (embedded dated tables, same
+# values as here) — this seed is the reference-catalogue copy, kept in
+# lock-step by tests/services/test_payroll_nz.py's seed-consistency
+# check.
+#
+# INDIVIDUAL income-tax brackets live here (nz_paye parameters) rather
+# than in income_tax_brackets — that table has no unique constraint so
+# the idempotent loader cannot upsert it (see corporate_tax_rates.yaml
+# header + build summary flag).
+table: withholding_tables
+key: [jurisdiction, code, effective_from]
+rows:
+  # --- PAYE (code-based wage withholding, incl. ACC earner's levy) --------
+  # One dated row per ACC-levy year; the bracket set is the 2025-26
+  # legislated table and carries forward unless re-legislated.
+  - jurisdiction: NZL
+    code: nz_paye
+    name: "PAYE — code-based wage withholding (M primary; SB/S/SH/ST/SA secondary), incl. ACC earner's levy"
+    withholding_type: wage_paye
+    formula_type: bracketed
+    parameters:
+      method: >-
+        Annualise period gross (WEEKLY x52, FORTNIGHTLY x26, MONTHLY x12),
+        apply the annual brackets (M code), add ACC earner's levy on
+        earnings up to the cap, de-annualise, round half-up to the cent.
+        Secondary codes apply their flat rate to the whole amount plus
+        the earner's levy.
+      brackets:  # individuals, 2025-26 (annual NZD)
+        - {lower: 0, upper: 15600, rate_percent: 10.5}
+        - {lower: 15600, upper: 53500, rate_percent: 17.5}
+        - {lower: 53500, upper: 78100, rate_percent: 30.0}
+        - {lower: 78100, upper: 180000, rate_percent: 33.0}
+        - {lower: 180000, upper: null, rate_percent: 39.0}
+      secondary_flat_rates_percent: {SB: 10.5, S: 17.5, SH: 30.0, ST: 33.0, SA: 39.0}
+      acc_earners_levy: {rate_percent: 1.67, earnings_cap: 152790.00}
+      supported_codes: [M, SB, S, SH, ST, SA]
+      unsupported_codes_hard_refuse: [ME, CAE, EDW, NSW, WT, STC]
+    effective_from: 2025-04-01
+    effective_to: 2026-03-31
+
+  - jurisdiction: NZL
+    code: nz_paye
+    name: "PAYE — code-based wage withholding (M primary; SB/S/SH/ST/SA secondary), incl. ACC earner's levy"
+    withholding_type: wage_paye
+    formula_type: bracketed
+    parameters:
+      method: >-
+        Annualise period gross (WEEKLY x52, FORTNIGHTLY x26, MONTHLY x12),
+        apply the annual brackets (M code), add ACC earner's levy on
+        earnings up to the cap, de-annualise, round half-up to the cent.
+        Secondary codes apply their flat rate to the whole amount plus
+        the earner's levy.
+      brackets:  # UNVERIFIED continuity — 2025-26 table carried forward; no legislated 2026-27 change found in the research pass.
+        - {lower: 0, upper: 15600, rate_percent: 10.5}
+        - {lower: 15600, upper: 53500, rate_percent: 17.5}
+        - {lower: 53500, upper: 78100, rate_percent: 30.0}
+        - {lower: 78100, upper: 180000, rate_percent: 33.0}
+        - {lower: 180000, upper: null, rate_percent: 39.0}
+      secondary_flat_rates_percent: {SB: 10.5, S: 17.5, SH: 30.0, ST: 33.0, SA: 39.0}
+      acc_earners_levy: {rate_percent: 1.75, earnings_cap: 156641.00}  # verified — 2026-27 year
+      supported_codes: [M, SB, S, SH, ST, SA]
+      unsupported_codes_hard_refuse: [ME, CAE, EDW, NSW, WT, STC]
+    effective_from: 2026-04-01
+    effective_to: 2027-03-31
+
+  - jurisdiction: NZL
+    code: nz_paye
+    name: "PAYE — code-based wage withholding (M primary; SB/S/SH/ST/SA secondary), incl. ACC earner's levy"
+    withholding_type: wage_paye
+    formula_type: bracketed
+    parameters:
+      method: >-
+        Annualise period gross (WEEKLY x52, FORTNIGHTLY x26, MONTHLY x12),
+        apply the annual brackets (M code), add ACC earner's levy on
+        earnings up to the cap, de-annualise, round half-up to the cent.
+        Secondary codes apply their flat rate to the whole amount plus
+        the earner's levy.
+      brackets:  # UNVERIFIED continuity — 2025-26 table carried forward.
+        - {lower: 0, upper: 15600, rate_percent: 10.5}
+        - {lower: 15600, upper: 53500, rate_percent: 17.5}
+        - {lower: 53500, upper: 78100, rate_percent: 30.0}
+        - {lower: 78100, upper: 180000, rate_percent: 33.0}
+        - {lower: 180000, upper: null, rate_percent: 39.0}
+      secondary_flat_rates_percent: {SB: 10.5, S: 17.5, SH: 30.0, ST: 33.0, SA: 39.0}
+      acc_earners_levy: {rate_percent: 1.83, earnings_cap: 160244.00}  # verified — 2027-28 year (§5.4)
+      supported_codes: [M, SB, S, SH, ST, SA]
+      unsupported_codes_hard_refuse: [ME, CAE, EDW, NSW, WT, STC]
+    effective_from: 2027-04-01
+    effective_to: null
+
+  # --- ESCT (employer superannuation contribution tax) ---------------------
+  # A withholding on the EMPLOYER's KiwiSaver (and other superannuation)
+  # cash contributions, banded by the employee's ESCT rate-relevant
+  # income for the PREVIOUS year (estimate permitted for employees not
+  # employed the full previous year).
+  - jurisdiction: NZL
+    code: nz_esct
+    name: "ESCT — employer superannuation contribution tax (banded on ESCT rate-relevant income)"
+    withholding_type: wage_paye  # closest available enum — ESCT is a payroll-collected withholding on the employer contribution, remitted with PAYE via payday filing
+    formula_type: bracketed
+    parameters:
+      basis: >-
+        ESCT rate-relevant income = employee's salary/wages + gross
+        employer superannuation cash contributions for the previous tax
+        year (or an estimate for a partial year). ESCT applies to the
+        GROSS employer contribution; the fund receives the contribution
+        net of ESCT.
+      bands:  # 2025-26 (verified; the competing $84,000 figure is wrong per §5.4)
+        - {lower: 0, upper: 18720, rate_percent: 10.5}
+        - {lower: 18720, upper: 64200, rate_percent: 17.5}
+        - {lower: 64200, upper: 93720, rate_percent: 30.0}
+        - {lower: 93720, upper: 216000, rate_percent: 33.0}
+        - {lower: 216000, upper: null, rate_percent: 39.0}
+    effective_from: 2025-04-01
+    effective_to: null
+
+  # --- Student loan ---------------------------------------------------------
+  - jurisdiction: NZL
+    code: nz_student_loan
+    name: "Student loan repayment deduction (SL suffix) — 12% over the pay-period repayment threshold"
+    withholding_type: wage_paye
+    formula_type: flat_rate
+    parameters:
+      rate_percent: 12.0
+      annual_repayment_threshold: 24128.00  # verified for the 2026 tax year (§5.4); earlier-year figures not independently verified
+      note: >-
+        The pay-period threshold (annual / 52, 26 or 12) applies to
+        PRIMARY income (M SL); secondary SL codes deduct 12% from the
+        whole secondary income with no threshold.
+    effective_from: 2025-04-01
+    effective_to: null
+
+  # --- RWT (resident withholding tax) ---------------------------------------
+  - jurisdiction: NZL
+    code: nz_rwt_interest
+    name: "RWT on interest — elective 10.5/17.5/30/33/39%, default 33% (individuals), 28% (companies), 45% no-IRD-number"
+    withholding_type: interest
+    formula_type: flat_rate
+    parameters:
+      elective_rates_percent: [10.5, 17.5, 30.0, 33.0, 39.0]
+      default_rate_percent_individual: 33.0
+      default_rate_percent_company: 28.0
+      no_ird_number_rate_percent: 45.0
+    effective_from: 2025-04-01
+    effective_to: null
+
+  - jurisdiction: NZL
+    code: nz_rwt_dividend
+    name: "RWT on dividends — flat 33% less attached imputation credits"
+    withholding_type: dividend
+    formula_type: flat_rate
+    parameters:
+      rate_percent: 33.0
+      note: "RWT = 33% of (dividend + imputation credits) - imputation credits attached."
+    effective_from: 2025-04-01
+    effective_to: null
+
+  # --- NRWT (non-resident withholding tax) — DOMESTIC rates only ------------
+  # DTA overrides per country are a build-time item the research pass
+  # did NOT fetch — PARKED (out of scope per the build brief). These are
+  # the domestic default rates only; a consuming service MUST check the
+  # applicable DTA before relying on them for an actual payment.
+  - jurisdiction: NZL
+    code: nz_nrwt
+    name: "NRWT — domestic default rates (DTA overrides NOT seeded — parked)"
+    withholding_type: non_resident
+    formula_type: flat_rate
+    parameters:
+      dividends_percent: 30.0
+      dividends_fully_imputed_percent: 15.0
+      dividends_fully_imputed_10pct_holder_percent: 5.0
+      interest_percent: 15.0
+      interest_reduced_percent: 10.0
+      royalties_percent: 15.0
+      royalties_reduced_percent: [10.0, 5.0]
+      note: "Domestic-law rates per §5.5; treaty (DTA) rates override per country and are deliberately not seeded."
+    effective_from: 2025-04-01
+    effective_to: null

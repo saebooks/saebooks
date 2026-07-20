@@ -81,6 +81,17 @@ async def _apply_file(session: AsyncSession, path: Path) -> int:
         doc = yaml.safe_load(f)
     if not isinstance(doc, dict):
         raise ValueError(f"{path}: top-level YAML must be a mapping")
+    # Auxiliary seed files that are NOT reference-DB tables opt out with an
+    # explicit ``reference_seed: false`` marker and are skipped by this loader
+    # (they are loaded directly off disk by the service that owns them — e.g.
+    # ``kmdtyyp_mapping.yaml`` is a flat KMDTYYP2026ap map read by
+    # ``services.lodgement.kmd_2027.kmdtyyp``, not a reference table). This lets
+    # such a file live alongside the real reference seeds in a jurisdiction dir
+    # (where a maintainer expects to find EE seed data) without the glob in
+    # ``_iter_yaml_files`` choking on its missing ``table``.
+    if doc.get("reference_seed") is False:
+        logger.debug("seed: %s → skipped (reference_seed: false)", path.name)
+        return 0
     table_name = doc.get("table")
     keys = doc.get("key") or []
     rows = doc.get("rows") or []

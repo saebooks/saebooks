@@ -22,13 +22,14 @@ from saebooks.models.contact import Contact
 from saebooks.models.credit_note import CreditNote, CreditNoteStatus
 from saebooks.models.department import CostCentre, Department
 from saebooks.models.invoice import Invoice, InvoiceLine, InvoiceStatus
-from saebooks.models.payment import Payment, PaymentAllocation, PaymentStatus
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
+from saebooks.models.payment import Payment, PaymentAllocation, PaymentStatus
 from saebooks.models.project import Project
 from saebooks.models.recurring_invoice import (
     RecurrenceStatus,
     RecurringInvoice,
 )
+from saebooks.money import money_quantum
 
 # Journal-entry statuses that contribute to GL balances in reports.
 #
@@ -1373,7 +1374,7 @@ async def cashflow_forecast(
                 ln.quantity * ln.unit_price
                 * (Decimal("1") - ln.discount_pct / Decimal("100"))
             )
-            total_per_run += line_sub.quantize(Decimal("0.01"))
+            total_per_run += line_sub.quantize(money_quantum(2))
         if total_per_run <= 0:
             continue
         run = tpl.next_run

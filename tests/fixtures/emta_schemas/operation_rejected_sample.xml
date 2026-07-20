@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<operationRejected>
+  <requestId>c99bbd83-28f8-48a8-ad2e-02fcad97804f</requestId>
+  <xmlError>
+    <errorDescription>Element 'foo': This element is not expected under declarationBody.</errorDescription>
+  </xmlError>
+  <functionalError>
+    <errorPointer>KMD_4</errorPointer>
+    <originalAttributeValue>-5.00</originalAttributeValue>
+    <errorDescription>Box 4 taxable value must not be negative.</errorDescription>
+  </functionalError>
+</operationRejected>

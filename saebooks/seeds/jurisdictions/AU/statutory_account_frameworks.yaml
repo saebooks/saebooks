@@ -1,0 +1,20 @@
+# Australian statutory chart-of-accounts frameworks (M1.5 · T10b).
+# Australia mandates NO chart-of-accounts numbering plan — AASB/ASIC set
+# financial-reporting standards, not account numbers. The single AU row
+# records that fact explicitly (is_legally_mandated: false): the engine's
+# AU chart_template rows are a recommended convention, and AU companies
+# keep companies.statutory_framework_code NULL. This proves AU parity —
+# registering the framework registry changes no AU behaviour.
+table: statutory_account_frameworks
+key: [jurisdiction, code]
+rows:
+  - jurisdiction: AUS
+    code: general
+    display_name: Australia — general purpose (no mandated numbering plan)
+    is_legally_mandated: false
+    mandating_authority: AASB / ASIC (reporting standards only — no mandated account numbering)
+    description: >-
+      Australia has no statutory chart-of-accounts numbering plan (unlike
+      Germany's SKR03/SKR04 or France's Plan Comptable Général). The AU
+      chart_template rows are the engine's recommended default chart, not a
+      legal requirement, so AU companies leave statutory_framework_code NULL.

@@ -1,0 +1,371 @@
+# Lithuania FR0600 (PVM deklaracija — the monthly VAT return) box
+# definitions, filed through VMI's EDS by the 25th of the following
+# month. Form version 03, mandatory for tax periods from 2026-01-01
+# (VMI head order No VA-129 of 2025-12-22, amending base order VA-29 of
+# 2004-03-01) — the version-03 change is the new box 29A for the 12%
+# rate introduced by Law No XV-287 (in force 2026-01-01).
+#
+# Box semantics pulled 2026-07-12 from VMI's official filling guide
+# KM1739 ("Mokestinio laikotarpio PVM deklaracijos FR0600 formos
+# užpildymas"), cross-checked against the 2026-02 FR0600(3) field
+# mapping published by an ERP localisation (independent secondary).
+#
+# Grammar: see saebooks/seeds/jurisdictions/AU/tax_return_box_definitions.yaml
+# for the full ``aggregation`` grammar this file uses, parsed by
+# saebooks.services.tax_return_generator._parse_box_definition.
+# feeder_tax_codes are company-side TaxCode.reporting_type tags (NOT
+# RefTaxCode.code strings) — this directory's tax_codes.yaml header
+# defines the LT convention: standard / reduced_12 / reduced_9_legacy /
+# reduced_5 / exempt / zero_export / zero_ic_goods / zero_other /
+# outside_lt / out_of_scope / rc_domestic_supply / rc_domestic_acq /
+# rc_eu_acq_goods / rc_eu_acq_services / rc_services_noneu /
+# input_import.
+#
+# Shape note (contrast with the EE KMD): FR0600 combines all domestic
+# taxed supplies into ONE taxable-value box (11) and rate-splits the
+# OUTPUT-VAT side instead (29 = 21%, 29A = 12%, 30 = 9% transitional,
+# 31 = 5%) — the mirror image of KMD's rate-split bases + rate-formula
+# VAT. The rate-specific reporting_type tag (standard/reduced_12/...)
+# is therefore the discriminator; no "@<rate>" pins are needed, and the
+# LT engine needs no supported-rate refusal for the ORDINARY path.
+#
+# Reverse charge (the EE/UK two-component fan-out precedent):
+# jurisdictions.lt.tax.LTTaxEngine emits an output + input component
+# pair for a line tagged rc_eu_acq_goods / rc_eu_acq_services /
+# rc_services_noneu / rc_domestic_acq. Output-role components feed the
+# role-keyed self-assessment boxes (34 / 32 / 32 / 33 respectively —
+# NONE of which is rate-split on the form, so no @rate pin, mirroring
+# VAT100 rather than KMD); input-role components feed box 25 via the
+# internal 25_RC leg and box 35 through the deduction formula.
+#
+# Deliberately MANUAL boxes (each with its reason inline): 14, 15, 16,
+# 22, 27, 28. Boxes the engine computes: 11-13, 17-21, 23-26, 29-35, 36.
+#
+# Box 36 formula caveat: the FR0600 rules' printed formula wording was
+# NOT verbatim-verified (the component list was). The formula below —
+# 29 + 29A + 30 + 31 + 32 + 33 + 34 + 27 − 35 — includes manual box 27
+# on the payable side AND in box 35's deduction, so the two legs cancel
+# and box 36's VALUE is correct under either reading of the printed
+# formula (with or without 27); for the common no-postponed-import case
+# 27 = 0 and the formula reduces to the uncontested core. Flagged in
+# the module build report.
+#
+# Internal-only ledger legs use display_order >= 100 (the EE
+# "_DOMESTIC"/"_RC" convention) — they are not real FR0600 box codes.
+table: tax_return_box_definitions
+key: [jurisdiction, return_type, box_code]
+rows:
+  # --- Part I — supplies (taxable-value boxes, sales side) -------------
+  - jurisdiction: LTU
+    return_type: FR0600
+    box_code: "11"
+    box_label: "PVM apmokestinami sandoriai — taxable value of domestic supplies at standard and reduced rates"
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["standard", "reduced_12", "reduced_9_legacy", "reduced_5"]
+    display_order: 1
+
+  - jurisdiction: LTU
+    return_type: FR0600
+    box_code: "12"
+    box_label: "Supplies where the buyer withholds VAT under Art 96 (domestic reverse charge — SELLER side)"
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["rc_domestic_supply"]
+    display_order: 2
+
+  - jurisdiction: LTU
+    return_type: FR0600
+    box_code: "13"
+    box_label: "PVM neapmokestinami sandoriai — VAT-exempt supplies (Arts 20-33)"
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["exempt"]
+    display_order: 3
+
+  - jurisdiction: LTU
+    return_type: FR0600
+    box_code: "14"
+    box_label: "Privatiems poreikiams suvartotos prekės/paslaugos — private-use consumption (taxable value)"
+    # MANUAL by design: deemed-supply valuation (cost/market per Art 15)
+    # is not a ledger income/purchase-bucket aggregation this engine
+    # expresses — same class as EE KMD's manual adjustment boxes.
+    aggregation: manual
+    display_order: 4
+
+  - jurisdiction: LTU
+    return_type: FR0600
+    box_code: "15"
+    box_label: "Pasigamintas ilgalaikis materialusis turtas — self-produced tangible fixed assets (taxable value)"
+    # MANUAL by design: self-supply of self-produced fixed assets is a
+    # deemed transaction with no posted sale line to aggregate.
+    aggregation: manual
+    display_order: 5
+
+  - jurisdiction: LTU
+    return_type: FR0600
+    box_code: "16"
+    box_label: "Marža — taxable margin under the special (margin) schemes (positive margins only)"
+    # MANUAL by design: margin-scheme taxable value = margin, not the
+    # posted line amount; no margin-tracking source model exists.
+    aggregation: manual
+    display_order: 6
+
+  - jurisdiction: LTU
+    return_type: FR0600
+    box_code: "17"
+    box_label: "Prekių eksportas (0%) — export of goods (Art 41)"
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["zero_export"]
+    display_order: 7
+
+  - jurisdiction: LTU
+    return_type: FR0600
+    box_code: "18"
+    box_label: "ES PVM mokėtojams tiekiamos prekės (0%) — intra-EU supplies of goods (Art 49(1))"
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["zero_ic_goods"]
+    display_order: 8
+
+  - jurisdiction: LTU
+    return_type: FR0600
+    box_code: "19"
+    box_label: "Kiti 0% apmokestinami sandoriai — other zero-rated supplies (Arts 42-48, 49(2)-(3), 51-53)"
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["zero_other"]
+    display_order: 9
+
+  - jurisdiction: LTU
+    return_type: FR0600
+    box_code: "20"
+    box_label: "Sandoriai už Lietuvos ribų / ne PVM objektas — supplies outside Lithuania (incl. OSS-declared distance sales)"
+    aggregation: "sum_taxable_for_codes:income:gst_exclusive"
+    feeder_tax_codes: ["outside_lt"]
+    display_order: 10
+
+  # --- Part II — acquisitions (taxable-value boxes, purchase side) -----
+  - jurisdiction: LTU
+    return_type: FR0600
+    box_code: "21"
+    box_label: "Iš ES įsigytos prekės — intra-EU acquisitions of goods (taxable value)"
+    # Purchase-bucket net of the RC line (the EE KMD box 6/6.1
+    # precedent — the base reads off the posted purchase line directly;
+    # the self-assessed VAT itself rides the role-keyed box 34).
+    aggregation: "sum_taxable_for_codes:purchase:gst_exclusive"
+    feeder_tax_codes: ["rc_eu_acq_goods"]
+    display_order: 11
+
+  - jurisdiction: LTU
+    return_type: FR0600
+    box_code: "22"
+    box_label: "Trikampės prekybos įsigijimai — EU acquisitions for triangular trade (intermediary leg)"
+    # MANUAL by design: triangulation is not modelled this wave (no
+    # triangulation reporting_type tag; rare case, flagged not dropped).
+    aggregation: manual
+    display_order: 12
+
+  - jurisdiction: LTU
+    return_type: FR0600
+    box_code: "23"
+    box_label: "Iš užsienio asmenų įsigytos paslaugos (95 str.) — services acquired from foreign persons, buyer self-assesses (taxable value)"
+    aggregation: "sum_taxable_for_codes:purchase:gst_exclusive"
+    feeder_tax_codes: ["rc_eu_acq_services", "rc_services_noneu"]
+    display_order: 13
+
+  - jurisdiction: LTU
+    return_type: FR0600
+    box_code: "24"
+    box_label: "iš jų: įsigyta iš ES PVM mokėtojų — of which acquired from EU VAT payers (subset of box 23)"
+    aggregation: "sum_taxable_for_codes:purchase:gst_exclusive"
+    feeder_tax_codes: ["rc_eu_acq_services"]
+    display_order: 14
+
+  # --- Part III — input/import VAT (VAT-amount boxes) ------------------
+  - jurisdiction: LTU
+    return_type: FR0600
+    box_code: "25"
+    box_label: "Pirkimo PVM — input VAT on purchased goods/services (incl. self-assessed VAT from boxes 32/33/34; excl. boxes 26/27)"
+    aggregation: formula
+    formula: "FR0600:25_DOMESTIC + FR0600:25_RC"
+    display_order: 15
+
+  - jurisdiction: LTU
+    return_type: FR0600
+    box_code: "25_DOMESTIC"
+    box_label: "(internal) input VAT on ordinary domestic purchases — all rate buckets"
+    aggregation: "sum_tax_amount_for_codes:purchase"
+    feeder_tax_codes: ["standard", "reduced_12", "reduced_9_legacy", "reduced_5"]
+    display_order: 101
+
+  - jurisdiction: LTU
+    return_type: FR0600
+    box_code: "25_RC"
+    box_label: "(internal) self-assessed input VAT — reverse-charge fan-out legs (EU acquisitions, Art 95 services, Art 96 domestic)"
+    # Role-based ("input") bucket — matches the INPUT-role component of
+    # the LT engine's reverse-charge fan-out (the EE 5_RC / UK 4_RC
+    # precedent). The output-role twins ride boxes 32/33/34.
+    aggregation: "sum_tax_amount_for_codes:input"
+    feeder_tax_codes: ["rc_eu_acq_goods", "rc_eu_acq_services", "rc_services_noneu", "rc_domestic_acq"]
+    display_order: 102
+
+  - jurisdiction: LTU
+    return_type: FR0600
+    box_code: "26"
+    box_label: "Importo PVM, sumokėtas muitinei — import VAT paid/payable to customs"
+    aggregation: "sum_tax_amount_for_codes:purchase"
+    feeder_tax_codes: ["input_import"]
+    display_order: 16
+
+  - jurisdiction: LTU
+    return_type: FR0600
+    box_code: "27"
+    box_label: "Importo PVM, kurio įskaitymą kontroliuoja VMI — import VAT under postponed accounting (VMI-controlled offset)"
+    # MANUAL by design: the postponed-import scheme ("importo PVM
+    # įskaitymas") has no posting tag this wave. A filer-entered value
+    # (generate_return manual_values) flows into BOTH box 36's payable
+    # side and box 35's deduction below, so the two legs cancel —
+    # cash-neutral, exactly the scheme's real effect — and box 36 stays
+    # correct whether or not the filer supplies it (the EE KMD box 4-1
+    # explicit-zero precedent).
+    aggregation: manual
+    display_order: 17
+
+  # --- Part IV ----------------------------------------------------------
+  - jurisdiction: LTU
+    return_type: FR0600
+    box_code: "28"
+    box_label: "Atskaitos procentas — pro-rata input-VAT deduction percentage for mixed activity (Art 60(1); >=95% -> 100)"
+    # MANUAL by design: a policy percentage, not a ledger aggregation.
+    # NOTE: box 35 below computes the FULL-deduction case only — the
+    # pro-rata scaling of box 35 by this percentage is NOT wired (the
+    # EE §30 partial-deduction posture: parked, engine reads
+    # extra["deductible_fraction"] per-line when a caller supplies it).
+    aggregation: manual
+    display_order: 18
+
+  # --- Part V — output VAT, deduction, result (VAT-amount boxes) --------
+  - jurisdiction: LTU
+    return_type: FR0600
+    box_code: "29"
+    box_label: "Standartinio tarifo pardavimo PVM — output VAT at the standard rate (21%)"
+    aggregation: "sum_tax_amount_for_codes:income"
+    feeder_tax_codes: ["standard"]
+    display_order: 19
+
+  - jurisdiction: LTU
+    return_type: FR0600
+    box_code: "29A"
+    box_label: "Lengvatinio 12% tarifo pardavimo PVM — output VAT at the 12% reduced rate (NEW in FR0600 version 03, from 2026-01-01)"
+    aggregation: "sum_tax_amount_for_codes:income"
+    feeder_tax_codes: ["reduced_12"]
+    display_order: 20
+
+  - jurisdiction: LTU
+    return_type: FR0600
+    box_code: "30"
+    box_label: "Lengvatinio 9% tarifo pardavimo PVM — output VAT at 9% (from 2026: transitional adjustments/credit notes of pre-2026 supplies only)"
+    aggregation: "sum_tax_amount_for_codes:income"
+    feeder_tax_codes: ["reduced_9_legacy"]
+    display_order: 21
+
+  - jurisdiction: LTU
+    return_type: FR0600
+    box_code: "31"
+    box_label: "Lengvatinio 5% tarifo pardavimo PVM — output VAT at the 5% reduced rate"
+    aggregation: "sum_tax_amount_for_codes:income"
+    feeder_tax_codes: ["reduced_5"]
+    display_order: 22
+
+  - jurisdiction: LTU
+    return_type: FR0600
+    box_code: "32"
+    box_label: "Pardavimo PVM (95 str.) — output VAT self-assessed on services (and certain goods) from foreign persons, Art 95"
+    aggregation: "sum_tax_amount_for_codes:output"
+    feeder_tax_codes: ["rc_eu_acq_services", "rc_services_noneu"]
+    display_order: 23
+
+  - jurisdiction: LTU
+    return_type: FR0600
+    box_code: "33"
+    box_label: "Pardavimo PVM (96 str.) — output VAT self-assessed under the domestic reverse charge (construction, metal waste/scrap — BUYER side)"
+    aggregation: "sum_tax_amount_for_codes:output"
+    feeder_tax_codes: ["rc_domestic_acq"]
+    display_order: 24
+
+  - jurisdiction: LTU
+    return_type: FR0600
+    box_code: "34"
+    box_label: "Pardavimo PVM iš ES įsigytų prekių — output VAT self-assessed on intra-EU acquisitions of goods (on the box 21 value)"
+    # Role-keyed, NOT rate-split (single box regardless of the goods'
+    # domestic rate — contrast KMD's per-rate RC legs), so no @rate pin
+    # and no supported-rate refusal is needed in the LT engine.
+    aggregation: "sum_tax_amount_for_codes:output"
+    feeder_tax_codes: ["rc_eu_acq_goods"]
+    display_order: 25
+
+  - jurisdiction: LTU
+    return_type: FR0600
+    box_code: "35"
+    box_label: "Atskaitomas PVM — deductible input VAT (from boxes 25 + 26 + 27; FULL deduction — pro-rata box 28 scaling not wired, see box 28)"
+    aggregation: formula
+    formula: "FR0600:25 + FR0600:26 + FR0600:27"
+    display_order: 26
+
+  - jurisdiction: LTU
+    return_type: FR0600
+    box_code: "36"
+    box_label: "Mokėtinas į biudžetą (+) arba grąžintinas iš biudžeto (−) PVM = 29 + 29A + 30 + 31 + 32 + 33 + 34 + 27 − 35"
+    # SIGNED result (negative = refundable, Art 91) — deliberately NOT
+    # split into a max(0,...) payable/refund pair: the official form has
+    # ONE box 36 carrying a minus sign, unlike EE's separate 12/13.
+    # Box 27 appears on both sides (here and inside 35) and cancels —
+    # see this file's header for why that makes the UNVERIFIED printed-
+    # formula wording a non-issue for the box's value.
+    aggregation: formula
+    formula: "FR0600:29 + FR0600:29A + FR0600:30 + FR0600:31 + FR0600:32 + FR0600:33 + FR0600:34 + FR0600:27 - FR0600:35"
+    display_order: 27
+
+  # =====================================================================
+  # i.SAF — the monthly registers of issued and received VAT invoices
+  # submitted through i.MAS (XML, a subset of the Lithuanian SAF-T
+  # structure), due the 20th of the following month; a nil register must
+  # still be submitted. This is a DATA obligation distinct from the
+  # FR0600 return (it feeds VMI's preliminary-FR0600 and counterparty
+  # cross-matching services). No ledger-bucket aggregation shape exists
+  # for an invoice-level register in this engine — seeded as MANUAL
+  # structural rows only (the EE KMD-INF Part A/B convention). The
+  # register EXPORTER is a later phase; its architectural precedent is
+  # the EE data-based-KMD exporter (services/lodgement/kmd_2027/).
+  # =====================================================================
+  - jurisdiction: LTU
+    return_type: ISAF
+    box_code: ISSUED
+    box_label: >-
+      i.SAF — išrašytų PVM sąskaitų faktūrų registras (register of
+      ISSUED VAT invoices; invoice-level XML listing, monthly, due the
+      20th; exporter is a later phase — see kmd_2027 precedent)
+    aggregation: manual
+    display_order: 1
+
+  - jurisdiction: LTU
+    return_type: ISAF
+    box_code: RECEIVED
+    box_label: >-
+      i.SAF — gautų PVM sąskaitų faktūrų registras (register of
+      RECEIVED VAT invoices; invoice-level XML listing, monthly, due the
+      20th; exporter is a later phase — see kmd_2027 precedent)
+    aggregation: manual
+    display_order: 2
+
+  # =====================================================================
+  # GPM313 — the monthly employer income-tax declaration (the TSD
+  # analogue): payroll data, not a general-ledger income/purchase-bucket
+  # model — MANUAL structural row only (the EE TSD convention). Figures
+  # come from the LT payroll engine's role-tagged results.
+  # =====================================================================
+  - jurisdiction: LTU
+    return_type: GPM313
+    box_code: MAIN
+    box_label: >-
+      GPM313 — mėnesinė pajamų mokesčio deklaracija (monthly employer
+      income-tax declaration, due the 15th of the following month;
+      structural row — payroll data model, not a ledger box vector)
+    aggregation: manual
+    display_order: 1

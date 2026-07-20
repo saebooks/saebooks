@@ -54,7 +54,13 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
-from saebooks.services.tax_engine.au import _INPUT_TYPES, _OUTPUT_TYPES
+from saebooks.money import money_quantum
+from saebooks.services.tax_engine.types import (
+    INPUT_ACCOUNT_TYPES as _INPUT_TYPES,
+)
+from saebooks.services.tax_engine.types import (
+    OUTPUT_ACCOUNT_TYPES as _OUTPUT_TYPES,
+)
 from saebooks.services.tax_engine.types import (
     PostingContext,
     PostingError,
@@ -103,7 +109,7 @@ class ReverseChargeRateNotSupportedError(PostingError):
     comment above)."""
 
 
-_TWO_PLACES = Decimal("0.01")
+_TWO_PLACES = money_quantum(2)
 
 
 class EETaxEngine:

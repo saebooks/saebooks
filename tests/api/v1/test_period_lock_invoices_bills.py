@@ -50,6 +50,17 @@ async def _create_locked_company() -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
             id=cid,
             tenant_id=_DEFAULT_TENANT_ID,
             name=f"CIVL4 Corp {cid.hex[:6]}",
+            # Explicit AU (jurisdiction/currency/CoA). The core Company model
+            # default flipped to the neutral "XX"/"XXX"/"xx/default" sentinels
+            # in Job G; an XXX-base company makes the default-AUD invoice/bill
+            # payload look like a foreign currency, so gate_non_base_currency()
+            # 404s before the period-lock check ever runs. This fixture always
+            # intended an ordinary AUD company — make that explicit (restores
+            # the byte-identical pre-Job-G AU default), matching how the other
+            # AU-relying tests were made explicit.
+            jurisdiction="AU",
+            base_currency="AUD",
+            coa_template_key="au/default",
         ))
         await session.flush()
 

@@ -43,6 +43,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from saebooks.db import Base
+from saebooks.db_types import Money
 from saebooks.models._scope import CompanyScoped
 
 if TYPE_CHECKING:
@@ -91,16 +92,16 @@ class Invoice(CompanyScoped, Base):
         default=InvoiceStatus.DRAFT,
     )
     subtotal: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     tax_total: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     total: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     amount_paid: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     # --- Foreign-currency header (Batch GG/2) ------------------------------
     # ``currency`` is the document currency (ISO 4217). ``fx_rate`` is
@@ -116,16 +117,16 @@ class Invoice(CompanyScoped, Base):
         Numeric(18, 8), nullable=False, default=Decimal("1")
     )
     base_subtotal: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     base_tax_total: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     base_total: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     base_amount_paid: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     # Real-estate commission timing (RLES-6). When set, the GL posting
     # uses this date as entry_date instead of issue_date so BAS period
@@ -241,13 +242,13 @@ class InvoiceLine(Base):
         Numeric(6, 2), nullable=False, default=Decimal("0")
     )
     line_subtotal: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     line_tax: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     line_total: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     # Optional project tag for P&L-by-project / job-costing reports.
     project_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -269,7 +270,7 @@ class InvoiceLine(Base):
     # grossed-up income can be calculated without a separate GL account.
     # franking_percentage is the % of the dividend that is franked (0-100);
     # franking_credit_amount is the absolute dollar value of the tax offset.
-    franking_credit_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+    franking_credit_amount: Mapped[Decimal | None] = mapped_column(Money())
     franking_percentage: Mapped[Decimal | None] = mapped_column(Numeric(7, 4))
     # Deferred-revenue support (FITC-3). When set, posting routes this line's
     # income portion to Unearned Income (2-1760) rather than the income
@@ -283,7 +284,7 @@ class InvoiceLine(Base):
     # line's tax code has reporting_type="margin_scheme", the GST is
     # 1/11 × (line_subtotal − margin_acq_cost) rather than rate % of
     # subtotal. NULL for all non-margin-scheme lines.
-    margin_acq_cost: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+    margin_acq_cost: Mapped[Decimal | None] = mapped_column(Money())
     # Retention percentage (CIVL-2). Civil/construction progress claims
     # often withhold a percentage (e.g. 5%) pending practical completion.
     # At posting, the Dr AR side is split: Trade Debtors receives

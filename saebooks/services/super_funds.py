@@ -1,7 +1,31 @@
 """Super-fund service — CRUD + company-default flag enforcement.
 
 APRA funds carry a USI (Unique Superannuation Identifier, 11 chars).
-SMSFs carry ABN + ESA + bank account details (encrypted).
+SMSFs carry ABN + ESA + bank account details (encrypted). Those
+vehicle-specific rules are AU law and live in the AU jurisdiction
+module (``jurisdictions.au.super_funds``, Phase 1); this module keeps
+the jurisdiction-neutral mechanics (CRUD, default-flag invariant,
+encrypted bank fields).
+
+Neutral-core strip (Job D): this module used to reach into
+``jurisdictions.au.super_funds`` directly with a lazy import inside
+``create()`` — a core→module edge, and it applied AU's SMSF/USI rules
+to every company regardless of jurisdiction (super funds were "AU-only
+vehicles today", per the removed docstring note that used to live on
+``create()``). It now dispatches vehicle-law validation through a tiny
+per-jurisdiction registry (``register_retirement_validator``/
+``_validate_retirement_account`` below), the same registration-inversion
+shape as ``services.payroll``'s engine/posting-profile registries: each
+jurisdiction module self-registers its validator via
+``services.jurisdiction_modules.register_jurisdiction_module(...,
+retirement_validator=...)`` at import time (see
+``jurisdictions/au/__init__.py``); an unregistered jurisdiction
+(including the neutral ``"XX"`` sentinel, or any non-AU company today)
+degrades to a no-op — no vehicle-law rule enforced, same null-object
+contract as ``payroll.get_payroll_engine``. AU behaviour is
+byte-identical: every existing company defaults to
+``jurisdiction="AU"`` and resolves to the exact same
+``validate_fund_fields`` call as before, just reached generically.
 
 The "exactly one default per company" invariant is enforced via a
 partial unique index in the migration:
@@ -15,6 +39,7 @@ partial index never sees two defaults.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -22,6 +47,7 @@ from typing import Any
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from saebooks.models.company import Company
 from saebooks.models.super_fund import SuperFund
 from saebooks.services import crypto
 
@@ -32,6 +58,67 @@ class SuperFundError(Exception):
     def __init__(self, message: str, *, code: str = "super_fund_error") -> None:
         super().__init__(message)
         self.code = code
+
+
+# ---------------------------------------------------------------------------
+# Retirement-vehicle-law validation registry (neutral-core strip Job D)
+# ---------------------------------------------------------------------------
+# Keyed on ``Company.jurisdiction``, exactly like ``services.payroll``'s
+# ``_REGISTRY``/``_POSTING_PROFILES``. Starts empty; populated by each
+# jurisdiction module's self-registration
+# (``jurisdiction_modules.register_jurisdiction_module(...,
+# retirement_validator=...)``). Unregistered jurisdictions degrade to
+# "validate nothing" — a generic retirement account is always creatable
+# even with no vehicle-law module bolted on.
+_RETIREMENT_VALIDATORS: dict[str, Callable[..., None]] = {}
+
+# One-shot guard for the lazy jurisdiction-bootstrap import below — same
+# per-reader-flag idiom as ``services.payroll._modules_loaded`` (the
+# app-wide ``bootstrap.jurisdictions.ensure_loaded()`` it calls is
+# itself idempotent; this local flag just avoids re-entering it on
+# every ``create()`` call).
+_modules_loaded = False
+
+
+def register_retirement_validator(
+    jurisdiction: str, validator: Callable[..., None]
+) -> None:
+    """Register (or replace) the retirement-account vehicle-law
+    validator for a jurisdiction. Called by that jurisdiction's
+    self-registration, never by core code directly.
+    """
+    _RETIREMENT_VALIDATORS[jurisdiction] = validator
+
+
+def _ensure_modules_registered() -> None:
+    global _modules_loaded
+    if not _modules_loaded:
+        # Local import to keep this module import-light and avoid a
+        # module-level cycle — same rationale as
+        # ``services.payroll._ensure_modules_registered``.
+        from saebooks.bootstrap.jurisdictions import ensure_loaded
+
+        ensure_loaded()
+        _modules_loaded = True
+
+
+def _validate_retirement_account(
+    jurisdiction: str,
+    *,
+    is_smsf: bool,
+    usi: str | None,
+    employer_abn: str | None,
+    esa: str | None,
+) -> None:
+    """Dispatch vehicle-law validation to the company's jurisdiction
+    module. Registered code → that module's validator; anything else
+    (the ``"XX"`` sentinel, or a jurisdiction with no retirement-vehicle
+    module) is a no-op — never raises.
+    """
+    _ensure_modules_registered()
+    validator = _RETIREMENT_VALIDATORS.get(jurisdiction)
+    if validator is not None:
+        validator(is_smsf=is_smsf, usi=usi, employer_abn=employer_abn, esa=esa)
 
 
 def _encrypt_opt(value: str | None) -> str | None:
@@ -70,21 +157,24 @@ async def create(
     is_default: bool = False,
     tenant_id: uuid.UUID = _DEFAULT_TENANT_ID,
 ) -> SuperFund:
-    # Validate combinations early so the CHECK constraint isn't the first error.
-    if is_smsf:
-        if not (employer_abn and esa):
-            raise SuperFundError(
-                "SMSF requires employer_abn + esa", code="smsf_missing_fields"
-            )
-    else:
-        if not usi:
-            raise SuperFundError(
-                "APRA-regulated fund requires usi", code="apra_missing_usi"
-            )
-        if len(usi) != 11:
-            raise SuperFundError(
-                f"USI must be exactly 11 chars (got {len(usi)})", code="usi_bad_length"
-            )
+    # Validate combinations early so the CHECK constraint isn't the first
+    # error. The USI/SMSF rules are AU vehicle law; dispatch through the
+    # per-jurisdiction registry (see module docstring) rather than
+    # importing the AU package directly — resolves ``Company.jurisdiction``
+    # exactly like ``journal._apply_tax_treatment``/``pay_runs_v2._compute``
+    # do, defaulting to "AU" when the company row can't be found (matches
+    # ``Company.jurisdiction``'s own column default). Every existing
+    # company is jurisdiction="AU" today, so this resolves to the exact
+    # same ``validate_fund_fields`` call as before — byte-identical.
+    company_jurisdiction = (
+        await session.execute(
+            sa.select(Company.jurisdiction).where(Company.id == company_id)
+        )
+    ).scalar_one_or_none() or "AU"
+    _validate_retirement_account(
+        company_jurisdiction,
+        is_smsf=is_smsf, usi=usi, employer_abn=employer_abn, esa=esa,
+    )
 
     fund = SuperFund(
         company_id=company_id,

@@ -98,6 +98,7 @@ from saebooks.models.fixed_asset import FixedAsset
 from saebooks.models.invoice import Invoice, InvoiceLine, InvoiceStatus
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
 from saebooks.models.tax_code import TaxCode
+from saebooks.money import money_quantum
 from saebooks.services import assets as assets_svc
 from saebooks.services import reports as reports_svc
 from saebooks.services.features import (
@@ -797,10 +798,10 @@ _TAXABLE_REPORTING_TYPE = "taxable"
 # GST-inclusive/exclusive treatment differs — see docstring below).
 # Imported under aliases to keep this module's local _INCOME_TYPES/
 # _EXPENSE_TYPES (used by the other report routes) untouched.
-from saebooks.services.tax_engine.au import (  # noqa: E402
+from saebooks.jurisdictions.au.tax import (  # noqa: E402
     _BAS_INCOME_TYPES as _AU_BAS_INCOME_TYPES,
 )
-from saebooks.services.tax_engine.au import (  # noqa: E402  aliased import, see comment above
+from saebooks.jurisdictions.au.tax import (  # noqa: E402  aliased import, see comment above
     _BAS_PURCHASE_TYPES as _AU_BAS_PURCHASE_TYPES,
 )
 
@@ -830,7 +831,7 @@ async def _bas_aggregate(
     ``tax_return_generator.aggregate_return_boxes``, which sources its
     box recipes (which ``TaxCode.reporting_type`` feeds which box, and
     with what formula) from the SAME jurisdiction-keyed
-    ``TaxReturnBoxDefinition`` rows ``services.tax_engine.au.bas_report``
+    ``TaxReturnBoxDefinition`` rows ``jurisdictions.au.tax.bas_report``
     now reads via ``generate_return`` — no more hardcoded G2/G10 account-
     type-and-reporting-type branching duplicated in this module. G2/G3/
     G10 agree with au.bas_report by construction (continuing the C3
@@ -1039,7 +1040,7 @@ async def bas_summary(
     * 1A/1B come from the GST control accounts (see _bas_gst_amounts).
 
     G2/G10 are computed by ``_bas_aggregate`` using the SAME account-type
-    sets and formulas as ``services.tax_engine.au.bas_report`` so the two
+    sets and formulas as ``jurisdictions.au.tax.bas_report`` so the two
     BAS implementations reconcile by construction (C3).
 
     When registration_effective_date falls within the period, G1 is split:
@@ -1093,13 +1094,13 @@ async def bas_summary(
     # reverse-calculates GST and drifts from the actual ledger when an
     # invoice has GST-free lines, manual rounding adjustments, or any
     # mixed-treatment line.
-    label_1a = gst_sales.quantize(Decimal("0.01"))
+    label_1a = gst_sales.quantize(money_quantum(2))
 
     # 1B: GST credits on purchases — sum of gst_amount on POSTED purchase
     # lines (EXPENSE/COST_OF_SALES/OTHER_EXPENSE/ASSET) in scope. Round-2
     # audit fix #6: previously derived as g11 * 1/11 which is the bug
     # critics 07 + 19 found ($141.82 off in their scenarios).
-    label_1b = gst_purchases.quantize(Decimal("0.01"))
+    label_1b = gst_purchases.quantize(money_quantum(2))
 
     net_gst = label_1a - label_1b
 
@@ -1348,15 +1349,15 @@ def _next_month_depreciation(
         depreciable_base = cost - residual_value
         if depreciable_base <= 0:
             return zero
-        charge = (depreciable_base / Decimal(life_months)).quantize(Decimal("0.01"))
-        return min(charge, remaining).quantize(Decimal("0.01"))
+        charge = (depreciable_base / Decimal(life_months)).quantize(money_quantum(2))
+        return min(charge, remaining).quantize(money_quantum(2))
 
     if model.method == "diminishing_value":
         if model.rate_pct is None or model.rate_pct <= 0:
             return zero
         monthly_rate = model.rate_pct / Decimal("100") / Decimal("12")
-        charge = (current_book_value * monthly_rate).quantize(Decimal("0.01"))
-        return min(charge, remaining).quantize(Decimal("0.01"))
+        charge = (current_book_value * monthly_rate).quantize(money_quantum(2))
+        return min(charge, remaining).quantize(money_quantum(2))
 
     return zero
 
@@ -1430,7 +1431,7 @@ async def depreciation_schedule(
         accum = await assets_svc.cumulative_depreciation_through(
             session, asset, as_of
         )
-        book_val = (asset.cost - accum).quantize(Decimal("0.01"))
+        book_val = (asset.cost - accum).quantize(money_quantum(2))
         fully_dep = book_val <= asset.residual_value
 
         next_month = (
@@ -1802,7 +1803,7 @@ async def budget_vs_actual(
         budget_val = budgets_by_account.get(aid, Decimal("0"))
         variance = actual_val - budget_val
         variance_pct = (
-            float((variance / budget_val * 100).quantize(Decimal("0.01")))
+            float((variance / budget_val * 100).quantize(money_quantum(2)))
             if budget_val != Decimal("0")
             else None
         )
@@ -2034,7 +2035,7 @@ async def ytd_turnover(
     # Look up the company's GST status — if already registered, neither
     # threshold flag fires (the registration obligation is moot).
     company = await session.get(Company, company_id)
-    already_registered = bool(company and company.gst_registered)
+    already_registered = bool(company and company.tax_registered)
 
     _approaching_floor = _GST_THRESHOLD * Decimal("0.80")
     return YTDTurnoverReport(

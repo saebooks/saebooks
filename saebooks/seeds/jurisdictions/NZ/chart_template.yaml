@@ -1,0 +1,55 @@
+# NZ recommended chart of accounts — used at company creation.
+#
+# NOT a state mandate (see statutory_account_frameworks.yaml — NZ has no
+# mandated numbering plan; this is a convenience default, freely
+# deviated from). Numbering follows the engine's own SME convention
+# (1xxx assets, 2xxx liabilities, 3xxx equity, 4xxx income, 5xxx COGS,
+# 6xxx expenses), matching the AU template.
+#
+# IR10 mapping: statutory_framework_code "ir10" +
+# statutory_parent_class = the IR10 part the account rolls into
+# (income / expenses / current assets / fixed assets / current
+# liabilities / equity). statutory_account_code (the per-box IR10 field
+# number) is deliberately NULL — the IR10 box numbering was not
+# extracted in the research pass and is not invented here (parked; a
+# manual IR10 form read fills it in). No mandate claims anywhere.
+#
+# Tax-code defaults reference the codes seeded in tax_codes.yaml.
+table: chart_template
+key: [jurisdiction, account_code]
+rows:
+  - {jurisdiction: NZL, account_code: "1100", account_name: "Bank — operating", account_type: ASSET, display_order: 10, statutory_framework_code: ir10, statutory_parent_class: "current assets"}
+  - {jurisdiction: NZL, account_code: "1110", account_name: "Bank — savings", account_type: ASSET, display_order: 11, statutory_framework_code: ir10, statutory_parent_class: "current assets"}
+  - {jurisdiction: NZL, account_code: "1200", account_name: "Accounts Receivable", account_type: ASSET, display_order: 20, statutory_framework_code: ir10, statutory_parent_class: "current assets"}
+  - {jurisdiction: NZL, account_code: "1300", account_name: "Inventory (trading stock)", account_type: ASSET, display_order: 30, statutory_framework_code: ir10, statutory_parent_class: "current assets"}
+  - {jurisdiction: NZL, account_code: "1400", account_name: "GST Receivable", account_type: ASSET, display_order: 40, statutory_framework_code: ir10, statutory_parent_class: "current assets"}
+  - {jurisdiction: NZL, account_code: "1500", account_name: "Prepayments", account_type: ASSET, display_order: 50, statutory_framework_code: ir10, statutory_parent_class: "current assets"}
+  - {jurisdiction: NZL, account_code: "1700", account_name: "Plant & Equipment — at cost", account_type: ASSET, display_order: 70, statutory_framework_code: ir10, statutory_parent_class: "fixed assets"}
+  - {jurisdiction: NZL, account_code: "1710", account_name: "Plant & Equipment — accumulated depreciation", account_type: ASSET, display_order: 71, statutory_framework_code: ir10, statutory_parent_class: "fixed assets"}
+  - {jurisdiction: NZL, account_code: "2100", account_name: "Accounts Payable", account_type: LIABILITY, display_order: 100, statutory_framework_code: ir10, statutory_parent_class: "current liabilities"}
+  - {jurisdiction: NZL, account_code: "2200", account_name: "GST Payable", account_type: LIABILITY, display_order: 110, statutory_framework_code: ir10, statutory_parent_class: "current liabilities"}
+  - {jurisdiction: NZL, account_code: "2300", account_name: "PAYE & payroll deductions payable (PAYE, student loan, KiwiSaver employee — remitted to Inland Revenue)", account_type: LIABILITY, display_order: 120, statutory_framework_code: ir10, statutory_parent_class: "current liabilities"}
+  - {jurisdiction: NZL, account_code: "2400", account_name: "KiwiSaver employer contributions payable (incl. ESCT — remitted via Inland Revenue)", account_type: LIABILITY, display_order: 130, statutory_framework_code: ir10, statutory_parent_class: "current liabilities"}
+  - {jurisdiction: NZL, account_code: "2500", account_name: "Income Tax Payable", account_type: LIABILITY, display_order: 140, statutory_framework_code: ir10, statutory_parent_class: "current liabilities"}
+  - {jurisdiction: NZL, account_code: "2600", account_name: "FBT Payable", account_type: LIABILITY, display_order: 150, statutory_framework_code: ir10, statutory_parent_class: "current liabilities"}
+  - {jurisdiction: NZL, account_code: "2700", account_name: "Loan — bank", account_type: LIABILITY, display_order: 160, statutory_framework_code: ir10, statutory_parent_class: "current liabilities"}
+  - {jurisdiction: NZL, account_code: "3100", account_name: "Owner contributions", account_type: EQUITY, display_order: 200, statutory_framework_code: ir10, statutory_parent_class: "equity"}
+  - {jurisdiction: NZL, account_code: "3200", account_name: "Retained earnings", account_type: EQUITY, display_order: 210, statutory_framework_code: ir10, statutory_parent_class: "equity"}
+  - {jurisdiction: NZL, account_code: "3300", account_name: "Current year earnings", account_type: EQUITY, display_order: 220, statutory_framework_code: ir10, statutory_parent_class: "equity"}
+  - {jurisdiction: NZL, account_code: "4100", account_name: "Sales — services", account_type: INCOME, default_tax_code: GST, display_order: 300, statutory_framework_code: ir10, statutory_parent_class: "income"}
+  - {jurisdiction: NZL, account_code: "4200", account_name: "Sales — goods", account_type: INCOME, default_tax_code: GST, display_order: 310, statutory_framework_code: ir10, statutory_parent_class: "income"}
+  - {jurisdiction: NZL, account_code: "4300", account_name: "Export & zero-rated sales", account_type: INCOME, default_tax_code: ZERO_EXPORT, display_order: 320, statutory_framework_code: ir10, statutory_parent_class: "income"}
+  - {jurisdiction: NZL, account_code: "4400", account_name: "Other income", account_type: OTHER_INCOME, default_tax_code: GST, display_order: 325, statutory_framework_code: ir10, statutory_parent_class: "income"}
+  - {jurisdiction: NZL, account_code: "4900", account_name: "Interest income", account_type: OTHER_INCOME, default_tax_code: NTR, display_order: 330, statutory_framework_code: ir10, statutory_parent_class: "income"}
+  - {jurisdiction: NZL, account_code: "5100", account_name: "Cost of goods sold", account_type: COST_OF_SALES, default_tax_code: INPUT, display_order: 400, statutory_framework_code: ir10, statutory_parent_class: "expenses"}
+  - {jurisdiction: NZL, account_code: "6100", account_name: "Wages & salaries", account_type: EXPENSE, default_tax_code: NTR, display_order: 500, statutory_framework_code: ir10, statutory_parent_class: "expenses"}
+  - {jurisdiction: NZL, account_code: "6110", account_name: "KiwiSaver employer contributions expense", account_type: EXPENSE, default_tax_code: NTR, display_order: 510, statutory_framework_code: ir10, statutory_parent_class: "expenses"}
+  - {jurisdiction: NZL, account_code: "6120", account_name: "ACC levies (Work / Working Safer — invoiced directly by ACC)", account_type: EXPENSE, default_tax_code: NTR, display_order: 511, statutory_framework_code: ir10, statutory_parent_class: "expenses"}
+  - {jurisdiction: NZL, account_code: "6200", account_name: "Rent", account_type: EXPENSE, default_tax_code: INPUT, display_order: 520, statutory_framework_code: ir10, statutory_parent_class: "expenses"}
+  - {jurisdiction: NZL, account_code: "6300", account_name: "Utilities", account_type: EXPENSE, default_tax_code: INPUT, display_order: 530, statutory_framework_code: ir10, statutory_parent_class: "expenses"}
+  - {jurisdiction: NZL, account_code: "6400", account_name: "Telephone & internet", account_type: EXPENSE, default_tax_code: INPUT, display_order: 540, statutory_framework_code: ir10, statutory_parent_class: "expenses"}
+  - {jurisdiction: NZL, account_code: "6500", account_name: "Motor vehicle", account_type: EXPENSE, default_tax_code: INPUT, display_order: 550, statutory_framework_code: ir10, statutory_parent_class: "expenses"}
+  - {jurisdiction: NZL, account_code: "6600", account_name: "Bank fees (exempt — financial services)", account_type: EXPENSE, default_tax_code: INPUT_EXEMPT, display_order: 560, statutory_framework_code: ir10, statutory_parent_class: "expenses"}
+  - {jurisdiction: NZL, account_code: "6700", account_name: "Insurance", account_type: EXPENSE, default_tax_code: INPUT, display_order: 570, statutory_framework_code: ir10, statutory_parent_class: "expenses"}
+  - {jurisdiction: NZL, account_code: "6800", account_name: "Depreciation", account_type: EXPENSE, default_tax_code: NTR, display_order: 580, statutory_framework_code: ir10, statutory_parent_class: "expenses"}
+  - {jurisdiction: NZL, account_code: "6900", account_name: "General expenses", account_type: EXPENSE, default_tax_code: INPUT, display_order: 590, statutory_framework_code: ir10, statutory_parent_class: "expenses"}

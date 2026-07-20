@@ -78,7 +78,7 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import date, timedelta
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -88,20 +88,19 @@ from saebooks.models.account import Account
 from saebooks.models.bill import Bill, BillStatus
 from saebooks.models.invoice import Invoice, InvoiceStatus
 from saebooks.models.journal import JournalEntry, JournalOrigin
+from saebooks.money import round_money
+from saebooks.services import control_accounts as control_accounts_svc
 from saebooks.services import journal as journal_svc
 from saebooks.services.fx.rates import get_rate
 
 log = logging.getLogger("saebooks.fx.reval")
 
-_AR_CODE = "1-1200"   # Trade Debtors
-_AP_CODE = "2-1200"   # Trade Creditors
 _FX_GAIN_CODE = "6-1640"  # Exchange Rate Gain
 _FX_LOSS_CODE = "6-1630"  # Exchange Rate Loss
-_TWOPLACES = Decimal("0.01")
 
 
 def _q2(value: Decimal) -> Decimal:
-    return value.quantize(_TWOPLACES, rounding=ROUND_HALF_UP)
+    return round_money(value)
 
 
 class FxRevalError(RuntimeError):
@@ -586,8 +585,13 @@ async def revalue_company(
     )
 
     # Pre-load the four control accounts once — reused across currencies.
-    ar_account = await _load_account(session, company_id, _AR_CODE)
-    ap_account = await _load_account(session, company_id, _AP_CODE)
+    # Packet 4b: AR/AP codes resolve companies.ar_control_account_code /
+    # ap_control_account_code, falling back to the AU convention codes —
+    # see services/control_accounts.py.
+    ar_code = await control_accounts_svc.resolve_ar_code(session, company_id)
+    ap_code = await control_accounts_svc.resolve_ap_code(session, company_id)
+    ar_account = await _load_account(session, company_id, ar_code)
+    ap_account = await _load_account(session, company_id, ap_code)
     gain_account = await _load_account(session, company_id, _FX_GAIN_CODE)
     loss_account = await _load_account(session, company_id, _FX_LOSS_CODE)
 

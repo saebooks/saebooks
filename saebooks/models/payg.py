@@ -7,7 +7,7 @@ coefficients which are identical for every tenant in the country.
 See migration ``0112_payg_tables.py`` for the seeded values + the
 "DERIVED — verify before production" caveats.
 
-Consumer: ``saebooks.services.payg``.
+Consumer: ``saebooks.jurisdictions.au.payg`` (the AU jurisdiction module).
 """
 from __future__ import annotations
 

@@ -10,8 +10,8 @@ Unique key ``(company_id, account_id, year, month)`` — upsert is the
 primary write path (see ``services/budgets.py:upsert``). Editing a
 whole-year grid for one account is a twelve-row bulk upsert.
 
-Amount stored as ``Numeric(18, 2)`` for consistency with all new money
-columns. Budgets do NOT hit the GL — they're a reporting overlay only.
+Amount stored as ``Money`` (``Numeric(18, 4)``) for consistency with
+all money columns. Budgets do NOT hit the GL — they're a reporting overlay only.
 
 API columns added in migration 0051:
     - ``version`` INT — optimistic locking via If-Match
@@ -29,7 +29,6 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
-    Numeric,
     SmallInteger,
     Text,
     UniqueConstraint,
@@ -39,6 +38,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from saebooks.db import Base
+from saebooks.db_types import Money
 from saebooks.models._scope import CompanyScoped
 
 _DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
@@ -79,7 +79,7 @@ class Budget(CompanyScoped, Base):
     year: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     month: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     amount: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=Decimal("0")
+        Money(), nullable=False, default=Decimal("0")
     )
     notes: Mapped[str | None] = mapped_column(Text)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)

@@ -386,7 +386,7 @@ override; nobody who isn't deliberately switching ever sees a difference.
 
 - **GST-registered sole trader below threshold.** Voluntary registration is
   legal and not uncommon (allows GST claims on inputs). Cashbook needs the
-  existing `companies.gst_registered` flag to drive whether the GST line is
+  existing `companies.tax_registered` flag to drive whether the GST line is
   generated. Easy. The harder question is BAS prep — see below.
 - **Receipt attachments.** Phase 1 saebooks-vault is the obvious hook
   (`entity_type='cashbook'`). Recommendation: re-use the vault — we just

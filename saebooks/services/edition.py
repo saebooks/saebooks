@@ -27,11 +27,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from saebooks.models.account import Account
 from saebooks.models.company import Company
 from saebooks.models.invoice import Invoice, InvoiceStatus
-
-_AR_CODE = "1-1200"
+from saebooks.money import money_quantum
+from saebooks.services import control_accounts as control_accounts_svc
 
 
 async def is_cashbook_mode(
@@ -102,16 +101,10 @@ async def backfill_invoice_journals(
     if not invoices:
         return 0
 
-    # AR control account (1-1200) is required.
-    ar_stmt = select(Account).where(
-        Account.company_id == company_id, Account.code == _AR_CODE
-    )
-    ar = (await session.execute(ar_stmt)).scalar_one_or_none()
-    if ar is None:
-        raise ValueError(
-            "Trade Debtors (1-1200) not found in chart of accounts — "
-            "re-run the AU CoA seed before upgrading to full mode."
-        )
+    # AR control account is required. Packet 4b: resolves
+    # companies.ar_control_account_code, falling back to the AU
+    # convention "1-1200" — see services/control_accounts.py.
+    ar = await control_accounts_svc.get_ar_account(session, company_id)
 
     count = 0
     for inv in invoices:
@@ -139,10 +132,10 @@ async def backfill_invoice_journals(
                     "account_id": ln.account_id,
                     "description": f"{inv.number}: {ln.description}",
                     "debit": Decimal("0"),
-                    "credit": line_base.quantize(Decimal("0.01")),
+                    "credit": line_base.quantize(money_quantum(2)),
                     "tax_code_id": ln.tax_code_id,
                     "gst_amount": (
-                        line_tax.quantize(Decimal("0.01"))
+                        line_tax.quantize(money_quantum(2))
                         if line_tax is not None
                         else None
                     ),

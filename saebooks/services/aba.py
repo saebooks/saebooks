@@ -56,7 +56,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
+
+from saebooks.money import round_money
 
 # Every line in an ABA file is CRLF-terminated. Strictly, APCA only
 # requires a LF between records but every bank parser we've seen
@@ -307,7 +309,5 @@ def dollars_to_cents(amount: Decimal) -> int:
     """
     if amount < 0:
         raise AbaError(f"amount {amount} must be non-negative for ABA")
-    cents = (amount * Decimal("100")).quantize(
-        Decimal("1"), rounding=ROUND_HALF_UP
-    )
+    cents = round_money(amount * Decimal("100"), 0)
     return int(cents)

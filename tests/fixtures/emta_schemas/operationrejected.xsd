@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+    <xs:element name="operationRejected" type="OperationRejected">
+        <xs:annotation>
+            <xs:documentation>Deklaratsiooni andmete tagasilükkamissõnum. Süsteemi poolt koostatav ja edastatav sõnum, millega süsteem teavitab,  
+				et deklaratsiooni andmete töötlemine ebaõnnestus ning andmeid ei võetud vastu või kui sooviti deklaratsiooni esitamist, siis deklaratsiooni esitamine ebaõnnestus. 
+				Sõnumiga tagastatakse XML struktuuri vigu, andmete mittevastavusest tingitud vigu ja ärireeglite vead.
+                Transmission failure message. Message, that is generated and forwarded by the system, informs that declaration data processing failed and data is not transmitted, 
+				or, if there was a request to submit a declaration, the declaration submission failed. Message returns errors caused by XML structure, 
+				non-compliant data and business rules.</xs:documentation>
+        </xs:annotation>
+    </xs:element>
+    <xs:complexType name="FunctionalError">
+        <xs:sequence>
+            <xs:element minOccurs="0" name="errorPointer" type="ErrorPointer">
+                <xs:annotation>
+                    <xs:documentation>Reegli kood. Rule code.</xs:documentation>
+                </xs:annotation>
+            </xs:element>
+            <xs:element minOccurs="0" name="originalAttributeValue" type="OriginalAttributeValue">
+                <xs:annotation>
+                    <xs:documentation>Viide vigasele väärtusele. Reference to the invalid value.</xs:documentation>
+                </xs:annotation>
+            </xs:element>
+            <xs:element minOccurs="0" name="errorDescription" type="ErrorDescription">
+                <xs:annotation>
+                    <xs:documentation>Vea kirjeldus. Error description.</xs:documentation>
+                </xs:annotation>
+            </xs:element>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="XmlError">
+        <xs:sequence>
+            <xs:element minOccurs="0" name="errorDescription" type="ErrorDescription">
+                <xs:annotation>
+                    <xs:documentation>Vea kirjeldus. Error description.</xs:documentation>
+                </xs:annotation>
+            </xs:element>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="OperationRejected">
+        <xs:sequence>
+            <xs:element name="requestId" type="RequestId">
+                <xs:annotation>
+                    <xs:documentation>Päringu ID. Request ID.</xs:documentation>
+                </xs:annotation>
+            </xs:element>
+            <xs:element minOccurs="0" maxOccurs="unbounded" name="xmlError" type="XmlError">
+                <xs:annotation>
+                    <xs:documentation>Dokumendi töötlemisel tekkinud XML-i vead [0..n]. XML errors while processing the file [0..n].</xs:documentation>
+                </xs:annotation>
+            </xs:element>
+            <xs:element minOccurs="0" maxOccurs="unbounded" name="functionalError" type="FunctionalError">
+                <xs:annotation>
+                    <xs:documentation>Dokumendi töötlemisel tekkinud funktsionaalsed vead [0..n]. Functional errors while processing the file [0..n].</xs:documentation>
+                </xs:annotation>
+            </xs:element>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:simpleType name="ErrorPointer">
+        <xs:restriction base="xs:string"/>
+    </xs:simpleType>
+    <xs:simpleType name="OriginalAttributeValue">
+        <xs:restriction base="xs:string"/>
+    </xs:simpleType>
+    <xs:simpleType name="RequestId">
+        <xs:restriction base="xs:string">
+            <xs:maxLength value="255"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="ErrorDescription">
+        <xs:restriction base="xs:string"/>
+    </xs:simpleType>
+</xs:schema>

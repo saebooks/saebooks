@@ -7,8 +7,9 @@ per run, the v2 service:
 
 * Takes the **inputs** to a pay-line (ordinary hours, overtime hours,
   allowances, deductions, paid leave, lump sums, OTE) and computes
-  the PAYG + super amounts via ``services.payg`` and
-  ``services.super_calc``.
+  the withholding + retirement amounts via the jurisdiction payroll
+  engine (``services.payroll.get_payroll_engine``; AU's PAYG/super
+  compute lives in ``saebooks.jurisdictions.au``).
 * Writes the full extended ``pay_run_lines`` row (Phase 1B shape:
   ordinary_hours, overtime_hours, allowances jsonb, deductions jsonb,
   paid_leave jsonb, lump_sums jsonb, ytd_gross, ytd_tax, ytd_super).
@@ -55,13 +56,34 @@ Out of scope for this pass:
     - ABA-file generation (re-use v1 ``export_aba`` after this
       finalises — same shape on the wire)
     - Leave accrual write-back (Phase 3)
+
+EE finalize (Packet 1, kmd-inf-tsd follow-up) — ``_finalize_ee``, wired
+through ``finalize_with_je`` for ``Company.jurisdiction == "EE"``:
+
+* On finalize, generates a per-employee JE:
+    Dr Wages expense                 gross
+    Dr Social tax expense            social_tax (33%, incl. EUR 886 floor)
+    Dr Employer unemployment expense unemployment_employer (0.8%)
+       Cr Income tax payable             income_tax
+       Cr Unemployment payable (employee)  unemployment_employee (1.6%)
+       Cr Pillar II payable              pillar_ii
+       Cr Social tax payable             social_tax
+       Cr Employer unemployment payable  unemployment_employer
+       Cr Net wages payable              net
+* Account resolution is per-company-column-driven
+  (``_account_by_company_column``), NOT fixed chart codes like the AU
+  posting profile's — EE has no chart-template seed in this tree to
+  hardcode against. See the ``_EE_*_COLUMN`` constants below for the
+  9 keys.
+* Reversal: ``void_pay_run`` (generic, not EE-specific — reverses
+  whichever journal a FINALIZED pay run posted, via ``journal_svc.reverse``).
 """
 from __future__ import annotations
 
 import dataclasses
 import uuid
 from datetime import date, datetime
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import delete, extract, func, insert, select
@@ -70,29 +92,99 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from saebooks.models.account import Account
 from saebooks.models.company import Company
 from saebooks.models.employee import Employee, PayFrequency
-from saebooks.models.journal import JournalOrigin
+from saebooks.models.journal import EntryStatus, JournalEntry, JournalOrigin
 from saebooks.models.pay_run import PayRun, PayRunLine, PayRunStatus
+from saebooks.money import round_money
 from saebooks.services import change_log as cl_svc
 from saebooks.services import journal as journal_svc
-from saebooks.services.payg import (
-    MedicareExemption,
-    WithholdingResult,
-    compute_withholding,
+from saebooks.services.fringe_benefits_ee import (
+    CarBenefitRates,
+    EEFringeBenefitResult,
+    compute_car_fringe_benefit,
+    compute_cash_fringe_benefit,
+    resolve_car_benefit_rates,
 )
-from saebooks.services.payroll_ee import EEPayrollResult, compute_ee_payroll
-from saebooks.services.super_calc import SuperResult, compute_super
+from saebooks.services.payroll import (
+    PayrollComponentRole,
+    PayrollContext,
+    PayrollRoleAccount,
+    get_payroll_engine,
+    get_posting_profile,
+)
+from saebooks.services.payroll_ee import (
+    EEPayrollResult,
+    compute_ee_payroll,
+    resolve_ee_rates,
+)
 
 
 class PayRunV2Error(ValueError):
     """Domain-level failure during a v2 pay-run operation."""
 
 
-# Account code conventions. Override via company settings in Phase 2B.
-_ACCT_WAGES_EXPENSE = "6-2110"
-_ACCT_SUPER_EXPENSE = "6-2120"
-_ACCT_PAYG_LIABILITY = "2-1310"
-_ACCT_SUPER_LIABILITY = "2-1320"
-_ACCT_NET_PAY_CLEARING = "2-1150"
+# Account-code conventions for the finalize JE live in each
+# jurisdiction's payroll posting profile (jurisdiction-module Phase 1):
+# AU's fixed chart codes are ``jurisdictions.au.PAYROLL_POSTING`` (the
+# former ``_ACCT_*`` constants here), the no-module floor is
+# ``payroll.neutral.NEUTRAL_POSTING_PROFILE``. Override via company
+# settings is still the Phase 2B plan.
+
+
+# --------------------------------------------------------------------- #
+# EE account resolution (Packet 1 — GL posting for EE pay-run finalize) #
+# --------------------------------------------------------------------- #
+#
+# Unlike AU's posting profile (fixed chart codes, ``_account_by_code``),
+# EE has no chart-template seed anywhere in this tree yet (no
+# ``seed/load_ee_coa.py`` — checked). Rather than invent fixed EE codes
+# that would silently collide with whatever a real EE company's chart
+# actually uses, each of these resolves to a per-company override
+# COLUMN on ``companies`` (0200, Fixer round 4 F1 — was a global
+# ``Setting`` row until this fix; see ``_account_by_company_column``'s
+# docstring for why that was wrong for a multi-company instance),
+# raising loudly (never posting an unbalanced or wrongly-coded JE) when
+# the column is unset or does not resolve. One column per journal leg —
+# the packet enumerates the components (income tax / unemployment
+# employee / pillar II / social tax / employer unemployment / net pay)
+# separately, so this mirrors that granularity rather than collapsing
+# them into fewer accounts. Values match the ``Company`` model
+# attribute names 1:1.
+_EE_WAGES_EXPENSE_COLUMN = "ee_payroll_wages_expense_account_code"
+_EE_SOCIAL_TAX_EXPENSE_COLUMN = "ee_payroll_social_tax_expense_account_code"
+_EE_UNEMPLOYMENT_EMPLOYER_EXPENSE_COLUMN = (
+    "ee_payroll_unemployment_employer_expense_account_code"
+)
+_EE_INCOME_TAX_PAYABLE_COLUMN = "ee_payroll_income_tax_payable_account_code"
+_EE_UNEMPLOYMENT_EMPLOYEE_PAYABLE_COLUMN = (
+    "ee_payroll_unemployment_employee_payable_account_code"
+)
+_EE_PILLAR_II_PAYABLE_COLUMN = "ee_payroll_pillar_ii_payable_account_code"
+_EE_SOCIAL_TAX_PAYABLE_COLUMN = "ee_payroll_social_tax_payable_account_code"
+_EE_UNEMPLOYMENT_EMPLOYER_PAYABLE_COLUMN = (
+    "ee_payroll_unemployment_employer_payable_account_code"
+)
+_EE_NET_PAY_CLEARING_COLUMN = "ee_payroll_net_pay_clearing_account_code"
+
+# Fringe-benefit (erisoodustus) tax legs — Packet 2. Resolved LAZILY,
+# only when a pay run actually has a nonzero fringe-benefit total (see
+# ``_finalize_ee``): existing EE companies with no fringe-benefit
+# columns configured must keep finalizing exactly as before this
+# packet (mirrors the 9 columns above being resolved unconditionally
+# because every EE pay run always has SOME wage withholding — a fringe
+# benefit is optional, so these 4 must not become a hard finalize
+# blocker for a company that never uses them).
+_EE_FRINGE_BENEFIT_INCOME_TAX_EXPENSE_COLUMN = (
+    "ee_payroll_fringe_benefit_income_tax_expense_account_code"
+)
+_EE_FRINGE_BENEFIT_SOCIAL_TAX_EXPENSE_COLUMN = (
+    "ee_payroll_fringe_benefit_social_tax_expense_account_code"
+)
+_EE_FRINGE_BENEFIT_INCOME_TAX_PAYABLE_COLUMN = (
+    "ee_payroll_fringe_benefit_income_tax_payable_account_code"
+)
+_EE_FRINGE_BENEFIT_SOCIAL_TAX_PAYABLE_COLUMN = (
+    "ee_payroll_fringe_benefit_social_tax_payable_account_code"
+)
 
 
 # --------------------------------------------------------------------- #
@@ -151,6 +243,46 @@ class LumpSumLine:
 
 
 @dataclasses.dataclass(frozen=True)
+class FringeBenefitLine:
+    """One EE fringe-benefit (erisoodustus) event for this pay-run line
+    (kmd-inf-tsd follow-up, Packet 2). EE-only — ``_compute`` (the AU
+    branch) never reads this field, mirrors ``medicare_exemption`` being
+    EE-inert.
+
+    Exactly ONE of two shapes, validated in ``__post_init__``:
+
+    * Company car — ``engine_power_kw`` + ``car_age_years`` set,
+      ``taxable_value`` left ``None``. Valued via
+      ``services.fringe_benefits_ee.compute_car_fringe_benefit`` (EUR/kW
+      /month, reduced past 5 years).
+    * Generic cash-value benefit (housing, entertainment, ...) —
+      ``taxable_value`` set, the car fields left ``None``. Valued via
+      ``services.fringe_benefits_ee.compute_cash_fringe_benefit`` (the
+      22/78 + 33% formula only, no valuation step — caller has already
+      determined the value).
+
+    Both shapes go through the SAME income-tax/social-tax formula; only
+    how ``taxable_value`` is arrived at differs.
+    """
+
+    benefit_category: str  # e.g. "motor_vehicle", "housing", "other"
+    engine_power_kw: Decimal | None = None
+    car_age_years: int | None = None
+    taxable_value: Decimal | None = None
+
+    def __post_init__(self) -> None:
+        car_shape = self.engine_power_kw is not None and self.car_age_years is not None
+        cash_shape = self.taxable_value is not None
+        if car_shape == cash_shape:  # both set, or neither
+            raise PayRunV2Error(
+                "FringeBenefitLine requires EITHER (engine_power_kw + "
+                "car_age_years) for the company-car basis OR "
+                "taxable_value for a generic cash-value benefit — not "
+                "both, not neither."
+            )
+
+
+@dataclasses.dataclass(frozen=True)
 class PayLineInput:
     """The complete set of inputs needed to compute one pay-line."""
 
@@ -163,7 +295,12 @@ class PayLineInput:
     deductions: tuple[DeductionLine, ...] = ()
     paid_leave: tuple[PaidLeaveLine, ...] = ()
     lump_sums: tuple[LumpSumLine, ...] = ()
-    medicare_exemption: MedicareExemption = "NONE"
+    # Opaque pass-through to the jurisdiction payroll engine (mirrors the
+    # neutral ``PayrollContext.medicare_exemption: str`` seam field); core never
+    # branches on it. Was the AU ``payg.MedicareExemption`` Literal — now plain
+    # str so core carries no AU-shaped payroll type.
+    medicare_exemption: str = "NONE"
+    fringe_benefits: tuple[FringeBenefitLine, ...] = ()
     # Phase 2B will surface these via ``employee.extra`` JSONB; for
     # now caller passes explicitly.
 
@@ -204,6 +341,13 @@ class ComputedPayLine:
     ee_unemployment_employer: Decimal | None = None
     ee_social_tax: Decimal | None = None
     ee_pillar_ii: Decimal | None = None
+    # --- EE fringe-benefit compute (Packet 2) — [] / None on every AU
+    # line AND every EE line with no fringe_benefits input (the common
+    # case). A separate EE tax event from ordinary withholding above —
+    # see services.fringe_benefits_ee module docstring. ---
+    ee_fringe_benefits: list[dict[str, Any]] = dataclasses.field(default_factory=list)
+    ee_fringe_benefit_income_tax: Decimal | None = None
+    ee_fringe_benefit_social_tax: Decimal | None = None
 
 
 # --------------------------------------------------------------------- #
@@ -233,6 +377,55 @@ async def _account_by_code(
     return acct
 
 
+async def _account_by_company_column(
+    session: AsyncSession,
+    *,
+    company_id: uuid.UUID,
+    column_name: str,
+) -> Account:
+    """Resolve a statutory GL account for EE pay-run posting via a
+    per-company override column on ``companies`` (0200).
+
+    Fixer round 4 (F1): this used to read a GLOBAL ``Setting`` row
+    (``settings.key`` is that table's sole primary key — no
+    ``company_id`` column at all), mirroring
+    ``services.bills._get_rc_payable_account``'s precedent. That was
+    wrong for a multi-company instance: two EE companies could not
+    configure this independently, and if the resolved code happened to
+    already exist in a second company's own chart for an unrelated
+    purpose, that company's payroll finalize would silently book to the
+    WRONG account — no error, journal still balances. Same class of bug
+    0198 (``ar_control_account_code`` / ``ap_control_account_code``)
+    fixed for AR/AP; this brings EE payroll account resolution in line
+    with that per-company pattern. Raises loudly — a config error must
+    never silently produce an unbalanced or wrongly-coded journal (same
+    posture as before)."""
+    column = getattr(Company, column_name)
+    raw = (
+        await session.execute(select(column).where(Company.id == company_id))
+    ).scalar_one_or_none()
+    code = (str(raw) if raw is not None else "").strip()
+    acct = None
+    if code:
+        acct = (
+            await session.execute(
+                select(Account).where(
+                    Account.company_id == company_id,
+                    Account.code == code,
+                    Account.archived_at.is_(None),
+                )
+            )
+        ).scalars().first()
+    if acct is None:
+        raise PayRunV2Error(
+            f"Cannot finalize this EE pay run: companies.{column_name} "
+            f"({code!r}) does not resolve to an account in this company's "
+            "chart. Set it on this company before finalizing — EE "
+            "payroll has no default chart-of-accounts seed to fall back on."
+        )
+    return acct
+
+
 # --------------------------------------------------------------------- #
 # Calc                                                                  #
 # --------------------------------------------------------------------- #
@@ -240,7 +433,20 @@ async def _account_by_code(
 
 def _q(value: Decimal | int | float | str) -> Decimal:
     """Quantize a value to 2 dp (half-up)."""
-    return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return round_money(Decimal(str(value)))
+
+
+def _fringe_benefit_to_dict(result: EEFringeBenefitResult) -> dict[str, Any]:
+    """``dataclasses.asdict`` leaves ``Decimal`` fields as ``Decimal`` —
+    the stdlib ``json`` serializer SQLAlchemy's JSONB type uses by
+    default cannot encode those, so this stringifies every Decimal
+    field explicitly before the dict is written to the
+    ``pay_run_lines.ee_fringe_benefits`` JSONB column."""
+    d = dataclasses.asdict(result)
+    for key, val in d.items():
+        if isinstance(val, Decimal):
+            d[key] = str(val)
+    return d
 
 
 def _resolve_ordinary_rate(emp: Employee, override: Decimal | None) -> Decimal:
@@ -304,7 +510,7 @@ async def _compute_ee(
 
     ⚠ **MONTHLY-only guard (critic round 2 finding).** Unlike the AU
     branch two lines below (which reads ``employee.pay_frequency`` and
-    scales via ``services.payg``'s period tables), this function never
+    scales via ``jurisdictions.au.payg``'s period tables), this function never
     read ``pay_frequency`` at all — the EUR 700/776 basic exemption and
     the EUR 886/mo social-tax floor
     (``services.payroll_ee.compute_ee_payroll``) are ``[SEED-EE]``
@@ -394,12 +600,23 @@ async def _compute_ee(
     overtime_pay = _q(line_input.overtime_hours * ot_rate)
     gross = _q(ordinary_pay + overtime_pay)
 
+    # Fixer round 5 (F4): resolve EERates ONCE for this call and reuse it
+    # for both the wage-withholding compute below AND every fringe-benefit
+    # compute in the loop further down — same "resolve once, reuse"
+    # convention ``compute_ee_payroll``'s own ``rates`` kwarg docstring
+    # describes (and that ``services.lodgement.tsd.generator`` already
+    # follows). Without this, each fringe-benefit line opened its OWN
+    # fresh ``ReferenceSession`` for the identical ``effective_date``
+    # instead of reusing the row already fetched here.
+    rates = await resolve_ee_rates(effective_date)
+
     result: EEPayrollResult = await compute_ee_payroll(
         gross=gross,
         effective_date=effective_date,
         pillar_ii_rate_percent=employee.ee_pillar_ii_rate_percent,
         basic_exemption_elected=employee.ee_basic_exemption_elected,
         pensionable_age=employee.ee_pensionable_age,
+        rates=rates,
     )
 
     deductions_total = sum(
@@ -412,6 +629,44 @@ async def _compute_ee(
     net = _q(
         gross - result.income_tax - result.unemployment_employee
         - result.pillar_ii - deductions_total
+    )
+
+    # EE fringe-benefit compute (Packet 2) — a SEPARATE tax event from
+    # the wage-withholding block above; deliberately NOT folded into
+    # ``net`` (module docstring: benefit income tax + social tax are
+    # both borne by the EMPLOYER, with no effect on the employee's net
+    # pay — services.fringe_benefits_ee module docstring).
+    fringe_results: list[EEFringeBenefitResult] = []
+    car_rates: CarBenefitRates | None = None
+    for fb in line_input.fringe_benefits:
+        if fb.engine_power_kw is not None:
+            if car_rates is None:
+                car_rates = await resolve_car_benefit_rates(effective_date)
+            fringe_results.append(
+                await compute_car_fringe_benefit(
+                    engine_power_kw=fb.engine_power_kw,
+                    car_age_years=fb.car_age_years,  # type: ignore[arg-type]
+                    effective_date=effective_date,
+                    tax_rates=rates,
+                    car_rates=car_rates,
+                )
+            )
+        else:
+            fringe_results.append(
+                await compute_cash_fringe_benefit(
+                    benefit_category=fb.benefit_category,
+                    taxable_value=fb.taxable_value,  # type: ignore[arg-type]
+                    effective_date=effective_date,
+                    tax_rates=rates,
+                )
+            )
+    fringe_income_tax = (
+        sum((r.income_tax for r in fringe_results), Decimal("0"))
+        if fringe_results else None
+    )
+    fringe_social_tax = (
+        sum((r.social_tax for r in fringe_results), Decimal("0"))
+        if fringe_results else None
     )
 
     return ComputedPayLine(
@@ -436,6 +691,9 @@ async def _compute_ee(
         ee_unemployment_employer=result.unemployment_employer,
         ee_social_tax=result.social_tax,
         ee_pillar_ii=result.pillar_ii,
+        ee_fringe_benefits=[_fringe_benefit_to_dict(r) for r in fringe_results],
+        ee_fringe_benefit_income_tax=fringe_income_tax,
+        ee_fringe_benefit_social_tax=fringe_social_tax,
     )
 
 
@@ -450,16 +708,27 @@ async def _compute(
     pay_run_id: uuid.UUID,
     company_jurisdiction: str = "AU",
 ) -> ComputedPayLine:
-    """Run PAYG + super for one employee line. Pure (no writes).
+    """Run withholding + retirement compute for one employee line.
+    Pure (no writes).
 
-    Dispatches on ``company_jurisdiction`` (Packet 3 — mirrors the
-    precedent in ``services.journal._apply_tax_treatment``): every
-    EXISTING caller passes the default ``"AU"`` (or omits it), so this
-    resolves to the exact same AU branch as before Packet 3 —
-    byte-identical AU behaviour. ``"EE"`` is the only other jurisdiction
-    wired; anything else still runs the AU branch (matches
-    ``Company.jurisdiction``'s own "AU is the only jurisdiction wired
-    end-to-end" default note).
+    Jurisdiction-module Phase 0: the statutory compute now dispatches
+    through the neutral payroll seam —
+    ``payroll.get_payroll_engine(company_jurisdiction)`` — mirroring
+    ``journal._apply_tax_treatment``'s tax dispatch. ``"AU"`` resolves
+    to ``jurisdictions.au.payroll.AUPayrollEngine`` (Phase 1 moved it
+    into the AU module beside its compute), which makes the exact
+    ``payg.compute_withholding`` + ``super_calc.compute_super`` calls
+    that used to be inlined here (same inputs, same rounding, same
+    breakdown notes — byte-identical AU results, reached through the
+    seam). The neutral gross/OTE assembly arithmetic below is plain
+    bookkeeping shared by every jurisdiction and stays here. An
+    unregistered jurisdiction (including the reserved ``"XX"``
+    sentinel) degrades to ``NeutralPayrollEngine`` — net = gross minus
+    deductions, zero statutory components.
+
+    ``"EE"`` keeps its pre-seam dedicated branch (``_compute_ee``,
+    Packet 3) — formalising EE as a registered module is Phase 5 of
+    the jurisdiction-module design.
     """
     if company_jurisdiction == "EE":
         return await _compute_ee(
@@ -510,29 +779,36 @@ async def _compute(
     # Lump sums default to non-OTE per SGR 2009/2.
     ote = _q(ordinary_pay + allowance_ote + paid_leave_ote)
 
-    wh: WithholdingResult = await compute_withholding(
+    engine = get_payroll_engine(company_jurisdiction)
+    result = await engine.compute_line(
         session,
-        gross_per_period=gross,
-        period=period,
-        employee=employee,
-        effective_date=effective_date,
-        medicare_exemption=line_input.medicare_exemption,
+        PayrollContext(
+            company_id=employee.company_id,
+            employee_id=employee.id,
+            pay_run_id=pay_run_id,
+            period=period,
+            period_start=period_start,
+            period_end=period_end,
+            effective_date=effective_date,
+            gross=gross,
+            ote=ote,
+            deductions_total=deductions_total,
+            employee=employee,
+            medicare_exemption=line_input.medicare_exemption,
+        ),
     )
-
-    sg: SuperResult = compute_super(
-        ote=ote,
-        period=period,
-        effective_date=effective_date,
-    )
-
-    net = _q(gross - wh.payg_amount - deductions_total)
+    # Role-tagged components back to the v2 line columns. For AU these
+    # are exactly wh.payg_amount / sg.sg_amount / the same breakdown
+    # notes as the pre-seam inline calls — see jurisdictions/au/payroll.py.
+    payg = result.total_for(PayrollComponentRole.WITHHOLDING_LIABILITY)
+    super_amount = result.total_for(PayrollComponentRole.RETIREMENT_LIABILITY)
 
     return ComputedPayLine(
         employee_id=employee.id,
-        gross=gross,
-        payg=wh.payg_amount,
-        super_amount=sg.sg_amount,
-        net=net,
+        gross=result.gross,
+        payg=payg,
+        super_amount=super_amount,
+        net=result.net,
         ordinary_hours=Decimal(str(line_input.ordinary_hours)),
         overtime_hours=Decimal(str(line_input.overtime_hours)),
         allowances=[dataclasses.asdict(a) for a in line_input.allowances],
@@ -540,8 +816,8 @@ async def _compute(
         paid_leave=[dataclasses.asdict(p) for p in line_input.paid_leave],
         lump_sums=[dataclasses.asdict(ls) for ls in line_input.lump_sums],
         ote=ote,
-        payg_breakdown=wh.breakdown_note,
-        super_breakdown=sg.breakdown_note,
+        payg_breakdown=result.note_for(PayrollComponentRole.WITHHOLDING_LIABILITY),
+        super_breakdown=result.note_for(PayrollComponentRole.RETIREMENT_LIABILITY),
     )
 
 
@@ -620,6 +896,31 @@ async def upsert_line(
         raise PayRunV2Error(
             f"Pay run {pay_run_id} is {pay_run.status!r}; only DRAFT accepts "
             "line writes."
+        )
+
+    # Critic round 2: close the crash window between journal_svc.post's
+    # own internal commit and the later, separate pay_run.status=FINALIZED
+    # commit in _finalize_ee (see that function's F3-fix comment). If a
+    # POSTED journal already exists for this pay run, status can still
+    # read DRAFT on a crashed/cancelled finalize -- refuse the line write
+    # here too (not just the status guard above) so a retried finalize's
+    # idempotency-recovery block never reattaches a journal that no
+    # longer matches this pay run's line data.
+    stale_journal = (
+        await session.execute(
+            select(JournalEntry.id).where(
+                JournalEntry.source_type == "pay_run",
+                JournalEntry.source_id == pay_run.id,
+                JournalEntry.status == EntryStatus.POSTED,
+            )
+        )
+    ).scalars().first()
+    if stale_journal is not None:
+        raise PayRunV2Error(
+            f"Pay run {pay_run_id} already has a posted journal "
+            f"({stale_journal}) from an interrupted finalize; it cannot "
+            "accept line writes. Retry finalize to recover it, or void "
+            "the pay run first."
         )
 
     employee = await session.get(Employee, line_input.employee_id)
@@ -704,6 +1005,11 @@ async def upsert_line(
         "ee_unemployment_employer": computed.ee_unemployment_employer,
         "ee_social_tax": computed.ee_social_tax,
         "ee_pillar_ii": computed.ee_pillar_ii,
+        # EE fringe-benefit compute (Packet 2) — [] / None for every AU
+        # line and every EE line with no fringe_benefits input.
+        "ee_fringe_benefits": computed.ee_fringe_benefits,
+        "ee_fringe_benefit_income_tax": computed.ee_fringe_benefit_income_tax,
+        "ee_fringe_benefit_social_tax": computed.ee_fringe_benefit_social_tax,
     }
     present_cols = set(PayRunLine.__table__.columns.keys())
     extras_to_apply = {
@@ -740,6 +1046,31 @@ async def upsert_line(
 # --------------------------------------------------------------------- #
 
 
+def _line_role_amounts(
+    line: PayRunLine,
+) -> dict[PayrollComponentRole, Decimal]:
+    """Reconstruct the role-tagged statutory amounts a stored line carries.
+
+    The v2 line columns ARE the role snapshot ``_compute`` wrote from
+    the engine's ``PayrollResult`` (``tax`` ← WITHHOLDING_LIABILITY,
+    ``super_amount`` ← RETIREMENT_LIABILITY), so finalize posts from
+    the stored snapshot — never a recompute (rates may have moved
+    between draft and finalize). The employer-funded retirement
+    contribution always pairs an expense leg with its liability (the
+    engine emits both roles with the same amount — see
+    ``jurisdictions.au.payroll``), so RETIREMENT_EXPENSE mirrors
+    ``super_amount``. Roles the v2 line schema has no column for (the
+    EMPLOYER_SOCIAL_* pair) cannot appear until the schema grows them.
+    """
+    withholding = line.tax or Decimal("0")
+    retirement = line.super_amount or Decimal("0")
+    return {
+        PayrollComponentRole.WITHHOLDING_LIABILITY: withholding,
+        PayrollComponentRole.RETIREMENT_LIABILITY: retirement,
+        PayrollComponentRole.RETIREMENT_EXPENSE: retirement,
+    }
+
+
 async def _get_pay_run(
     session: AsyncSession,
     pay_run_id: uuid.UUID,
@@ -765,13 +1096,24 @@ async def finalize_with_je(
 ) -> PayRun:
     """Build the per-employee JE and post it; mark the run FINALIZED.
 
-    Per-employee shape, per the brief:
+    Jurisdiction-module Phase 1: the JE is posted **generically from
+    the role-tagged statutory amounts** each line carries, mapped to
+    accounts by the jurisdiction's payroll posting profile
+    (``payroll.get_posting_profile``) — the old hardcoded
+    AU-if/else JE shape is gone. Per-employee shape:
 
-        Dr Wages expense       gross
-        Dr Super expense       sg
-           Cr PAYG WH liability       payg
-           Cr Super payable           sg
-           Cr Bank (net-pay clearing) net
+        Dr Wages expense                    gross
+        Dr each ``*_EXPENSE`` role account     (AU: SG expense = sg)
+           Cr each ``*_LIABILITY`` role account   (AU: PAYG WH = payg,
+                                                    Super payable = sg)
+           Cr Bank (net-pay clearing)       net
+
+    For AU (``jurisdictions.au.PAYROLL_POSTING``) this produces the
+    exact pre-Phase-1 5-leg JE — same accounts, same order, same
+    descriptions, same amounts. A jurisdiction with no payroll module
+    degrades to the neutral profile (wages + net only) instead of the
+    old hard refusal; EE keeps its dedicated ``_finalize_ee`` branch
+    (formalising EE onto this path is Phase 5).
 
     A pay run with N employees produces a single JE with N×5 lines
     (or fewer if some employees have $0 super / no PAYG). All lines
@@ -781,7 +1123,27 @@ async def finalize_with_je(
     if pay_run is None:
         raise PayRunV2Error(f"Pay run {pay_run_id} not found")
     if pay_run.status == PayRunStatus.FINALIZED:
-        return pay_run
+        # Fixer round 5 (F3): a genuinely-posted pay run (journal_id set,
+        # every path that flips FINALIZED here or in ``_finalize_ee`` sets
+        # it in the same commit) is a real no-op — return it unchanged.
+        # ``finalize_ee_status_only`` also flips status to FINALIZED but
+        # deliberately leaves journal_id None (TSD-only status lock, no GL
+        # posting — see its own docstring). Without this split, that
+        # combination made this short-circuit swallow the call silently
+        # forever: no journal was ever posted and no error was raised.
+        # Raise loudly instead — same tax-safe posture as ``_compute_ee``'s
+        # own guards — rather than pretend the pay run is fully finalized.
+        if pay_run.journal_id is not None:
+            return pay_run
+        raise PayRunV2Error(
+            f"Pay run {pay_run_id} is already FINALIZED but has no "
+            "journal_id — it was locked via finalize_ee_status_only "
+            "(status-only lock for TSD sourcing, no GL posting) and "
+            "finalize_with_je cannot silently no-op past that: no "
+            "wages/tax journal has ever been posted for this period. "
+            "Void the pay run and re-finalize, rather than retrying "
+            "finalize_with_je on an already status-locked pay run."
+        )
     if pay_run.status not in (PayRunStatus.DRAFT, PayRunStatus.ABA_EXPORTED):
         raise PayRunV2Error(
             f"Cannot finalize from status {pay_run.status!r}"
@@ -790,35 +1152,36 @@ async def finalize_with_je(
     # Resolve accounts once.
     co_id = pay_run.company_id
 
-    # EE JE posting is NOT built (Packet 3 scope-narrowing, flagged —
-    # not a silent gap): the 5-leg shape below is AU-account-coded
-    # (_ACCT_*) and Dr-Wages/Cr-Net-only, which for an EE line would
-    # both use the wrong chart-of-accounts convention AND omit the
-    # employer-borne legs (social tax, employer unemployment) entirely
-    # — Dr gross / Cr net would not even balance, since EE net pay
-    # deducts only income tax + employee unemployment + pillar II, not
-    # the full gross-minus-net gap the AU shape assumes. Refuse loudly
-    # rather than post a broken or AU-shaped JE for an EE company. The
-    # EE compute path (``upsert_line``) is unaffected — this guard is
-    # finalize-only.
+    # Packet 1 (kmd-inf-tsd follow-up) — EE JE posting IS built now, via
+    # ``_finalize_ee`` below. Dispatch BEFORE any account resolution so
+    # the generic path beneath stays byte-identical to the pre-Phase-1
+    # AU branch for an AU-jurisdiction company.
     company_jurisdiction = (
         await session.execute(
             select(Company.jurisdiction).where(Company.id == co_id)
         )
     ).scalar_one_or_none() or "AU"
-    if company_jurisdiction != "AU":
-        raise PayRunV2Error(
-            f"finalize_with_je does not support jurisdiction "
-            f"{company_jurisdiction!r} yet — only AU's Dr-Wages/"
-            "Dr-Super/Cr-PAYG/Cr-Super/Cr-Net JE shape is implemented. "
-            "EE payroll compute (services.payroll_ee via upsert_line) "
-            "is available; EE journal posting is a follow-up packet."
+    if company_jurisdiction == "EE":
+        return await _finalize_ee(session, pay_run, tenant_id=tenant_id, actor=actor)
+
+    # Generic role-tagged posting (jurisdiction-module Phase 1). The
+    # profile's ``role_accounts`` order is contractual: it fixes both
+    # which missing-account error fires first (wages → roles → net,
+    # matching the old AU wages/super-exp/payg/super-liab/net order)
+    # and the per-employee JE leg order below.
+    profile = get_posting_profile(company_jurisdiction)
+    wages = await _account_by_code(
+        session, company_id=co_id, code=profile.wages_account_code
+    )
+    role_accounts: list[tuple[PayrollRoleAccount, Account]] = []
+    for spec in profile.role_accounts:
+        acct = await _account_by_code(
+            session, company_id=co_id, code=spec.account_code
         )
-    wages = await _account_by_code(session, company_id=co_id, code=_ACCT_WAGES_EXPENSE)
-    super_exp = await _account_by_code(session, company_id=co_id, code=_ACCT_SUPER_EXPENSE)
-    payg_liab = await _account_by_code(session, company_id=co_id, code=_ACCT_PAYG_LIABILITY)
-    super_liab = await _account_by_code(session, company_id=co_id, code=_ACCT_SUPER_LIABILITY)
-    net_clearing = await _account_by_code(session, company_id=co_id, code=_ACCT_NET_PAY_CLEARING)
+        role_accounts.append((spec, acct))
+    net_clearing = await _account_by_code(
+        session, company_id=co_id, code=profile.net_account_code
+    )
 
     # Fetch lines.
     lines_result = await session.execute(
@@ -829,45 +1192,55 @@ async def finalize_with_je(
         raise PayRunV2Error("Pay run has no lines — add at least one before finalize.")
 
     je_lines: list[dict[str, Any]] = []
+    mapped_roles = {spec.role for spec, _acct in role_accounts}
     for line in lines:
         emp_label = str(line.employee_id)[:8]
+        amounts = _line_role_amounts(line)
+        unmapped = [
+            role.value
+            for role, amount in amounts.items()
+            if amount > 0 and role not in mapped_roles
+        ]
+        if unmapped:
+            # Tax-safe posture: a statutory amount with nowhere to book
+            # must refuse loudly, never silently drop the leg (which
+            # would also unbalance the JE against net).
+            raise PayRunV2Error(
+                f"Pay run line for employee {line.employee_id} carries "
+                f"statutory amounts with no account mapping in the "
+                f"{company_jurisdiction!r} payroll posting profile: "
+                f"{', '.join(sorted(unmapped))}. The company's "
+                "jurisdiction has no payroll module registered for "
+                "these roles — recompute the lines under the correct "
+                "jurisdiction before finalizing."
+            )
         # Dr Wages
         if line.gross > 0:
             je_lines.append({
                 "account_id": wages.id,
-                "description": f"Wages: {emp_label}",
+                "description": f"{profile.wages_label}: {emp_label}",
                 "debit": line.gross,
                 "credit": Decimal("0"),
             })
-        # Dr Super expense
-        if line.super_amount > 0:
+        # Role-tagged statutory legs, in profile order — for AU:
+        # Dr SG expense / Cr PAYG WH / Cr Super payable, exactly the
+        # pre-Phase-1 hardcoded shape.
+        for spec, acct in role_accounts:
+            amount = amounts.get(spec.role, Decimal("0"))
+            if amount <= 0:
+                continue
+            debit = spec.role.posts_debit
             je_lines.append({
-                "account_id": super_exp.id,
-                "description": f"SG: {emp_label}",
-                "debit": line.super_amount,
-                "credit": Decimal("0"),
-            })
-        # Cr PAYG liability
-        if line.tax > 0:
-            je_lines.append({
-                "account_id": payg_liab.id,
-                "description": f"PAYG WH: {emp_label}",
-                "debit": Decimal("0"),
-                "credit": line.tax,
-            })
-        # Cr Super payable
-        if line.super_amount > 0:
-            je_lines.append({
-                "account_id": super_liab.id,
-                "description": f"Super payable: {emp_label}",
-                "debit": Decimal("0"),
-                "credit": line.super_amount,
+                "account_id": acct.id,
+                "description": f"{spec.label}: {emp_label}",
+                "debit": amount if debit else Decimal("0"),
+                "credit": Decimal("0") if debit else amount,
             })
         # Cr Net pay clearing
         if line.net > 0:
             je_lines.append({
                 "account_id": net_clearing.id,
-                "description": f"Net pay: {emp_label}",
+                "description": f"{profile.net_label}: {emp_label}",
                 "debit": Decimal("0"),
                 "credit": line.net,
             })
@@ -928,6 +1301,481 @@ async def finalize_with_je(
         company_id=pay_run.company_id,
         pay_run_id=pay_run.id,
     )
+    return pay_run
+
+
+async def _finalize_ee(
+    session: AsyncSession,
+    pay_run: PayRun,
+    *,
+    tenant_id: uuid.UUID,
+    actor: str,
+) -> PayRun:
+    """Build and post the EE pay-run finalize JE (Packet 1 — closes the
+    gap ``finalize_with_je`` used to hard-refuse for EE). Per-employee
+    shape:
+
+        Dr Wages expense                 gross
+        Dr Social tax expense            social_tax   (33%, incl. the
+                                                        EUR 886/mo floor)
+        Dr Employer unemployment expense unemployment_employer (0.8%)
+           Cr Income tax payable             income_tax
+           Cr Unemployment payable (employee)  unemployment_employee (1.6%)
+           Cr Pillar II payable              pillar_ii
+           Cr Social tax payable             social_tax
+           Cr Employer unemployment payable  unemployment_employer
+           Cr Net wages payable              net
+
+    Plus, per-line, IFF that line carries a fringe benefit (Packet 2 —
+    ``services.fringe_benefits_ee``; the benefit's own VALUE is never
+    posted, only its two tax consequences, both pure employer cost with
+    NO net-pay effect):
+
+        Dr Fringe benefit income tax expense  fb_income_tax
+        Dr Fringe benefit social tax expense   fb_social_tax
+           Cr Fringe benefit income tax payable  fb_income_tax
+           Cr Fringe benefit social tax payable  fb_social_tax
+
+    Employee-side amounts (income tax, unemployment employee, pillar II)
+    are already inside ``gross`` — they book straight to a liability
+    with no matching expense leg, same as AU's PAYG WH. Employer-side
+    amounts (social tax, employer unemployment) are additional employer
+    cost — each gets an expense leg AND a liability leg, per the packet.
+
+    Account resolution is per-company-column-driven
+    (``_account_by_company_column``, 0200 — the same per-company
+    override pattern 0198 established for AR/AP control accounts) — EE
+    has no chart-template seed to hardcode fixed codes against, unlike
+    AU's ``_ACCT_*`` constants above.
+
+    ⚠ Deductions are NOT booked to a liability leg — mirrors the
+    pre-existing gap in the AU branch above (``net`` already subtracts
+    ``deductions_total`` with no offsetting credit line anywhere in
+    either branch). For the golden month (no deductions) this is a
+    no-op; if a caller ever populates ``PayLineInput.deductions`` for an
+    EE line, ``journal_svc.post``'s balance check refuses the JE loudly
+    rather than post a silently-unbalanced one.
+
+    ``finalize_ee_status_only`` (below) predates this function — it
+    exists only because this function used to hard-refuse EE. It is now
+    SUPERSEDED for real use (this function is the canonical EE
+    finalize), but is left byte-unchanged: the TSD golden tests
+    (``tests/services/lodgement/test_tsd_golden.py`` /
+    ``test_tsd_generator.py``) call it directly and their fixtures are
+    pinned to its no-journal behaviour. Migrating those callers onto
+    this function (adding the 9 settings-keyed payroll accounts to
+    their shared ``_make_ee_company`` fixture) is a follow-up, not this
+    packet.
+    """
+    co_id = pay_run.company_id
+
+    # Fixer round 1 (F3): finalize_with_je flips pay_run.status/journal_id
+    # to FINALIZED under a SEPARATE, later commit than journal_svc.post's
+    # own internal commit — if that later commit never lands (crash,
+    # cancelled request, cl_svc.append error) the pay run is retried from
+    # DRAFT with no memory of the JE it already posted, producing a SECOND
+    # fully-posted journal. Recover idempotently instead: if a POSTED
+    # journal already exists for this pay run, attach it and return rather
+    # than building a duplicate.
+    existing = (
+        await session.execute(
+            select(JournalEntry).where(
+                JournalEntry.source_type == "pay_run",
+                JournalEntry.source_id == pay_run.id,
+                JournalEntry.status == EntryStatus.POSTED,
+            )
+        )
+    ).scalars().first()
+    if existing is not None:
+        pay_run.journal_id = existing.id
+        pay_run.status = PayRunStatus.FINALIZED
+        pay_run.version += 1
+        pay_run.updated_at = datetime.utcnow()
+        await cl_svc.append(
+            session,
+            entity="pay_run",
+            entity_id=pay_run.id,
+            op="update",
+            actor=actor,
+            payload={
+                "journal_id": str(existing.id),
+                "note": "Recovered pre-existing POSTED journal on retry (F3 fix).",
+            },
+            version=pay_run.version,
+        )
+        await session.commit()
+        return pay_run
+
+    lines_result = await session.execute(
+        select(PayRunLine).where(PayRunLine.pay_run_id == pay_run.id)
+    )
+    lines = list(lines_result.scalars().all())
+    if not lines:
+        raise PayRunV2Error("Pay run has no lines — add at least one before finalize.")
+
+    # Fixer round 5 (F1): resolve each base wage-related account ONLY if
+    # some line actually needs it — mirrors the fringe-benefit columns'
+    # own conditional resolution just below. A director paid entirely via
+    # a fringe benefit (gross=0 on every line, only FringeBenefitLine
+    # populated) has no reason to have ANY of the 9 base wage columns
+    # configured; resolving them unconditionally made
+    # ``PayRunV2Error`` fire before ``je_lines`` was ever built, even
+    # though every base leg below is itself guarded by the matching
+    # `if ... > 0` check and would never be emitted.
+    has_wages = any(ln.gross > 0 for ln in lines)
+    has_social_tax = any((ln.ee_social_tax or Decimal("0")) > 0 for ln in lines)
+    has_unemployment_employer = any(
+        (ln.ee_unemployment_employer or Decimal("0")) > 0 for ln in lines
+    )
+    has_income_tax = any((ln.ee_income_tax or Decimal("0")) > 0 for ln in lines)
+    has_unemployment_employee = any(
+        (ln.ee_unemployment_employee or Decimal("0")) > 0 for ln in lines
+    )
+    has_pillar_ii = any((ln.ee_pillar_ii or Decimal("0")) > 0 for ln in lines)
+    has_net = any(ln.net > 0 for ln in lines)
+
+    wages = (
+        await _account_by_company_column(
+            session, company_id=co_id, column_name=_EE_WAGES_EXPENSE_COLUMN
+        )
+        if has_wages else None
+    )
+    social_tax_exp = (
+        await _account_by_company_column(
+            session, company_id=co_id, column_name=_EE_SOCIAL_TAX_EXPENSE_COLUMN
+        )
+        if has_social_tax else None
+    )
+    unemp_er_exp = (
+        await _account_by_company_column(
+            session, company_id=co_id,
+            column_name=_EE_UNEMPLOYMENT_EMPLOYER_EXPENSE_COLUMN,
+        )
+        if has_unemployment_employer else None
+    )
+    income_tax_liab = (
+        await _account_by_company_column(
+            session, company_id=co_id, column_name=_EE_INCOME_TAX_PAYABLE_COLUMN
+        )
+        if has_income_tax else None
+    )
+    unemp_ee_liab = (
+        await _account_by_company_column(
+            session, company_id=co_id,
+            column_name=_EE_UNEMPLOYMENT_EMPLOYEE_PAYABLE_COLUMN,
+        )
+        if has_unemployment_employee else None
+    )
+    pillar_ii_liab = (
+        await _account_by_company_column(
+            session, company_id=co_id, column_name=_EE_PILLAR_II_PAYABLE_COLUMN
+        )
+        if has_pillar_ii else None
+    )
+    social_tax_liab = (
+        await _account_by_company_column(
+            session, company_id=co_id, column_name=_EE_SOCIAL_TAX_PAYABLE_COLUMN
+        )
+        if has_social_tax else None
+    )
+    unemp_er_liab = (
+        await _account_by_company_column(
+            session, company_id=co_id,
+            column_name=_EE_UNEMPLOYMENT_EMPLOYER_PAYABLE_COLUMN,
+        )
+        if has_unemployment_employer else None
+    )
+    net_clearing = (
+        await _account_by_company_column(
+            session, company_id=co_id, column_name=_EE_NET_PAY_CLEARING_COLUMN
+        )
+        if has_net else None
+    )
+
+    # Fringe-benefit (erisoodustus) tax legs — Packet 2. Resolved ONLY if
+    # at least one line actually carries a nonzero fringe-benefit total
+    # (see the settings-key block's own comment: these 4 keys must not
+    # become a hard finalize blocker for a company that never grants a
+    # fringe benefit — every pre-Packet-2 EE company has none of them
+    # configured).
+    has_fringe_benefits = any(
+        (ln.ee_fringe_benefit_income_tax or Decimal("0")) > 0
+        or (ln.ee_fringe_benefit_social_tax or Decimal("0")) > 0
+        for ln in lines
+    )
+    fringe_income_tax_exp = fringe_social_tax_exp = None
+    fringe_income_tax_liab = fringe_social_tax_liab = None
+    if has_fringe_benefits:
+        fringe_income_tax_exp = await _account_by_company_column(
+            session, company_id=co_id,
+            column_name=_EE_FRINGE_BENEFIT_INCOME_TAX_EXPENSE_COLUMN,
+        )
+        fringe_social_tax_exp = await _account_by_company_column(
+            session, company_id=co_id,
+            column_name=_EE_FRINGE_BENEFIT_SOCIAL_TAX_EXPENSE_COLUMN,
+        )
+        fringe_income_tax_liab = await _account_by_company_column(
+            session, company_id=co_id,
+            column_name=_EE_FRINGE_BENEFIT_INCOME_TAX_PAYABLE_COLUMN,
+        )
+        fringe_social_tax_liab = await _account_by_company_column(
+            session, company_id=co_id,
+            column_name=_EE_FRINGE_BENEFIT_SOCIAL_TAX_PAYABLE_COLUMN,
+        )
+
+    je_lines: list[dict[str, Any]] = []
+    for line in lines:
+        emp_label = str(line.employee_id)[:8]
+        income_tax = line.ee_income_tax or Decimal("0")
+        unemployment_employee = line.ee_unemployment_employee or Decimal("0")
+        unemployment_employer = line.ee_unemployment_employer or Decimal("0")
+        social_tax = line.ee_social_tax or Decimal("0")
+        pillar_ii = line.ee_pillar_ii or Decimal("0")
+
+        if line.gross > 0:
+            je_lines.append({
+                "account_id": wages.id,
+                "description": f"Wages: {emp_label}",
+                "debit": line.gross, "credit": Decimal("0"),
+            })
+        if social_tax > 0:
+            je_lines.append({
+                "account_id": social_tax_exp.id,
+                "description": f"Social tax (employer): {emp_label}",
+                "debit": social_tax, "credit": Decimal("0"),
+            })
+        if unemployment_employer > 0:
+            je_lines.append({
+                "account_id": unemp_er_exp.id,
+                "description": f"Unemployment (employer): {emp_label}",
+                "debit": unemployment_employer, "credit": Decimal("0"),
+            })
+        if income_tax > 0:
+            je_lines.append({
+                "account_id": income_tax_liab.id,
+                "description": f"Income tax withheld: {emp_label}",
+                "debit": Decimal("0"), "credit": income_tax,
+            })
+        if unemployment_employee > 0:
+            je_lines.append({
+                "account_id": unemp_ee_liab.id,
+                "description": f"Unemployment (employee): {emp_label}",
+                "debit": Decimal("0"), "credit": unemployment_employee,
+            })
+        if pillar_ii > 0:
+            je_lines.append({
+                "account_id": pillar_ii_liab.id,
+                "description": f"Pillar II: {emp_label}",
+                "debit": Decimal("0"), "credit": pillar_ii,
+            })
+        if social_tax > 0:
+            je_lines.append({
+                "account_id": social_tax_liab.id,
+                "description": f"Social tax payable: {emp_label}",
+                "debit": Decimal("0"), "credit": social_tax,
+            })
+        if unemployment_employer > 0:
+            je_lines.append({
+                "account_id": unemp_er_liab.id,
+                "description": f"Unemployment payable (employer): {emp_label}",
+                "debit": Decimal("0"), "credit": unemployment_employer,
+            })
+        if line.net > 0:
+            je_lines.append({
+                "account_id": net_clearing.id,
+                "description": f"Net pay: {emp_label}",
+                "debit": Decimal("0"), "credit": line.net,
+            })
+
+        # Fringe-benefit (erisoodustus) tax legs — Packet 2. The benefit's
+        # own VALUE (e.g. the car's running costs) is NOT posted here —
+        # only its two tax consequences, both pure employer cost with NO
+        # net-pay effect (module docstring of services.fringe_benefits_ee).
+        fb_income_tax = line.ee_fringe_benefit_income_tax or Decimal("0")
+        fb_social_tax = line.ee_fringe_benefit_social_tax or Decimal("0")
+        if fb_income_tax > 0:
+            je_lines.append({
+                "account_id": fringe_income_tax_exp.id,
+                "description": f"Fringe benefit income tax: {emp_label}",
+                "debit": fb_income_tax, "credit": Decimal("0"),
+            })
+            je_lines.append({
+                "account_id": fringe_income_tax_liab.id,
+                "description": f"Fringe benefit income tax payable: {emp_label}",
+                "debit": Decimal("0"), "credit": fb_income_tax,
+            })
+        if fb_social_tax > 0:
+            je_lines.append({
+                "account_id": fringe_social_tax_exp.id,
+                "description": f"Fringe benefit social tax: {emp_label}",
+                "debit": fb_social_tax, "credit": Decimal("0"),
+            })
+            je_lines.append({
+                "account_id": fringe_social_tax_liab.id,
+                "description": f"Fringe benefit social tax payable: {emp_label}",
+                "debit": Decimal("0"), "credit": fb_social_tax,
+            })
+
+    entry = await journal_svc.create_draft(
+        session,
+        company_id=co_id,
+        entry_date=pay_run.payment_date,
+        description=(
+            f"EE Payroll {pay_run.period_start} to {pay_run.period_end} "
+            f"({len(lines)} employee{'s' if len(lines) != 1 else ''})"
+        ),
+        lines=je_lines,
+        tenant_id=tenant_id,
+    )
+    try:
+        await journal_svc.post(
+            session, entry.id, posted_by=actor, tenant_id=tenant_id,
+            origin=JournalOrigin.PAYRUN,
+            source_type="pay_run",
+            source_id=pay_run.id,
+        )
+    except journal_svc.PostingError as exc:
+        # F1 fix: create_draft already committed ``entry`` (it internally
+        # commits — journal.py's create_draft), so a post() failure (e.g.
+        # an unbalanced JE from the documented "deductions not booked to a
+        # liability leg" gap above) would otherwise leave a permanently
+        # orphaned DRAFT journal entry, consuming a ref sequence number on
+        # every retry. post_in_txn's balance check runs BEFORE any status
+        # mutation, so ``entry`` is still DRAFT here and safe to delete.
+        await journal_svc.delete(
+            session, entry.id, performed_by=actor, tenant_id=tenant_id,
+            company_id=co_id,
+        )
+        raise PayRunV2Error(f"Journal post failed: {exc}") from exc
+
+    pay_run.journal_id = entry.id
+    pay_run.status = PayRunStatus.FINALIZED
+    pay_run.version += 1
+    pay_run.updated_at = datetime.utcnow()
+
+    await cl_svc.append(
+        session,
+        entity="pay_run",
+        entity_id=pay_run.id,
+        op="update",
+        actor=actor,
+        payload={
+            "journal_id": str(entry.id),
+            "line_count": len(lines),
+            "total_gross": str(sum((ln.gross for ln in lines), Decimal("0"))),
+            "total_income_tax": str(sum(
+                ((ln.ee_income_tax or Decimal("0")) for ln in lines), Decimal("0")
+            )),
+            "total_social_tax": str(sum(
+                ((ln.ee_social_tax or Decimal("0")) for ln in lines), Decimal("0")
+            )),
+            "total_unemployment_employee": str(sum(
+                ((ln.ee_unemployment_employee or Decimal("0")) for ln in lines),
+                Decimal("0"),
+            )),
+            "total_unemployment_employer": str(sum(
+                ((ln.ee_unemployment_employer or Decimal("0")) for ln in lines),
+                Decimal("0"),
+            )),
+            "total_pillar_ii": str(sum(
+                ((ln.ee_pillar_ii or Decimal("0")) for ln in lines), Decimal("0")
+            )),
+            "total_fringe_benefit_income_tax": str(sum(
+                ((ln.ee_fringe_benefit_income_tax or Decimal("0")) for ln in lines),
+                Decimal("0"),
+            )),
+            "total_fringe_benefit_social_tax": str(sum(
+                ((ln.ee_fringe_benefit_social_tax or Decimal("0")) for ln in lines),
+                Decimal("0"),
+            )),
+            "total_net": str(sum((ln.net for ln in lines), Decimal("0"))),
+        },
+        version=pay_run.version,
+    )
+    await session.commit()
+    return pay_run
+
+
+async def void_pay_run(
+    session: AsyncSession,
+    pay_run_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID,
+    actor: str,
+    override_reason: str | None = None,
+) -> PayRun:
+    """Reverse a FINALIZED pay run's posted journal entry and mark the
+    run VOIDED — Packet 1's reversal story.
+
+    Mirrors ``services.bills.void_bill`` (``journal_svc.reverse``):
+    pay_runs_v2 had no prior unfinalize/void path for EITHER
+    jurisdiction to mirror byte-for-byte (there was nothing there), so
+    this is built generically off ``pay_run.journal_id`` and does not
+    branch on jurisdiction — it works for an AU-finalized run too.
+
+    The reversal entry is found afterwards via its own
+    ``reversal_of_id == pay_run.journal_id`` (``journal_svc.reverse``
+    sets this) — ``pay_run.journal_id`` itself is left pointing at the
+    original (now REVERSED) entry, so no new column/migration was
+    needed. Callers computing "nets to zero" must include BOTH the
+    REVERSED original and its POSTED reversal (mirrors
+    ``tests/services/test_tax_return_generator.py``'s
+    ``REPORTABLE_STATUSES`` convention) — a POSTED-only query sees only
+    the reversal and reads as the negative of the original, not zero.
+
+    Idempotent: voiding an already-VOIDED run is a no-op (returns as-is,
+    same convention as ``void_bill``).
+    """
+    pay_run = await _get_pay_run(session, pay_run_id, tenant_id=tenant_id)
+    if pay_run is None:
+        raise PayRunV2Error(f"Pay run {pay_run_id} not found")
+    if pay_run.status == PayRunStatus.VOIDED:
+        return pay_run
+    if pay_run.status != PayRunStatus.FINALIZED:
+        raise PayRunV2Error(
+            f"Cannot void pay run {pay_run_id} from status "
+            f"{pay_run.status!r} — only a FINALIZED pay run can be voided."
+        )
+    if pay_run.journal_id is None:
+        raise PayRunV2Error(
+            f"Pay run {pay_run_id} is FINALIZED but has no journal_id — "
+            "nothing to reverse. (A pay run finalized via "
+            "finalize_ee_status_only never posts a journal; there is no "
+            "GL entry here to void.)"
+        )
+
+    # F4 fix: journal_svc.reverse() is internally atomic (its own trailing
+    # commit covers both posting the reversal AND flipping the original to
+    # REVERSED), but THIS function's pay_run.status flip is a separate,
+    # later commit. If that later commit never lands (crash, cancelled
+    # request, cl_svc.append error), a retry would call reverse() again on
+    # an already-REVERSED original, which raises PostingError uncaught —
+    # permanently stuck at FINALIZED with the journal already reversed
+    # underneath it. Detect that partially-completed state up front and
+    # skip straight to the VOIDED flip instead of re-reversing.
+    original = await journal_svc.get(session, pay_run.journal_id, tenant_id=tenant_id)
+    if original.status != EntryStatus.REVERSED:
+        await journal_svc.reverse(
+            session,
+            pay_run.journal_id,
+            posted_by=actor,
+            override_reason=override_reason or f"Void pay run {pay_run.id}",
+            tenant_id=tenant_id,
+        )
+    pay_run.status = PayRunStatus.VOIDED
+    pay_run.version += 1
+    pay_run.updated_at = datetime.utcnow()
+
+    await cl_svc.append(
+        session,
+        entity="pay_run",
+        entity_id=pay_run.id,
+        op="update",
+        actor=actor,
+        payload={"note": "Pay run voided; journal reversed (see reversal_of_id)."},
+        version=pay_run.version,
+    )
+    await session.commit()
     return pay_run
 
 
@@ -1018,4 +1866,5 @@ __all__ = [
     "finalize_ee_status_only",
     "finalize_with_je",
     "upsert_line",
+    "void_pay_run",
 ]

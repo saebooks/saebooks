@@ -56,13 +56,14 @@ from saebooks.models.account import Account
 from saebooks.models.depreciation_model import DepreciationModel
 from saebooks.models.fixed_asset import FixedAsset
 from saebooks.models.journal import JournalOrigin
+from saebooks.money import money_quantum
 from saebooks.services import journal as journal_svc
 
 # Days-per-month used for day-count depreciation proration.
 # 365.25 / 12 — handles leap years smoothly across long useful lives.
 _DAYS_PER_MONTH = Decimal("30.4375")
 
-_CENT = Decimal("0.01")
+_CENT = money_quantum(2)
 
 
 # ---------------------------------------------------------------------- #

@@ -403,7 +403,7 @@ async def oauth_handoff(
     if not expected or not x_oauth_handoff_secret or x_oauth_handoff_secret != expected:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
 
-    if body.provider.lower() not in {"discourse", "authentik", "cf-access"}:
+    if body.provider.lower() not in {"discourse", "authentik", "cf-access", "eid"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="unknown provider")
     if not body.email or "@" not in body.email:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid email")
@@ -419,14 +419,40 @@ async def oauth_handoff(
             detail="this portal is private — your email is not authorised",
         )
 
-    from saebooks.services.oauth_service import find_or_create_user
+    from saebooks.services.oauth_service import find_linked_user, find_or_create_user
 
-    user = await find_or_create_user(
-        provider=body.provider.lower(),
-        provider_user_id=str(body.provider_user_id),
-        email=body.email.strip().lower(),
-        display_name=body.display_name,
-    )
+    if body.provider.lower() == "eid":
+        # eID is edition-gated engine-side too (FLAG_EID_AUTH, Business+):
+        # SK charges per authentication, so a Community/Offline instance
+        # refuses the handoff even if a mis-configured web front sends it.
+        from saebooks.services.features import FLAG_EID_AUTH, is_enabled
+
+        if not is_enabled(FLAG_EID_AUTH):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="eID login is not available on this edition",
+            )
+        # Estonian eID is fail-closed: a validated assertion may only log
+        # into an EXISTING user (linked in settings by an authenticated
+        # session, or matched by email). Never auto-create — self-serve
+        # signup via eID is an untaken business decision.
+        user = await find_linked_user(
+            provider="eid",
+            provider_user_id=str(body.provider_user_id),
+            email=body.email.strip().lower(),
+        )
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="no account is linked to this eID identity",
+            )
+    else:
+        user = await find_or_create_user(
+            provider=body.provider.lower(),
+            provider_user_id=str(body.provider_user_id),
+            email=body.email.strip().lower(),
+            display_name=body.display_name,
+        )
     if user.archived_at is not None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="account inactive")
 

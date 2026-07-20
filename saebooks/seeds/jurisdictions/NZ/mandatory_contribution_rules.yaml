@@ -1,0 +1,82 @@
+# New Zealand mandatory retirement-contribution rules — KiwiSaver
+# date-effective rate rows (employee default + employer minimum).
+#
+# Source: ~/records/saebooks/nz-market-entry-strategy.md §5.4 — the
+# KiwiSaver figures were CORRECTED BY VERIFICATION (the pass-1 numbers
+# were stale): since 1 APRIL 2026 the default employee rate and the
+# employer minimum are 3.5% (not 3%); both rise to 4% on 1 APRIL 2028.
+# Employee options 3.5/4/6/8/10% with a temporary opt-down to 3%
+# (employer may match at 3%). The 2026 and 2028 steps are seeded per
+# the brief; the pre-2026 3% row is included so a 2025-26 pay period
+# resolves, with its start date flagged.
+#
+# earnings_base: KiwiSaver contributions apply to GROSS salary or wages
+# (including overtime) — deliberately "gross_wages", NOT AU's
+# ordinary_time_earnings.
+#
+# KiwiSaver is contributed by BOTH sides but at independently-set rates,
+# so employee-default and employer-minimum are separate coded rows
+# (payer=employee / payer=employer), mirroring EE's per-side pillar_ii
+# rows rather than a single payer=both row.
+table: mandatory_contribution_rules
+key: [jurisdiction, code, effective_from]
+rows:
+  # --- Employee default rate ------------------------------------------------
+  - jurisdiction: NZL
+    code: nz_kiwisaver_employee_default
+    payer: employee
+    rate_percent: 3.0000
+    earnings_base: gross_wages
+    cap_amount: null
+    # UNVERIFIED start date — the 3% default long predates this seed
+    # (2013-04-01 is the widely-documented step from 2%); only the fact
+    # that 3% was the default UNTIL 2026-03-31 is verified by §5.4.
+    effective_from: 2013-04-01
+    effective_to: 2026-03-31
+
+  - jurisdiction: NZL
+    code: nz_kiwisaver_employee_default
+    payer: employee
+    rate_percent: 3.5000
+    earnings_base: gross_wages
+    cap_amount: null
+    effective_from: 2026-04-01   # verified — §5.4 corrected value
+    effective_to: 2028-03-31
+
+  - jurisdiction: NZL
+    code: nz_kiwisaver_employee_default
+    payer: employee
+    rate_percent: 4.0000
+    earnings_base: gross_wages
+    cap_amount: null
+    effective_from: 2028-04-01   # verified — legislated 2028 step
+    effective_to: null
+
+  # --- Employer minimum (compulsory employer contribution) -------------------
+  - jurisdiction: NZL
+    code: nz_kiwisaver_employer_min
+    payer: employer
+    rate_percent: 3.0000
+    earnings_base: gross_wages
+    cap_amount: null
+    # UNVERIFIED start date — same caveat as the employee 3% row.
+    effective_from: 2013-04-01
+    effective_to: 2026-03-31
+
+  - jurisdiction: NZL
+    code: nz_kiwisaver_employer_min
+    payer: employer
+    rate_percent: 3.5000
+    earnings_base: gross_wages
+    cap_amount: null
+    effective_from: 2026-04-01   # verified — §5.4 corrected value
+    effective_to: 2028-03-31
+
+  - jurisdiction: NZL
+    code: nz_kiwisaver_employer_min
+    payer: employer
+    rate_percent: 4.0000
+    earnings_base: gross_wages
+    cap_amount: null
+    effective_from: 2028-04-01   # verified — legislated 2028 step
+    effective_to: null

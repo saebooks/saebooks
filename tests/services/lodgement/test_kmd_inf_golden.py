@@ -87,8 +87,8 @@ async def test_kmd_inf_golden_period_serialises_byte_for_byte() -> None:
             input_credit_recoverable=False,
         )
         session.add(nd_tc)
-        session.add(Account(company_id=company_id, code="1-1200", name="Trade Debtors", account_type=AccountType.ASSET))
-        session.add(Account(company_id=company_id, code="2-1200", name="Trade Creditors", account_type=AccountType.LIABILITY))
+        session.add(Account(company_id=company_id, code="1200", name="Trade Debtors", account_type=AccountType.ASSET))
+        session.add(Account(company_id=company_id, code="2100", name="Trade Creditors", account_type=AccountType.LIABILITY))
         await session.commit()
         nd_tax_code_id = nd_tc.id
 

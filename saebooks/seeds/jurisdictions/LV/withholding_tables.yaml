@@ -1,0 +1,102 @@
+# Latvian withholding rules (LV jurisdiction module seed).
+# jurisdiction is the 3-char code 'LVA'. Mirrors the AU/EE
+# withholding_tables.yaml shape: a formula_type tag + a free-shape
+# parameters JSONB blob.
+#
+# IIN (iedzīvotāju ienākuma nodoklis) 2026 — the 2025 reform structure,
+# unchanged for 2026 (VERIFIED vid.gov.lv/en/personal-income-tax-rates):
+#   * Annual bands: 25.5% up to EUR 105,300; 33% above (via the ANNUAL
+#     return); +3% additional rate on total annual income over
+#     EUR 200,000 (annual return; the base folds in capital income).
+#   * MONTHLY EMPLOYER WITHHOLDING IS FLAT 25.5% — the employer applies
+#     one rate all year regardless of salary level ("Ikmēneša algu
+#     aprēķinā darba devējs visu gadu piemēro vienu likmi (25,5 %),
+#     neatkarīgi no bruto algas apmēra" — aibirojs.lv, corroborated by
+#     LV portāls + the VID rates page's monthly/annual split). The 33%
+#     band and the 3% surcharge are settled ONLY through the annual
+#     income tax return — they are NOT a payroll band. Encoding a
+#     monthly 33% band here would be the classic wrong-model bug; the
+#     LVPayrollEngine implements the flat-25.5% monthly algorithm and
+#     documents the annual reconciliation as out of payroll scope.
+#   * Non-taxable minimum: FIXED EUR 550/month for 2026 (510 in 2025;
+#     the income-dependent differentiated minimum was abolished from
+#     2025). Applied only where the employee's algas nodokļa grāmatiņa
+#     (wage tax book) is submitted electronically to THIS employer; with
+#     no tax book the rate stays 25.5% but no minimum/allowances apply.
+#     VERIFIED (fm.gov.lv + vid.gov.lv + aibirojs.lv). Pensioner
+#     minimum EUR 1,000/month — VERIFIED (fm.gov.lv).
+#   * Dependant allowance: EUR 250/month per dependant (tax book
+#     required). VERIFIED (fm.gov.lv).
+#   * IIN base = gross - employee VSAOI (10.50%) - non-taxable minimum -
+#     dependant allowances. VERIFIED (aibirojs.lv payroll mechanics).
+#
+# Dividend withholding:
+#   * Standard regime: no separate IIN withholding on dividends paid
+#     from profit taxed at the company-level 20%/÷0.8 UIN — single-layer
+#     taxation at the distributing company (the VID 2025-12-23 bulletin
+#     frames the new regime's 6% precisely as the visible alternative to
+#     embedding the burden in the 20/80 corporate tax).
+#   * 2026 elective regime: 6% IIN withheld on the dividend
+#     simultaneously with the 15% UIN (÷0.85 base). VERIFIED (VID
+#     bulletin + UIN likums Art. 4.2).
+table: withholding_tables
+key: [jurisdiction, code, effective_from]
+rows:
+  - jurisdiction: LVA
+    code: lv_iin_salary_paye
+    name: "Algas nodoklis — IIN ieturējums no darba algas (mēneša aprēķins)"
+    withholding_type: wage_paye
+    formula_type: flat_rate
+    parameters:
+      rate_percent: 25.5
+      monthly_flat_rate_note: >-
+        The employer withholds a single flat 25.5% all year on the IIN
+        base (gross - employee VSAOI - exemptions). The 33% band (annual
+        income over EUR 105,300) and the additional 3% rate (over
+        EUR 200,000) are settled exclusively via the annual income tax
+        return — never in monthly payroll.
+      annual_band_1_rate_percent: 25.5
+      annual_band_1_upper: 105300.00
+      annual_band_2_rate_percent: 33.0
+      annual_additional_rate_percent: 3.0
+      annual_additional_rate_threshold: 200000.00
+      non_taxable_minimum_monthly: 550.00
+      non_taxable_minimum_monthly_pensioner: 1000.00
+      dependant_allowance_monthly: 250.00
+      tax_book_required_for_exemptions: true
+      no_tax_book_rate_percent: 25.5
+      no_tax_book_note: >-
+        With no algas nodokļa grāmatiņa submitted to this employer the
+        rate remains 25.5% but the non-taxable minimum and dependant
+        allowances are NOT applied (tax from the first euro).
+    effective_from: 2026-01-01
+
+  - jurisdiction: LVA
+    code: lv_dividend_iin_standard
+    name: "Dividendes — IIN, standarta režīms (UIN 20% nomaksāts uzņēmuma līmenī)"
+    withholding_type: dividend
+    formula_type: flat_rate
+    parameters:
+      rate_percent: 0.0
+      note: >-
+        No separate IIN on dividends distributed from profit that bore
+        the standard company-level 20%/÷0.8 UIN — single-layer taxation
+        at the distributing company. (Framing per the VID 2025-12-23
+        bulletin on the 2026 alternative regime.)
+    effective_from: 2018-01-01
+
+  - jurisdiction: LVA
+    code: lv_dividend_iin_alt_6pct
+    name: "Dividendes — IIN 6% ieturējums, alternatīvais 15% UIN režīms (no 2026)"
+    withholding_type: dividend
+    formula_type: flat_rate
+    parameters:
+      rate_percent: 6.0
+      condition: >-
+        Applies ONLY when the company has elected the 2026 alternative
+        regime (members exclusively natural persons; 15% UIN on the
+        ÷0.85 grossed-up base). Withheld simultaneously with the UIN at
+        distribution; all-or-nothing per tax period. See
+        corporate_tax_rates.yaml entity_scope
+        distributed_profit_alternative.
+    effective_from: 2026-01-01

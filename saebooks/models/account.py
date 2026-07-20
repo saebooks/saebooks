@@ -10,7 +10,6 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Integer,
-    Numeric,
     String,
     UniqueConstraint,
     func,
@@ -20,6 +19,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from saebooks.db import Base
+from saebooks.db_types import Money
 from saebooks.models._scope import CompanyScoped
 
 
@@ -32,6 +32,20 @@ class AccountType(enum.StrEnum):
     EXPENSE = "EXPENSE"
     COST_OF_SALES = "COST_OF_SALES"
     OTHER_EXPENSE = "OTHER_EXPENSE"
+
+
+class NetAssetRestrictionTier(enum.StrEnum):
+    """Fund-accounting net-asset restriction tiers (M1.5 · T10b). Vocabulary
+    for ``Account.net_asset_restriction_tier`` — stored as a plain string
+    (service-layer validation, like ``chart_template.account_type``)."""
+
+    UNRESTRICTED = "unrestricted"
+    BOARD_DESIGNATED = "board_designated"
+    DONOR_RESTRICTED_TEMPORARY = "donor_restricted_temporary"
+    DONOR_RESTRICTED_PERMANENT = "donor_restricted_permanent"
+
+
+NET_ASSET_RESTRICTION_TIERS = tuple(t.value for t in NetAssetRestrictionTier)
 
 
 class Account(CompanyScoped, Base):
@@ -126,7 +140,7 @@ class Account(CompanyScoped, Base):
     # blocks data entry; hard is a stronger state. Backed by a CHECK
     # constraint (ck_accounts_credit_limit_kind) added in migration 0141.
     credit_limit: Mapped[Decimal | None] = mapped_column(
-        Numeric(18, 2),
+        Money(),
         nullable=True,
         comment="Credit limit for this account; NULL = no limit set",
     )
@@ -135,6 +149,36 @@ class Account(CompanyScoped, Base):
         server_default="soft",
         nullable=True,
         comment="soft (warn only) | hard — mirrors SeatCapKind soft/hard",
+    )
+    # M1.5 · T10b — statutory chart-of-accounts mapping (all nullable; AU
+    # accounts stay NULL because Australia mandates no numbering plan or
+    # local-language labels). Populated for companies reporting under a
+    # mandated framework (companies.statutory_framework_code): the account's
+    # number in that framework, its local-language statutory label, and the
+    # framework class/group it rolls up into. Reference-data only — nothing
+    # in the posting path reads these.
+    statutory_account_code: Mapped[str | None] = mapped_column(
+        String(32),
+        comment="Account number under the company's statutory framework, e.g. SKR03 '4400'",
+    )
+    statutory_account_label_local: Mapped[str | None] = mapped_column(
+        String(255),
+        comment="Local-language statutory label, e.g. 'Erlöse 19 % USt'",
+    )
+    statutory_parent_class: Mapped[str | None] = mapped_column(
+        String(64),
+        comment="Statutory class/group the account sits under, e.g. 'Klasse 4'",
+    )
+    # M1.5 · T10b — NFP / fund-accounting net-asset restriction tier. NULL
+    # for for-profit books (every existing account). One of
+    # NET_ASSET_RESTRICTION_TIERS when the entity tracks donor restrictions
+    # (canonical_bucket 'nonprofit'/'government' structures).
+    net_asset_restriction_tier: Mapped[str | None] = mapped_column(
+        String(32),
+        comment=(
+            "One of unrestricted / board_designated / donor_restricted_temporary / "
+            "donor_restricted_permanent; NULL = not fund-accounted"
+        ),
     )
     extra: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # Optimistic-locking version — bumped on every write through the API.

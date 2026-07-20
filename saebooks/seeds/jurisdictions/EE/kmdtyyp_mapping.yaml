@@ -1,0 +1,540 @@
+# KMDTYYP2026ap — transaction-type classification for the 2027 data-based
+# KMD (käibedeklaratsioon) XBRL GL export (section EE0203001).
+#
+# READY FOR the data-based KMD; NOT "compliant with" — the 2027 mandate is at
+# VTK / consultation stage, not enacted law (Chamber of Commerce called
+# 1 Jan 2027 "unrealistic"). Do not read this file as a legal conformance claim.
+#
+# SOURCE OF TRUTH: APA_KMD_TAKSONOOMIA_20260507.xlsx, sheet `KMDTYYP2026ap`
+# (57 selectable level-3 leaf codes under 4 level-1 roots M/S/O/A), cross-checked
+# against the official instance sample
+# `English/XBRL_GL_sample_20260617.xml` (M_101/M_103/M_104/M_105/M_201/M_206/
+# M_208/M_210/M_301/S_101/O_101/O_106/O_401/O_601 all appear there).
+# Both artefacts live under ~/records/saebooks/emta-schemas/andmepohine-kmd-2027/.
+#
+# NOT a reference-DB table — this is a FLAT MAP loaded directly off disk by
+# `saebooks/services/lodgement/kmd_2027/kmdtyyp.py` (the plan permitted a flat
+# map over a reference table; KMDTYYP is not tenant-scoped, so no RLS applies).
+# The `reference_seed: false` marker tells `services.reference.loader` to skip
+# this file when it globs the EE seed directory for reference-table seeds.
+reference_seed: false
+classifier: KMDTYYP2026ap
+classifier_version: "2026-03-31"
+section: EE0203001
+
+# -- The engine→KMDTYYP mapping, per leaf -------------------------------------
+#
+# THE RISK CONCENTRATION (build-plan §4.5 / top-5 risk #1): ~57 hierarchical
+# leaf codes vs the box engine's ~20 coarser `reporting_type` tags. The mapping
+# KEY is (reporting_type, role) — NOT reporting_type alone — because the SAME
+# tag means a different leaf on the sale vs the purchase/input side (e.g.
+# `standard` on a sale → M_101; `standard` on a deductible purchase → O_101).
+#
+# `role` values:
+#   sale        — output supply, amount = taxable value        → M_* leaves
+#   acquisition — reverse-charge self-assessment (buyer),
+#                 amount = taxable value (self-assessed base)   → S_* leaves
+#   input       — input VAT deduction, amount = VAT amount      → O_* leaves
+#   accounting  — accounting-entry adjustment                   → A_* leaves
+#
+# `amount_basis`:
+#   taxable_value — gl-cor:amount carries the taxable value (M_/S_ rows)
+#   input_vat     — gl-cor:amount carries the input-VAT amount (O_ rows)
+#   (build-plan §4.1 / andmepohine read §1: "for sales, reverse-charge
+#    acquisitions and accounting entries = taxable value; for purchases = the
+#    amount of input VAT".)
+#
+# `reconcile_group` — the koondvaade reconciliation bucket (see reconcile.py).
+#   A leaf with `reconcile_group: null` is NOT summed into a box-reconciliation
+#   line; a generated row carrying such a leaf is surfaced by reconcile.py as an
+#   `unclassified_row` (never silently dropped).
+#
+# `engine` — the list of (reporting_type, role) tuples the box engine emits that
+#   map UNAMBIGUOUSLY to this leaf. EMPTY list = leaf has NO confident engine
+#   source the generator can act on today. Only tuples the engine ACTUALLY emits
+#   AND the generator ACTUALLY dispatches belong here — this list is the LIVE
+#   forward map (kmdtyyp.py loads it into `forward`, coverage() counts a leaf with
+#   a non-empty `engine` as mapped, and the coverage guard asserts every tuple
+#   here is reachable by generator.py). Do NOT put a would-be/pending tuple here.
+#
+# `engine_pending` — (OPTIONAL, per leaf) proposed (reporting_type, role) tuples
+#   that a leaf COULD be mapped by with only a classifier change (a new tax_code
+#   seeded with that reporting_type, plus at most adding the tag to a generator
+#   dispatch frozenset — NO new accounting math). These are TIER-2 proposals:
+#   the loader deliberately IGNORES `engine_pending` (it reads only `engine`), so
+#   a pending tuple does NOT enter the forward map, does NOT flip is_mapped, and
+#   does NOT trip the reachability guard — the engine does not emit it YET. Each
+#   pending entry carries `pending_engine_emit: true` + a `prereq` note naming the
+#   exact seed row / dispatch wiring to make it real. See
+#   ~/records/saebooks/kmdtyyp-mapping-tiers.md for the full per-leaf tiering.
+#
+# TIER CENSUS (2026-07-11 mapping pass; was 17/57):
+#   * 18 leaves LIVE-mapped (`engine:` non-empty)              — coverage() metric
+#   * 11 leaves TIER-2 pending (`engine_pending:` present)     — classifier gap
+#   * 28 leaves TIER-3 feature-blocked (`engine: []`, note)    — real engine work
+#   The margin-scheme / triangular / cash-accounting / passenger-car /
+#   partial-deduction / warehousing / import-amendment / correction /
+#   accounting-entry leaves stay TIER-3: mapping their existing-ish tag would
+#   report a WRONG amount (e.g. margin_scheme would report full value, not the
+#   margin) or needs data the engine does not track — worse than leaving unmapped.
+#   Those leaves are only reachable via a hand-supplied code on a row (the golden
+#   path), never guessed by the generator — building the named feature (or, for
+#   TIER-2, seeding the finer tag) is the prerequisite (build-plan §4.5).
+leaves:
+  # === M — Sale (taxable value) ============================================
+  M_101:
+    name_en: "Supply subject to standard or reduced rate, incl advance payments"
+    amount_basis: taxable_value
+    reconcile_group: domestic_taxable_supply
+    engine:
+      - {reporting_type: standard, role: sale}
+      - {reporting_type: standard_legacy_20, role: sale}
+      - {reporting_type: standard_legacy_22, role: sale}
+      - {reporting_type: reduced_9, role: sale}
+      - {reporting_type: reduced_13, role: sale}
+      - {reporting_type: reduced_5_legacy, role: sale}
+  M_102:
+    name_en: "Supply subject to standard or reduced rate, cash accounting of VAT"
+    amount_basis: taxable_value
+    reconcile_group: domestic_taxable_supply
+    engine: []   # TIER 3 — cash-accounting of VAT (KMS §44): supply is recognised
+                 # on PAYMENT receipt, not invoice date. Needs a cash-basis
+                 # recognition path (payment-driven supply timing) the engine does
+                 # not have. Future: (cash_accounting_supply, sale) -> M_102.
+  M_103:
+    name_en: "Margin scheme — resale of second-hand goods, art, collectors' items, antiques"
+    amount_basis: taxable_value
+    reconcile_group: domestic_taxable_supply
+    engine: []   # TIER 3 — margin scheme (KMS §41/§42). The reported taxable value
+                 # is the MARGIN (sale price − acquisition cost), not the line net.
+                 # An existing `margin_scheme` tag exists (AU MGN) but mapping it
+                 # would report the full value as the margin — WRONG. Needs margin
+                 # accounting (per-line acquisition-cost tracking + margin base).
+                 # Future: (margin_resale, sale) -> M_103.
+  M_104:
+    name_en: "Margin scheme — travel agencies"
+    amount_basis: taxable_value
+    reconcile_group: domestic_taxable_supply
+    engine: []   # TIER 3 — travel-agency margin scheme (KMS §40). Same margin-
+                 # accounting feature as M_103 (report margin, not value), distinct
+                 # leaf. Future: (margin_travel, sale) -> M_104.
+  M_105:
+    name_en: "Special arrangements (immovables, scrap/precious metal) — seller (domestic reverse charge, KMS §41^1)"
+    amount_basis: taxable_value
+    reconcile_group: domestic_rc_supply
+    engine:
+      - {reporting_type: rc_domestic_supply, role: sale}
+  M_201:
+    name_en: "Intra-Community supply of goods"
+    amount_basis: taxable_value
+    reconcile_group: zero_rated_supply
+    engine:
+      - {reporting_type: zero_ic_goods, role: sale}
+  M_202:
+    name_en: "Services to a taxable person of another Member State at 0%, incl advance payment"
+    amount_basis: taxable_value
+    reconcile_group: zero_rated_supply
+    engine:
+      - {reporting_type: zero_ic_services, role: sale}
+  M_203:
+    name_en: "Intra-Community supply of goods — transferor in a triangular transaction"
+    amount_basis: taxable_value
+    reconcile_group: zero_rated_supply
+    engine: []   # TIER 3 — triangular transaction (transferor leg). Correct
+                 # reporting needs three-party chain tracking (who is transferor /
+                 # reseller / final acquirer), not a tag the user picks in
+                 # isolation. Future: (zero_ic_triangular_transferor, sale) -> M_203.
+  M_204:
+    name_en: "Intra-Community supply of goods — reseller in a triangular transaction"
+    amount_basis: taxable_value
+    reconcile_group: zero_rated_supply
+    engine: []   # TIER 3 — triangular transaction (reseller leg). Same triangular-
+                 # chain tracking as M_203. Future: (triangular_reseller, sale) -> M_204.
+  M_205:
+    name_en: "Intra-Community supply of goods — new means of transport"
+    amount_basis: taxable_value
+    reconcile_group: zero_rated_supply
+    engine: []   # TIER 2 — classifier sub-case of intra-Community goods supply
+    engine_pending:
+      - {reporting_type: zero_ic_new_transport, role: sale, pending_engine_emit: true,
+         prereq: "Seed EE tax_code (rate 0%, direction sale, reporting_type=zero_ic_new_transport); no generator wiring (sale role already dispatched). Then move this tuple into `engine:`."}
+  M_206:
+    name_en: "Intra-Community supply of goods — excise goods"
+    amount_basis: taxable_value
+    reconcile_group: zero_rated_supply
+    engine: []   # TIER 2 — classifier sub-case of intra-Community goods supply
+    engine_pending:
+      - {reporting_type: zero_ic_excise, role: sale, pending_engine_emit: true,
+         prereq: "Seed EE tax_code (rate 0%, direction sale, reporting_type=zero_ic_excise); no generator wiring. Then move this tuple into `engine:`."}
+  M_207:
+    name_en: "Intra-Community supply of goods — customs agency"
+    amount_basis: taxable_value
+    reconcile_group: zero_rated_supply
+    engine: []   # TIER 2 — classifier sub-case (customs procedure 42, declared by agent)
+    engine_pending:
+      - {reporting_type: zero_ic_customs_agency, role: sale, pending_engine_emit: true,
+         prereq: "Seed EE tax_code (rate 0%, direction sale, reporting_type=zero_ic_customs_agency); no generator wiring. Then move this tuple into `engine:`."}
+  M_208:
+    name_en: "Export of goods, incl advance payment"
+    amount_basis: taxable_value
+    reconcile_group: zero_rated_supply
+    engine:
+      - {reporting_type: zero_export, role: sale}
+  M_209:
+    name_en: "Export of goods — sale to passengers with VAT refund (tax-free)"
+    amount_basis: taxable_value
+    reconcile_group: zero_rated_supply
+    engine:
+      - {reporting_type: zero_traveller, role: sale}
+  M_210:
+    name_en: "Other goods taxable at 0%, incl advance payment"
+    amount_basis: taxable_value
+    reconcile_group: zero_rated_supply
+    engine: []   # TIER 2 — 'other' 0% goods bucket (KMS §15(3)/(4) not already an
+                 # IC-supply / export / traveller leaf)
+    engine_pending:
+      - {reporting_type: zero_other_goods, role: sale, pending_engine_emit: true,
+         prereq: "Seed EE tax_code (rate 0%, direction sale, reporting_type=zero_other_goods); no generator wiring. Then move this tuple into `engine:`."}
+  M_211:
+    name_en: "Other services taxable at 0%, incl advance payment"
+    amount_basis: taxable_value
+    reconcile_group: zero_rated_supply
+    engine: []   # TIER 2 — 'other' 0% services bucket
+    engine_pending:
+      - {reporting_type: zero_other_services, role: sale, pending_engine_emit: true,
+         prereq: "Seed EE tax_code (rate 0%, direction sale, reporting_type=zero_other_services); no generator wiring. Then move this tuple into `engine:`."}
+  M_212:
+    name_en: "Taxable at 0% under the margin scheme — travel agencies"
+    amount_basis: taxable_value
+    reconcile_group: zero_rated_supply
+    engine: []   # TIER 3 — travel-agency margin scheme at 0% (KMS §40). Needs the
+                 # same margin accounting as M_104, at the 0% rate.
+                 # Future: (margin_travel_zero, sale) -> M_212.
+  M_301:
+    name_en: "Supply exempt from tax"
+    amount_basis: taxable_value
+    reconcile_group: exempt_supply
+    engine:
+      - {reporting_type: exempt, role: sale}
+  M_302:
+    name_en: "Not supply"
+    amount_basis: taxable_value
+    reconcile_group: null   # informative; not summed into a KMD box
+    # TIER 1 — LIVE-mapped. `out_of_scope` is an existing, unclaimed engine tag
+    # (services/tax_codes.py: AU N-T, GEN_OOS) meaning "outside the VAT/GST system"
+    # — exactly M_302 "Ei ole käive" (not a supply within the meaning of the VAT
+    # Act). Distinct from `exempt`->M_301 (a supply that IS in scope but exempt).
+    # Correct amount_basis (taxable_value) and no new math. Because M_302 is
+    # informative (reconcile_group: null → surfaced by reconcile.py as an
+    # unclassified_row), even an over-emitted M_302 has ZERO box-total impact.
+    # KNOWN APPROXIMATION: the taxonomy says M_302 is NOT reported for a
+    # WHOLLY-non-supply document (only for a non-supply line beside real supply);
+    # the generator emits M_302 for any out_of_scope sale line regardless. Harmless
+    # per the zero-box-impact note above; documented, not silent.
+    engine:
+      - {reporting_type: out_of_scope, role: sale}
+  M_303:
+    name_en: "Transmission of natural gas / electricity / heating / cooling from Estonia abroad"
+    amount_basis: taxable_value
+    reconcile_group: null   # informative; not summed into a KMD box
+    engine: []   # TIER 2 — network energy transmission abroad (KMS place-of-supply
+                 # is the consumer/reseller country). Classifier sub-case; taxable
+                 # value basis, no new math.
+    engine_pending:
+      - {reporting_type: zero_energy_transmission, role: sale, pending_engine_emit: true,
+         prereq: "Seed EE tax_code (rate 0%, direction sale, reporting_type=zero_energy_transmission); no generator wiring. Then move this tuple into `engine:`."}
+  M_304:
+    name_en: "Taxable value of goods installed or assembled in another Member State"
+    amount_basis: taxable_value
+    reconcile_group: domestic_rc_supply   # KMD lahter 9 family (seller-side §41^1 / install)
+    engine:
+      - {reporting_type: install_other_ms, role: sale}
+
+  # === S — Acquisition on which reverse charge is applied (taxable value) ===
+  S_101:
+    name_en: "Intra-Community acquisition of goods"
+    amount_basis: taxable_value
+    reconcile_group: rc_acquisition
+    engine:
+      - {reporting_type: rc_eu_acq_goods, role: acquisition}
+  S_102:
+    name_en: "Services received from a taxable person of another Member State"
+    amount_basis: taxable_value
+    reconcile_group: rc_acquisition
+    engine:
+      - {reporting_type: rc_eu_acq_services, role: acquisition}
+  S_103:
+    name_en: "Acquisition of goods by way of a triangular transaction"
+    amount_basis: taxable_value
+    reconcile_group: rc_acquisition
+    engine: []   # TIER 3 — triangular-transaction acquisition (intermediary leg).
+                 # Needs three-party chain tracking, not a standalone tag; pairs
+                 # with O_403 on the input side.
+                 # Future: (rc_triangular_acq, acquisition) -> S_103.
+  S_104:
+    name_en: "Acquisition of other goods and services"
+    amount_basis: taxable_value
+    reconcile_group: rc_acquisition
+    engine: []   # TIER 2 — the 'other EE-taxable acquisition from abroad' catch-all
+                 # (installation etc.), currently the ambiguous half of ee_acq_foreign.
+                 # A dedicated tag disambiguates it (triangular -> S_103 stays TIER 3);
+                 # once both exist, ee_acq_foreign can be retired. Pairs with O_404.
+    engine_pending:
+      - {reporting_type: rc_other_foreign_acq, role: acquisition, pending_engine_emit: true,
+         prereq: "Seed EE tax_code (reverse_charge, direction purchase, reporting_type=rc_other_foreign_acq) AND add rc_other_foreign_acq to generator _RC_ACQUISITION_TAGS + _RC_FANOUT_INPUT_TAGS (base×rate fan-out, no new math). Then move both rc_other_foreign_acq tuples (this + O_404's) into `engine:`."}
+  S_105:
+    name_en: "Acquisition of immovables, scrap/precious metal under special arrangements (§41^1 buyer)"
+    amount_basis: taxable_value
+    reconcile_group: rc_acquisition
+    engine:
+      - {reporting_type: rc_domestic_acq, role: acquisition}
+  S_106:
+    name_en: "Intra-Community acquisition of goods exempt from tax"
+    amount_basis: taxable_value
+    reconcile_group: rc_acquisition
+    engine:
+      - {reporting_type: ic_acq_exempt, role: acquisition}
+
+  # === O — Purchase / input VAT (input VAT amount) =========================
+  O_101:
+    name_en: "Amount of input VAT legally permitted to deduct"
+    amount_basis: input_vat
+    reconcile_group: input_vat
+    engine:
+      - {reporting_type: standard, role: input}
+      - {reporting_type: standard_legacy_20, role: input}
+      - {reporting_type: standard_legacy_22, role: input}
+      - {reporting_type: reduced_9, role: input}
+      - {reporting_type: reduced_13, role: input}
+  O_102:
+    name_en: "Deduction of input VAT in instalments"
+    amount_basis: input_vat
+    reconcile_group: input_vat
+    engine: []   # TIER 3 — input VAT deducted in instalments across periods (e.g.
+                 # on a prepayment invoice). Needs a multi-period deduction schedule
+                 # the engine does not model. Future: (input_instalment, input) -> O_102.
+  O_103:
+    name_en: "Partial deduction of input VAT (§29, §32, §33)"
+    amount_basis: input_vat
+    reconcile_group: input_vat
+    engine: []   # TIER 3 — proportional/mixed partial deduction (KMS §29/§32/§33).
+                 # TaxCode.input_credit_recoverable is a BOOLEAN — there is no
+                 # deductible-fraction field to carry the proportion. Needs a
+                 # partial-deduction fraction feature (PostingContext already reads
+                 # extra["deductible_fraction"] for RC, but no caller supplies it and
+                 # no ordinary-input path scales by it). Future: (input_partial, input) -> O_103.
+  O_104:
+    name_en: "Input VAT, cash accounting of VAT"
+    amount_basis: input_vat
+    reconcile_group: input_vat
+    engine: []   # TIER 3 — cash-accounting special arrangement (KMS §44): input VAT
+                 # deducted only to the extent paid. Needs payment-driven deduction
+                 # timing. Future: (input_cash, input) -> O_104.
+  O_105:
+    name_en: "Input VAT, cash accounting, partial deduction (§29, §32, §33)"
+    amount_basis: input_vat
+    reconcile_group: input_vat
+    engine: []   # TIER 3 — combines the O_104 cash-accounting feature AND the O_103
+                 # partial-deduction fraction feature. Future: (input_cash_partial, input) -> O_105.
+  O_106:
+    name_en: "Input VAT paid or due on import"
+    amount_basis: input_vat
+    reconcile_group: input_vat
+    engine:
+      - {reporting_type: input_import, role: input}
+  O_201:
+    name_en: "Input VAT paid or due on acquisition of fixed assets"
+    amount_basis: input_vat
+    reconcile_group: input_vat
+    engine:
+      - {reporting_type: capital, role: input}
+  O_202:
+    name_en: "Input VAT on acquisition of fixed assets, partial deduction"
+    amount_basis: input_vat
+    reconcile_group: input_vat
+    engine: []   # TIER 3 — fixed-asset acquisition with partial deduction: combines
+                 # `capital` (O_201, mapped) with the O_103 partial-deduction feature.
+                 # Future: (capital_partial, input) -> O_202.
+  O_203:
+    name_en: "Input VAT on imported fixed assets"
+    amount_basis: input_vat
+    reconcile_group: input_vat
+    engine: []   # TIER 2 — fixed asset acquired on IMPORT. `capital`->O_201 does not
+                 # distinguish acquisition source; a source-tagged classifier splits it.
+                 # Full deduction, input VAT basis, no new math.
+    engine_pending:
+      - {reporting_type: capital_import, role: input, pending_engine_emit: true,
+         prereq: "Seed EE tax_code (direction purchase, reporting_type=capital_import) AND add capital_import to generator _ORDINARY_INPUT_TAGS. Then move this tuple into `engine:`."}
+  O_204:
+    name_en: "Input VAT on intra-Community acquisition of fixed assets (incl triangular)"
+    amount_basis: input_vat
+    reconcile_group: input_vat
+    engine: []   # TIER 2 (non-triangular case) — fixed asset acquired intra-Community
+                 # (reverse charge). Base row is S_101 (existing); the input leg needs
+                 # its own leaf because `capital` does not know it is an IC acquisition.
+                 # A capital-flavoured RC fan-out routes the input to O_204. The
+                 # "incl triangular" sub-case rides the TIER-3 triangular feature.
+    engine_pending:
+      - {reporting_type: capital_ic_acq, role: input, pending_engine_emit: true,
+         prereq: "Seed EE tax_code (reverse_charge, direction purchase, reporting_type=capital_ic_acq) AND add capital_ic_acq to generator _RC_ACQUISITION_TAGS + _RC_FANOUT_INPUT_TAGS with acquisition -> S_101 (existing leaf). Then move this input tuple into `engine:`."}
+  # O_301..O_310 — ALL TIER 3 (passenger-car special deduction, KMS §30(4)/§29).
+  # Needs a passenger-car feature the engine lacks: (a) recognise the line pertains
+  # to a passenger car, (b) apply the 100% (full business use) vs ≤50% cap, and
+  # (c) split by acquisition source (Estonia / import / IC acq). The 100% leaves
+  # are full-deduction (a classifier once the car flag exists); the ≤50% leaves
+  # additionally need the partial-deduction fraction (see O_103). The deferred
+  # tags input_car_100 / input_car_50 (named in tax_codes.yaml) are the seed half;
+  # the 50%-cap math + source split are the engine half. Future tuples per leaf below.
+  O_301:
+    name_en: "Input VAT, passenger car 100% business use (acquired in Estonia)"
+    amount_basis: input_vat
+    reconcile_group: input_vat
+    engine: []   # TIER 3 — future: (input_car_100_ee, input) -> O_301
+  O_302:
+    name_en: "Input VAT, passenger car 100% business use (import)"
+    amount_basis: input_vat
+    reconcile_group: input_vat
+    engine: []   # TIER 3 — future: (input_car_100_import, input) -> O_302
+  O_303:
+    name_en: "Input VAT, passenger car 100% business use (intra-Community acquisition)"
+    amount_basis: input_vat
+    reconcile_group: input_vat
+    engine: []   # TIER 3 — future: (input_car_100_ic, input) -> O_303
+  O_304:
+    name_en: "Input VAT, passenger car up to 50% business use (acquired in Estonia)"
+    amount_basis: input_vat
+    reconcile_group: input_vat
+    engine: []   # TIER 3 — 50% cap (partial deduction) — future: (input_car_50_ee, input) -> O_304
+  O_305:
+    name_en: "Input VAT, passenger car up to 50% business use (import)"
+    amount_basis: input_vat
+    reconcile_group: input_vat
+    engine: []   # TIER 3 — 50% cap — future: (input_car_50_import, input) -> O_305
+  O_306:
+    name_en: "Input VAT, passenger car up to 50% business use (intra-Community acquisition)"
+    amount_basis: input_vat
+    reconcile_group: input_vat
+    engine: []   # TIER 3 — 50% cap — future: (input_car_50_ic, input) -> O_306
+  O_307:
+    name_en: "Input VAT, goods/services for a passenger car 100% business use (acquired in Estonia)"
+    amount_basis: input_vat
+    reconcile_group: input_vat
+    engine: []   # TIER 3 — future: (input_car_goods_100_ee, input) -> O_307
+  O_308:
+    name_en: "Input VAT, goods/services for a passenger car 100% business use (import / IC acquisition)"
+    amount_basis: input_vat
+    reconcile_group: input_vat
+    engine: []   # TIER 3 — future: (input_car_goods_100_foreign, input) -> O_308
+  O_309:
+    name_en: "Input VAT, goods/services for a passenger car up to 50% business use (acquired in Estonia)"
+    amount_basis: input_vat
+    reconcile_group: input_vat
+    engine: []   # TIER 3 — 50% cap — future: (input_car_goods_50_ee, input) -> O_309
+  O_310:
+    name_en: "Input VAT, goods/services for a passenger car up to 50% business use (import / IC acquisition)"
+    amount_basis: input_vat
+    reconcile_group: input_vat
+    engine: []   # TIER 3 — 50% cap — future: (input_car_goods_50_foreign, input) -> O_310
+  O_401:
+    name_en: "Input VAT, intra-Community acquisition of goods (excl fixed assets and passenger cars)"
+    amount_basis: input_vat
+    reconcile_group: input_vat
+    engine:
+      - {reporting_type: rc_eu_acq_goods, role: input}
+  O_402:
+    name_en: "Input VAT, services received from a taxable person of another Member State"
+    amount_basis: input_vat
+    reconcile_group: input_vat
+    engine:
+      - {reporting_type: rc_eu_acq_services, role: input}
+  O_403:
+    name_en: "Input VAT, acquisition of goods by way of a triangular transaction (excl fixed assets/cars)"
+    amount_basis: input_vat
+    reconcile_group: input_vat
+    engine: []   # TIER 3 — input side of a triangular acquisition (pairs S_103).
+                 # Rides the same triangular-chain tracking feature.
+                 # Future: (rc_triangular_acq, input) -> O_403.
+  O_404:
+    name_en: "Input VAT, acquisition of other goods and services"
+    amount_basis: input_vat
+    reconcile_group: input_vat
+    engine: []   # TIER 2 — input side of the S_104 'other acquisition' catch-all.
+                 # Same rc_other_foreign_acq tag, input role (fan-out gives base×rate).
+    engine_pending:
+      - {reporting_type: rc_other_foreign_acq, role: input, pending_engine_emit: true,
+         prereq: "Same prereq as S_104: add rc_other_foreign_acq to _RC_ACQUISITION_TAGS + _RC_FANOUT_INPUT_TAGS. Then move this input tuple into `engine:`."}
+  O_405:
+    name_en: "Input VAT, immovables/scrap/precious metal under special arrangement"
+    amount_basis: input_vat
+    reconcile_group: input_vat
+    engine: []   # TIER 2 — input side of the domestic §41^1 reverse charge. Reuses
+                 # the EXISTING rc_domestic_acq tag (already live on acquisition->S_105);
+                 # only the input role is missing. Pure fan-out wiring, base×rate, no new tag.
+    engine_pending:
+      - {reporting_type: rc_domestic_acq, role: input, pending_engine_emit: true,
+         prereq: "Add rc_domestic_acq to generator _RC_FANOUT_INPUT_TAGS (it is already in _RC_ACQUISITION_TAGS). No new seed row — the RC_DOMESTIC_ACQ tax_code already exists. CAUTION: today a §41^1 domestic-RC purchase's input deduction rides an ordinary `standard` input line -> O_101 (see generator.py). Promoting O_405 means that separate O_101 line must STOP for these purchases, or the deduction is double-counted. Still no new math (base×rate) — a re-routing, not a feature. Then move this tuple into `engine:`."}
+  O_406:
+    name_en: "Input VAT, immovables/scrap/precious metal under special arrangement, partial deduction"
+    amount_basis: input_vat
+    reconcile_group: input_vat
+    engine: []   # TIER 3 — O_405 domestic-RC input WITH partial deduction (§29/§32/§33).
+                 # Needs the partial-deduction fraction feature (see O_103).
+                 # Future: (rc_domestic_partial, input) -> O_406.
+  O_501:
+    name_en: "Input VAT on amendment of the taxable value of imported goods"
+    amount_basis: input_vat
+    reconcile_group: input_vat
+    engine: []   # TIER 3 — input VAT on a KMD-return AMENDMENT of imported-goods
+                 # taxable value. Needs an import-value-amendment posting (a return-
+                 # level adjustment tied to the original import), not an invoice/bill
+                 # line. Future: (input_import_amendment, input) -> O_501.
+  O_502:
+    name_en: "Input VAT on termination of tax warehousing / excise duty suspension without transfer"
+    amount_basis: input_vat
+    reconcile_group: input_vat
+    engine: []   # TIER 3 — input VAT triggered by terminating tax warehousing /
+                 # excise-suspension WITHOUT a transfer. Needs warehousing-event
+                 # tracking the engine does not model.
+                 # Future: (input_warehouse_termination, input) -> O_502.
+  O_601:
+    name_en: "Reduction/increase of input VAT as a result of input VAT correction"
+    amount_basis: input_vat
+    reconcile_group: input_vat
+    engine: []   # TIER 3 as a distinct leaf — ordinary credit adjustments ride the base
+                 # input leaf (O_101) as a SIGNED row (sample Example 19 = O_101 at -240),
+                 # so this is not a functional gap for the common case; only a standalone
+                 # §29(9)/§32 correction posting would need O_601. Needs a distinct
+                 # input-VAT correction/adjustment posting type (signed: '+' on
+                 # reduction, '-' on increase). Future: (input_correction, input) -> O_601.
+
+  # === A — Accounting entries ==============================================
+  A_101:
+    name_en: "Accounting entries taxable at a standard or reduced rate"
+    amount_basis: taxable_value
+    reconcile_group: null   # accounting-entry adjustment; not a koondvaade box line here
+    engine: []   # TIER 3 — the ONLY role the generator has NO path for. `role:
+                 # accounting` is unreachable by construction (the coverage guard's
+                 # test_every_mapped_engine_source_is_reachable treats accounting as
+                 # always-unreachable). Needs an accounting-entry path in generator.py
+                 # AND the economic events it captures (self-supply / own use, taxable
+                 # stock on deregistration (KMS §29), import-value increase, warehousing
+                 # termination), none of which are invoice/bill lines.
+                 # Future: (accounting_taxable, accounting) -> A_101 (requires a new
+                 # generator dispatch branch for the accounting role).
+
+# -- Engine tags the generator may ENCOUNTER but CANNOT confidently classify --
+# Listed so the generator FLAGS them (Kmd2027DataQualityError) instead of
+# guessing a leaf. build-plan §4.5: "Some leaves may have no engine tag today →
+# those transactions can't be classified until finer tags are seeded."
+unmapped_engine_tags:
+  - reporting_type: ee_acq_foreign
+    role: acquisition
+    reason: >-
+      ee_acq_foreign ("muu Eestis maksustatav soetamine välismaalt" — other
+      EE-taxable acquisition from abroad: installation, triangular transaction,
+      etc.) spans multiple KMDTYYP leaves (S_103 triangular vs S_104 other goods
+      and services) with no way to disambiguate from the single coarse tag.
+      RESOLUTION PATH (2026-07-11 tiering): S_104's TIER-2 `rc_other_foreign_acq`
+      (see S_104/O_404 engine_pending) + S_103's TIER-3 `rc_triangular_acq` (see
+      S_103/O_403) split this tag cleanly; once both are seeded, ee_acq_foreign can
+      be retired. Until then it stays flagged, never guessed.

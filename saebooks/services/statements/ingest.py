@@ -40,6 +40,7 @@ from saebooks.models.supplier_statement import (
     SupplierStatementLine,
 )
 from saebooks.models.supplier_statement_template import SupplierStatementTemplate
+from saebooks.money import money_quantum
 from saebooks.services.integrations.paperless import PaperlessClient
 from saebooks.services.statements.extract import (
     ExtractedStatement,
@@ -50,7 +51,7 @@ from saebooks.services.statements.reconcile import reconcile_lines
 
 logger = logging.getLogger("saebooks.statements.ingest")
 
-_CENT = Decimal("0.01")
+_CENT = money_quantum(2)
 # OCR text shorter than this is treated as absent; vision fallback is used.
 _MIN_OCR_CHARS = 40
 
