@@ -29,6 +29,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     Numeric,
+    String,
     Text,
     UniqueConstraint,
     func,
@@ -100,6 +101,14 @@ class LeaveBalance(CompanyScoped, Base):
         Numeric(10, 2), nullable=False, default=Decimal("0")
     )
     opening_balance_as_at: Mapped[date | None] = mapped_column(Date)
+    # M1.5 P1 tail — statutory-scheme jurisdiction tag. Leave semantics
+    # (NES annual/personal leave accrual, above) are implicitly AU; this
+    # column names the jurisdiction whose statutory leave scheme governs
+    # this balance, for companies with non-AU employees. NULL = AU (every
+    # existing balance). Free text (no FK) — validated at the service
+    # layer against the company's jurisdiction, same idiom as
+    # ``Company.jurisdiction``.
+    jurisdiction_code: Mapped[str | None] = mapped_column(String(3))
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

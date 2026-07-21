@@ -21,8 +21,9 @@ import io
 import uuid
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+from typing import Any
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.models.account import Account, AccountType
@@ -42,6 +43,32 @@ from saebooks.models.payment import Payment
 
 _VALID_TARGETS = {TARGET_PAYMENT, TARGET_JOURNAL_ENTRY}
 _TARGET_MODEL = {TARGET_PAYMENT: Payment, TARGET_JOURNAL_ENTRY: JournalEntry}
+
+# Match provenance (R8b, migration 0220) — how an allocation came to be.
+MATCHED_VIA_MANUAL = "MANUAL"
+MATCHED_VIA_AUTO = "AUTO"
+MATCHED_VIA_RULE = "RULE"
+MATCHED_VIA_COMPOUND = "COMPOUND"
+_VALID_MATCHED_VIA = {
+    MATCHED_VIA_MANUAL,
+    MATCHED_VIA_AUTO,
+    MATCHED_VIA_RULE,
+    MATCHED_VIA_COMPOUND,
+}
+
+# Suggest/auto_match scoring (R8a/R8d) — confidence tiers and reasons.
+CONFIDENCE_HIGH = "HIGH"
+CONFIDENCE_MEDIUM = "MEDIUM"
+CONFIDENCE_LOW = "LOW"
+REASON_EXACT_AMOUNT = "EXACT_AMOUNT"
+REASON_AMOUNT_AND_DATE = "AMOUNT_AND_DATE"
+REASON_AMOUNT_AND_REFERENCE = "AMOUNT_AND_REFERENCE"
+REASON_RULE_PATTERN = "RULE_PATTERN"
+
+# A bank line clearing a day or two after the source transaction date is
+# routine (weekend/processing lag) — treat entries within this window as
+# a "date match" for scoring purposes, not just an exact-day match.
+_DATE_PROXIMITY_DAYS = 3
 
 # Allocations within this many cents of the BSL amount count as fully
 # matched. Two-cent fuzz handles cumulative GST rounding when many
@@ -118,28 +145,55 @@ async def import_csv(
     return count
 
 
+def _statement_line_conditions(
+    company_id: uuid.UUID,
+    account_id: uuid.UUID,
+    status: StatementLineStatus | None,
+) -> list[Any]:
+    conditions: list[Any] = [
+        BankStatementLine.company_id == company_id,
+        BankStatementLine.account_id == account_id,
+    ]
+    if status:
+        conditions.append(BankStatementLine.status == status)
+    return conditions
+
+
 async def statement_lines(
     session: AsyncSession,
     company_id: uuid.UUID,
     account_id: uuid.UUID,
     *,
     status: StatementLineStatus | None = None,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[BankStatementLine]:
     """Get statement lines for a bank account, optionally filtered."""
-    conditions = [
-        BankStatementLine.company_id == company_id,
-        BankStatementLine.account_id == account_id,
-    ]
-    if status:
-        conditions.append(BankStatementLine.status == status)
-
     stmt = (
         select(BankStatementLine)
-        .where(and_(*conditions))
+        .where(and_(*_statement_line_conditions(company_id, account_id, status)))
         .order_by(BankStatementLine.txn_date, BankStatementLine.created_at)
     )
+    if offset:
+        stmt = stmt.offset(offset)
+    if limit is not None:
+        stmt = stmt.limit(limit)
     result = await session.execute(stmt)
     return list(result.scalars().all())
+
+
+async def count_statement_lines(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    account_id: uuid.UUID,
+    *,
+    status: StatementLineStatus | None = None,
+) -> int:
+    """Count statement lines matching the same filters as statement_lines."""
+    stmt = select(func.count()).select_from(BankStatementLine).where(
+        and_(*_statement_line_conditions(company_id, account_id, status))
+    )
+    return (await session.execute(stmt)).scalar_one()
 
 
 async def candidate_entries(
@@ -170,6 +224,80 @@ async def candidate_entries(
 
 
 # ---------------------------------------------------------------- #
+# Suggest scoring (R8a) — shared by GET /suggest and auto_match     #
+# ---------------------------------------------------------------- #
+
+
+def _reference_overlap(stmt_line: BankStatementLine, entry: JournalEntry) -> bool:
+    """True if the BSL's reference/description shows up in the entry.
+
+    Case-insensitive SUBSTRING containment against the entry's ``ref`` and
+    ``description`` — deliberately not word-boundary tokenised. Known
+    accepted risk: a short-ish numeric reference (e.g. "1050") can match
+    inside a longer unrelated number ("21050") and promote a same-amount
+    candidate to HIGH. Bounded because the amount must already match
+    exactly and auto_match only links (never posts), but do not lower the
+    len >= 4 floor without adding word-boundary tokenisation.
+    """
+    haystack = " ".join(
+        filter(None, [entry.description, entry.ref])
+    ).lower()
+    if not haystack:
+        return False
+    for candidate in (stmt_line.reference, stmt_line.description):
+        if not candidate:
+            continue
+        needle = candidate.strip().lower()
+        if len(needle) >= 4 and needle in haystack:
+            return True
+    return False
+
+
+def _date_proximity(stmt_line: BankStatementLine, entry: JournalEntry) -> bool:
+    """True if the entry's date is within ``_DATE_PROXIMITY_DAYS`` of the BSL."""
+    return abs((entry.entry_date - stmt_line.txn_date).days) <= _DATE_PROXIMITY_DAYS
+
+
+async def score_candidate(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    stmt_line: BankStatementLine,
+    entry: JournalEntry,
+) -> tuple[str, str, uuid.UUID | None]:
+    """Score a candidate entry against a statement line.
+
+    Returns ``(confidence, match_reason, rule_id)``. Candidates reaching
+    this function are already exact-amount matches (``candidate_entries``
+    filters on that) — scoring only ranks them, it never loosens the
+    underlying amount match (R8 risk control).
+
+    Tiers, most to least specific:
+        * RULE_PATTERN  — a ``bank_rules`` rule matches the BSL's
+          description → HIGH, ``rule_id`` set.
+        * AMOUNT_AND_REFERENCE — the BSL's reference/description shows
+          up in the entry's ref/description → HIGH.
+        * AMOUNT_AND_DATE — entry date within
+          ``_DATE_PROXIMITY_DAYS`` of the BSL's txn_date → MEDIUM.
+        * EXACT_AMOUNT — no other corroborating signal → LOW.
+    """
+    from saebooks.services import bank_rules as bank_rules_svc
+
+    rule = await bank_rules_svc.find_matching_rule(
+        session, company_id, stmt_line.description or ""
+    )
+    if rule is not None:
+        return CONFIDENCE_HIGH, REASON_RULE_PATTERN, rule.id
+
+    if _reference_overlap(stmt_line, entry):
+        return CONFIDENCE_HIGH, REASON_AMOUNT_AND_REFERENCE, None
+
+    if _date_proximity(stmt_line, entry):
+        return CONFIDENCE_MEDIUM, REASON_AMOUNT_AND_DATE, None
+
+    return CONFIDENCE_LOW, REASON_EXACT_AMOUNT, None
+
+
+# ---------------------------------------------------------------- #
 # Junction-table API (N:1)                                         #
 # ---------------------------------------------------------------- #
 
@@ -196,6 +324,8 @@ async def add_match(
     amount: Decimal | None = None,
     matched_by: str | None = None,
     notes: str | None = None,
+    matched_via: str = MATCHED_VIA_MANUAL,
+    rule_id: uuid.UUID | None = None,
     commit: bool = True,
 ) -> BslMatch:
     """Allocate ``amount`` of ``bsl_id`` to ``target_type:target_id``.
@@ -208,6 +338,7 @@ async def add_match(
         * amount sign must match BSL.amount sign
         * sum(existing allocations) + amount must not exceed |BSL.amount|
         * journal-entry targets must be POSTED
+        * matched_via must be one of MANUAL/AUTO/RULE/COMPOUND (R8b)
 
     Side effects:
         * Inserts a ``bsl_matches`` row (commit unless commit=False)
@@ -218,6 +349,11 @@ async def add_match(
     if target_type not in _VALID_TARGETS:
         raise ValueError(
             f"target_type must be PAYMENT or JOURNAL_ENTRY, got {target_type!r}"
+        )
+    if matched_via not in _VALID_MATCHED_VIA:
+        raise ValueError(
+            f"matched_via must be one of {sorted(_VALID_MATCHED_VIA)}, "
+            f"got {matched_via!r}"
         )
 
     bsl = await session.get(BankStatementLine, bsl_id)
@@ -271,6 +407,8 @@ async def add_match(
         tenant_id=bsl.tenant_id,
         matched_by=matched_by,
         notes=notes,
+        matched_via=matched_via,
+        rule_id=rule_id,
     )
     session.add(match)
     await session.flush()
@@ -420,6 +558,85 @@ async def unmatch_line(
     return bsl
 
 
+async def auto_match(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    account_id: uuid.UUID,
+) -> dict[str, int]:
+    """Run "honest" automatic matching for an account (R8d).
+
+    For each UNMATCHED line, score every candidate (see
+    ``score_candidate``) and link ONLY when exactly one candidate scores
+    HIGH confidence. This never loosens matching (candidates are still
+    exact-amount) and never posts anything — it only links already-POSTED
+    entries, same invariant as before R8.
+
+    Returns ``{"matched": N, "skipped_ambiguous": M, "skipped_no_candidate": K}``:
+        * matched — a single HIGH-confidence candidate was linked.
+        * skipped_ambiguous — 2+ candidates tied at HIGH confidence; the
+          caller must resolve manually (POST /reconciliation/match).
+        * skipped_no_candidate — zero candidates, or candidates existed
+          but none reached HIGH confidence.
+    """
+    matched = 0
+    skipped_ambiguous = 0
+    skipped_no_candidate = 0
+
+    unmatched = await statement_lines(
+        session, company_id, account_id, status=StatementLineStatus.UNMATCHED
+    )
+
+    for line in unmatched:
+        candidates = await candidate_entries(session, company_id, account_id, line)
+        if not candidates:
+            skipped_no_candidate += 1
+            continue
+
+        high: list[tuple[JournalEntry, str, uuid.UUID | None]] = []
+        for entry in candidates:
+            confidence, reason, rule_id = await score_candidate(
+                session, company_id, line, entry
+            )
+            if confidence == CONFIDENCE_HIGH:
+                high.append((entry, reason, rule_id))
+
+        if not high:
+            skipped_no_candidate += 1
+            continue
+        if len(high) > 1:
+            skipped_ambiguous += 1
+            continue
+
+        entry, reason, rule_id = high[0]
+        try:
+            await add_match(
+                session,
+                bsl_id=line.id,
+                target_type=TARGET_JOURNAL_ENTRY,
+                target_id=entry.id,
+                amount=line.amount,
+                matched_by="auto-match",
+                matched_via=(
+                    MATCHED_VIA_RULE if reason == REASON_RULE_PATTERN
+                    else MATCHED_VIA_AUTO
+                ),
+                rule_id=rule_id,
+                commit=True,
+            )
+            matched += 1
+        except ValueError:
+            # Entry already matched or line state changed underneath us
+            # (e.g. a concurrent manual match) — skip, don't blow up the
+            # whole batch.
+            skipped_no_candidate += 1
+
+    return {
+        "matched": matched,
+        "skipped_ambiguous": skipped_ambiguous,
+        "skipped_no_candidate": skipped_no_candidate,
+    }
+
+
 async def split_match_line(
     session: AsyncSession,
     line_id: uuid.UUID,
@@ -507,6 +724,195 @@ async def split_match_line(
     await session.commit()
     await session.refresh(stmt_line)
     return stmt_line
+
+
+# ---------------------------------------------------------------- #
+# Compound create-and-match (R8c)                                  #
+# ---------------------------------------------------------------- #
+
+_CREATE_AND_MATCH_RECORD_TYPES = {"expense", "payment"}
+
+
+async def create_and_match(
+    session: AsyncSession,
+    line_id: uuid.UUID,
+    *,
+    company_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    actor: str,
+    record_type: str,
+    expense_spec: dict[str, object] | None = None,
+    payment_spec: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Create a record (expense or payment), post it, and match it to a
+    bank statement line — one call, one bookkeeping action.
+
+    Composes the SAME service-layer primitives the individual
+    ``/expenses`` and ``/payments`` endpoints call (``api_create`` +
+    ``api_post_expense`` / ``api_post_payment``) — never a manual journal
+    entry (golden rule). The record's amount/account/direction are ALWAYS
+    derived from the bank line server-side, never accepted from the
+    caller, so the created record and the match can never disagree on
+    amount or sign.
+
+    Atomicity — read this before assuming "one transaction" end to end:
+        * The DRAFT record creation phase (``api_create(commit=False)``)
+          is genuinely atomic with its own validation: if the record
+          spec's total doesn't reconcile against the bank line amount,
+          the session is rolled back and NOTHING persists.
+        * The POST phase (``api_post_expense`` / ``api_post_payment``)
+          calls into ``journal_svc.create_draft`` / ``journal_svc.post``,
+          which commit internally (same as every other posting path in
+          this codebase — see ``post_expense``/``post_payment``). A
+          failure here leaves a POSTED-or-DRAFT record with no match —
+          recoverable (void/delete/re-post it), never a corrupt or
+          partial ``bsl_matches`` row.
+        * The final ``add_match`` call is its own commit. A failure here
+          leaves a valid POSTED record with no match — again recoverable,
+          never partial.
+        * "No partial matches ever persisted" (the hard constraint) IS
+          satisfied: a ``bsl_matches`` row only ever exists fully-formed
+          or not at all. What is NOT achieved is "one atomic transaction"
+          across the whole create+post+match pipeline — that would
+          require no-commit twins of the record-posting engines, which
+          is out of scope for this slice (flagged in the R8 report).
+
+    Raises ``ValueError`` (caught by the router → 404/422):
+        * BSL not found / wrong company / already MATCHED
+        * record_type not in {"expense", "payment"}
+        * record spec missing for the given record_type
+        * expense: BSL is not a withdrawal (expenses only debit spend)
+        * expense: line totals don't reconcile against the BSL amount
+    """
+    from saebooks.services import expenses as expenses_svc
+    from saebooks.services import payments as payments_svc
+    from saebooks.services.payments import PaymentDirection, PaymentMethod
+
+    bsl = await session.get(BankStatementLine, line_id)
+    if bsl is None or bsl.archived_at is not None:
+        raise ValueError("Statement line not found")
+    if bsl.company_id != company_id:
+        raise ValueError("Statement line not found")
+    if bsl.status in (StatementLineStatus.MATCHED, StatementLineStatus.PARTIAL):
+        # PARTIAL lines are rejected too: the record below is created for the
+        # FULL bsl.amount, which would always over-allocate against a line
+        # that already carries partial matches.
+        raise ValueError("Statement line is already matched")
+
+    if record_type not in _CREATE_AND_MATCH_RECORD_TYPES:
+        raise ValueError(
+            f"Unsupported record_type {record_type!r}; expected one of "
+            f"{sorted(_CREATE_AND_MATCH_RECORD_TYPES)}"
+        )
+
+    if record_type == "expense":
+        if expense_spec is None:
+            raise ValueError("record_type=expense requires an expense spec")
+        if bsl.amount >= 0:
+            raise ValueError(
+                "An expense can only match a withdrawal (negative bank "
+                "line amount) — this line is a deposit"
+            )
+
+        expense = await expenses_svc.api_create(
+            session,
+            company_id,
+            tenant_id,
+            actor=actor,
+            payment_account_id=bsl.account_id,
+            expense_date=expense_spec.get("expense_date") or bsl.txn_date,
+            contact_id=expense_spec.get("contact_id"),
+            lines=expense_spec.get("lines"),
+            reference=expense_spec.get("reference"),
+            notes=expense_spec.get("notes"),
+            currency=expense_spec.get("currency", "AUD"),
+            fx_rate=expense_spec.get("fx_rate"),
+            commit=False,
+        )
+
+        # Pre-flight amount reconciliation BEFORE committing anything —
+        # this is the genuinely-atomic rollback case: a mismatch here
+        # leaves nothing persisted. Capture the scalar values we need in
+        # the error message BEFORE rollback — session.rollback() expires
+        # every ORM object in the session (expire_on_rollback=True), and
+        # touching an expired attribute afterwards triggers an implicit
+        # lazy-load that isn't safe outside the SQLAlchemy async greenlet.
+        expense_base_total = expense.base_total
+        bsl_amount = bsl.amount
+        if abs(expense_base_total - abs(bsl_amount)) > _MATCH_TOLERANCE:
+            await session.rollback()
+            raise ValueError(
+                f"Expense total {expense_base_total} does not reconcile "
+                f"with bank line amount {bsl_amount} (tolerance "
+                f"{_MATCH_TOLERANCE}) — nothing was created"
+            )
+
+        await session.commit()
+
+        posted_expense = await expenses_svc.api_post_expense(
+            session, expense.id, actor, expected_version=1, tenant_id=tenant_id,
+        )
+        record_id = posted_expense.id
+        target_id = posted_expense.journal_entry_id
+
+    else:  # record_type == "payment"
+        if payment_spec is None:
+            raise ValueError("record_type=payment requires a payment spec")
+
+        direction = (
+            PaymentDirection.INCOMING if bsl.amount >= 0
+            else PaymentDirection.OUTGOING
+        )
+        try:
+            method = PaymentMethod(str(payment_spec.get("method", "eft")).lower())
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid payment method {payment_spec.get('method')!r}"
+            ) from exc
+
+        payment = await payments_svc.api_create(
+            session,
+            company_id,
+            tenant_id,
+            actor=actor,
+            contact_id=payment_spec["contact_id"],
+            bank_account_id=bsl.account_id,
+            payment_date=payment_spec.get("payment_date") or bsl.txn_date,
+            amount=abs(bsl.amount),
+            direction=direction,
+            method=method,
+            reference=payment_spec.get("reference"),
+            notes=payment_spec.get("notes"),
+            currency=payment_spec.get("currency", "AUD"),
+            fx_rate=payment_spec.get("fx_rate"),
+            allocations=payment_spec.get("allocations"),
+        )
+
+        posted_payment = await payments_svc.api_post_payment(
+            session, payment.id, actor, expected_version=1, tenant_id=tenant_id,
+        )
+        record_id = posted_payment.id
+        target_id = posted_payment.journal_entry_id
+
+    match = await add_match(
+        session,
+        bsl_id=line_id,
+        target_type=TARGET_JOURNAL_ENTRY,
+        target_id=target_id,
+        amount=bsl.amount,
+        matched_by=actor,
+        matched_via=MATCHED_VIA_COMPOUND,
+        commit=True,
+    )
+
+    refreshed = await session.get(BankStatementLine, line_id)
+    return {
+        "bsl": refreshed,
+        "record_type": record_type,
+        "record_id": record_id,
+        "journal_entry_id": target_id,
+        "match_id": match.id,
+    }
 
 
 def _parse_date(raw: str) -> date | None:

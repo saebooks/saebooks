@@ -603,6 +603,11 @@ async def test_match_bsl_to_payment(
     assert body["matched_to_id"] == payment_id
     assert body["matched_at"] is not None
     assert body["version"] == 2
+    # R8d — contract-level surface reconciliation: this route is kept
+    # (not removed — that would be breaking) but flags itself deprecated
+    # in favour of the canonical /reconciliation/match surface.
+    assert r2.headers.get("Deprecation") == "true"
+    assert "/api/v1/reconciliation/match" in r2.headers.get("Link", "")
 
 
 async def test_unmatch_bsl(

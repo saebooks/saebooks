@@ -50,7 +50,22 @@ NET_ASSET_RESTRICTION_TIERS = tuple(t.value for t in NetAssetRestrictionTier)
 
 class Account(CompanyScoped, Base):
     __tablename__ = "accounts"
-    __table_args__ = (UniqueConstraint("company_id", "code", name="uq_accounts_company_code"),)
+    __table_args__ = (
+        UniqueConstraint("company_id", "code", name="uq_accounts_company_code"),
+        # Composite-FK target for the per-company money-movement models:
+        # transfers.(from/to_account_id, company_id) and
+        # receipts.(bank_account_id, company_id) FK to accounts(id, company_id)
+        # so a transfer/receipt can never point at a sister company's account.
+        # On Postgres this constraint is created by migration 0152 (raw SQL);
+        # it was missing from the ORM, so SQLite's bootstrap_schema
+        # (Base.metadata.create_all) never emitted the unique index and the
+        # composite FKs rejected every insert with "foreign key mismatch" —
+        # the transfers + receipts web UIs were dead on Community/SQLite.
+        # Declaring it here creates it on SQLite bootstrap and keeps the ORM
+        # in lock-step with the Postgres schema (no new migration: Postgres
+        # already has it from 0152).
+        UniqueConstraint("id", "company_id", name="uq_accounts_id_company"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
@@ -179,6 +194,41 @@ class Account(CompanyScoped, Base):
             "One of unrestricted / board_designated / donor_restricted_temporary / "
             "donor_restricted_permanent; NULL = not fund-accounted"
         ),
+    )
+    # M1.5 P1 tail — current/non-current balance-sheet classification. The
+    # AU CoA seed source carries this distinction (Odoo account_type values
+    # asset_current/asset_non_current/liability_current/liability_non_current)
+    # but previously collapsed it into the flat ASSET/LIABILITY account_type
+    # above (seed/load_au_coa.py). NULL for non-AU-seeded accounts, headers,
+    # and non-asset/liability account types (equity/income/expense have no
+    # current/non-current distinction). One of "current" / "non_current"
+    # when populated. Reference-data only — nothing in the posting path
+    # reads this column.
+    balance_sheet_classification: Mapped[str | None] = mapped_column(
+        String(16),
+        comment="One of current / non_current; NULL = not classified (headers, equity/income/expense)",
+    )
+    # M1.5 P1 tail — contra-account designation + normal balance. A contra
+    # account (e.g. Accumulated Depreciation, a contra-ASSET) carries the
+    # opposite normal balance to its account_type's usual side.
+    # ``normal_balance`` is "debit" or "credit"; NULL = not classified.
+    # Reference-data only — nothing in the posting path reads these.
+    is_contra: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false"),
+        comment="True for contra accounts (e.g. Accumulated Depreciation) — opposite normal balance to account_type",
+    )
+    normal_balance: Mapped[str | None] = mapped_column(
+        String(6),
+        comment="One of debit / credit; NULL = not classified",
+    )
+    # M1.5 P1 tail — for-profit equity sub-classification. AccountType has
+    # a single EQUITY value; this column carries the finer breakdown
+    # (share_capital / retained_earnings / reserves / drawings / other).
+    # NULL for non-equity accounts and unclassified equity accounts.
+    # Reference-data only — nothing in the posting path reads this.
+    equity_subtype: Mapped[str | None] = mapped_column(
+        String(32),
+        comment="One of share_capital / retained_earnings / reserves / drawings / other; NULL = unclassified",
     )
     extra: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # Optimistic-locking version — bumped on every write through the API.

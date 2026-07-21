@@ -21,7 +21,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
-from saebooks.api.v1.auth import DEFAULT_TENANT_ID, current_token
+from saebooks.api.v1.auth import current_token
 from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.account import Account, AccountType
@@ -44,14 +44,19 @@ async def api_client() -> AsyncClient:
 
 
 async def _income_acct_id() -> str:
+    # Scope to the seed company (multi-company seed -> tenant-only picks can
+    # return a foreign-company account; see test_purchase_orders.po_deps).
+    from saebooks.services.companies import ensure_seed_company
+
     async with AsyncSessionLocal() as session:
+        company = await ensure_seed_company(session)
         a = (
             await session.execute(
                 select(Account).where(
                     Account.archived_at.is_(None),
-                    Account.tenant_id == DEFAULT_TENANT_ID,
+                    Account.company_id == company.id,
                     Account.account_type == AccountType.INCOME,
-                ).limit(1)
+                ).order_by(Account.code).limit(1)
             )
         ).scalars().first()
         assert a is not None
@@ -59,14 +64,17 @@ async def _income_acct_id() -> str:
 
 
 async def _expense_acct_id() -> str:
+    from saebooks.services.companies import ensure_seed_company
+
     async with AsyncSessionLocal() as session:
+        company = await ensure_seed_company(session)
         a = (
             await session.execute(
                 select(Account).where(
                     Account.archived_at.is_(None),
-                    Account.tenant_id == DEFAULT_TENANT_ID,
+                    Account.company_id == company.id,
                     Account.account_type == AccountType.EXPENSE,
-                ).limit(1)
+                ).order_by(Account.code).limit(1)
             )
         ).scalars().first()
         assert a is not None
@@ -74,17 +82,32 @@ async def _expense_acct_id() -> str:
 
 
 async def _customer_id() -> str:
+    from saebooks.services.companies import ensure_seed_company
+
     async with AsyncSessionLocal() as session:
+        company = await ensure_seed_company(session)
         c = (
             await session.execute(
                 select(Contact).where(
                     Contact.archived_at.is_(None),
-                    Contact.tenant_id == DEFAULT_TENANT_ID,
+                    Contact.company_id == company.id,
                     Contact.contact_type == ContactType.CUSTOMER,
-                ).limit(1)
+                ).order_by(Contact.name).limit(1)
             )
         ).scalars().first()
-        assert c is not None
+        if c is None:
+            # Seed a deterministic customer so the file stands alone
+            # (same rationale as _supplier_id below).
+            c = Contact(
+                company_id=company.id,
+                tenant_id=company.tenant_id,
+                name="Retention Test Customer",
+                contact_type=ContactType.CUSTOMER,
+                email="ret-customer@example.com",
+            )
+            session.add(c)
+            await session.commit()
+            await session.refresh(c)
         return str(c.id)
 
 
@@ -96,31 +119,23 @@ async def _supplier_id() -> str:
     in isolation showed the gap — seed a deterministic placeholder so
     the retention tests stand on their own.
     """
+    from saebooks.services.companies import ensure_seed_company
+
     async with AsyncSessionLocal() as session:
+        company = await ensure_seed_company(session)
         c = (
             await session.execute(
                 select(Contact).where(
                     Contact.archived_at.is_(None),
-                    Contact.tenant_id == DEFAULT_TENANT_ID,
+                    Contact.company_id == company.id,
                     Contact.contact_type == ContactType.SUPPLIER,
-                ).limit(1)
+                ).order_by(Contact.name).limit(1)
             )
         ).scalars().first()
         if c is None:
-            # Look up a company in the same tenant so the FK lands.
-            from saebooks.models.company import Company
-            co = (
-                await session.execute(
-                    select(Company)
-                    .where(Company.tenant_id == DEFAULT_TENANT_ID, Company.archived_at.is_(None))
-                    .order_by(Company.created_at)
-                    .limit(1)
-                )
-            ).scalars().first()
-            assert co is not None, "no company in test DB for tenant"
             c = Contact(
-                company_id=co.id,
-                tenant_id=DEFAULT_TENANT_ID,
+                company_id=company.id,
+                tenant_id=company.tenant_id,
                 name="Retention Test Supplier",
                 contact_type=ContactType.SUPPLIER,
                 email="ret-supplier@example.com",

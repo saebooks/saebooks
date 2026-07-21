@@ -280,9 +280,15 @@ async def archive_time_entry(
     if hard:
         # Developer-tier hard delete — bypass the state-machine archive rules
         # entirely; remove the row + cascade dependents via the audit helper.
+        # Engine-local re-fetch: the audit helper needs the ORM row, and the
+        # pre-accounting module shares this database, so the delegated
+        # getter's Pydantic object must not be used here.
         from saebooks.services.hard_delete import hard_delete_with_audit
+        row = await svc.get_local(session, company_id=company_id, entry_id=entry_id)
+        if row is None:
+            raise HTTPException(404, "time entry not found")
         await hard_delete_with_audit(
-            session, entry, "time_entries", getattr(request.state, "user", None)
+            session, row, "time_entries", getattr(request.state, "user", None)
         )
         await session.commit()
         return Response(status_code=204)

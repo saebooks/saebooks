@@ -65,6 +65,8 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
+from tests.conftest import owner_seed_session
+
 pytestmark = pytest.mark.postgres_only
 
 
@@ -73,7 +75,13 @@ pytestmark = pytest.mark.postgres_only
 # sets SAEBOOKS_ENV, not the secret.
 os.environ.setdefault("SAEBOOKS_SECRET_KEY", "test-secret-key-for-cross-tenant-tests")
 
-from saebooks.db import engine as _owner_engine
+# NOTE: deliberately NOT ``saebooks.db.engine`` — that's the runtime
+# engine, which IS the saebooks_app role under --rls (see
+# docker-compose.test.yml). This file needs a connection that is always
+# the real owner/superuser role (ALTER ROLE below requires it, and the
+# catalog probes + URL-template below are clearer reading the one
+# genuinely-fixed owner engine rather than a conditionally-app-role one).
+from saebooks.db import _owner_role_engine as _owner_engine
 from saebooks.main import app
 from saebooks.models.account import Account, AccountType
 from saebooks.models.bill import Bill, BillStatus
@@ -172,9 +180,6 @@ async def seeded() -> dict[str, Any]:
     we need to write rows into BOTH tenants regardless of any
     ``app.current_tenant`` GUC.
     """
-    Owner = async_sessionmaker(
-        _owner_engine, expire_on_commit=False, class_=AsyncSession
-    )
 
     suffix = uuid.uuid4().hex[:8]
     out: dict[str, Any] = {}
@@ -184,7 +189,7 @@ async def seeded() -> dict[str, Any]:
     # Payment, JournalEntry. Flush after each layer so SQLAlchemy
     # doesn't reorder the INSERTs (asyncpg's prepared-statement
     # batcher honours statement order, but only within a flush).
-    async with Owner() as session:
+    async with owner_seed_session() as session:
         for label in ("tenant_a", "tenant_b"):
             tenant_id = uuid.uuid4()
             company_id = uuid.uuid4()
@@ -358,7 +363,7 @@ async def seeded() -> dict[str, Any]:
     # Best-effort cleanup. Foreign keys are ON DELETE CASCADE for child
     # rows that matter; we delete in dependency order to satisfy
     # RESTRICTED FKs (Payment→Account, Bill→Contact, etc).
-    async with Owner() as session:
+    async with owner_seed_session() as session:
         for label in ("tenant_a", "tenant_b"):
             ids = out[label]["ids"]
             tid = out[label]["tenant_id"]

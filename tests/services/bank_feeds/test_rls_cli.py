@@ -48,7 +48,14 @@ from sqlalchemy.pool import NullPool
 os.environ.setdefault("SAEBOOKS_ENV", "test")
 
 from saebooks import cli
-from saebooks.db import engine as _owner_engine
+
+# NOTE: deliberately NOT ``saebooks.db.engine`` — that's the runtime
+# engine, which IS the saebooks_app role under --rls (see
+# docker-compose.test.yml). This file needs a connection that is always
+# the real owner/superuser role (ALTER ROLE below requires it, and the
+# catalog probes + URL-template below are clearer reading the one
+# genuinely-fixed owner engine rather than a conditionally-app-role one).
+from saebooks.db import _owner_role_engine as _owner_engine
 from saebooks.models.account import Account, AccountType
 from saebooks.models.bank_feed import (
     BankFeedAccount,
@@ -56,6 +63,7 @@ from saebooks.models.bank_feed import (
 )
 from saebooks.models.company import Company
 from saebooks.models.tenant import Tenant
+from tests.conftest import owner_seed_session
 
 # --------------------------------------------------------------------------- #
 # saebooks_app engine — connects via the locked-down runtime role.            #
@@ -133,15 +141,12 @@ async def app_engine() -> AsyncIterator[Any]:
 
 @pytest_asyncio.fixture(scope="module")
 async def seeded() -> dict[str, Any]:
-    Owner = async_sessionmaker(
-        _owner_engine, expire_on_commit=False, class_=AsyncSession
-    )
     suffix = uuid.uuid4().hex[:8]
     out: dict[str, Any] = {}
 
     client_ids: dict[str, uuid.UUID] = {}
 
-    async with Owner() as session:
+    async with owner_seed_session() as session:
         for label in ("tenant_a", "tenant_b"):
             tid = uuid.uuid4()
             cid = uuid.uuid4()
@@ -211,7 +216,7 @@ async def seeded() -> dict[str, Any]:
 
     # Cleanup — drop every row we inserted (cascades from companies
     # take out bank_feed_accounts and accounts).
-    async with Owner() as session:
+    async with owner_seed_session() as session:
         for label in ("tenant_a", "tenant_b"):
             row = out[label]
             await session.execute(

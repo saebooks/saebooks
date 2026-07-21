@@ -158,6 +158,27 @@ async def get(
     return res.scalar_one_or_none()
 
 
+async def get_local(
+    session: AsyncSession,
+    *,
+    company_id: uuid.UUID,
+    entry_id: uuid.UUID,
+) -> TimeEntry | None:
+    """Fetch the ORM row from the engine database, never delegating.
+
+    Hard delete needs the physical row (``__table__`` snapshot + session
+    delete); the pre-accounting module shares this database, so destructive
+    admin operations stay engine-local.
+    """
+    stmt = select(TimeEntry).where(
+        TimeEntry.company_id == company_id,
+        TimeEntry.id == entry_id,
+        TimeEntry.archived_at.is_(None),
+    )
+    res = await session.execute(stmt)
+    return res.scalar_one_or_none()
+
+
 @dataclass
 class TimeEntryFilters:
     user_id: uuid.UUID | None = None

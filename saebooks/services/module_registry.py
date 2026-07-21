@@ -287,6 +287,8 @@ _FLAG_META: dict[str, tuple[str, str]] = {
     _f.FLAG_DOCUMENT_INBOX: ("Document inbox", "capture"),
     _f.FLAG_INBOX_EMAIL: ("Document inbox email-in", "capture"),
     _f.FLAG_EID_AUTH: ("Estonian eID login", "integrations"),
+    _f.FLAG_ACCOUNTING_SYNC: ("Accounting-package sync", "integrations"),
+    _f.FLAG_SYNC_XERO: ("Xero sync", "integrations"),
 }
 
 

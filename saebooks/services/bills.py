@@ -677,8 +677,8 @@ async def void_bill(
         return bill
     if bill.amount_paid > Decimal("0"):
         raise BillError(
-            f"Bill {bill.number} has payments allocated — "
-            "unallocate before voiding."
+            f"Bill {bill.number} has payments or credit notes allocated — "
+            "unallocate/void them before voiding."
         )
     if bill.journal_entry_id is None:
         raise BillError(f"Posted bill {bill.id} has no journal entry id")

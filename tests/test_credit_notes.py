@@ -35,7 +35,10 @@ from saebooks.models.journal import (
     JournalOrigin,
 )
 from saebooks.models.tax_code import TaxCode
+from saebooks.seed.load_au_coa import _load_accounts, ensure_tax_codes
 from saebooks.services import credit_notes as svc
+from saebooks.services import invoices as inv_svc
+from saebooks.services import reports as report_svc
 
 pytestmark = pytest.mark.postgres_only
 
@@ -391,6 +394,149 @@ async def test_post_cogs_credit_note_contra_cogs_journal() -> None:
             assert acct_obj.account_type not in (AT.INCOME, AT.OTHER_INCOME), (
                 f"Income account {acct_obj.code} should not appear in a COGS credit note GL"
             )
+
+
+_DEFAULT_TENANT = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+
+async def _other_company_posted_invoice() -> dict[str, object]:
+    """Create a fully-independent company B with its own CoA + a POSTED
+    invoice (the AR twin of ``test_supplier_credit_notes.py``'s
+    ``_other_company_posted_bill``)."""
+    async with AsyncSessionLocal() as session:
+        company = Company(
+            name=f"CN-Other-Co-{uuid.uuid4().hex[:8]}",
+            base_currency="AUD",
+            tenant_id=_DEFAULT_TENANT,
+        )
+        session.add(company)
+        await session.commit()
+        await session.refresh(company)
+
+        await ensure_tax_codes(session, company.id)
+        await _load_accounts(session, company)
+        await session.commit()
+
+        session.add(
+            DocumentCounter(
+                company_id=company.id, kind="invoice", prefix="OINV-",
+                pad_width=6, next_value=1,
+            )
+        )
+        contact = Contact(
+            company_id=company.id, tenant_id=company.tenant_id,
+            name="Other Co Customer", contact_type=ContactType.CUSTOMER,
+        )
+        session.add(contact)
+        await session.commit()
+        await session.refresh(contact)
+
+        income = (
+            await session.execute(
+                select(Account).where(
+                    Account.company_id == company.id, Account.code == "4-6000"
+                )
+            )
+        ).scalar_one()
+        gst = (
+            await session.execute(
+                select(TaxCode).where(
+                    TaxCode.company_id == company.id, TaxCode.code == "GST"
+                )
+            )
+        ).scalar_one()
+
+    async with AsyncSessionLocal() as session:
+        inv = await inv_svc.create_draft(
+            session,
+            company_id=company.id,
+            contact_id=contact.id,
+            issue_date=date(2026, 4, 20),
+            due_date=date(2026, 5, 20),
+            lines=[_line(income.id, gst.id, Decimal("100.00"))],
+        )
+    async with AsyncSessionLocal() as session:
+        posted_inv = await inv_svc.post_invoice(session, inv.id, posted_by="test")
+
+    return {
+        "company_id": company.id,
+        "contact_id": contact.id,
+        "invoice_id": posted_inv.id,
+    }
+
+
+@pytest.mark.asyncio
+async def test_api_create_rejects_cross_company_original_invoice_id() -> None:
+    """AR twin of the SCN cross-company guard: a company-A credit note
+    referencing company-B's invoice is rejected, and B's invoice is left
+    completely untouched."""
+    cid, contact, income, gst = await _ctx()
+    async with AsyncSessionLocal() as session:
+        company = await session.get(Company, cid)
+        assert company is not None
+        tenant_id = company.tenant_id
+    other = await _other_company_posted_invoice()
+
+    async with AsyncSessionLocal() as session:
+        with pytest.raises(svc.CreditNoteError, match="not found for this company"):
+            await svc.api_create(
+                session, cid, tenant_id, "test",
+                contact_id=contact, issue_date=date(2026, 4, 20),
+                lines=[_line(income, gst, Decimal("50.00"))],
+                original_invoice_id=other["invoice_id"],
+            )
+
+    # Probe: company B's invoice is untouched -- still fully outstanding and
+    # still visible in its own aged receivables.
+    async with AsyncSessionLocal() as session:
+        inv = await inv_svc.get(session, other["invoice_id"])
+        assert inv.amount_paid == Decimal("0.00")
+        assert inv.company_id == other["company_id"]
+
+    async with AsyncSessionLocal() as session:
+        report = await report_svc.aged_ar(
+            session, other["company_id"], as_at=date(2026, 4, 20)
+        )
+    assert any(
+        row.invoice_id == other["invoice_id"]
+        for group in report.groups
+        for row in group.invoices
+    ), "company B's invoice dropped out of its own aged receivables"
+
+
+@pytest.mark.asyncio
+async def test_api_update_rejects_cross_company_original_invoice_id() -> None:
+    """The same guard applies on api_update, not just api_create."""
+    cid, contact, income, gst = await _ctx()
+    async with AsyncSessionLocal() as session:
+        company = await session.get(Company, cid)
+        assert company is not None
+        tenant_id = company.tenant_id
+    other = await _other_company_posted_invoice()
+
+    async with AsyncSessionLocal() as session:
+        cn = await svc.api_create(
+            session, cid, tenant_id, "test",
+            contact_id=contact, issue_date=date(2026, 4, 20),
+            lines=[_line(income, gst, Decimal("50.00"))],
+        )
+    assert cn.original_invoice_id is None
+
+    async with AsyncSessionLocal() as session:
+        with pytest.raises(svc.CreditNoteError, match="not found for this company"):
+            await svc.api_update(
+                session, cn.id, "test", cn.version,
+                original_invoice_id=other["invoice_id"],
+            )
+
+    async with AsyncSessionLocal() as session:
+        reloaded = await svc.api_get(session, cn.id)
+        assert reloaded is not None
+        assert reloaded.original_invoice_id is None
+
+    async with AsyncSessionLocal() as session:
+        inv = await inv_svc.get(session, other["invoice_id"])
+        assert inv.amount_paid == Decimal("0.00")
 
 
 @pytest.mark.asyncio

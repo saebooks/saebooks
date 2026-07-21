@@ -160,6 +160,7 @@ async def create_company(
             acn=payload.acn,
             base_currency=payload.base_currency,
             fin_year_start_month=payload.fin_year_start_month,
+            fin_year_start_day=payload.fin_year_start_day,
             jurisdiction=payload.jurisdiction,
             coa_template_key=payload.coa_template_key,
             registrikood=payload.registrikood,

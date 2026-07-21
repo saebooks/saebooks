@@ -1,7 +1,9 @@
-"""Wiring test: lodge_tax_return BAS path builds a real SBR XBRL envelope.
+"""Wiring test: lodge_tax_return BAS path builds a real AS.0004 envelope.
 
-Covers ``_build_bas_envelope`` — figures JSONB + tax-period + company ABN ->
-XBRL business document, and the 422 guard when the company has no ABN.
+Covers ``_build_bas_envelope`` — figures JSONB + tax-period + company ABN +
+request-body lodgement fields (TFN / DIN / signatory) -> AS.0004
+``ASSubmitRequest`` XML, and the 422 guards for missing ABN / period / header
+fields.
 """
 from __future__ import annotations
 
@@ -22,13 +24,13 @@ from saebooks.services.lodgement.sbr import bas as _sbr_bas
 
 pytestmark = pytest.mark.postgres_only
 
-# The XBRL envelope generator is the certified ATO SBR transmission path; in the
-# open/AGPL build it is the PUBLIC SHIM (raises NotImplementedError). The real
-# private generator never sets this flag → no-op in the private tree, fires only
-# in the open tree. The 422 input-guard tests below stay real (open-engine surface).
-_SBR_STUBBED = getattr(_sbr_bas, "__OPEN_ENGINE_STUB__", False)
+AS_NS = "http://www.sbr.gov.au/ato/assubmitrequest"
 
-XBRLI = "http://www.xbrl.org/2003/instance"
+LODGEMENT_FIELDS = {
+    "tfn": "123456782",
+    "document_id": "11234813678",
+    "signatory": "Richard Sauer",
+}
 
 
 async def _seed_company_and_period(
@@ -82,25 +84,29 @@ async def _seed_company_and_period(
         return co.id, period.id
 
 
-@pytest.mark.skipif(
-    _SBR_STUBBED,
-    reason="commercial ATO SBR XBRL envelope generation is stubbed in the open/AGPL engine",
-)
-async def test_build_bas_envelope_generates_xbrl_from_figures():
+async def test_build_bas_envelope_generates_as0004_from_figures():
     company_id, period_id = await _seed_company_and_period("51824753556")
     figures = {"G1": 11000, "G3": 500, "G10": 2200, "G11": 3300, "1A": 1000, "1B": 500}
 
     async with AsyncSessionLocal() as s:
         doc = await _build_bas_envelope(
-            s, company_id=company_id, period_id=period_id, figures=figures
+            s,
+            company_id=company_id,
+            period_id=period_id,
+            figures=figures,
+            lodgement_fields=LODGEMENT_FIELDS,
         )
 
     root = etree.fromstring(doc)
-    assert root.tag == f"{{{XBRLI}}}xbrl"
-    assert root.find(f".//{{{XBRLI}}}identifier").text == "51824753556"
-    assert root.find(f".//{{{XBRLI}}}startDate").text == "2026-01-01"
-    # G1 fact present with the supplied value (placeholder concept ns is fine here)
-    assert b"11000" in doc and b"500" in doc
+    assert root.tag == f"{{{AS_NS}}}ASSubmitRequest"
+    rp = root.find(f"{{{AS_NS}}}RP")
+    assert rp.find(f"{{{AS_NS}}}AustralianBusinessNumberId").text == "51824753556"
+    assert rp.find(f"{{{AS_NS}}}TaxFileNumberId").text == "123456782"
+    assert (
+        rp.find(f"{{{AS_NS}}}BusinessDocumentGovernmentGeneratedId").text == "11234813678"
+    )
+    gst = rp.find(f"{{{AS_NS}}}GST")
+    assert gst.find(f"{{{AS_NS}}}IncomeSaleOfGoodsAndServicesWholeA").text == "11000"
 
 
 async def test_build_bas_envelope_422_without_company_abn():
@@ -110,10 +116,41 @@ async def test_build_bas_envelope_422_without_company_abn():
     async with AsyncSessionLocal() as s:
         with pytest.raises(HTTPException) as ei:
             await _build_bas_envelope(
-                s, company_id=company_id, period_id=period_id, figures={"G1": 100}
+                s,
+                company_id=company_id,
+                period_id=period_id,
+                figures={"G1": 100},
+                lodgement_fields=LODGEMENT_FIELDS,
             )
     assert ei.value.status_code == 422
     assert "ABN" in ei.value.detail
+
+
+async def test_build_bas_envelope_422_without_tfn_or_din():
+    company_id, period_id = await _seed_company_and_period("51824753556")
+    async with AsyncSessionLocal() as s:
+        with pytest.raises(HTTPException) as ei:
+            await _build_bas_envelope(
+                s,
+                company_id=company_id,
+                period_id=period_id,
+                figures={"G1": 100},
+                lodgement_fields={},
+            )
+    assert ei.value.status_code == 422
+    assert "TFN" in ei.value.detail
+
+    async with AsyncSessionLocal() as s:
+        with pytest.raises(HTTPException) as ei:
+            await _build_bas_envelope(
+                s,
+                company_id=company_id,
+                period_id=period_id,
+                figures={"G1": 100},
+                lodgement_fields={"tfn": "123456782"},
+            )
+    assert ei.value.status_code == 422
+    assert "DIN" in ei.value.detail
 
 
 async def test_build_bas_envelope_422_when_period_missing():
@@ -123,6 +160,10 @@ async def test_build_bas_envelope_422_when_period_missing():
     async with AsyncSessionLocal() as s:
         with pytest.raises(HTTPException) as ei:
             await _build_bas_envelope(
-                s, company_id=company_id, period_id=uuid.uuid4(), figures={"G1": 100}
+                s,
+                company_id=company_id,
+                period_id=uuid.uuid4(),
+                figures={"G1": 100},
+                lodgement_fields=LODGEMENT_FIELDS,
             )
     assert ei.value.status_code == 422

@@ -2,6 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import (
     Boolean,
@@ -15,7 +16,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from saebooks.db import Base
@@ -87,6 +88,14 @@ class Contact(CompanyScoped, Base):
         default=uuid.UUID("00000000-0000-0000-0000-000000000001"),
     )
     name: Mapped[str] = mapped_column(String, nullable=False)
+    # Person-name split (migration 0219). Set only when the contact is an
+    # individual; ``name`` stays the display string. AU TPAR's flat file
+    # requires surname + first given name whenever the payee has no
+    # business name (spec 6.48/6.49) — a lone display string can't encode
+    # which shape a contact is.
+    family_name: Mapped[str | None] = mapped_column(String(64))
+    given_name: Mapped[str | None] = mapped_column(String(64))
+    other_given_name: Mapped[str | None] = mapped_column(String(64))
     contact_type: Mapped[ContactType] = mapped_column(
         Enum(ContactType, name="contact_type_enum"), nullable=False
     )
@@ -100,6 +109,10 @@ class Contact(CompanyScoped, Base):
     # Part A/B counterparty grouping key (services/lodgement/kmd_inf).
     # Nullable: most contacts (AU-only companies) never set this.
     registration_number: Mapped[str | None] = mapped_column(String(32))
+    # Industry classification linkage (M1.5 P1 tail) — same free-text
+    # (no FK) idiom as Company.industry_code above; validated at the
+    # service layer against the industry_codes reference table.
+    industry_code: Mapped[str | None] = mapped_column(String(16))
     address_line1: Mapped[str | None] = mapped_column(String)
     address_line2: Mapped[str | None] = mapped_column(String)
     city: Mapped[str | None] = mapped_column(String)
@@ -176,4 +189,11 @@ class Contact(CompanyScoped, Base):
     # .as_string(). NULL = flagged as a recipient but no routing address on
     # file yet.
     peppol_participant_id: Mapped[str | None] = mapped_column(String(64))
+    # Accounting-package sync (migration 0217) — same external-id quartet
+    # shape as bills/invoices/credit_notes/payments (migration 0092).
+    # Populated by saebooks/services/sync/xero/pull.py + push.py.
+    external_id: Mapped[str | None] = mapped_column(String(255))
+    external_source: Mapped[str | None] = mapped_column(String(64))
+    external_etag: Mapped[str | None] = mapped_column(String(255))
+    external_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 

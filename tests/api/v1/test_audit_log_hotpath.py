@@ -48,6 +48,8 @@ from saebooks.models.account import Account, AccountType
 from saebooks.models.audit_log import AuditLog
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact
+from saebooks.models.journal import JournalEntry
+from saebooks.models.tenant import Tenant
 from saebooks.models.user import User
 from saebooks.services import journal as journal_svc
 from saebooks.services.jwt_tokens import _reset_secret_cache, create_access_token
@@ -367,6 +369,35 @@ async def _locked_company() -> dict:
         return {"company_id": cid, "expense_account_id": expense.id, "bank_account_id": bank.id}
 
 
+async def _drop_locked_company(company_id: uuid.UUID) -> None:
+    """Teardown for ``_locked_company`` — leaves the default tenant as it
+    found it.
+
+    ``journal_lines.account_id`` is ON DELETE RESTRICT, so any posted JE in
+    this company (event 8's override-post tests) would block the
+    company->accounts cascade. Delete the entries first (their lines cascade
+    via ``journal_lines.entry_id`` ON DELETE CASCADE); ``period_locks`` and
+    ``accounts`` both cascade off ``company_id`` ON DELETE CASCADE, so the
+    company delete cleans those up on its own. Mirrors
+    ``tests/conftest.py::seeded_company``'s teardown.
+    """
+    async with AsyncSessionLocal() as session:
+        await session.execute(sa_delete(JournalEntry).where(JournalEntry.company_id == company_id))
+        co = await session.get(Company, company_id)
+        if co is not None:
+            await session.delete(co)
+        await session.commit()
+
+
+@pytest_asyncio.fixture
+async def locked_company() -> AsyncIterator[dict]:
+    ctx = await _locked_company()
+    try:
+        yield ctx
+    finally:
+        await _drop_locked_company(ctx["company_id"])
+
+
 def _je_payload(ctx: dict) -> dict:
     return {
         "entry_date": "2026-01-15",
@@ -383,8 +414,8 @@ def _je_payload(ctx: dict) -> dict:
 # ===========================================================================
 
 
-async def test_rejected_override_leaves_no_orphan_audit_row(acting_user):
-    ctx = await _locked_company()
+async def test_rejected_override_leaves_no_orphan_audit_row(acting_user, locked_company):
+    ctx = locked_company
     async with _client(acting_user, ctx["company_id"]) as client:
         je = (await client.post("/api/v1/journal_entries", json=_je_payload(ctx))).json()
         # Post with NO override reason -> rejected (422), period locked.
@@ -400,8 +431,8 @@ async def test_rejected_override_leaves_no_orphan_audit_row(acting_user):
 # ===========================================================================
 
 
-async def test_je_override_post_writes_audit_row_with_reason(acting_user):
-    ctx = await _locked_company()
+async def test_je_override_post_writes_audit_row_with_reason(acting_user, locked_company):
+    ctx = locked_company
     override_reason = "Auditor-approved prior-period adjustment per engagement letter"
     async with _client(acting_user, ctx["company_id"]) as client:
         je = (await client.post("/api/v1/journal_entries", json=_je_payload(ctx))).json()
@@ -448,3 +479,199 @@ async def test_admin_audit_log_endpoint_denies_non_admin():
             assert r.status_code == 403, f"viewer must be denied, got {r.status_code}"
     finally:
         await _drop_user(viewer.id)
+
+
+# ===========================================================================
+# M3b — date-range + actor filters, CSV export
+# ===========================================================================
+
+
+async def test_audit_log_at_range_filter_includes_and_excludes(acting_user, deps):
+    async with _client(acting_user) as client:
+        inv = (await client.post("/api/v1/invoices", json=_inv_payload(deps))).json()
+        r = await client.post(f"/api/v1/invoices/{inv['id']}/post",
+                             headers={"If-Match": str(inv["version"])})
+        assert r.status_code == 200, r.text
+
+        # A window that spans "now" must include the freshly-written row.
+        past = "2000-01-01T00:00:00Z"
+        future = "2999-01-01T00:00:00Z"
+        r = await client.get("/api/v1/audit-log", params={
+            "row_id": inv["id"], "at_from": past, "at_to": future,
+        })
+        assert r.status_code == 200, r.text
+        actions = [it["action"] for it in r.json()["items"]]
+        assert "invoice.post" in actions
+
+        # A window entirely in the past must exclude it.
+        r = await client.get("/api/v1/audit-log", params={
+            "row_id": inv["id"], "at_from": "1990-01-01T00:00:00Z", "at_to": past,
+        })
+        assert r.status_code == 200, r.text
+        assert r.json()["items"] == []
+
+
+async def test_audit_log_actor_filter(acting_user, deps):
+    other = await _make_user("admin")
+    try:
+        async with _client(acting_user) as client:
+            inv = (await client.post("/api/v1/invoices", json=_inv_payload(deps))).json()
+            r = await client.post(f"/api/v1/invoices/{inv['id']}/post",
+                                 headers={"If-Match": str(inv["version"])})
+            assert r.status_code == 200, r.text
+
+            r = await client.get("/api/v1/audit-log", params={
+                "row_id": inv["id"], "actor_user_id": str(acting_user.id),
+            })
+            assert r.status_code == 200, r.text
+            actions = [it["action"] for it in r.json()["items"]]
+            assert "invoice.post" in actions
+
+            r = await client.get("/api/v1/audit-log", params={
+                "row_id": inv["id"], "actor_user_id": str(other.id),
+            })
+            assert r.status_code == 200, r.text
+            assert r.json()["items"] == []
+    finally:
+        await _drop_user(other.id)
+
+
+async def test_audit_log_csv_export_returns_header_and_seeded_row(acting_user, deps):
+    async with _client(acting_user) as client:
+        inv = (await client.post("/api/v1/invoices", json=_inv_payload(deps))).json()
+        r = await client.post(f"/api/v1/invoices/{inv['id']}/post",
+                             headers={"If-Match": str(inv["version"])})
+        assert r.status_code == 200, r.text
+
+        r = await client.get("/api/v1/audit-log.csv", params={"row_id": inv["id"]})
+        assert r.status_code == 200, r.text
+        assert r.headers["content-type"].startswith("text/csv")
+        assert 'attachment; filename="audit_log.csv"' in r.headers["content-disposition"]
+
+        lines = r.text.strip("\r\n").split("\r\n")
+        assert lines[0] == "at,actor_user_id,action,table_name,row_id,reason"
+        assert any(
+            f",invoice.post,invoices,{inv['id']}," in line for line in lines[1:]
+        ), f"expected invoice.post row in CSV, got {lines}"
+        # row_snapshot is deliberately not a column.
+        assert "row_snapshot" not in lines[0]
+
+
+async def test_audit_log_csv_formula_injection_guard(acting_user, locked_company):
+    ctx = locked_company
+    override_reason = "=SUM(A1:A99)-payload"  # leading '=' -> formula injection
+    async with _client(acting_user, ctx["company_id"]) as client:
+        je = (await client.post("/api/v1/journal_entries", json=_je_payload(ctx))).json()
+        r = await client.post(f"/api/v1/journal_entries/{je['id']}/post",
+                             headers={"If-Match": str(je["version"])},
+                             json={"override_reason": override_reason})
+        assert r.status_code == 200, f"override post should succeed: {r.text}"
+
+        r = await client.get("/api/v1/audit-log.csv", params={"row_id": je["id"]})
+        assert r.status_code == 200, r.text
+        assert f"'{override_reason}" in r.text, (
+            f"leading '=' must be quote-guarded in the CSV, got: {r.text!r}"
+        )
+        assert override_reason not in r.text.replace(f"'{override_reason}", ""), (
+            "the raw un-guarded formula must not appear anywhere in the CSV"
+        )
+
+
+async def test_audit_log_csv_export_denies_non_admin():
+    viewer = await _make_user("viewer")
+    try:
+        async with _client(viewer) as client:
+            r = await client.get("/api/v1/audit-log.csv")
+            assert r.status_code == 403, f"viewer must be denied, got {r.status_code}"
+    finally:
+        await _drop_user(viewer.id)
+
+
+# ===========================================================================
+# Adversarial-review fixes — naive at_from/at_to reject with 422, tenant-B
+# isolation on the audit-log surfaces
+# ===========================================================================
+
+
+async def test_audit_log_naive_datetime_filter_returns_422(acting_user):
+    """A naive (no offset) at_from/at_to compares wrong against the
+    timestamptz ``at`` column — silently ~10h off on this deployment
+    (Brisbane). Both the JSON and CSV routes must reject it loudly.
+    """
+    async with _client(acting_user) as client:
+        r = await client.get("/api/v1/audit-log", params={"at_from": "2026-07-01T00:00:00"})
+        assert r.status_code == 422, r.text
+        assert "timezone-aware" in r.text
+
+        r = await client.get("/api/v1/audit-log", params={"at_to": "2026-07-01T00:00:00"})
+        assert r.status_code == 422, r.text
+
+        r = await client.get("/api/v1/audit-log.csv", params={"at_from": "2026-07-01T00:00:00"})
+        assert r.status_code == 422, r.text
+        assert "timezone-aware" in r.text
+
+
+@pytest_asyncio.fixture
+async def tenant_b_admin() -> AsyncIterator[User]:
+    """A real second tenant + an admin user IN that tenant.
+
+    Unlike ``period-close/locks`` (gated by ``get_active_company_id``),
+    the audit-log surfaces are TENANT-scoped only — ``audit_log`` carries
+    no ``company_id`` column at all (see the module docstring: "tenant-
+    scoped, mirroring the admin router"), so ``X-Company-Id`` is not even
+    read by these routes. The real isolation boundary here is the JWT's
+    ``tenant_id`` claim, so the genuine probe is a second real tenant +
+    user, mirroring saebooks-m3's ``tenant_b`` fixture (tests/api/v1/
+    test_reports_csv.py, commit 6b1bfd3) rather than a bare random UUID.
+    """
+    suffix = uuid.uuid4().hex[:8]
+    tenant_id = uuid.uuid4()
+    user = User(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        username=f"audit-tenantb-{suffix}",
+        email=f"audit-tenantb-{suffix}@test.invalid",
+        role="admin",
+    )
+    async with AsyncSessionLocal() as session:
+        session.add(
+            Tenant(id=tenant_id, name=f"AuditTenantB-{suffix}", slug=f"audit-tenant-b-{suffix}")
+        )
+        await session.flush()
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+    try:
+        yield user
+    finally:
+        async with AsyncSessionLocal() as session:
+            await session.execute(sa_delete(User).where(User.id == user.id))
+            await session.execute(sa_delete(Tenant).where(Tenant.id == tenant_id))
+            await session.commit()
+
+
+async def test_audit_log_tenant_b_isolation(acting_user, deps, tenant_b_admin):
+    """A real second tenant's admin cannot see tenant A's audit_log rows
+    via either the JSON list or the CSV export. Both routes filter
+    strictly by the caller's own JWT ``tenant_id`` (``_apply_filters``),
+    so tenant B querying by tenant A's ``row_id`` gets a 200 with no
+    matching rows -- not a 404, since these routes are tenant- not
+    company-scoped and never fail to resolve for a genuinely-authenticated
+    admin of ANY tenant.
+    """
+    async with _client(acting_user) as client:
+        inv = (await client.post("/api/v1/invoices", json=_inv_payload(deps))).json()
+        r = await client.post(f"/api/v1/invoices/{inv['id']}/post",
+                             headers={"If-Match": str(inv["version"])})
+        assert r.status_code == 200, r.text
+
+    async with _client(tenant_b_admin) as client_b:
+        r = await client_b.get("/api/v1/audit-log", params={"row_id": inv["id"]})
+        assert r.status_code == 200, r.text
+        assert r.json()["items"] == [], "tenant B must not see tenant A's audit_log row"
+
+        r = await client_b.get("/api/v1/audit-log.csv", params={"row_id": inv["id"]})
+        assert r.status_code == 200, r.text
+        assert inv["id"] not in r.text, (
+            "tenant B's CSV export must not contain tenant A's row"
+        )

@@ -49,9 +49,9 @@ from decimal import Decimal
 from enum import StrEnum
 
 from sqlalchemy import select, text
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from saebooks.db import upsert_stmt
 from saebooks.models.bank_statement import BankStatementLine, StatementLineStatus
 from saebooks.models.company import Company
 
@@ -287,7 +287,7 @@ async def _external_id_bulk(
             row["tenant_id"] = tenant_id
         rows.append(row)
 
-    stmt = pg_insert(BankStatementLine).values(rows)
+    stmt = upsert_stmt(BankStatementLine).values(rows)
     stmt = stmt.on_conflict_do_nothing(
         index_elements=["bank_feed_account_id", "external_id"],
         index_where=text("external_id IS NOT NULL"),

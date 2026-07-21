@@ -529,8 +529,16 @@ async def archive_purchase_order(
         raise HTTPException(404, "PurchaseOrder not found")
 
     if hard:
+        # Engine-local re-fetch: hard delete needs the ORM row, and the
+        # pre-accounting module shares this database, so the delegated
+        # getter's Pydantic object must not be passed to the audit helper.
+        row = await svc.api_get_local(
+            session, po_id, tenant_id=tenant_id, company_id=company_id
+        )
+        if row is None:
+            raise HTTPException(404, "PurchaseOrder not found")
         await hard_delete_with_audit(
-            session, existing, "purchase_orders", getattr(request.state, "user", None)
+            session, row, "purchase_orders", getattr(request.state, "user", None)
         )
         await session.commit()
         return Response(status_code=204)

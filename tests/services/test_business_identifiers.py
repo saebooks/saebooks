@@ -291,6 +291,13 @@ async def test_upsert_leaves_check_digit_valid_none_for_unregistered_scheme() ->
         ("ca_bn", "123456789", True),
         ("ca_bn", "123456789RT0001", True),
         ("ca_bn", "abc", False),
+        # M1.5 P1 tail — EORI + OSS/IOSS scheme-membership identifiers.
+        ("eori", "GB123456789000", True),
+        ("eori", "123456789", False),
+        ("eu_ioss_scheme", "IM0123456789", True),
+        ("eu_ioss_scheme", "IM12345", False),
+        ("eu_oss_scheme", "IE1234567AB", True),
+        ("eu_oss_scheme", "not-oss", False),
     ],
 )
 def test_scheme_validators(scheme: str, value: str, expected: bool) -> None:
@@ -356,6 +363,18 @@ def test_all_known_schemes_accepted() -> None:
         "ca_bn",
     }
     assert new_schemes <= bi_svc.KNOWN_SCHEMES
+    for scheme in new_schemes:
+        assert bi_svc._validate_scheme(scheme) == scheme
+
+
+def test_eori_oss_ioss_schemes_accepted() -> None:
+    """M1.5 P1 tail — eori/eu_oss_scheme/eu_ioss_scheme round-trip through
+    scheme validation without raising UnknownScheme. Deliberately absent
+    from ``_SCHEME_JURISDICTION`` — EU-wide schemes with no single owning
+    country, same posture as ``eu_vat``/``global_lei``."""
+    new_schemes = {"eori", "eu_oss_scheme", "eu_ioss_scheme"}
+    assert new_schemes <= bi_svc.KNOWN_SCHEMES
+    assert new_schemes.isdisjoint(bi_svc._SCHEME_JURISDICTION)
     for scheme in new_schemes:
         assert bi_svc._validate_scheme(scheme) == scheme
 

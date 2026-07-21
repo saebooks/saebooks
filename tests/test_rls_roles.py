@@ -20,19 +20,22 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.ext.asyncio import (
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
+from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
 os.environ.setdefault("SAEBOOKS_ENV", "test")
 
-from saebooks.db import engine as _owner_engine
+# NOTE: deliberately NOT ``saebooks.db.engine`` — that's the runtime
+# engine, which IS the saebooks_app role under --rls (see
+# docker-compose.test.yml). This file needs a connection that is always
+# the real owner/superuser role (ALTER ROLE below requires it, and the
+# catalog probes + URL-template below are clearer reading the one
+# genuinely-fixed owner engine rather than a conditionally-app-role one).
+from saebooks.db import _owner_role_engine as _owner_engine
 from saebooks.models.permission import RolePermission
 from saebooks.models.role import Role
 from saebooks.models.tenant import Tenant
+from tests.conftest import owner_seed_session
 
 pytestmark = pytest.mark.postgres_only
 
@@ -73,13 +76,14 @@ async def app_engine() -> AsyncIterator[Any]:
 @pytest_asyncio.fixture(scope="module")
 async def seeded() -> AsyncIterator[dict[str, Any]]:
     """Two tenants, each with one custom role + one grant row, inserted
-    through the BYPASSRLS owner engine. Uses an existing SEEDED
-    permission code (dashboard.view) so the FK is always satisfiable
-    regardless of migration order."""
-    Owner = async_sessionmaker(_owner_engine, expire_on_commit=False, class_=AsyncSession)
+    through the BYPASSRLS owner role (via ``owner_seed_session`` — always
+    ``DATABASE_URL``, never the possibly-app-role runtime engine, so this
+    fixture seeds correctly under both the default suite and --rls).
+    Uses an existing SEEDED permission code (dashboard.view) so the FK is
+    always satisfiable regardless of migration order."""
     suffix = uuid.uuid4().hex[:8]
     out: dict[str, Any] = {"suffix": suffix}
-    async with Owner() as session:
+    async with owner_seed_session() as session:
         code_row = (
             await session.execute(text("SELECT code FROM permissions LIMIT 1"))
         ).first()
@@ -111,7 +115,7 @@ async def seeded() -> AsyncIterator[dict[str, Any]]:
             out[label] = {"tenant_id": tid, "role_id": role.id}
         await session.commit()
     yield out
-    async with Owner() as session:
+    async with owner_seed_session() as session:
         for label in ("tenant_a", "tenant_b"):
             await session.execute(
                 text("DELETE FROM role_permissions WHERE tenant_id = :tid").bindparams(

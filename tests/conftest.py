@@ -92,6 +92,69 @@ _ejl()
 
 
 # ---------------------------------------------------------------------------
+# RLS-aware test-session helpers (M3 CI role-split fixture migration).
+#
+# AsyncSessionLocal (saebooks.db) is the SAME engine the running app uses —
+# it binds to the owner/BYPASSRLS role by default and to the saebooks_app
+# (NOSUPERUSER + NOBYPASSRLS) role when the isolated test stack is run with
+# ``--rls`` / ``SAEBOOKS_TEST_RLS=1`` (see docker-compose.test.yml,
+# scripts/run-tests.sh). Under --rls, any direct ``AsyncSessionLocal()``
+# session that never stamps ``session.info["tenant_id"]`` hits FORCE ROW
+# LEVEL SECURITY: reads silently return zero rows and writes raise
+# "new row violates row-level security policy". These two helpers let a
+# test be correct in BOTH modes without hand-rolling the stamp or reaching
+# for a second ad-hoc "owner" engine per file.
+import contextlib as _rls_contextlib
+import uuid as _rls_uuid
+from collections.abc import AsyncIterator as _RlsAsyncIterator
+
+from sqlalchemy.ext.asyncio import AsyncSession as _RlsAsyncSession
+
+
+@_rls_contextlib.asynccontextmanager
+async def tenant_session(
+    tenant_id: _rls_uuid.UUID | str,
+) -> _RlsAsyncIterator[_RlsAsyncSession]:
+    """``AsyncSessionLocal()`` session with the tenant GUC stamped.
+
+    Use for any read/write that is legitimately scoped to ONE tenant
+    inside a test — this mirrors what a real request-scoped session does
+    (``saebooks/api/v1/deps.py``'s ``get_session``), just without going
+    through HTTP. Under the default (non-``--rls``) owner role the stamp
+    is a harmless no-op; under ``--rls`` it is what makes the
+    ``after_begin`` listener in ``api/v1/deps.py`` issue
+    ``SET LOCAL app.current_tenant`` so FORCE RLS resolves the row set
+    correctly instead of hiding every row.
+    """
+    from saebooks.db import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        session.info["tenant_id"] = str(tenant_id)
+        yield session
+
+
+@_rls_contextlib.asynccontextmanager
+async def owner_seed_session() -> _RlsAsyncIterator[_RlsAsyncSession]:
+    """A session that is ALWAYS the BYPASSRLS owner role, regardless of
+    ``--rls``.
+
+    Use ONLY for cross-tenant seeding/teardown that legitimately needs to
+    write rows for multiple tenants in one fixture (e.g. an isolation
+    test's "tenant A" + "tenant B" setup) — never for the assertions
+    under test, which should go through ``tenant_session`` (or a real
+    HTTP call) so they actually exercise RLS. Backed by
+    ``LoginSessionLocal`` (``saebooks/db.py``), the same dedicated
+    owner-role sessionmaker the pre-auth login/signup routes use — it
+    always binds to ``DATABASE_URL`` and is unaffected by
+    ``SAEBOOKS_APP_DATABASE_URL`` / ``--rls``.
+    """
+    from saebooks.db import LoginSessionLocal
+
+    async with LoginSessionLocal() as session:
+        yield session
+
+
+# ---------------------------------------------------------------------------
 # Migration 0161 (je_engine_guard) — test-suite escape hatch.
 #
 # The 0161 BEFORE trigger on ``journal_entries`` refuses raw-SQL / direct-ORM
@@ -343,12 +406,20 @@ async def _reset_seed_company_to_full_after_test() -> None:
     yield
     if _BACKEND_IS_SQLITE:
         return
+    import uuid as _uu2
+
     from sqlalchemy import select, text
 
-    from saebooks.db import AsyncSessionLocal
     from saebooks.models.company import Company
 
-    async with AsyncSessionLocal() as session:
+    # tenant_session (not a plain AsyncSessionLocal()) so this resolves
+    # correctly under --rls too — the seed company always lives in the
+    # well-known default tenant (see saebooks/services/companies.py
+    # ensure_seed_company). Without the stamp, FORCE RLS would make the
+    # SELECT below silently return zero rows under --rls and this
+    # cleanup would quietly no-op instead of resetting the invariant.
+    _DEFAULT_TENANT_ID = _uu2.UUID("00000000-0000-0000-0000-000000000001")
+    async with tenant_session(_DEFAULT_TENANT_ID) as session:
         co = (
             await session.execute(
                 select(Company)

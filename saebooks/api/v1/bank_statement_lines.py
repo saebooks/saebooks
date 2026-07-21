@@ -459,6 +459,16 @@ async def delete_bank_statement_line(
 # ---------------------------------------------------------------------------
 
 
+_DEPRECATION_HEADERS = {
+    # R8d — contract-level surface reconciliation: /reconciliation/* is the
+    # canonical matching workflow surface; this route stays functional
+    # (no removal — that would be breaking) but flags itself as
+    # deprecated per RFC 8594, pointing callers at the successor route.
+    "Deprecation": "true",
+    "Link": '</api/v1/reconciliation/match>; rel="successor-version"',
+}
+
+
 @router.post("/{line_id}/match", response_model=BankStatementLineOut)
 async def match_bank_statement_line(
     request: Request,
@@ -472,6 +482,11 @@ async def match_bank_statement_line(
 
     Sets status=MATCHED, records matched_to_type, matched_to_id, matched_at,
     and bumps the version.
+
+    DEPRECATED (R8d, contract-level only — not removed): prefer
+    ``POST /api/v1/reconciliation/match``, the canonical matching-workflow
+    surface. This route stays functional and answers with a
+    ``Deprecation`` + ``Link`` header pair (RFC 8594).
     """
     tenant_id = resolve_tenant_id(request)
     if await svc.api_get(session, line_id, tenant_id=tenant_id, company_id=company_id) is None:
@@ -492,7 +507,7 @@ async def match_bank_statement_line(
             raise HTTPException(404, msg) from exc
         raise HTTPException(422, msg) from exc
 
-    return JSONResponse(_dump(line), status_code=200)
+    return JSONResponse(_dump(line), status_code=200, headers=_DEPRECATION_HEADERS)
 
 
 # ---------------------------------------------------------------------------

@@ -45,6 +45,28 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: "postgresql+asyncpg://saebooks_test:saebooks_test_pw@db:5432/saebooks_test"
+      # Runtime app role — NOSUPERUSER + NOBYPASSRLS (see migration
+      # 0056_split_db_role.py / docs/db-role-split.md). OPT-IN, not
+      # default: ./scripts/run-tests.sh --rls (or SAEBOOKS_TEST_RLS=1)
+      # sets SAEBOOKS_TEST_APP_DATABASE_URL, which this interpolates in;
+      # otherwise it's empty and the runtime engine falls back to
+      # DATABASE_URL above (the BYPASSRLS owner role) exactly like
+      # before — the default suite stays green byte-for-byte.
+      #
+      # With --rls, FORCE ROW LEVEL SECURITY actually binds instead of
+      # being a no-op — but most of the suite's test fixtures write
+      # directly via AsyncSessionLocal() without stamping the tenant
+      # GUC (session.info["tenant_id"]), which FORCE RLS then blocks.
+      # Only the dedicated RLS/isolation test files have been migrated
+      # to the tenant_session()/owner_seed_session() helpers in
+      # tests/conftest.py to run clean in both modes — see
+      # docs/db-role-split.md for the wider fixture-migration plan.
+      # Same db/host, saebooks_app role, password matches
+      # SAEBOOKS_APP_DB_PASSWORD below (migration 0128 sets it;
+      # docker/test-initdb/01-test-roles.sql seeds it on fresh init).
+      # alembic (invoked directly with DATABASE_URL below, not through
+      # this var) keeps running as the owner role — see alembic/env.py.
+      SAEBOOKS_APP_DATABASE_URL: "${SAEBOOKS_TEST_APP_DATABASE_URL:-}"
       SAEBOOKS_ENV: "test"
       SAEBOOKS_MAIL_OUTBOX_DIR: "/tmp/saebooks-mail-outbox"
       SAEBOOKS_TEST_TRUSTED_USER_HEADER: "1"

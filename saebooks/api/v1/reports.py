@@ -56,7 +56,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -72,6 +72,9 @@ from saebooks.api.v1.schemas import (
     BSReport,
     BudgetVsActualLine,
     BudgetVsActualReport,
+    CashflowForecastItem,
+    CashflowForecastReport,
+    CashflowForecastWeek,
     CashflowStatement,
     DepreciationAssetLine,
     DepreciationSchedule,
@@ -100,6 +103,7 @@ from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
 from saebooks.models.tax_code import TaxCode
 from saebooks.money import money_quantum
 from saebooks.services import assets as assets_svc
+from saebooks.services import report_exports as exports_svc
 from saebooks.services import reports as reports_svc
 from saebooks.services.features import (
     FLAG_MULTI_CURRENCY,
@@ -114,6 +118,11 @@ router = APIRouter(
 )
 
 _GST_THRESHOLD = Decimal("75000.00")
+
+# R7 — opt-in comparative/prior-period query param for the JSON
+# /profit_loss, /balance_sheet, /trial_balance routes. FastAPI/Pydantic
+# rejects any other value with 422 automatically (Literal-typed Query).
+CompareMode = Literal["previous_period", "previous_year"]
 
 
 def _current_fy_bounds(today: date | None = None) -> tuple[date, date]:
@@ -452,8 +461,9 @@ async def aged_payables(
     candidate_rows = (await session.execute(stmt)).all()
 
     # Point-in-time settlement as at ``as_of`` (POSTED payment allocations
-    # with payment_date <= as_of). There is no supplier-credit-note→bill
-    # link, so AP has only the payment-date component.
+    # with payment_date <= as_of, plus POSTED supplier credit notes linked
+    # via original_bill_id with issue_date <= as_of — see
+    # ``_bill_settled_asof``).
     settled = await reports_svc._bill_settled_asof(
         session, [doc.id for doc, _ in candidate_rows], as_of
     )
@@ -469,6 +479,86 @@ async def aged_payables(
 
     return _build_report(
         rows, as_of, bd, labels, outstanding_by_id=outstanding_by_id
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/reports/aged_receivables.csv + aged_payables.csv
+# ---------------------------------------------------------------------------
+#
+# These do NOT reuse ``_build_report``/``aged_receivables``/``aged_payables``
+# above: that pipeline produces the pydantic ``AgedReport`` (contact-level
+# bucket sums keyed by the caller's dynamic ``bucket_days``), but the CSV
+# needs one row PER INVOICE/BILL, which only ``reports_svc.aged_ar`` /
+# ``reports_svc.aged_ap`` (the dataclass builders behind ``aged_ar_csv`` /
+# ``aged_ap_csv``) provide. Those service builders hardcode the standard
+# 30/60/90 bucket boundaries with no ``bucket_days`` override, so unlike
+# their JSON siblings these CSV routes do NOT accept a ``bucket_days``
+# query param at all -- accepting-then-ignoring it would silently mislead
+# a caller who passes a custom value expecting it to take effect.
+
+
+@router.get("/aged_receivables.csv", response_model=None)
+async def aged_receivables_csv(
+    request: Request,
+    as_of_date: date | None = Query(default=None),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> FastAPIResponse:
+    """Aged receivables as at ``as_of_date`` (default today), CSV export.
+
+    One row per open invoice; see ``reports_svc.aged_ar_csv`` for columns.
+    Bucketing is FIXED (Current / 1-30 / 31-60 / 61-90 / 90+ days) -- unlike
+    the JSON ``/aged_receivables`` route, this endpoint has no
+    ``bucket_days`` override.
+    """
+    as_of = as_of_date or date.today()
+    tenant_id = resolve_tenant_id(request)
+
+    report = await reports_svc.aged_ar(
+        session, company_id, as_at=as_of, tenant_id=tenant_id
+    )
+    csv_text = reports_svc.aged_ar_csv(report)
+    return FastAPIResponse(
+        content=csv_text,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="aged_receivables_{as_of.isoformat()}.csv"'
+            )
+        },
+    )
+
+
+@router.get("/aged_payables.csv", response_model=None)
+async def aged_payables_csv(
+    request: Request,
+    as_of_date: date | None = Query(default=None),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> FastAPIResponse:
+    """Aged payables as at ``as_of_date`` (default today), CSV export.
+
+    One row per open bill; see ``reports_svc.aged_ap_csv`` for columns.
+    Bucketing is FIXED (Current / 1-30 / 31-60 / 61-90 / 90+ days) -- unlike
+    the JSON ``/aged_payables`` route, this endpoint has no ``bucket_days``
+    override.
+    """
+    as_of = as_of_date or date.today()
+    tenant_id = resolve_tenant_id(request)
+
+    report = await reports_svc.aged_ap(
+        session, company_id, as_at=as_of, tenant_id=tenant_id
+    )
+    csv_text = reports_svc.aged_ap_csv(report)
+    return FastAPIResponse(
+        content=csv_text,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="aged_payables_{as_of.isoformat()}.csv"'
+            )
+        },
     )
 
 
@@ -518,16 +608,22 @@ _INCOME_TYPES = {AccountType.INCOME, AccountType.OTHER_INCOME}
 _EXPENSE_TYPES = {AccountType.EXPENSE, AccountType.COST_OF_SALES, AccountType.OTHER_EXPENSE}
 
 
-@router.get("/profit_loss", response_model=PnLReport)
-async def profit_loss(
-    request: Request,
-    from_date: date = Query(...),
-    to_date: date = Query(...),
-    include_draft: bool = Query(default=False),
-    session: AsyncSession = Depends(get_session),
-    company_id: UUID = Depends(get_active_company_id),
-) -> PnLReport:
-    """Profit & Loss for a date range.
+async def _pl_raw_for_range(
+    session: AsyncSession,
+    company_id: UUID,
+    tenant_id: UUID,
+    *,
+    from_date: date,
+    to_date: date,
+    include_draft: bool = False,
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, list[dict[str, Any]]], float, float]:
+    """Query + aggregate P&L account lines for one date range.
+
+    Extracted from ``_assemble_profit_loss`` (R7) so the comparative-period
+    query param can call this same query/aggregation twice -- once for the
+    current range, once for the shifted comparative range -- rather than a
+    second copy of the debit/credit aggregation living inline (see
+    ``reports_svc.merge_comparative_lines`` for how the two results merge).
 
     Sums JournalLine debit/credit per account for POSTED JEs whose
     ``entry_date`` falls within [from_date, to_date] (inclusive).
@@ -536,6 +632,8 @@ async def profit_loss(
     Income accounts: net = credit - debit (credits increase income).
     Expense accounts: net = debit - credit (debits increase expense).
     Only accounts with a non-zero net amount appear in the result.
+
+    Returns ``(income_by_type, expenses_by_type, total_income, total_expenses)``.
     """
     # REVERSED included so a void (mirror reversal + REVERSED original)
     # nets to zero rather than the POSTED reversal subtracting twice;
@@ -543,8 +641,6 @@ async def profit_loss(
     statuses = list(reports_svc.REPORTABLE_STATUSES)
     if include_draft:
         statuses.append(EntryStatus.DRAFT)
-
-    tenant_id = resolve_tenant_id(request)
 
     stmt = (
         select(
@@ -614,24 +710,195 @@ async def profit_loss(
         for lines in expenses_by_type.values()
         for line in lines
     )
+    return income_by_type, expenses_by_type, total_income, total_expenses
 
-    warnings = await _later_dated_warning(session, company_id, tenant_id, to_date)
-    return PnLReport(
+
+def _pl_comparative_range(from_date: date, to_date: date, compare: CompareMode) -> tuple[date, date]:
+    """Derive the comparative date range for a P&L ``compare`` mode.
+
+    ``previous_year`` shifts both bounds back a leap-safe year (identical
+    semantics to the statement pack's prior-year P&L). ``previous_period``
+    is the immediately-preceding period of equal length (see
+    ``reports_svc.previous_period_range``).
+    """
+    if compare == "previous_year":
+        return reports_svc.subtract_one_year(from_date), reports_svc.subtract_one_year(to_date)
+    return reports_svc.previous_period_range(from_date, to_date)
+
+
+async def _assemble_profit_loss(
+    session: AsyncSession,
+    company_id: UUID,
+    tenant_id: UUID,
+    *,
+    from_date: date,
+    to_date: date,
+    include_draft: bool = False,
+    compare: CompareMode | None = None,
+) -> PnLReport:
+    """Assemble the P&L pydantic report. Shared by the JSON and CSV routes.
+
+    ``compare`` (R7, opt-in) adds a ``comparative`` value to every line plus
+    comparative totals/net-profit and the comparative date range -- entirely
+    absent from the response when ``None`` (the route sets
+    ``response_model_exclude_none``), so existing consumers see the
+    unchanged shape.
+    """
+    income_by_type, expenses_by_type, total_income, total_expenses = await _pl_raw_for_range(
+        session,
+        company_id,
+        tenant_id,
         from_date=from_date,
         to_date=to_date,
-        income={
-            "INCOME": income_by_type.get("INCOME", []),
-            "OTHER_INCOME": income_by_type.get("OTHER_INCOME", []),
-            "total_income": total_income,
+        include_draft=include_draft,
+    )
+
+    warnings = await _later_dated_warning(session, company_id, tenant_id, to_date)
+
+    income: dict[str, Any] = {
+        "INCOME": income_by_type.get("INCOME", []),
+        "OTHER_INCOME": income_by_type.get("OTHER_INCOME", []),
+        "total_income": total_income,
+    }
+    expenses: dict[str, Any] = {
+        "EXPENSE": expenses_by_type.get("EXPENSE", []),
+        "COST_OF_SALES": expenses_by_type.get("COST_OF_SALES", []),
+        "OTHER_EXPENSE": expenses_by_type.get("OTHER_EXPENSE", []),
+        "total_expenses": total_expenses,
+    }
+    report_kwargs: dict[str, Any] = {
+        "from_date": from_date,
+        "to_date": to_date,
+        "income": income,
+        "expenses": expenses,
+        "net_profit": total_income - total_expenses,
+        "warnings": warnings,
+    }
+
+    if compare is not None:
+        comp_from, comp_to = _pl_comparative_range(from_date, to_date, compare)
+        c_income_by_type, c_expenses_by_type, c_total_income, c_total_expenses = (
+            await _pl_raw_for_range(
+                session,
+                company_id,
+                tenant_id,
+                from_date=comp_from,
+                to_date=comp_to,
+                include_draft=include_draft,
+            )
+        )
+        for section_key in ("INCOME", "OTHER_INCOME"):
+            income[section_key] = reports_svc.merge_comparative_lines(
+                income[section_key], c_income_by_type.get(section_key, []), value_key="amount"
+            )
+        for section_key in ("EXPENSE", "COST_OF_SALES", "OTHER_EXPENSE"):
+            expenses[section_key] = reports_svc.merge_comparative_lines(
+                expenses[section_key], c_expenses_by_type.get(section_key, []), value_key="amount"
+            )
+        income["total_income_comparative"] = c_total_income
+        expenses["total_expenses_comparative"] = c_total_expenses
+        report_kwargs["net_profit_comparative"] = c_total_income - c_total_expenses
+        report_kwargs["comparative_from_date"] = comp_from
+        report_kwargs["comparative_to_date"] = comp_to
+        report_kwargs["compare"] = compare
+
+    return PnLReport(**report_kwargs)
+
+
+@router.get("/profit_loss", response_model=PnLReport, response_model_exclude_none=True)
+async def profit_loss(
+    request: Request,
+    from_date: date = Query(...),
+    to_date: date = Query(...),
+    include_draft: bool = Query(default=False),
+    compare: CompareMode | None = Query(
+        default=None,
+        description=(
+            "Opt-in comparative period (R7). 'previous_period' = the "
+            "immediately-preceding period of equal length; 'previous_year' "
+            "= the same date range shifted back one year. Omitted (default) "
+            "leaves the response shape unchanged."
+        ),
+    ),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> PnLReport:
+    """Profit & Loss for a date range. See ``_assemble_profit_loss``."""
+    tenant_id = resolve_tenant_id(request)
+    return await _assemble_profit_loss(
+        session,
+        company_id,
+        tenant_id,
+        from_date=from_date,
+        to_date=to_date,
+        include_draft=include_draft,
+        compare=compare,
+    )
+
+
+def _profit_loss_csv(report: PnLReport) -> str:
+    """Render a P&L report as RFC 4180 CSV (one row per account line).
+
+    Columns: ``section,code,account_name,amount``. ``section`` is
+    ``income`` or ``expenses`` -- the INCOME/OTHER_INCOME and
+    EXPENSE/COST_OF_SALES/OTHER_EXPENSE subtypes collapse into their
+    parent section. No totals row, matching ``reports_svc.aged_ar_csv``'s
+    detail-rows-only convention. Kept here rather than in
+    ``services/reports.py`` because it consumes the pydantic ``PnLReport``
+    that ``/profit_loss`` assembles directly in the API layer (no
+    service-layer dataclass builder to reuse without importing API
+    schemas into services). ``account_name`` is run through
+    ``reports_svc._csv_sanitize_text`` (formula-injection guard) since it
+    is free text an operator could have named starting with ``=``/``+``/
+    ``-``/``@``.
+    """
+    import csv
+    from io import StringIO
+
+    buf = StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["section", "code", "account_name", "amount"])
+    for line in (*report.income.INCOME, *report.income.OTHER_INCOME):
+        writer.writerow(
+            ["income", line.code, reports_svc._csv_sanitize_text(line.account_name), f"{line.amount:.2f}"]
+        )
+    for line in (
+        *report.expenses.EXPENSE,
+        *report.expenses.COST_OF_SALES,
+        *report.expenses.OTHER_EXPENSE,
+    ):
+        writer.writerow(
+            ["expenses", line.code, reports_svc._csv_sanitize_text(line.account_name), f"{line.amount:.2f}"]
+        )
+    return buf.getvalue()
+
+
+@router.get("/profit_loss.csv", response_model=None)
+async def profit_loss_csv(
+    request: Request,
+    from_date: date = Query(...),
+    to_date: date = Query(...),
+    include_draft: bool = Query(default=False),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> FastAPIResponse:
+    """Profit & Loss for a date range, CSV export. See ``_profit_loss_csv``."""
+    tenant_id = resolve_tenant_id(request)
+    report = await _assemble_profit_loss(
+        session,
+        company_id,
+        tenant_id,
+        from_date=from_date,
+        to_date=to_date,
+        include_draft=include_draft,
+    )
+    csv_text = _profit_loss_csv(report)
+    return FastAPIResponse(
+        content=csv_text,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="profit_loss_{to_date.isoformat()}.csv"'
         },
-        expenses={
-            "EXPENSE": expenses_by_type.get("EXPENSE", []),
-            "COST_OF_SALES": expenses_by_type.get("COST_OF_SALES", []),
-            "OTHER_EXPENSE": expenses_by_type.get("OTHER_EXPENSE", []),
-            "total_expenses": total_expenses,
-        },
-        net_profit=total_income - total_expenses,
-        warnings=warnings,
     )
 
 
@@ -647,33 +914,37 @@ _LIABILITY_TYPES = {AccountType.LIABILITY}
 _EQUITY_TYPES = {AccountType.EQUITY}
 
 
-@router.get("/balance_sheet", response_model=BSReport)
-async def balance_sheet(
-    request: Request,
-    as_of_date: date = Query(...),
-    session: AsyncSession = Depends(get_session),
-    company_id: UUID = Depends(get_active_company_id),
-) -> BSReport:
-    """Balance sheet as at ``as_of_date``.
+async def _bs_raw_asof(
+    session: AsyncSession,
+    company_id: UUID,
+    tenant_id: UUID,
+    *,
+    as_of_date: date,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], float, float, float]:
+    """Query + aggregate balance-sheet account lines as at one date.
+
+    Extracted from ``_assemble_balance_sheet`` (R7) so the comparative-date
+    query param can call this same query/aggregation twice -- once for
+    ``as_of_date``, once for the comparative as-at date -- instead of a
+    second copy of the debit/credit aggregation living inline (see
+    ``reports_svc.merge_comparative_lines`` for how the two results merge).
 
     Sums ALL POSTED JournalLine entries where ``entry_date <= as_of_date``
     (cumulative from inception).
 
     Asset accounts: balance = debit - credit.
     Liability + equity accounts: balance = credit - debit.
-    Accounts with a zero net balance are omitted from the response.
+    Accounts with a zero net balance are omitted from the result.
 
     A synthetic "Current Year Earnings" line is always appended to the
-    equity section.  It represents the period net income (income credits
+    equity list.  It represents the period net income (income credits
     minus expense debits) for all POSTED entries up to ``as_of_date``.
     This matches Xero/MYOB/QBO behaviour for periods that have not been
     formally closed to a retained-earnings equity account.
 
-    ``balanced`` is True when
-    ``abs(total_assets - total_liabilities - total_equity) < 0.01``.
+    Returns ``(assets, liabilities, equity, total_assets, total_liabilities,
+    total_equity)``.
     """
-    tenant_id = resolve_tenant_id(request)
-
     stmt = (
         select(
             Account.id,
@@ -770,17 +1041,199 @@ async def balance_sheet(
     total_assets = sum(line["balance"] for line in assets)
     total_liabilities = sum(line["balance"] for line in liabilities)
     total_equity = sum(line["balance"] for line in equity)
+    return assets, liabilities, equity, total_assets, total_liabilities, total_equity
+
+
+def _bs_comparative_asof(
+    as_of_date: date,
+    compare: CompareMode,
+    fin_year_start_month: int = 7,
+    fin_year_start_day: int = 1,
+) -> date:
+    """Derive the comparative as-at date for a balance-sheet ``compare`` mode.
+
+    ``previous_year`` = ``as_of_date`` shifted back a leap-safe year
+    (identical semantics to the statement pack's prior-year balance sheet).
+
+    ``previous_period`` has no natural period length for a snapshot report
+    (the balance sheet has no ``from_date`` of its own) -- the statement
+    pack never implemented a BS "previous_period" mode to mirror, so this
+    is a deliberate convention for R7: the prior financial-year close (the
+    day before the FY containing ``as_of_date`` started).
+
+    Adversarial-review fix: this used to always call the AU-hardcoded
+    ``_current_fy_bounds`` (1 July), which was wrong for any company with
+    a non-July ``fin_year_start_month``/``fin_year_start_day``. It now
+    calls ``reports_svc.fy_bounds_for_company`` with the caller-supplied
+    anchor -- the defaults (7, 1) here exist only so this stays callable
+    without arguments (e.g. from tests); real callers (below) always pass
+    the company's actual anchor, fetched via ``_company_fy_anchor``.
+    """
+    if compare == "previous_year":
+        return reports_svc.subtract_one_year(as_of_date)
+    fy_start, _fy_end = reports_svc.fy_bounds_for_company(
+        as_of_date, fin_year_start_month, fin_year_start_day
+    )
+    return fy_start - timedelta(days=1)
+
+
+async def _company_fy_anchor(session: AsyncSession, company_id: UUID) -> tuple[int, int]:
+    """Return ``(fin_year_start_month, fin_year_start_day)`` for ``company_id``.
+
+    Shared by the balance-sheet and trial-balance ``compare=previous_period``
+    paths (see Finding 1 fix). Defaults to ``(7, 1)`` -- the AU anchor -- if
+    the company row is somehow missing; defensive only, since ``company_id``
+    already came from ``get_active_company_id``'s tenant-scoped lookup.
+    """
+    company = await session.get(Company, company_id)
+    if company is None:
+        return 7, 1
+    return company.fin_year_start_month, company.fin_year_start_day
+
+
+async def _assemble_balance_sheet(
+    session: AsyncSession,
+    company_id: UUID,
+    tenant_id: UUID,
+    *,
+    as_of_date: date,
+    compare: CompareMode | None = None,
+) -> BSReport:
+    """Assemble the balance sheet pydantic report. Shared by JSON + CSV routes.
+
+    ``balanced`` is True when
+    ``abs(total_assets - total_liabilities - total_equity) < 0.01``.
+
+    ``compare`` (R7, opt-in) adds a ``comparative`` value (balance AS AT the
+    comparative date, not a period movement) to every line plus comparative
+    totals and the comparative as-at date -- entirely absent from the
+    response when ``None`` (the route sets ``response_model_exclude_none``),
+    so existing consumers see the unchanged shape.
+    """
+    assets, liabilities, equity, total_assets, total_liabilities, total_equity = (
+        await _bs_raw_asof(session, company_id, tenant_id, as_of_date=as_of_date)
+    )
     difference = abs(total_assets - total_liabilities - total_equity)
 
     warnings = await _later_dated_warning(session, company_id, tenant_id, as_of_date)
-    return BSReport(
-        as_of_date=as_of_date,
-        assets={"ASSET": assets, "total_assets": total_assets},
-        liabilities={"LIABILITY": liabilities, "total_liabilities": total_liabilities},
-        equity={"EQUITY": equity, "total_equity": total_equity},
-        balanced=difference < 0.01,
-        difference=round(difference, 2),
-        warnings=warnings,
+
+    assets_section: dict[str, Any] = {"ASSET": assets, "total_assets": total_assets}
+    liabilities_section: dict[str, Any] = {
+        "LIABILITY": liabilities,
+        "total_liabilities": total_liabilities,
+    }
+    equity_section: dict[str, Any] = {"EQUITY": equity, "total_equity": total_equity}
+    report_kwargs: dict[str, Any] = {
+        "as_of_date": as_of_date,
+        "assets": assets_section,
+        "liabilities": liabilities_section,
+        "equity": equity_section,
+        "balanced": difference < 0.01,
+        "difference": round(difference, 2),
+        "warnings": warnings,
+    }
+
+    if compare is not None:
+        fy_month, fy_day = await _company_fy_anchor(session, company_id)
+        comp_as_of = _bs_comparative_asof(as_of_date, compare, fy_month, fy_day)
+        (
+            c_assets,
+            c_liabilities,
+            c_equity,
+            c_total_assets,
+            c_total_liabilities,
+            c_total_equity,
+        ) = await _bs_raw_asof(session, company_id, tenant_id, as_of_date=comp_as_of)
+
+        assets_section["ASSET"] = reports_svc.merge_comparative_lines(
+            assets, c_assets, value_key="balance"
+        )
+        liabilities_section["LIABILITY"] = reports_svc.merge_comparative_lines(
+            liabilities, c_liabilities, value_key="balance"
+        )
+        equity_section["EQUITY"] = reports_svc.merge_comparative_lines(
+            equity, c_equity, value_key="balance"
+        )
+        assets_section["total_assets_comparative"] = c_total_assets
+        liabilities_section["total_liabilities_comparative"] = c_total_liabilities
+        equity_section["total_equity_comparative"] = c_total_equity
+        report_kwargs["comparative_as_of_date"] = comp_as_of
+        report_kwargs["compare"] = compare
+
+    return BSReport(**report_kwargs)
+
+
+@router.get("/balance_sheet", response_model=BSReport, response_model_exclude_none=True)
+async def balance_sheet(
+    request: Request,
+    as_of_date: date = Query(...),
+    compare: CompareMode | None = Query(
+        default=None,
+        description=(
+            "Opt-in comparative as-at date (R7). 'previous_year' = as_of_date "
+            "shifted back one year; 'previous_period' = the prior financial-"
+            "year close. Omitted (default) leaves the response shape unchanged."
+        ),
+    ),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> BSReport:
+    """Balance sheet as at ``as_of_date``. See ``_assemble_balance_sheet``."""
+    tenant_id = resolve_tenant_id(request)
+    return await _assemble_balance_sheet(
+        session, company_id, tenant_id, as_of_date=as_of_date, compare=compare
+    )
+
+
+def _balance_sheet_csv(report: BSReport) -> str:
+    """Render a balance sheet as RFC 4180 CSV (one row per account line).
+
+    Columns: ``section,code,account_name,balance`` where ``section`` is
+    ``assets``, ``liabilities``, or ``equity``. The synthetic "Current Year
+    Earnings" line (code ``CYE``) is part of the equity section and appears
+    like any other row. No totals row. ``account_name`` is run through
+    ``reports_svc._csv_sanitize_text`` (formula-injection guard).
+    """
+    import csv
+    from io import StringIO
+
+    buf = StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["section", "code", "account_name", "balance"])
+    for line in report.assets.ASSET:
+        writer.writerow(
+            ["assets", line.code, reports_svc._csv_sanitize_text(line.account_name), f"{line.balance:.2f}"]
+        )
+    for line in report.liabilities.LIABILITY:
+        writer.writerow(
+            ["liabilities", line.code, reports_svc._csv_sanitize_text(line.account_name), f"{line.balance:.2f}"]
+        )
+    for line in report.equity.EQUITY:
+        writer.writerow(
+            ["equity", line.code, reports_svc._csv_sanitize_text(line.account_name), f"{line.balance:.2f}"]
+        )
+    return buf.getvalue()
+
+
+@router.get("/balance_sheet.csv", response_model=None)
+async def balance_sheet_csv(
+    request: Request,
+    as_of_date: date = Query(...),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> FastAPIResponse:
+    """Balance sheet as at ``as_of_date``, CSV export. See ``_balance_sheet_csv``."""
+    tenant_id = resolve_tenant_id(request)
+    report = await _assemble_balance_sheet(
+        session, company_id, tenant_id, as_of_date=as_of_date
+    )
+    csv_text = _balance_sheet_csv(report)
+    return FastAPIResponse(
+        content=csv_text,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="balance_sheet_{as_of_date.isoformat()}.csv"'
+        },
     )
 
 
@@ -1295,6 +1748,65 @@ async def cashflow(
 
 
 # ---------------------------------------------------------------------------
+# GET /api/v1/reports/cashflow_forecast
+# ---------------------------------------------------------------------------
+
+
+@router.get("/cashflow_forecast", response_model=CashflowForecastReport)
+async def cashflow_forecast(
+    request: Request,
+    horizon_days: int = Query(default=90, ge=7, le=365),
+    as_of: date | None = Query(default=None),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> CashflowForecastReport:
+    """Project cash in/out over the next ``horizon_days`` days from ``as_of``.
+
+    Thin wrapper around ``reports_svc.cashflow_forecast`` — see that
+    function's docstring for the three projection sources (open invoices,
+    open bills, active recurring-invoice templates) and the opening-balance
+    computation. Decimal fields are converted to float, matching how the
+    sibling report routes (P&L, balance sheet, trial balance) serialize.
+    """
+    tenant_id = resolve_tenant_id(request)
+    forecast = await reports_svc.cashflow_forecast(
+        session,
+        company_id,
+        horizon_days=horizon_days,
+        as_of=as_of,
+        tenant_id=tenant_id,
+    )
+    return CashflowForecastReport(
+        from_date=forecast.from_date,
+        to_date=forecast.to_date,
+        opening_balance=float(forecast.opening_balance),
+        total_inflows=float(forecast.total_inflows),
+        total_outflows=float(forecast.total_outflows),
+        projected_closing=float(forecast.projected_closing),
+        items=[
+            CashflowForecastItem(
+                expected_date=item.expected_date,
+                description=item.description,
+                source=item.source,
+                source_id=item.source_id,
+                amount=float(item.amount),
+            )
+            for item in forecast.items
+        ],
+        weeks=[
+            CashflowForecastWeek(
+                start=week.start,
+                inflows=float(week.inflows),
+                outflows=float(week.outflows),
+                net=float(week.net),
+                running_balance=float(week.running_balance),
+            )
+            for week in forecast.weeks
+        ],
+    )
+
+
+# ---------------------------------------------------------------------------
 # GET /api/v1/reports/depreciation_schedule
 # ---------------------------------------------------------------------------
 
@@ -1597,26 +2109,30 @@ async def fx_revaluation(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/trial_balance", response_model=TrialBalanceReport)
-async def trial_balance(
-    request: Request,
-    as_of_date: date | None = Query(default=None),
-    include_zero_balance: bool = Query(default=False),
-    session: AsyncSession = Depends(get_session),
-    company_id: UUID = Depends(get_active_company_id),
-) -> TrialBalanceReport:
-    """Trial balance as at ``as_of_date`` (default today).
+async def _tb_raw_asof(
+    session: AsyncSession,
+    company_id: UUID,
+    tenant_id: UUID,
+    *,
+    as_of_date: date,
+    include_zero_balance: bool = False,
+) -> tuple[list[dict[str, Any]], float, float]:
+    """Query + aggregate trial-balance account lines as at one date.
+
+    Extracted from ``_assemble_trial_balance`` (R7) so the comparative-date
+    query param can call this same query/aggregation twice -- once for
+    ``as_of_date``, once for the comparative as-at date -- instead of a
+    second copy of the debit/credit aggregation living inline (see
+    ``reports_svc.merge_comparative_lines`` for how the two results merge).
 
     Sums ALL POSTED JournalLine entries where ``entry_date <= as_of_date``
-    (cumulative from inception), grouped by account.  Only accounts with a
+    (cumulative from inception), grouped by account. Only accounts with a
     non-zero balance appear unless ``include_zero_balance=True``.
 
-    ``balanced`` is True when ``abs(total_debits - total_credits) < 0.01``.
+    Returns ``(lines, total_debits, total_credits)`` where each line is a
+    plain dict with ``account_id``/``code``/``name``/``account_type``/
+    ``debit_total``/``credit_total``/``balance`` keys.
     """
-    as_of = as_of_date or date.today()
-
-    tenant_id = resolve_tenant_id(request)
-
     stmt = (
         select(
             Account.id,
@@ -1634,7 +2150,7 @@ async def trial_balance(
                 JournalEntry.tenant_id == tenant_id,
                 JournalEntry.status.in_(reports_svc.REPORTABLE_STATUSES),
                 JournalEntry.archived_at.is_(None),
-                JournalEntry.entry_date <= as_of,
+                JournalEntry.entry_date <= as_of_date,
             )
         )
         .group_by(Account.id, Account.code, Account.name, Account.account_type)
@@ -1642,7 +2158,7 @@ async def trial_balance(
     )
     rows = (await session.execute(stmt)).all()
 
-    lines: list[TrialBalanceLine] = []
+    lines: list[dict[str, Any]] = []
     total_debits = Decimal("0")
     total_credits = Decimal("0")
 
@@ -1655,25 +2171,201 @@ async def trial_balance(
             continue
 
         lines.append(
-            TrialBalanceLine(
-                account_id=acc_id,
-                code=acc_code,
-                name=acc_name,
-                account_type=acc_type,
-                debit_total=float(debit_total),
-                credit_total=float(credit_total),
-                balance=float(balance),
-            )
+            {
+                "account_id": acc_id,
+                "code": acc_code,
+                "name": acc_name,
+                "account_type": acc_type,
+                "debit_total": float(debit_total),
+                "credit_total": float(credit_total),
+                "balance": float(balance),
+            }
         )
         total_debits += debit_total
         total_credits += credit_total
 
-    return TrialBalanceReport(
+    return lines, float(total_debits), float(total_credits)
+
+
+def _tb_comparative_asof(
+    as_of_date: date,
+    compare: CompareMode,
+    fin_year_start_month: int = 7,
+    fin_year_start_day: int = 1,
+) -> date:
+    """Derive the comparative as-at date for a trial-balance ``compare`` mode.
+
+    Same convention as ``_bs_comparative_asof`` -- the trial balance is
+    cumulative-from-inception as at a single date (no ``from_date`` of its
+    own), so like the balance sheet its comparative is an AS-AT balance,
+    not a period movement. (The task brief describes "P&L/TB = the
+    comparative period's movement", but ``_assemble_trial_balance`` has no
+    ``from_date`` to derive a movement from, and the statement pack itself
+    never implemented a TB comparative to mirror -- see this module's R7
+    docstrings on ``TrialBalanceReport``/``BSReport`` for the full
+    reasoning. Flagged as a deliberate deviation, not an oversight.)
+
+    Adversarial-review fix: same non-July bug and same fix as
+    ``_bs_comparative_asof`` -- now anchored on ``reports_svc.fy_bounds_for_company``
+    with the caller-supplied ``fin_year_start_month``/``fin_year_start_day``
+    (fetched via ``_company_fy_anchor``) instead of the AU-hardcoded
+    ``_current_fy_bounds``.
+    """
+    if compare == "previous_year":
+        return reports_svc.subtract_one_year(as_of_date)
+    fy_start, _fy_end = reports_svc.fy_bounds_for_company(
+        as_of_date, fin_year_start_month, fin_year_start_day
+    )
+    return fy_start - timedelta(days=1)
+
+
+async def _assemble_trial_balance(
+    session: AsyncSession,
+    company_id: UUID,
+    tenant_id: UUID,
+    *,
+    as_of_date: date | None = None,
+    include_zero_balance: bool = False,
+    compare: CompareMode | None = None,
+) -> TrialBalanceReport:
+    """Assemble the trial balance pydantic report. Shared by JSON + CSV routes.
+
+    ``balanced`` is True when ``abs(total_debits - total_credits) < 0.01``.
+
+    ``compare`` (R7, opt-in) adds a ``comparative`` value (balance AS AT the
+    comparative date -- see ``_tb_comparative_asof``) to every line plus
+    comparative totals and the comparative as-at date -- entirely absent
+    from the response when ``None`` (the route sets
+    ``response_model_exclude_none``), so existing consumers see the
+    unchanged shape.
+    """
+    as_of = as_of_date or date.today()
+
+    raw_lines, total_debits, total_credits = await _tb_raw_asof(
+        session,
+        company_id,
+        tenant_id,
         as_of_date=as_of,
-        accounts=lines,
-        total_debits=float(total_debits),
-        total_credits=float(total_credits),
-        balanced=abs(total_debits - total_credits) < Decimal("0.01"),
+        include_zero_balance=include_zero_balance,
+    )
+
+    report_kwargs: dict[str, Any] = {
+        "as_of_date": as_of,
+        "total_debits": total_debits,
+        "total_credits": total_credits,
+        "balanced": abs(Decimal(str(total_debits)) - Decimal(str(total_credits))) < Decimal("0.01"),
+    }
+
+    if compare is not None:
+        fy_month, fy_day = await _company_fy_anchor(session, company_id)
+        comp_as_of = _tb_comparative_asof(as_of, compare, fy_month, fy_day)
+        c_raw_lines, c_total_debits, c_total_credits = await _tb_raw_asof(
+            session,
+            company_id,
+            tenant_id,
+            as_of_date=comp_as_of,
+            include_zero_balance=include_zero_balance,
+        )
+        raw_lines = reports_svc.merge_comparative_lines(
+            raw_lines,
+            c_raw_lines,
+            value_key="balance",
+            zero_keys=["debit_total", "credit_total", "balance"],
+        )
+        report_kwargs["comparative_as_of_date"] = comp_as_of
+        report_kwargs["total_debits_comparative"] = c_total_debits
+        report_kwargs["total_credits_comparative"] = c_total_credits
+        report_kwargs["compare"] = compare
+
+    report_kwargs["accounts"] = [TrialBalanceLine(**line) for line in raw_lines]
+
+    return TrialBalanceReport(**report_kwargs)
+
+
+@router.get("/trial_balance", response_model=TrialBalanceReport, response_model_exclude_none=True)
+async def trial_balance(
+    request: Request,
+    as_of_date: date | None = Query(default=None),
+    include_zero_balance: bool = Query(default=False),
+    compare: CompareMode | None = Query(
+        default=None,
+        description=(
+            "Opt-in comparative as-at date (R7). 'previous_year' = as_of_date "
+            "shifted back one year; 'previous_period' = the prior financial-"
+            "year close. Omitted (default) leaves the response shape unchanged."
+        ),
+    ),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> TrialBalanceReport:
+    """Trial balance as at ``as_of_date`` (default today). See ``_assemble_trial_balance``."""
+    tenant_id = resolve_tenant_id(request)
+    return await _assemble_trial_balance(
+        session,
+        company_id,
+        tenant_id,
+        as_of_date=as_of_date,
+        include_zero_balance=include_zero_balance,
+        compare=compare,
+    )
+
+
+def _trial_balance_csv(report: TrialBalanceReport) -> str:
+    """Render a trial balance as RFC 4180 CSV (one row per account).
+
+    Columns: ``code,account_name,account_type,debit,credit``. No totals
+    row, matching ``reports_svc.aged_ar_csv``'s detail-rows-only
+    convention. Kept here rather than in ``services/reports.py`` because
+    it consumes the pydantic ``TrialBalanceReport`` that ``/trial_balance``
+    assembles directly in the API layer (no service-layer dataclass
+    builder to reuse without importing API schemas into services).
+    ``account_name`` is run through ``reports_svc._csv_sanitize_text``
+    (formula-injection guard).
+    """
+    import csv
+    from io import StringIO
+
+    buf = StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["code", "account_name", "account_type", "debit", "credit"])
+    for line in report.accounts:
+        writer.writerow(
+            [
+                line.code,
+                reports_svc._csv_sanitize_text(line.name),
+                line.account_type.value,
+                f"{line.debit_total:.2f}",
+                f"{line.credit_total:.2f}",
+            ]
+        )
+    return buf.getvalue()
+
+
+@router.get("/trial_balance.csv", response_model=None)
+async def trial_balance_csv(
+    request: Request,
+    as_of_date: date | None = Query(default=None),
+    include_zero_balance: bool = Query(default=False),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> FastAPIResponse:
+    """Trial balance as at ``as_of_date``, CSV export. See ``_trial_balance_csv``."""
+    tenant_id = resolve_tenant_id(request)
+    report = await _assemble_trial_balance(
+        session,
+        company_id,
+        tenant_id,
+        as_of_date=as_of_date,
+        include_zero_balance=include_zero_balance,
+    )
+    csv_text = _trial_balance_csv(report)
+    as_of = as_of_date or date.today()
+    return FastAPIResponse(
+        content=csv_text,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="trial_balance_{as_of.isoformat()}.csv"'
+        },
     )
 
 
@@ -2047,6 +2739,605 @@ async def ytd_turnover(
         threshold_approaching=(
             (not already_registered)
             and _approaching_floor <= ytd < _GST_THRESHOLD
+        ),
+    )
+
+
+# ===========================================================================
+# Report exports — XLSX (+ CSV for reports that did not already have one).
+#
+# CSV already exists for profit_loss / balance_sheet / trial_balance /
+# aged_receivables / aged_payables (see the ``.csv`` routes above); those are
+# left untouched. This block adds:
+#   * ``.xlsx`` for every one of the 5 above plus cashflow / pl_by_segment /
+#     revenue_by_customer, and
+#   * ``.csv`` for cashflow / pl_by_segment / revenue_by_customer.
+# BAS export lives in the AU jurisdiction module (see
+# ``jurisdictions/au/bas_export.py`` and the ``bas_summary.{csv,xlsx}`` routes).
+#
+# Column headers/labels are plain English on purpose: the engine is
+# locale-neutral and emits stable machine-friendly column keys (matching the
+# existing ``.csv`` routes). User-facing i18n lives in saebooks-web (the Export
+# button/menu). Money columns are serialized as exact 2-dp Decimals — never
+# floats — by ``report_exports.build_csv`` / ``build_xlsx``.
+# ===========================================================================
+
+
+def _download_headers(filename: str) -> dict[str, str]:
+    return {"Content-Disposition": f'attachment; filename="{filename}"'}
+
+
+async def _company_name(session: AsyncSession, company_id: UUID) -> str:
+    company = await session.get(Company, company_id)
+    return (company.name if company else "") or "SAE Books"
+
+
+def _profit_loss_rows(
+    report: PnLReport,
+) -> tuple[list[str], list[list[Any]], list[int], list[int]]:
+    headers = ["section", "code", "account_name", "amount"]
+    rows: list[list[Any]] = []
+    for line in (*report.income.INCOME, *report.income.OTHER_INCOME):
+        rows.append(["income", line.code, line.account_name, line.amount])
+    for line in (
+        *report.expenses.EXPENSE,
+        *report.expenses.COST_OF_SALES,
+        *report.expenses.OTHER_EXPENSE,
+    ):
+        rows.append(["expenses", line.code, line.account_name, line.amount])
+    return headers, rows, [3], [2]
+
+
+def _balance_sheet_rows(
+    report: BSReport,
+) -> tuple[list[str], list[list[Any]], list[int], list[int]]:
+    headers = ["section", "code", "account_name", "balance"]
+    rows: list[list[Any]] = []
+    for line in report.assets.ASSET:
+        rows.append(["assets", line.code, line.account_name, line.balance])
+    for line in report.liabilities.LIABILITY:
+        rows.append(["liabilities", line.code, line.account_name, line.balance])
+    for line in report.equity.EQUITY:
+        rows.append(["equity", line.code, line.account_name, line.balance])
+    return headers, rows, [3], [2]
+
+
+def _trial_balance_rows(
+    report: TrialBalanceReport,
+) -> tuple[list[str], list[list[Any]], list[int], list[int]]:
+    headers = ["code", "account_name", "account_type", "debit", "credit"]
+    rows: list[list[Any]] = [
+        [line.code, line.name, line.account_type.value, line.debit_total, line.credit_total]
+        for line in report.accounts
+    ]
+    return headers, rows, [3, 4], [1]
+
+
+def _aged_rows(
+    report: AgedReport, number_header: str
+) -> tuple[list[str], list[list[Any]], list[int], list[int]]:
+    headers = [
+        "contact",
+        number_header,
+        "issue_date",
+        "due_date",
+        "total",
+        "paid",
+        "balance_due",
+        "days_overdue",
+        "bucket",
+    ]
+    rows: list[list[Any]] = []
+    for group in report.groups:
+        for doc in group.invoices:
+            rows.append(
+                [
+                    group.contact_name,
+                    doc.number,
+                    doc.issue_date.isoformat(),
+                    doc.due_date.isoformat(),
+                    doc.total,
+                    doc.amount_paid,
+                    doc.balance_due,
+                    doc.days_overdue,
+                    reports_svc.BUCKET_LABELS[doc.bucket],
+                ]
+            )
+    return headers, rows, [4, 5, 6], [0]
+
+
+def _cashflow_rows(
+    report: CashflowStatement,
+) -> tuple[list[str], list[list[Any]], list[int], list[int]]:
+    headers = ["section", "item", "amount"]
+    op = report.operating
+    inv = report.investing
+    fin = report.financing
+    rows: list[list[Any]] = [["Operating", "Net profit", op.net_profit]]
+    for adj in getattr(op, "adjustments", []) or []:
+        label = adj.get("label", "") if isinstance(adj, dict) else getattr(adj, "label", "")
+        amount = adj.get("amount", 0) if isinstance(adj, dict) else getattr(adj, "amount", 0)
+        rows.append(["Operating", label, amount])
+    rows.append(["Operating", "Total operating cash flow", op.total_operating])
+    rows.append(["Investing", "Asset purchases", inv.asset_purchases])
+    rows.append(["Investing", "Asset disposals", inv.asset_disposals])
+    rows.append(["Investing", "Total investing cash flow", inv.total_investing])
+    rows.append(["Financing", "Loan proceeds", fin.loan_proceeds])
+    rows.append(["Financing", "Loan repayments", fin.loan_repayments])
+    rows.append(["Financing", "Total financing cash flow", fin.total_financing])
+    rows.append(["Summary", "Net change in cash", report.net_change])
+    rows.append(["Summary", "Opening cash", report.opening_cash])
+    rows.append(["Summary", "Closing cash", report.closing_cash])
+    return headers, rows, [2], [1]
+
+
+def _pl_by_segment_rows(
+    report: PLBySegmentReport,
+) -> tuple[list[str], list[list[Any]], list[int], list[int]]:
+    headers = ["segment", "section", "code", "account_name", "amount"]
+    rows: list[list[Any]] = []
+    for seg in report.segments:
+        for section in seg.sections:
+            for line in section.lines:
+                rows.append(
+                    [seg.segment_label, section.account_type, line.code, line.name, line.amount]
+                )
+        rows.append([seg.segment_label, "NET_PROFIT", "", "Net profit", seg.net_profit])
+    return headers, rows, [4], [0, 3]
+
+
+def _revenue_by_customer_rows(
+    report: RevenueByCustomerReport,
+) -> tuple[list[str], list[list[Any]], list[int], list[int]]:
+    headers = ["contact", "revenue", "pct_of_total"]
+    rows: list[list[Any]] = [
+        [r.contact_name, r.revenue, f"{r.pct_of_total:.2f}"] for r in report.rows
+    ]
+    return headers, rows, [1], [0]
+
+
+# --- Profit & Loss XLSX ----------------------------------------------------
+
+
+@router.get("/profit_loss.xlsx", response_model=None)
+async def profit_loss_xlsx(
+    request: Request,
+    from_date: date = Query(...),
+    to_date: date = Query(...),
+    include_draft: bool = Query(default=False),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> FastAPIResponse:
+    """Profit & Loss for a date range, XLSX export (same columns as .csv)."""
+    tenant_id = resolve_tenant_id(request)
+    report = await _assemble_profit_loss(
+        session, company_id, tenant_id, from_date=from_date, to_date=to_date, include_draft=include_draft
+    )
+    headers, rows, money_cols, text_cols = _profit_loss_rows(report)
+    content = exports_svc.build_xlsx(
+        headers,
+        rows,
+        sheet_title="Profit & Loss",
+        money_cols=money_cols,
+        text_cols=text_cols,
+        title_lines=[
+            await _company_name(session, company_id),
+            "Profit & Loss",
+            f"{from_date.isoformat()} to {to_date.isoformat()}",
+        ],
+    )
+    return FastAPIResponse(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=_download_headers(
+            f"profit_loss_{from_date.isoformat()}_{to_date.isoformat()}.xlsx"
+        ),
+    )
+
+
+# --- Balance Sheet XLSX ----------------------------------------------------
+
+
+@router.get("/balance_sheet.xlsx", response_model=None)
+async def balance_sheet_xlsx(
+    request: Request,
+    as_of_date: date = Query(...),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> FastAPIResponse:
+    """Balance sheet as at ``as_of_date``, XLSX export (same columns as .csv)."""
+    tenant_id = resolve_tenant_id(request)
+    report = await _assemble_balance_sheet(session, company_id, tenant_id, as_of_date=as_of_date)
+    headers, rows, money_cols, text_cols = _balance_sheet_rows(report)
+    content = exports_svc.build_xlsx(
+        headers,
+        rows,
+        sheet_title="Balance Sheet",
+        money_cols=money_cols,
+        text_cols=text_cols,
+        title_lines=[
+            await _company_name(session, company_id),
+            "Balance Sheet",
+            f"As at {as_of_date.isoformat()}",
+        ],
+    )
+    return FastAPIResponse(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=_download_headers(f"balance_sheet_{as_of_date.isoformat()}.xlsx"),
+    )
+
+
+# --- Trial Balance XLSX ----------------------------------------------------
+
+
+@router.get("/trial_balance.xlsx", response_model=None)
+async def trial_balance_xlsx(
+    request: Request,
+    as_of_date: date | None = Query(default=None),
+    include_zero_balance: bool = Query(default=False),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> FastAPIResponse:
+    """Trial balance as at ``as_of_date``, XLSX export (same columns as .csv)."""
+    tenant_id = resolve_tenant_id(request)
+    report = await _assemble_trial_balance(
+        session, company_id, tenant_id, as_of_date=as_of_date, include_zero_balance=include_zero_balance
+    )
+    as_of = as_of_date or date.today()
+    headers, rows, money_cols, text_cols = _trial_balance_rows(report)
+    content = exports_svc.build_xlsx(
+        headers,
+        rows,
+        sheet_title="Trial Balance",
+        money_cols=money_cols,
+        text_cols=text_cols,
+        title_lines=[
+            await _company_name(session, company_id),
+            "Trial Balance",
+            f"As at {as_of.isoformat()}",
+        ],
+    )
+    return FastAPIResponse(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=_download_headers(f"trial_balance_{as_of.isoformat()}.xlsx"),
+    )
+
+
+# --- Aged Receivables / Payables XLSX --------------------------------------
+
+
+@router.get("/aged_receivables.xlsx", response_model=None)
+async def aged_receivables_xlsx(
+    request: Request,
+    as_of_date: date | None = Query(default=None),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> FastAPIResponse:
+    """Aged receivables as at ``as_of_date``, XLSX export (same columns as .csv)."""
+    as_of = as_of_date or date.today()
+    tenant_id = resolve_tenant_id(request)
+    report = await reports_svc.aged_ar(session, company_id, as_at=as_of, tenant_id=tenant_id)
+    headers, rows, money_cols, text_cols = _aged_rows(report, "invoice_number")
+    content = exports_svc.build_xlsx(
+        headers,
+        rows,
+        sheet_title="Aged Receivables",
+        money_cols=money_cols,
+        text_cols=text_cols,
+        title_lines=[
+            await _company_name(session, company_id),
+            "Aged Receivables",
+            f"As at {as_of.isoformat()}",
+        ],
+    )
+    return FastAPIResponse(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=_download_headers(f"aged_receivables_{as_of.isoformat()}.xlsx"),
+    )
+
+
+@router.get("/aged_payables.xlsx", response_model=None)
+async def aged_payables_xlsx(
+    request: Request,
+    as_of_date: date | None = Query(default=None),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> FastAPIResponse:
+    """Aged payables as at ``as_of_date``, XLSX export (same columns as .csv)."""
+    as_of = as_of_date or date.today()
+    tenant_id = resolve_tenant_id(request)
+    report = await reports_svc.aged_ap(session, company_id, as_at=as_of, tenant_id=tenant_id)
+    headers, rows, money_cols, text_cols = _aged_rows(report, "bill_number")
+    content = exports_svc.build_xlsx(
+        headers,
+        rows,
+        sheet_title="Aged Payables",
+        money_cols=money_cols,
+        text_cols=text_cols,
+        title_lines=[
+            await _company_name(session, company_id),
+            "Aged Payables",
+            f"As at {as_of.isoformat()}",
+        ],
+    )
+    return FastAPIResponse(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=_download_headers(f"aged_payables_{as_of.isoformat()}.xlsx"),
+    )
+
+
+# --- Cashflow CSV + XLSX ---------------------------------------------------
+
+
+@router.get("/cashflow.csv", response_model=None)
+async def cashflow_csv(
+    request: Request,
+    from_date: date = Query(...),
+    to_date: date = Query(...),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> FastAPIResponse:
+    """Indirect-method cashflow statement for a date range, CSV export."""
+    report = await cashflow(
+        request=request, from_date=from_date, to_date=to_date, session=session, company_id=company_id
+    )
+    headers, rows, money_cols, text_cols = _cashflow_rows(report)
+    content = exports_svc.build_csv(headers, rows, money_cols=money_cols, text_cols=text_cols)
+    return FastAPIResponse(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers=_download_headers(
+            f"cashflow_{from_date.isoformat()}_{to_date.isoformat()}.csv"
+        ),
+    )
+
+
+@router.get("/cashflow.xlsx", response_model=None)
+async def cashflow_xlsx(
+    request: Request,
+    from_date: date = Query(...),
+    to_date: date = Query(...),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> FastAPIResponse:
+    """Indirect-method cashflow statement for a date range, XLSX export."""
+    report = await cashflow(
+        request=request, from_date=from_date, to_date=to_date, session=session, company_id=company_id
+    )
+    headers, rows, money_cols, text_cols = _cashflow_rows(report)
+    content = exports_svc.build_xlsx(
+        headers,
+        rows,
+        sheet_title="Cashflow",
+        money_cols=money_cols,
+        text_cols=text_cols,
+        title_lines=[
+            await _company_name(session, company_id),
+            "Cashflow Statement",
+            f"{from_date.isoformat()} to {to_date.isoformat()}",
+        ],
+    )
+    return FastAPIResponse(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=_download_headers(
+            f"cashflow_{from_date.isoformat()}_{to_date.isoformat()}.xlsx"
+        ),
+    )
+
+
+# --- P&L by segment CSV + XLSX ---------------------------------------------
+
+
+@router.get("/pl_by_segment.csv", response_model=None)
+async def pl_by_segment_csv(
+    request: Request,
+    from_date: date = Query(...),
+    to_date: date = Query(...),
+    segment_type: str = Query(default="project"),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> FastAPIResponse:
+    """P&L by segment for a date range, CSV export."""
+    report = await pl_by_segment(
+        request=request,
+        from_date=from_date,
+        to_date=to_date,
+        segment_type=segment_type,
+        session=session,
+        company_id=company_id,
+    )
+    headers, rows, money_cols, text_cols = _pl_by_segment_rows(report)
+    content = exports_svc.build_csv(headers, rows, money_cols=money_cols, text_cols=text_cols)
+    return FastAPIResponse(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers=_download_headers(
+            f"pl_by_segment_{segment_type}_{from_date.isoformat()}_{to_date.isoformat()}.csv"
+        ),
+    )
+
+
+@router.get("/pl_by_segment.xlsx", response_model=None)
+async def pl_by_segment_xlsx(
+    request: Request,
+    from_date: date = Query(...),
+    to_date: date = Query(...),
+    segment_type: str = Query(default="project"),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> FastAPIResponse:
+    """P&L by segment for a date range, XLSX export."""
+    report = await pl_by_segment(
+        request=request,
+        from_date=from_date,
+        to_date=to_date,
+        segment_type=segment_type,
+        session=session,
+        company_id=company_id,
+    )
+    headers, rows, money_cols, text_cols = _pl_by_segment_rows(report)
+    content = exports_svc.build_xlsx(
+        headers,
+        rows,
+        sheet_title="P&L by Segment",
+        money_cols=money_cols,
+        text_cols=text_cols,
+        title_lines=[
+            await _company_name(session, company_id),
+            f"P&L by {segment_type}",
+            f"{from_date.isoformat()} to {to_date.isoformat()}",
+        ],
+    )
+    return FastAPIResponse(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=_download_headers(
+            f"pl_by_segment_{segment_type}_{from_date.isoformat()}_{to_date.isoformat()}.xlsx"
+        ),
+    )
+
+
+# --- Revenue by customer CSV + XLSX ----------------------------------------
+
+
+@router.get("/revenue_by_customer.csv", response_model=None)
+async def revenue_by_customer_csv(
+    request: Request,
+    from_date: date = Query(...),
+    to_date: date = Query(...),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> FastAPIResponse:
+    """Revenue by customer for a date range, CSV export."""
+    report = await revenue_by_customer(
+        request=request, from_date=from_date, to_date=to_date, session=session, company_id=company_id
+    )
+    headers, rows, money_cols, text_cols = _revenue_by_customer_rows(report)
+    content = exports_svc.build_csv(headers, rows, money_cols=money_cols, text_cols=text_cols)
+    return FastAPIResponse(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers=_download_headers(
+            f"revenue_by_customer_{from_date.isoformat()}_{to_date.isoformat()}.csv"
+        ),
+    )
+
+
+@router.get("/revenue_by_customer.xlsx", response_model=None)
+async def revenue_by_customer_xlsx(
+    request: Request,
+    from_date: date = Query(...),
+    to_date: date = Query(...),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> FastAPIResponse:
+    """Revenue by customer for a date range, XLSX export."""
+    report = await revenue_by_customer(
+        request=request, from_date=from_date, to_date=to_date, session=session, company_id=company_id
+    )
+    headers, rows, money_cols, text_cols = _revenue_by_customer_rows(report)
+    content = exports_svc.build_xlsx(
+        headers,
+        rows,
+        sheet_title="Revenue by Customer",
+        money_cols=money_cols,
+        text_cols=text_cols,
+        title_lines=[
+            await _company_name(session, company_id),
+            "Revenue by Customer",
+            f"{from_date.isoformat()} to {to_date.isoformat()}",
+        ],
+    )
+    return FastAPIResponse(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=_download_headers(
+            f"revenue_by_customer_{from_date.isoformat()}_{to_date.isoformat()}.xlsx"
+        ),
+    )
+
+
+# --- BAS summary CSV + XLSX (AU jurisdiction module) -----------------------
+
+
+@router.get("/bas_summary.csv", response_model=None)
+async def bas_summary_csv(
+    request: Request,
+    from_date: date = Query(...),
+    to_date: date = Query(...),
+    registration_effective_date: date | None = Query(None),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> FastAPIResponse:
+    """Australian BAS summary for a date range, CSV export.
+
+    The BAS-specific column mapping lives in the AU jurisdiction module
+    (``jurisdictions.au.bas_export``); serialization is the neutral core.
+    """
+    from saebooks.jurisdictions.au.bas_export import bas_summary_rows
+
+    report = await bas_summary(
+        request=request,
+        from_date=from_date,
+        to_date=to_date,
+        registration_effective_date=registration_effective_date,
+        session=session,
+        company_id=company_id,
+    )
+    headers, rows, money_cols, text_cols = bas_summary_rows(report)
+    content = exports_svc.build_csv(headers, rows, money_cols=money_cols, text_cols=text_cols)
+    return FastAPIResponse(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers=_download_headers(
+            f"bas_summary_{from_date.isoformat()}_{to_date.isoformat()}.csv"
+        ),
+    )
+
+
+@router.get("/bas_summary.xlsx", response_model=None)
+async def bas_summary_xlsx(
+    request: Request,
+    from_date: date = Query(...),
+    to_date: date = Query(...),
+    registration_effective_date: date | None = Query(None),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> FastAPIResponse:
+    """Australian BAS summary for a date range, XLSX export."""
+    from saebooks.jurisdictions.au.bas_export import bas_summary_rows
+
+    report = await bas_summary(
+        request=request,
+        from_date=from_date,
+        to_date=to_date,
+        registration_effective_date=registration_effective_date,
+        session=session,
+        company_id=company_id,
+    )
+    headers, rows, money_cols, text_cols = bas_summary_rows(report)
+    content = exports_svc.build_xlsx(
+        headers,
+        rows,
+        sheet_title="BAS Summary",
+        money_cols=money_cols,
+        text_cols=text_cols,
+        title_lines=[
+            await _company_name(session, company_id),
+            "BAS Summary",
+            f"{from_date.isoformat()} to {to_date.isoformat()}",
+        ],
+    )
+    return FastAPIResponse(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=_download_headers(
+            f"bas_summary_{from_date.isoformat()}_{to_date.isoformat()}.xlsx"
         ),
     )
 
@@ -2551,4 +3842,131 @@ async def statement_pack_pdf(
         content=pdf_bytes,
         media_type="application/pdf",
         headers={"Content-Disposition": 'inline; filename="statement-pack.pdf"'},
+    )
+
+
+# ===========================================================================
+# Single-report PDFs — P&L / Balance Sheet / Trial Balance.
+#
+# Reuse the ``_assemble_*`` builders (the same ones the JSON + CSV/XLSX routes
+# use) → the pydantic report → ``model_dump(mode="json")`` gives the exact dict
+# shape the ``report_single`` LaTeX template consumes. Rendering is delegated to
+# the app render service (``render_latex``), like statement_pack.pdf. Non-
+# comparative (single column) — the comparative prior-year PDF lives in the
+# combined statement_pack.pdf.
+# ===========================================================================
+
+
+async def _company_pdf_ctx(session: AsyncSession, company_id: UUID) -> dict[str, str]:
+    company_obj = await session.get(Company, company_id)
+    if company_obj is None:
+        raise HTTPException(404, "Active company not found")
+    return {
+        "name": company_obj.name,
+        "legal_name": company_obj.legal_name or company_obj.name,
+        "acn": company_obj.acn or "",
+        "abn": company_obj.abn or "",
+    }
+
+
+async def _render_report_pdf(ctx: dict[str, Any]) -> bytes:
+    from saebooks.services.latex_pdf import (
+        LatexCompileError,
+        LatexServiceError,
+        render_latex,
+    )
+
+    try:
+        return await render_latex("report_single", ctx)
+    except LatexCompileError as exc:
+        raise HTTPException(status_code=502, detail=f"LaTeX compile error: {exc.log_tail}") from exc
+    except LatexServiceError as exc:
+        raise HTTPException(status_code=502, detail=f"LaTeX service error: {exc}") from exc
+
+
+@router.get("/profit_loss.pdf", response_model=None)
+async def profit_loss_pdf(
+    request: Request,
+    from_date: date = Query(...),
+    to_date: date = Query(...),
+    include_draft: bool = Query(default=False),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> FastAPIResponse:
+    """Profit & Loss for a date range as a single-report PDF."""
+    tenant_id = resolve_tenant_id(request)
+    report = await _assemble_profit_loss(
+        session, company_id, tenant_id, from_date=from_date, to_date=to_date, include_draft=include_draft
+    )
+    ctx = {
+        "kind": "profit_loss",
+        "company": await _company_pdf_ctx(session, company_id),
+        "title": "Profit & Loss",
+        "period_label": f"For the period {from_date.isoformat()} to {to_date.isoformat()}",
+        "prepared": date.today().isoformat(),
+        "pl_report": report.model_dump(mode="json"),
+    }
+    pdf_bytes = await _render_report_pdf(ctx)
+    return FastAPIResponse(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers=_download_headers(
+            f"profit_loss_{from_date.isoformat()}_{to_date.isoformat()}.pdf"
+        ),
+    )
+
+
+@router.get("/balance_sheet.pdf", response_model=None)
+async def balance_sheet_pdf(
+    request: Request,
+    as_of_date: date = Query(...),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> FastAPIResponse:
+    """Balance sheet as at ``as_of_date`` as a single-report PDF."""
+    tenant_id = resolve_tenant_id(request)
+    report = await _assemble_balance_sheet(session, company_id, tenant_id, as_of_date=as_of_date)
+    ctx = {
+        "kind": "balance_sheet",
+        "company": await _company_pdf_ctx(session, company_id),
+        "title": "Balance Sheet",
+        "period_label": f"As at {as_of_date.isoformat()}",
+        "prepared": date.today().isoformat(),
+        "bs_report": report.model_dump(mode="json"),
+    }
+    pdf_bytes = await _render_report_pdf(ctx)
+    return FastAPIResponse(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers=_download_headers(f"balance_sheet_{as_of_date.isoformat()}.pdf"),
+    )
+
+
+@router.get("/trial_balance.pdf", response_model=None)
+async def trial_balance_pdf(
+    request: Request,
+    as_of_date: date | None = Query(default=None),
+    include_zero_balance: bool = Query(default=False),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> FastAPIResponse:
+    """Trial balance as at ``as_of_date`` as a single-report PDF."""
+    tenant_id = resolve_tenant_id(request)
+    report = await _assemble_trial_balance(
+        session, company_id, tenant_id, as_of_date=as_of_date, include_zero_balance=include_zero_balance
+    )
+    as_of = as_of_date or date.today()
+    ctx = {
+        "kind": "trial_balance",
+        "company": await _company_pdf_ctx(session, company_id),
+        "title": "Trial Balance",
+        "period_label": f"As at {as_of.isoformat()}",
+        "prepared": date.today().isoformat(),
+        "tb_report": report.model_dump(mode="json"),
+    }
+    pdf_bytes = await _render_report_pdf(ctx)
+    return FastAPIResponse(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers=_download_headers(f"trial_balance_{as_of.isoformat()}.pdf"),
     )

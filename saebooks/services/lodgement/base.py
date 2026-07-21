@@ -92,6 +92,24 @@ class LodgementService(ABC):
         """
 
     @abstractmethod
+    async def lodge_stp_bundle(
+        self,
+        parts: list[bytes],
+        payevent_id: str,
+        metadata: dict[str, Any],
+    ) -> LodgementResult:
+        """POST a PAYEVNT.0004 document SET as an ordered parts array.
+
+        A payroll event is not one document: it is a parent ``PAYEVNT``
+        (employer) followed by one ``PAYEVNTEMP`` per payee. ``parts``
+        carries them in that order — ``parts[0]`` is the parent, the rest
+        the payees. The relay reassembles them into a single AS4 multipart
+        UserMessage. ``payevent_id`` is the 24h dedup key, as for
+        ``lodge_stp``. The bundle integrity hash the server verifies is the
+        sha256 over the concatenated parts, in order.
+        """
+
+    @abstractmethod
     async def lodge_bas(
         self,
         envelope: bytes,

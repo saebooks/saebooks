@@ -18,14 +18,23 @@ raise ``FieldEncryptionNotConfiguredError`` rather than falling back to
 plaintext, so a misconfigured install can't silently persist a plaintext
 secret into a column the schema promised was ciphertext.
 
-Key rotation is out of scope for v1 — when we need it, the shape is a
-JSON list of keys in the env var with the first one being the "encrypt"
-key and the rest being "decrypt-only". That future change can happen
-behind the current API without touching callers.
+Key rotation (v2, per ``docs/security/key-management-plan.md``): the env
+var accepts a **comma-separated key list**. Index 0 is the primary — it
+encrypts everything new; every listed key decrypts. Rotation is:
+
+1. prepend the new key → deploy (``new,old``);
+2. ``python -m saebooks.cli rotate-field-keys`` — re-encrypts every
+   stored ciphertext under the primary (idempotent, batched, resumable);
+3. drop the old key from the list → deploy.
+
+``rotate_token`` never exposes plaintext to the caller — it uses
+``MultiFernet.rotate`` under the hood.
 """
 from __future__ import annotations
 
-from cryptography.fernet import Fernet, InvalidToken
+import hashlib
+
+from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 
 from saebooks.config import Settings
 from saebooks.config import settings as _default_settings
@@ -54,19 +63,50 @@ def is_configured(settings: Settings | None = None) -> bool:
     return bool(effective.field_encryption_key)
 
 
-def _fernet(settings: Settings | None = None) -> Fernet:
+def _keys(settings: Settings | None = None) -> list[str]:
     effective = settings if settings is not None else _default_settings
-    if not effective.field_encryption_key:
+    return [k.strip() for k in effective.field_encryption_key.split(",") if k.strip()]
+
+
+def _fernet(settings: Settings | None = None) -> MultiFernet:
+    keys = _keys(settings)
+    if not keys:
         raise FieldEncryptionNotConfiguredError(
             "Field encryption not configured — set SAEBOOKS_FIELD_ENCRYPTION_KEY. "
             "Generate a key with: python -c "
             "'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
         )
     try:
-        return Fernet(effective.field_encryption_key.encode("ascii"))
+        # Index 0 encrypts; every key decrypts (comma-separated rotation list).
+        return MultiFernet([Fernet(k.encode("ascii")) for k in keys])
     except (ValueError, TypeError) as exc:
         raise FieldEncryptionNotConfiguredError(
             f"Field encryption key is not a valid Fernet key: {exc}"
+        ) from exc
+
+
+def key_fingerprints(settings: Settings | None = None) -> list[str]:
+    """Short SHA-256 fingerprints of the configured keys, primary first.
+
+    Safe to log — fingerprints identify a key for audit without exposing it.
+    """
+    return [hashlib.sha256(k.encode("ascii")).hexdigest()[:12] for k in _keys(settings)]
+
+
+def rotate_token(ciphertext: str, *, settings: Settings | None = None) -> str:
+    """Re-encrypt ``ciphertext`` under the primary key, without exposing plaintext.
+
+    Idempotent: a token already under the primary key comes back valid (with a
+    fresh timestamp). Raises ``FieldDecryptionError`` if no configured key can
+    decrypt the token — rotation must never silently drop a stored secret.
+    """
+    if ciphertext == "":
+        return ""
+    try:
+        return _fernet(settings).rotate(ciphertext.encode("ascii")).decode("ascii")
+    except InvalidToken as exc:
+        raise FieldDecryptionError(
+            "Ciphertext could not be rotated — no configured key decrypts it."
         ) from exc
 
 

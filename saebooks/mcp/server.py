@@ -1446,6 +1446,9 @@ async def create_quote(
     ctx: Context, customer_id: str, issue_date: str,
     lines: list[dict[str, Any]],
     expiry_date: str = "", notes: str = "",
+    title: str = "", scope: str = "", terms: str = "",
+    validity_days: int = 0, deposit_pct: str = "",
+    is_supply_only: bool = False,
 ) -> dict[str, Any]:
     """Create a DRAFT quote.
 
@@ -1458,13 +1461,26 @@ async def create_quote(
         expiry_date: ISO date the quote lapses (there is no 'reference'
             field on quotes).
         notes: optional internal notes.
+        title: quote/project title shown on the document.
+        scope: scope-of-works text.
+        terms: commercial terms text.
+        validity_days: days the quote stays open (engine default 28).
+        deposit_pct: deposit percentage as a string, e.g. "50".
+        is_supply_only: supply-only quote (no install section).
     """
     body: dict[str, Any] = {
         "customer_id": customer_id, "issue_date": issue_date, "lines": lines,
     }
-    for k, v in (("expiry_date", expiry_date), ("notes", notes)):
+    for k, v in (
+        ("expiry_date", expiry_date), ("notes", notes), ("title", title),
+        ("scope", scope), ("terms", terms), ("deposit_pct", deposit_pct),
+    ):
         if v:
             body[k] = v
+    if validity_days:
+        body["validity_days"] = validity_days
+    if is_supply_only:
+        body["is_supply_only"] = True
     return await _post(ctx, "/api/v1/quotes", body)
 
 
@@ -1807,14 +1823,16 @@ async def reconciliation_match(
 
 @_gated_tool(safety="mutation")
 async def reconciliation_auto_match(ctx: Context, account_id: str) -> dict[str, Any]:
-    """Run auto-matching (exact-amount, first candidate) across all
-    unmatched lines for an account.
+    """Run "honest" auto-matching across all unmatched lines for an account
+    (M3 R8d) — links a line only when exactly one candidate scores HIGH
+    confidence; ambiguous lines (2+ HIGH candidates) are skipped, not
+    guessed at.
 
     Args:
         account_id: bank/cash account UUID — REQUIRED query param (the
             endpoint takes no request body).
 
-    Returns ``{"matched": N}``.
+    Returns ``{"matched": N, "skipped_ambiguous": M, "skipped_no_candidate": K}``.
     """
     async with _client_for(ctx) as client:
         resp = await client.post(

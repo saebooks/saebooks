@@ -13,6 +13,11 @@
 # lookups, ATO SBR e-lodgement, Stripe, AI extraction, multi-company, …) are
 # licence-gated and simply return 404 on this edition.
 #
+# Three containers: the API engine, the web UI, and a small XeLaTeX render
+# service (latex-api) that turns invoices/quotes/statements into PDFs. The
+# render service is internal-only (no published port) — the web app is its
+# only client.
+#
 # Why SQLite and no Postgres:
 #   The engine's SQLite backend builds its schema from the ORM metadata
 #   (saebooks.db.bootstrap_schema) instead of the 100+ Postgres/RLS Alembic
@@ -97,6 +102,11 @@ services:
       SAEBOOKS_WEB_SECRET_KEY: "${SAEBOOKS_WEB_SECRET_KEY:-local-only-community-web-session-key-change-me}"
       SAEBOOKS_OAUTH_ENABLED: "false"
       SAEBOOKS_WEBAUTHN_ENABLED: "false"
+      # --- PDF rendering: the web app owns document presentation and talks to
+      #     the latex-api container below. No RENDER_TOKEN is set — the render
+      #     endpoint is open inside this compose network only (nothing is
+      #     published), same trust model as the localhost bind above. ---
+      LATEX_API_URL: "http://latex-api:8000"
       # CSRF origin allow-list. The web app rejects any POST whose Origin/Referer
       # is not in this list (default is the SAE-hosted books.* domains), which
       # would block login on a localhost self-host. Point it at the URL you open
@@ -105,6 +115,26 @@ services:
     depends_on:
       api:
         condition: service_healthy
+      latex-api:
+        condition: service_started
+
+  latex-api:
+    # XeLaTeX PDF compiler (FastAPI + texlive). Stateless: the web app sends
+    # fully-rendered LaTeX source, this container compiles it and hands back
+    # the PDF. Without it, invoice/quote/statement PDF preview and every
+    # email-with-attachment send fail. Source: latex-api/ in this repo.
+    #   docker build -t saebooks-community-latex:local ./latex-api
+    #   SAEBOOKS_LATEX_IMAGE=saebooks-community-latex:local docker compose ... up -d
+    image: ${SAEBOOKS_LATEX_IMAGE:-saebooks/saebooks-community-latex:latest}
+    restart: unless-stopped
+    # No ports: internal-only service, reachable as http://latex-api:8000
+    # from the other containers on this compose network.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
 
 volumes:
   books_data:

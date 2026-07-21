@@ -337,6 +337,33 @@ async def api_get(
     return result.scalar_one_or_none()
 
 
+async def api_get_local(
+    session: AsyncSession,
+    quote_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
+    company_id: uuid.UUID | None = None,
+) -> Quote | None:
+    """Fetch the ORM row from the engine database, never delegating.
+
+    Hard delete snapshots ``__table__`` columns and physically removes the
+    row; the pre-accounting module shares this database, so destructive
+    admin operations must stay engine-local (a delegated ``QuoteOut`` has
+    no ``__table__`` and cannot be deleted from a session).
+    """
+    clauses = [Quote.id == quote_id]
+    if tenant_id is not None:
+        clauses.append(Quote.tenant_id == tenant_id)
+    if company_id is not None:
+        clauses.append(Quote.company_id == company_id)
+    result = await session.execute(
+        select(Quote)
+        .options(selectinload(Quote.lines))
+        .where(*clauses)
+    )
+    return result.scalar_one_or_none()
+
+
 async def list_active(
     session: AsyncSession,
     company_id: uuid.UUID,

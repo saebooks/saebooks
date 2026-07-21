@@ -158,6 +158,16 @@ class JournalEntry(CompanyScoped, Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Accounting-package sync (migration 0217) — same external-id quartet
+    # shape as bills/invoices/credit_notes/payments (migration 0092).
+    # Push-only direction: saebooks/services/sync/xero/push.py::push_journal
+    # records the upstream link via sync_state rather than these columns
+    # directly, so nothing writes them yet — kept for schema/model parity
+    # with the migration (see its docstring).
+    external_id: Mapped[str | None] = mapped_column(String(255))
+    external_source: Mapped[str | None] = mapped_column(String(64))
+    external_etag: Mapped[str | None] = mapped_column(String(255))
+    external_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     lines: Mapped[list["JournalLine"]] = relationship(
         back_populates="entry",

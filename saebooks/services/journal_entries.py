@@ -876,13 +876,20 @@ _expenses_table_exists: bool | None = None
 
 
 async def _check_expenses_table(session: AsyncSession) -> bool:
-    """Return True if public.expenses exists in this DB."""
-    from sqlalchemy import text
+    """Return True if the expenses table exists in this DB.
 
-    result = await session.execute(
-        text("SELECT to_regclass('public.expenses') IS NOT NULL AS exists")
+    Uses the SQLAlchemy inspector (cross-dialect) rather than the Postgres
+    ``to_regclass('public.expenses')`` — that raw form raised on the SQLite
+    Cashbook/Community backend, breaking the get_source_doc path that every
+    journal-entry detail view calls.
+    """
+    from sqlalchemy import inspect
+
+    return bool(
+        await session.run_sync(
+            lambda sync: inspect(sync.get_bind()).has_table("expenses")
+        )
     )
-    return bool(result.scalar_one())
 
 
 async def get_source_doc(
@@ -912,10 +919,14 @@ async def get_source_doc(
     if _expenses_table_exists is None:
         _expenses_table_exists = await _check_expenses_table(session)
 
+    # Cross-dialect casts: CAST(... AS TEXT) and substr() work on both
+    # Postgres and SQLite (Community). The former ``id::text`` / ``left(...)``
+    # forms are Postgres-only and 500'd on the SQLite backend for every JE
+    # detail view.
     expenses_branch = (
         """
             UNION ALL
-            SELECT 'expense', id, COALESCE(NULLIF(reference, ''), NULLIF(number, ''), id::text), 4
+            SELECT 'expense', id, COALESCE(NULLIF(reference, ''), NULLIF(number, ''), CAST(id AS TEXT)), 4
                 FROM expenses
                 WHERE journal_entry_id = :eid AND tenant_id = :tid AND archived_at IS NULL"""
         if _expenses_table_exists
@@ -925,7 +936,7 @@ async def get_source_doc(
     sql = text(
         f"""
         SELECT type, id, ref FROM (
-            SELECT 'invoice'::text AS type, id, number AS ref, 1 AS prio
+            SELECT CAST('invoice' AS TEXT) AS type, id, number AS ref, 1 AS prio
                 FROM invoices
                 WHERE journal_entry_id = :eid AND tenant_id = :tid AND archived_at IS NULL
             UNION ALL
@@ -938,7 +949,7 @@ async def get_source_doc(
                 WHERE journal_entry_id = :eid AND tenant_id = :tid AND archived_at IS NULL
             {expenses_branch}
             UNION ALL
-            SELECT 'payment', id, COALESCE(NULLIF(reference, ''), NULLIF(number, ''), 'Payment ' || left(id::text, 8)), 5
+            SELECT 'payment', id, COALESCE(NULLIF(reference, ''), NULLIF(number, ''), 'Payment ' || substr(CAST(id AS TEXT), 1, 8)), 5
                 FROM payments
                 WHERE journal_entry_id = :eid AND tenant_id = :tid AND archived_at IS NULL
         ) src

@@ -24,12 +24,11 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
-from saebooks.api.v1.auth import DEFAULT_TENANT_ID, current_token
+from saebooks.api.v1.auth import current_token
 from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.account import Account, AccountType
 from saebooks.models.change_log import ChangeLog
-from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
 
 pytestmark = pytest.mark.postgres_only
@@ -67,37 +66,35 @@ async def po_deps() -> dict[str, str]:
     lazily provisions a SUPPLIER contact in the seed company so the
     PO suite is self-bootstrapping against a fresh test DB.
     """
+    from saebooks.services.companies import ensure_seed_company
+
     async with AsyncSessionLocal() as session:
+        # Scope every dep to the seed company the api_client posts under — the
+        # multi-jurisdiction seed carries >1 company in DEFAULT_TENANT_ID, so a
+        # tenant-only pick can return a foreign-company account (→ PO line FK /
+        # company validation failures).
+        company = await ensure_seed_company(session)
         expense = (
             await session.execute(
                 select(Account).where(
+                    Account.company_id == company.id,
                     Account.archived_at.is_(None),
                     Account.account_type == AccountType.EXPENSE,
-                    Account.tenant_id == DEFAULT_TENANT_ID,
-                ).limit(1)
+                ).order_by(Account.code).limit(1)
             )
         ).scalars().first()
         contact = (
             await session.execute(
                 select(Contact).where(
+                    Contact.company_id == company.id,
                     Contact.archived_at.is_(None),
-                    Contact.tenant_id == DEFAULT_TENANT_ID,
                     Contact.contact_type == ContactType.SUPPLIER,
                 ).limit(1)
             )
         ).scalars().first()
         if contact is None:
-            company = (
-                await session.execute(
-                    select(Company).where(
-                        Company.tenant_id == DEFAULT_TENANT_ID,
-                        Company.archived_at.is_(None),
-                    ).limit(1)
-                )
-            ).scalars().first()
-            assert company is not None, "Seed company missing — load_au_coa fixture broken"
             contact = Contact(
-                tenant_id=DEFAULT_TENANT_ID,
+                tenant_id=company.tenant_id,
                 company_id=company.id,
                 name="Test Vendor",
                 contact_type=ContactType.SUPPLIER,

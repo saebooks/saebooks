@@ -38,6 +38,7 @@ from saebooks.services import credit_notes as cn_svc
 from saebooks.services import invoices as inv_svc
 from saebooks.services import payments as pay_svc
 from saebooks.services import reports as svc
+from saebooks.services import supplier_credit_notes as scn_svc
 
 _TENANT = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
@@ -71,6 +72,7 @@ async def _make_company() -> tuple[uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID, u
             ("bill", "BILL-"),
             ("payment", "PAY-"),
             ("credit_note", "CN-"),
+            ("supplier_credit_note", "SCN-"),
         ):
             session.add(
                 DocumentCounter(
@@ -191,6 +193,33 @@ async def _post_cn(
         )
     async with AsyncSessionLocal() as session:
         posted = await cn_svc.post_credit_note(session, cn.id, posted_by="test")
+    return posted.id
+
+
+async def _post_scn(
+    company: uuid.UUID, contact: uuid.UUID, expense: uuid.UUID, gst: uuid.UUID,
+    amount: Decimal, *, issue: date, original_bill_id: uuid.UUID,
+) -> uuid.UUID:
+    async with AsyncSessionLocal() as session:
+        scn = await scn_svc.api_create(
+            session,
+            company_id=company,
+            tenant_id=_TENANT,
+            actor="test",
+            contact_id=contact,
+            issue_date=issue,
+            lines=[{
+                "description": "Materials refund", "account_id": expense,
+                "tax_code_id": gst, "quantity": Decimal("1"),
+                "unit_price": amount, "discount_pct": Decimal("0"),
+            }],
+            original_bill_id=original_bill_id,
+        )
+    async with AsyncSessionLocal() as session:
+        posted = await scn_svc.api_post(
+            session, scn.id, "test", scn.version,
+            tenant_id=_TENANT, company_id=company,
+        )
     return posted.id
 
 
@@ -351,6 +380,33 @@ async def test_ap_future_payment_does_not_clear_asof() -> None:
         report = await svc.aged_ap(session, company, as_at=date(2026, 6, 25))
     assert _outstanding(report, bill) == Decimal("110.00")
 
+    async with AsyncSessionLocal() as session:
+        report = await svc.aged_ap(session, company, as_at=date(2026, 6, 30))
+    assert _outstanding(report, bill) == Decimal("0")
+
+
+# --------------------------------------------------------------------------- #
+# AP — supplier credit note dated after cutoff (gating finding 2)            #
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_ap_future_supplier_credit_note_does_not_clear_asof() -> None:
+    company, contact, _income, expense, _bank, gst = await _make_company()
+    bill = await _post_bill(
+        company, contact, expense, gst, Decimal("100.00"),
+        issue=date(2026, 6, 1),
+    )  # total 110.00
+
+    await _post_scn(
+        company, contact, expense, gst, Decimal("100.00"),
+        issue=date(2026, 6, 30), original_bill_id=bill,
+    )  # SCN total 110.00, dated AFTER the cutoff below
+
+    # As-of 2026-06-25 (before the SCN) → still fully outstanding.
+    async with AsyncSessionLocal() as session:
+        report = await svc.aged_ap(session, company, as_at=date(2026, 6, 25))
+    assert _outstanding(report, bill) == Decimal("110.00")
+
+    # As-of 2026-06-30 (on/after the SCN) → cleared.
     async with AsyncSessionLocal() as session:
         report = await svc.aged_ap(session, company, as_at=date(2026, 6, 30))
     assert _outstanding(report, bill) == Decimal("0")

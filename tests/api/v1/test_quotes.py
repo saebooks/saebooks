@@ -397,6 +397,37 @@ async def test_quotes_delete_204(
     assert r3.status_code == 404
 
 
+async def test_quotes_delete_204_under_delegation(
+    api_client: AsyncClient,
+    quote_deps: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hard delete must stay engine-local when the pre-accounting module
+    delegation flag is on.
+
+    Regression: the route used the delegating getter, which returns a
+    QuoteOut (no ``__table__``) — hard_delete._snapshot then raised
+    AttributeError → 500 on every quote delete in delegated prod
+    (2026-07-04). Create with the flag off, delete with it on: the row
+    lives in the shared engine database either way.
+    """
+    r = await api_client.post("/api/v1/quotes", json=_quote_payload(quote_deps))
+    assert r.status_code == 201
+    quote_id = r.json()["id"]
+
+    monkeypatch.setattr(
+        "saebooks.config.settings.preaccounting_base_url",
+        "http://preaccounting.invalid:8080",
+    )
+
+    r2 = await api_client.delete(f"/api/v1/quotes/{quote_id}")
+    assert r2.status_code == 204
+
+    monkeypatch.setattr("saebooks.config.settings.preaccounting_base_url", "")
+    r3 = await api_client.get(f"/api/v1/quotes/{quote_id}")
+    assert r3.status_code == 404
+
+
 # ---------------------------------------------------------------------------
 # Send (DRAFT → SENT)
 # ---------------------------------------------------------------------------

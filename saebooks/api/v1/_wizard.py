@@ -76,8 +76,10 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from saebooks.db import backend_supports_rls
 
 
 class WizardExpiredError(Exception):
@@ -135,6 +137,24 @@ class Wizard:
         # but never re-writes the column.
         merged_initial = {**initial_state, "kind": kind}
 
+        if not backend_supports_rls():
+            # SQLite (Cashbook / Community): no RLS GUC, no ``::uuid`` cast,
+            # no JSONB literal cast. Insert via the ORM; ``tenant_id`` is
+            # backfilled from ``session.info['tenant_id']`` by the
+            # ``_fill_tenant_id_on_flush`` before-flush listener (deps.py).
+            from saebooks.models.wizard_state import WizardState
+
+            session.add(
+                WizardState(
+                    id=wizard_id,
+                    kind=kind,
+                    state=merged_initial,
+                    expires_at=expires_at,
+                )
+            )
+            await session.flush()
+            return wizard_id
+
         await session.execute(
             text(
                 """
@@ -182,6 +202,24 @@ class Wizard:
             WizardExpiredError: Row exists but ``expires_at`` is in the past.
         """
         import json as _json
+
+        if not backend_supports_rls():
+            # SQLite path — Python-side JSON merge (no JSONB ``||`` operator).
+            from saebooks.models.wizard_state import WizardState
+
+            obj = await session.get(WizardState, wizard_id)
+            if obj is None:
+                raise WizardNotFoundError(str(wizard_id))
+            expires_at = obj.expires_at
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=UTC)
+            if expires_at < datetime.now(UTC):
+                raise WizardExpiredError(str(wizard_id))
+            merged = {**(obj.state or {}), **patch_state}
+            obj.state = merged  # reassign so SQLAlchemy flags the column dirty
+            obj.updated_at = datetime.now(UTC)
+            await session.flush()
+            return dict(merged)
 
         # First fetch to check existence and expiry.
         row = await session.execute(
@@ -234,6 +272,19 @@ class Wizard:
         """
         import json as _json
 
+        if not backend_supports_rls():
+            from saebooks.models.wizard_state import WizardState
+
+            obj = await session.get(WizardState, wizard_id)
+            if obj is None:
+                return None
+            expires_at = obj.expires_at
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=UTC)
+            if expires_at < datetime.now(UTC):
+                return None
+            return dict(obj.state or {})
+
         row = await session.execute(
             text(
                 """
@@ -272,6 +323,32 @@ class Wizard:
         """
         import json as _json
 
+        if not backend_supports_rls():
+            from saebooks.models.wizard_state import WizardState
+
+            stmt = select(WizardState).where(
+                WizardState.expires_at > datetime.now(UTC)
+            )
+            if kind:
+                stmt = stmt.where(WizardState.kind == kind)
+            stmt = stmt.order_by(WizardState.expires_at.desc()).limit(limit)
+            objs = (await session.execute(stmt)).scalars().all()
+            out: list[dict[str, Any]] = []
+            for obj in objs:
+                state = dict(obj.state or {})
+                out.append(
+                    {
+                        "wizard_id": str(obj.id),
+                        "kind": obj.kind,
+                        "step": state.get("step", 0),
+                        "state": state,
+                        "expires_at": obj.expires_at.isoformat()
+                        if obj.expires_at is not None
+                        else None,
+                    }
+                )
+            return out
+
         sql = (
             "SELECT id, kind, state, expires_at FROM wizard_state "
             "WHERE expires_at > now()"
@@ -307,6 +384,17 @@ class Wizard:
         Returns the number of rows deleted.  Intended for a scheduled
         housekeeping endpoint -- not called per-request.
         """
+        if not backend_supports_rls():
+            from saebooks.models.wizard_state import WizardState
+
+            result = await session.execute(
+                delete(WizardState).where(
+                    WizardState.expires_at <= datetime.now(UTC)
+                )
+            )
+            await session.flush()
+            return int(result.rowcount or 0)
+
         result = await session.execute(
             text("DELETE FROM wizard_state WHERE expires_at <= now() RETURNING id")
         )

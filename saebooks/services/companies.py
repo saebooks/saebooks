@@ -35,6 +35,33 @@ class VersionConflict(Exception):
         self.current = current
 
 
+# Fixed month lengths for fin-year-start-day validation. February is
+# deliberately capped at 28, not 29 — day=29/30/31 with month=2 is a
+# leap-year-only ambiguity and is rejected outright rather than silently
+# clamped, per the period-picker engine spec (2026-07-21): an explicit 422
+# is clearer than year-to-year drift in what "this FY" means.
+_MAX_DAY_FOR_MONTH: dict[int, int] = {
+    1: 31, 2: 28, 3: 31, 4: 30, 5: 31, 6: 30,
+    7: 31, 8: 31, 9: 30, 10: 31, 11: 30, 12: 31,
+}
+
+
+def validate_fin_year_start_day(month: int, day: int) -> None:
+    """Raise ``ValueError`` if ``day`` can never occur in ``month``.
+
+    Shared by the ``CompanyCreate``/``CompanyUpdate`` schema-layer
+    validators (primary gate, field-scoped 422) and this module's
+    ``create_company``/``update`` (belt-and-braces, same trust-but-verify
+    posture as the existing 1-31 range checks).
+    """
+    max_day = _MAX_DAY_FOR_MONTH.get(month)
+    if max_day is not None and day > max_day:
+        raise ValueError(
+            f"fin_year_start_day {day} is not valid for fin_year_start_month "
+            f"{month} (max {max_day})"
+        )
+
+
 _COMPANY_COLUMNS: tuple[str, ...] = (
     "id",
     "name",
@@ -44,6 +71,7 @@ _COMPANY_COLUMNS: tuple[str, ...] = (
     "acn",
     "base_currency",
     "fin_year_start_month",
+    "fin_year_start_day",
     "audit_mode",
     "tax_registered",
     "gst_effective_date",
@@ -54,6 +82,10 @@ _COMPANY_COLUMNS: tuple[str, ...] = (
     "bad_debt_recovery_account",
     "ar_control_account_code",
     "ap_control_account_code",
+    "asset_disposal_gain_account_code",
+    "asset_disposal_loss_account_code",
+    "lifecycle_status",
+    "industry_code",
     "costing_method",
     "phone",
     "email",
@@ -159,6 +191,21 @@ async def _set_company_registry_id(
 
 async def ensure_seed_company(session: AsyncSession) -> Company:
     """Idempotent: create the default company from env if none exists."""
+    # This is a boot-time/CLI seed helper (seed_dev, seed_cashbook_demo,
+    # load_au_coa, the test suite) — never called from a live per-request
+    # session, so it is always safe to stamp the tenant here. Without this,
+    # the read below silently returns zero rows (FORCE RLS filters out
+    # every row when app.current_tenant is unset) and the write below
+    # raises "new row violates row-level security policy" the moment the
+    # runtime engine points at the NOBYPASSRLS saebooks_app role instead
+    # of the owner role — see saebooks/db.py::_runtime_database_url and
+    # saebooks/api/v1/deps.py's after_begin listener, which is what
+    # actually issues ``SET LOCAL app.current_tenant`` once this is set.
+    # setdefault (not unconditional assignment) so a caller that already
+    # bound a different tenant onto this same session is not clobbered.
+    session.info.setdefault(
+        "tenant_id", "00000000-0000-0000-0000-000000000001"
+    )
     name = settings.seed_company_name or "Default Company"
     result = await session.execute(
         select(Company).where(Company.name == name, Company.archived_at.is_(None))
@@ -207,6 +254,7 @@ async def create_company(
     acn: str | None = None,
     base_currency: str = "XXX",
     fin_year_start_month: int = 7,
+    fin_year_start_day: int = 1,
     jurisdiction: str = "XX",
     coa_template_key: str = "xx/default",
     registrikood: str | None = None,
@@ -240,6 +288,7 @@ async def create_company(
         trading_name=trading_name,
         base_currency=base_currency,
         fin_year_start_month=fin_year_start_month,
+        fin_year_start_day=fin_year_start_day,
         jurisdiction=jurisdiction,
         coa_template_key=coa_template_key,
         version=1,
@@ -303,6 +352,7 @@ async def update(
     kmv_number: str | None = None,
     base_currency: str | None = None,
     fin_year_start_month: int | None = None,
+    fin_year_start_day: int | None = None,
     audit_mode: str | None = None,
     tax_registered: bool | None = None,
     gst_effective_date: date | None = None,
@@ -313,6 +363,10 @@ async def update(
     bad_debt_recovery_account: str | None = None,
     ar_control_account_code: str | None = None,
     ap_control_account_code: str | None = None,
+    asset_disposal_gain_account_code: str | None = None,
+    asset_disposal_loss_account_code: str | None = None,
+    lifecycle_status: str | None = None,
+    industry_code: str | None = None,
     costing_method: str | None = None,
     phone: str | None = None,
     email: str | None = None,
@@ -367,6 +421,18 @@ async def update(
         if not 1 <= fin_year_start_month <= 12:
             raise ValueError("fin_year_start_month must be 1–12")
         company.fin_year_start_month = fin_year_start_month
+    if fin_year_start_day is not None:
+        if not 1 <= fin_year_start_day <= 31:
+            raise ValueError("fin_year_start_day must be 1–31")
+        company.fin_year_start_day = fin_year_start_day
+    if fin_year_start_month is not None or fin_year_start_day is not None:
+        # Cross-check the FINAL resolved state, not just the field(s) this
+        # call touched -- e.g. a lone month=2 PATCH against a company whose
+        # day is already 30 (set while month was, say, 4) must be caught
+        # too, not just the reverse (lone day=30 PATCH against month=2).
+        validate_fin_year_start_day(
+            company.fin_year_start_month, company.fin_year_start_day
+        )
     if audit_mode is not None:
         # CHARTER §7.2 vocabulary (Wave C, migration 0185 relabelled the
         # legacy {immutable, mutable, draft} column values onto this set:
@@ -419,6 +485,23 @@ async def update(
         company.ar_control_account_code = ar_control_account_code.strip() or None
     if ap_control_account_code is not None:
         company.ap_control_account_code = ap_control_account_code.strip() or None
+    # Asset-disposal gain/loss account override (M1.5 P1 tail) — same
+    # optional-string-column pattern as ar/ap control accounts above.
+    if asset_disposal_gain_account_code is not None:
+        company.asset_disposal_gain_account_code = (
+            asset_disposal_gain_account_code.strip() or None
+        )
+    if asset_disposal_loss_account_code is not None:
+        company.asset_disposal_loss_account_code = (
+            asset_disposal_loss_account_code.strip() or None
+        )
+    if lifecycle_status is not None:
+        valid_ls = {"active", "dormant", "in_liquidation", "deregistered"}
+        if lifecycle_status not in valid_ls:
+            raise ValueError(f"lifecycle_status must be one of: {sorted(valid_ls)}")
+        company.lifecycle_status = lifecycle_status
+    if industry_code is not None:
+        company.industry_code = industry_code.strip() or None
     if costing_method is not None:
         valid_cm = {"weighted_average", "fifo", "quantity_only"}
         if costing_method not in valid_cm:

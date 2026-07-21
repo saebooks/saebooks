@@ -5,7 +5,7 @@ name = "saebooks"
 # asserts they match, so they can't drift. (Dynamic attr is impractical here:
 # the Dockerfile installs deps before copying saebooks/, so attr resolution
 # would ModuleNotFound or bust the dependency-cache layer every release.)
-version = "0.5.1"
+version = "0.6.1"
 description = "Self-hosted double-entry accounting for small-to-medium businesses"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -39,6 +39,7 @@ dependencies = [
     "webauthn>=2.0",
     "pyyaml>=6.0",
     "mcp>=1.0",
+    "openpyxl>=3.1",  # XLSX report exports (services/report_exports.py)
 ]
 
 [project.optional-dependencies]

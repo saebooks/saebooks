@@ -74,8 +74,15 @@ class CashbookNotConfigured(CashbookError):
 
 
 class CashbookCurrencyError(CashbookError):
-    """Cashbook is AUD-only in v1; the company has a different
-    ``base_currency``. Multi-currency cashbook is a 2027+ problem."""
+    """The company's ``base_currency`` does not match the home currency
+    pinned by its jurisdiction's cashbook module (e.g. an EE company set
+    to AUD, or an AU company set to EUR).
+
+    NOTE: this is NOT raised for a jurisdiction that has no cashbook module
+    at all — such a company runs a neutral, tax-free cashbook in its OWN
+    base currency (see ``_resolve_company``). The multi-currency cashbook
+    (a company's cashbook operates in the company's own currency, tax per
+    its jurisdiction module) is the current behaviour, not a future one."""
 
     code = "cashbook_currency_unsupported"
 
@@ -161,9 +168,17 @@ async def _resolve_company(
         )
     try:
         profile = profile_for(company.jurisdiction)
-    except CashbookUnsupportedJurisdiction as e:
-        raise CashbookCurrencyError(str(e)) from e
+    except CashbookUnsupportedJurisdiction:
+        # Neutral core: no cashbook module for this company's jurisdiction.
+        # The cashbook still functions — it operates in the company's OWN
+        # base currency with tax-free entries (architecture: the core must
+        # function with 0 jurisdiction modules). There is no profile currency
+        # to match against, so accept whatever base_currency the company has.
+        return company
     if company.base_currency != profile.currency:
+        # A jurisdiction WITH a cashbook module pins the home currency (e.g.
+        # AU→AUD, EE→EUR). A company mis-configured to a different currency is
+        # a real misconfiguration and is refused.
         raise CashbookCurrencyError(
             f"Cashbook supports {profile.currency} only for jurisdiction "
             f"{company.jurisdiction} "
@@ -223,9 +238,16 @@ async def _resolve_category(
         return _ResolvedCategory(category=category, account_id=account_id)
 
     if not category.default_account_code:
-        # Should only happen for TX_TRANSFER, which we rejected above.
-        raise CashbookCategoryError(
-            f"Category {category_code} has no default account."
+        # Reached by neutral-core categories (no standard chart → no default
+        # account code) that lack a per-company account_id override. This is
+        # the "seed/map my chart" onboarding gap, not a bad category — surface
+        # it as account-unresolved so the caller maps the account. (TX_TRANSFER
+        # is the only other no-default category and was rejected above.)
+        raise CashbookAccountResolutionError(
+            f"Category {category_code} has no default account for this "
+            f"jurisdiction. Map it to one of your accounts "
+            f"(companies.cashbook_categories.overrides[{category_code!r}]"
+            ".account_id) before recording entries."
         )
 
     stmt = select(Account.id).where(

@@ -5,6 +5,7 @@ from typing import Any
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     Enum,
@@ -52,6 +53,17 @@ class CostingMethod(enum.StrEnum):
 
 class Company(Base):
     __tablename__ = "companies"
+    __table_args__ = (
+        # cashbook_default_bank_account_id may only be set in cashbook mode
+        # (migration 0126). This CHECK lived only in the Postgres migration,
+        # not the ORM, so SQLite's bootstrap_schema omitted it — declare it
+        # here so the invariant holds on the Community/SQLite backend too.
+        CheckConstraint(
+            "cashbook_default_bank_account_id IS NULL "
+            "OR bookkeeping_mode = 'cashbook'",
+            name="ck_cashbook_default_bank_requires_cashbook_mode",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
@@ -132,6 +144,15 @@ class Company(Base):
     # account numbering plan.
     statutory_framework_code: Mapped[str | None] = mapped_column(String(32))
     fin_year_start_month: Mapped[int] = mapped_column(Integer, default=7, nullable=False)
+    # M1.5 P1 tail — day-level fiscal-year anchor precision (companion to
+    # ``fin_year_start_month`` above). The reference ``FiscalYearDefinition``
+    # already carries ``fy_start_day``; this is its company-side companion,
+    # e.g. for a UK company's 6-April anchor (month=4, day=6). Defaults to 1
+    # — every existing company's month-only anchor is unchanged (1st of the
+    # month, exactly the implicit assumption every current consumer makes).
+    fin_year_start_day: Mapped[int] = mapped_column(
+        Integer, default=1, nullable=False, server_default="1"
+    )
     audit_mode: Mapped[str] = mapped_column(String, default="immutable", nullable=False)
 
     # Per-company SISS credentials (Batch II, Enterprise-gated via
@@ -182,6 +203,36 @@ class Company(Base):
     # engine forcing an AU-shaped chart on it.
     ar_control_account_code: Mapped[str | None] = mapped_column(String(64))
     ap_control_account_code: Mapped[str | None] = mapped_column(String(64))
+
+    # Asset-disposal gain/loss account override (M1.5 P1 tail). Mirrors the
+    # AR/AP override above: ``services.assets.dispose_asset`` historically
+    # hardcoded the AU convention codes ("4-9100" gain / "6-9100" loss).
+    # NULL = engine falls back to those AU codes, so every existing (AU)
+    # company is byte-identical.
+    asset_disposal_gain_account_code: Mapped[str | None] = mapped_column(String(64))
+    asset_disposal_loss_account_code: Mapped[str | None] = mapped_column(String(64))
+
+    # Not-for-profit / charitable-registration attributes (M1.5 P1 tail).
+    # ``EntityStructureBucket.NONPROFIT`` (reference DB) classifies the
+    # entity *structure*; these columns hold the registration status a
+    # nonprofit entity separately obtains from a regulator (AU: ACNC
+    # charity registration + ATO DGR endorsement). All default to
+    # not-registered/NULL — no existing company is affected.
+    acnc_registered: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false"),
+        comment="Registered with the Australian Charities and Not-for-profits Commission",
+    )
+    dgr_endorsed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false"),
+        comment="ATO-endorsed as a Deductible Gift Recipient",
+    )
+    dgr_category: Mapped[str | None] = mapped_column(
+        String(64), comment="DGR item category code, e.g. 'public_benevolent_institution'"
+    )
+    tax_concession_type: Mapped[str | None] = mapped_column(
+        String(32),
+        comment="One of income_tax_exempt / gst_concession / fbt_rebate / fbt_exemption; NULL = none",
+    )
 
     # EE payroll GL control-account overrides (0200, Fixer round 4 F1).
     # Previously resolved from a GLOBAL ``Setting`` row keyed only by
@@ -270,6 +321,25 @@ class Company(Base):
         ForeignKey("companies.id", ondelete="RESTRICT"),
         nullable=True,
     )
+
+    # Entity lifecycle status (M1.5 P1 tail) — distinct from ``archived_at``
+    # (a saebooks soft-delete flag for records the tenant no longer wants
+    # listed). This tracks the entity's REAL-WORLD registration lifecycle
+    # with its regulator: a company can be ``dormant`` or ``in_liquidation``
+    # while still very much present (and still filing) in saebooks. Plain
+    # string, validated at the service layer (same idiom as ``psi_status``/
+    # ``writeoff_mode`` above) — not a native Postgres enum.
+    lifecycle_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="active", server_default="active",
+        comment="One of active / dormant / in_liquidation / deregistered",
+    )
+
+    # Industry classification linkage (M1.5 P1 tail). Free text (no FK)
+    # because the industry_codes registry lives in the reference DB;
+    # validated at the service layer against this company's jurisdiction,
+    # same idiom as ``entity_structure_code``. NULL = not yet classified.
+    # Value is ``IndustryCode.code`` (e.g. an ANZSIC code for an AU company).
+    industry_code: Mapped[str | None] = mapped_column(String(16))
 
     # Optimistic-locking version — bumped on every write through the API.
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)

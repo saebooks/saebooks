@@ -161,6 +161,11 @@ MODULE_MANIFEST: tuple[_RouterSpec, ...] = (
     _RouterSpec("transfers", "router", "/transfers"),
     # Intercompany Phase 1 (LOCAL / same-tenant) record type.
     _RouterSpec("intercompany", "router", "/intercompany"),
+    # Public inbound relay webhook (per-edge token + Ed25519, no JWT) — the
+    # receiver half of the cross-DB intercompany relay (Phase 3c); gated
+    # default-off by SAEBOOKS_IC_REMOTE_RELAY_ENABLED (returns 503 when off).
+    # Shares "/intercompany" exactly with the entry above.
+    _RouterSpec("intercompany", "public_router", "/intercompany"),
     # Gap 2 (0158): first-class Reclassification.
     # See saebooks/services/reclassifications.py.
     _RouterSpec("reclassifications", "router", "/reclassifications"),
@@ -233,6 +238,9 @@ MODULE_MANIFEST: tuple[_RouterSpec, ...] = (
     _RouterSpec("statements", "router", "/statements"),
     # Gitea #28 P4: supplier-statement extraction-hint templates
     _RouterSpec("statement_templates", "router", "/statement-templates"),
+    # Accounting-package sync — Enterprise tier, FLAG_ACCOUNTING_SYNC +
+    # FLAG_SYNC_XERO gated. See saebooks/services/sync/xero/ + docs/sync/xero.md.
+    _RouterSpec("sync_xero", "router", "/sync/xero"),
 )
 
 

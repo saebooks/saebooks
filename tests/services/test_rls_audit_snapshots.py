@@ -39,9 +39,16 @@ from sqlalchemy.pool import NullPool
 
 os.environ.setdefault("SAEBOOKS_ENV", "test")
 
-from saebooks.db import engine as _owner_engine
+# NOTE: deliberately NOT ``saebooks.db.engine`` — that's the runtime
+# engine, which IS the saebooks_app role under --rls (see
+# docker-compose.test.yml). This file needs a connection that is always
+# the real owner/superuser role (ALTER ROLE below requires it, and the
+# catalog probes + URL-template below are clearer reading the one
+# genuinely-fixed owner engine rather than a conditionally-app-role one).
+from saebooks.db import _owner_role_engine as _owner_engine
 from saebooks.models.audit_snapshot import AuditSnapshot
 from saebooks.models.tenant import Tenant
+from tests.conftest import owner_seed_session
 
 _APP_ROLE_PASSWORD = "saebooks_app_test_pw"
 _APP_ENGINE_URL_TEMPLATE = "postgresql+asyncpg://saebooks_app:{pw}@db:5432/{db}"
@@ -90,11 +97,10 @@ async def app_engine() -> AsyncIterator[Any]:
 
 @pytest_asyncio.fixture(scope="module")
 async def seeded() -> AsyncIterator[dict[str, Any]]:
-    Owner = async_sessionmaker(_owner_engine, expire_on_commit=False, class_=AsyncSession)
     suffix = uuid.uuid4().hex[:8]
     out: dict[str, Any] = {}
 
-    async with Owner() as session:
+    async with owner_seed_session() as session:
         for label in ("tenant_a", "tenant_b"):
             tid = uuid.uuid4()
             snap_id = uuid.uuid4()
@@ -131,7 +137,7 @@ async def seeded() -> AsyncIterator[dict[str, Any]]:
 
     yield out
 
-    async with Owner() as session:
+    async with owner_seed_session() as session:
         for label in ("tenant_a", "tenant_b"):
             await session.execute(
                 text("DELETE FROM audit_snapshots WHERE id = :id"),

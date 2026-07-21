@@ -669,6 +669,96 @@ async def get_summary(
 
 
 # ---------------------------------------------------------------------------
+# GET /summary.csv, /summary.xlsx — cashbook summary export
+# ---------------------------------------------------------------------------
+
+
+def _cashbook_summary_rows(
+    report: CashbookSummaryOut,
+) -> tuple[list[str], list[list[Any]], list[int], list[int]]:
+    """``(headers, rows, money_cols, text_cols)`` for a cashbook summary export.
+
+    One row per category, then the income/expense/net + GST summary rows.
+    Columns: ``code, label, direction, amount, count``.
+    """
+    headers = ["code", "label", "direction", "amount", "count"]
+    rows: list[list[Any]] = [
+        [c.code, c.label, c.direction, c.amount, c.count] for c in report.by_category
+    ]
+    rows.extend(
+        [
+            ["", "Income total", "income", report.income_total, ""],
+            ["", "Expense total", "expense", report.expense_total, ""],
+            ["", "Net", "", report.net, ""],
+            ["", "GST collected", "income", report.gst_collected, ""],
+            ["", "GST paid", "expense", report.gst_paid, ""],
+        ]
+    )
+    return headers, rows, [3], [1]
+
+
+@router.get("/summary.csv", response_model=None)
+async def get_summary_csv(
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+    from_: date = Query(..., alias="from"),
+    to: date = Query(...),
+) -> Response:
+    """Cashbook summary for a date range, CSV export."""
+    from saebooks.services import report_exports as exports_svc
+
+    report = await get_summary(session=session, company_id=company_id, from_=from_, to=to)
+    headers, rows, money_cols, text_cols = _cashbook_summary_rows(report)
+    content = exports_svc.build_csv(headers, rows, money_cols=money_cols, text_cols=text_cols)
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="cashbook_summary_{from_.isoformat()}_{to.isoformat()}.csv"'
+            )
+        },
+    )
+
+
+@router.get("/summary.xlsx", response_model=None)
+async def get_summary_xlsx(
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+    from_: date = Query(..., alias="from"),
+    to: date = Query(...),
+) -> Response:
+    """Cashbook summary for a date range, XLSX export."""
+    from saebooks.services import report_exports as exports_svc
+
+    report = await get_summary(session=session, company_id=company_id, from_=from_, to=to)
+    company = await session.get(Company, company_id)
+    company_name = (company.name if company else "") or "SAE Books"
+    headers, rows, money_cols, text_cols = _cashbook_summary_rows(report)
+    content = exports_svc.build_xlsx(
+        headers,
+        rows,
+        sheet_title="Cashbook Summary",
+        money_cols=money_cols,
+        text_cols=text_cols,
+        title_lines=[
+            company_name,
+            "Cashbook Summary",
+            f"{from_.isoformat()} to {to.isoformat()}",
+        ],
+    )
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="cashbook_summary_{from_.isoformat()}_{to.isoformat()}.xlsx"'
+            )
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
 # POST /setup — onboarding (Phase C)
 # ---------------------------------------------------------------------------
 

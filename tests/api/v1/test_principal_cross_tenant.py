@@ -47,7 +47,12 @@ os.environ.setdefault(
     "SAEBOOKS_SECRET_KEY", "test-secret-key-for-principal-tests"
 )
 
-from saebooks.db import engine as _owner_engine
+# NOTE: deliberately NOT ``saebooks.db.engine`` — that's the runtime
+# engine, which IS the saebooks_app role under --rls (see
+# docker-compose.test.yml). ``_set_app_role_password`` (ALTER ROLE) and
+# the ``owner_sessionmaker`` fixture below both need the real
+# owner/superuser role regardless of --rls.
+from saebooks.db import _owner_role_engine as _owner_engine
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
 from saebooks.models.principal import (

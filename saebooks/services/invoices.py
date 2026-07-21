@@ -846,8 +846,8 @@ async def void_invoice(
         return inv
     if inv.amount_paid > Decimal("0"):
         raise InvoiceError(
-            f"Invoice {inv.number} has payments allocated — "
-            "unallocate before voiding."
+            f"Invoice {inv.number} has payments or credit notes allocated — "
+            "unallocate/void them before voiding."
         )
     if inv.journal_entry_id is None:
         # Cashbook-mode invoices have no JE on issue — just flip status.

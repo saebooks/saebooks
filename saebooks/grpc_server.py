@@ -1060,23 +1060,35 @@ class BearerAuthInterceptor(aio.ServerInterceptor):
 # ---------------------------------------------------------------------------
 
 
-async def serve(port: int = 50051) -> aio.Server:
+async def serve(port: int = 50051, host: str | None = None) -> aio.Server:
     """Create and start the async gRPC server with the bearer-auth
     interceptor wired in.
 
+    The listen interface honours the same ``SAEBOOKS_BIND_HOST`` contract as
+    the REST/uvicorn surface (config default ``127.0.0.1``). The one-click
+    server sets ``SAEBOOKS_BIND_HOST=127.0.0.1``, so the gRPC sidecar must
+    bind loopback there too — previously it hardcoded ``[::]`` and was
+    externally reachable on bare-metal installs (a security regression). The
+    Docker bundles that publish ``50051`` set ``SAEBOOKS_BIND_HOST=0.0.0.0``
+    explicitly so container port-publishing still works.
+
     Returns the server instance so the caller can await ``server.wait_for_termination()``.
     """
+    if host is None:
+        from saebooks.config import settings
+
+        host = settings.bind_host
     server = aio.server(interceptors=[BearerAuthInterceptor()])
     saebooks_pb2_grpc.add_SAEBooksServicer_to_server(SAEBooksServicer(), server)
-    listen_addr = f"[::]:{port}"
+    listen_addr = f"{host}:{port}"
     server.add_insecure_port(listen_addr)
     await server.start()
     logger.info("gRPC server listening on %s (with bearer auth)", listen_addr)
     return server
 
 
-async def _main(port: int = 50051) -> None:
-    server = await serve(port)
+async def _main(port: int = 50051, host: str | None = None) -> None:
+    server = await serve(port, host)
     try:
         await server.wait_for_termination()
     except asyncio.CancelledError:

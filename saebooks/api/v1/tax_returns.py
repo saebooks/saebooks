@@ -63,19 +63,29 @@ async def _build_bas_envelope(
     company_id: UUID,
     period_id: Any,
     figures: dict[str, Any],
+    lodgement_fields: dict[str, Any] | None = None,
 ) -> bytes:
-    """Build the SBR BAS/IAS XBRL business document for a tax return.
+    """Build the AS.0004 Activity Statement document for a tax return.
 
     Resolves the reporting period (``tax_periods``) and the lodging entity's
     ABN (``companies``), maps the return's ``figures`` JSONB onto BAS labels,
-    and renders the XBRL instance. Raises 422 if the period is missing or the
-    company has no ABN — we never emit a knowingly-invalid lodgement envelope.
+    and renders the AS.0004 ``ASSubmitRequest`` XML. Raises 422 if the period
+    is missing or a required reporting-party field is absent — we never emit
+    a knowingly-invalid lodgement envelope.
+
+    ``lodgement_fields`` carries the AS.0004 statement header the DB cannot
+    derive, straight from the lodge request body: ``tfn`` (reporting party),
+    ``document_id`` (the ATO DIN from the AS Get / prefill), ``signatory``,
+    and optionally ``form_type`` (TypeC, default "A") + ``revision``.
     """
     from saebooks.services.lodgement.sbr import (
+        AsDocumentError,
         BasFigures,
         ReportingContext,
         build_bas_document,
     )
+
+    fields = lodgement_fields or {}
 
     prow = (
         await session.execute(
@@ -100,8 +110,20 @@ async def _build_bas_envelope(
         )
 
     figs = BasFigures.from_figures_json(figures)
-    ctx = ReportingContext(abn=abn, period_start=prow[0], period_end=prow[1])
-    return build_bas_document(figs, ctx)
+    ctx = ReportingContext(
+        abn=abn,
+        period_start=prow[0],
+        period_end=prow[1],
+        tfn=str(fields.get("tfn") or ""),
+        document_id=str(fields.get("document_id") or ""),
+        form_type=str(fields.get("form_type") or "A"),
+        revision=bool(fields.get("revision", False)),
+        signatory=str(fields.get("signatory") or ""),
+    )
+    try:
+        return build_bas_document(figs, ctx)
+    except AsDocumentError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 async def _generate_tsd_return(
@@ -716,20 +738,27 @@ async def lodge_tax_return(
         # Caller supplied a pre-built envelope (e.g. an external generator).
         envelope = base64.b64decode(envelope_b64)
     elif return_type in ("BAS", "IAS"):
-        # Generate the SBR Activity-Statement XBRL from the return's figures.
+        # Generate the AS.0004 Activity Statement XML from the return's figures.
         envelope = await _build_bas_envelope(
             session,
             company_id=company_id,
             period_id=row[3],
             figures=figures,
+            lodgement_fields=payload,
         )
     elif return_type == "STP_PAYEVENT" and figures.get("payees") is not None:
         # STP normally lodges via the StpSubmission flow, not tax_returns; this
         # branch only fires if a caller persisted a build_pay_event payload as
         # the return's figures.
-        from saebooks.services.lodgement.sbr import build_stp_pay_event_document
+        from saebooks.services.lodgement.sbr import (
+            StpDocumentError,
+            build_stp_pay_event_document,
+        )
 
-        envelope = build_stp_pay_event_document(figures)
+        try:
+            envelope = build_stp_pay_event_document(figures).to_envelope_bundle()
+        except StpDocumentError as exc:
+            raise HTTPException(422, str(exc)) from exc
     else:
         # No generator for this return_type yet (TPAR / SuperStream / foreign).
         envelope = (

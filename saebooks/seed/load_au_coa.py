@@ -46,6 +46,65 @@ ODOO_TYPE_MAP: dict[str, AccountType] = {
     "expense_direct_cost": AccountType.COST_OF_SALES,
 }
 
+# M1.5 P1 tail — current/non-current balance-sheet classification, derived
+# from the same Odoo account_type the row above collapses to a flat
+# ASSET/LIABILITY. Only asset/liability types carry the distinction; equity/
+# income/expense types map to None (no current/non-current concept).
+_BS_CLASSIFICATION_MAP: dict[str, str | None] = {
+    "asset_cash": "current",
+    "asset_current": "current",
+    "asset_non_current": "non_current",
+    "asset_receivable": "current",
+    "asset_prepayments": "current",
+    "asset_fixed": "non_current",
+    "liability_current": "current",
+    "liability_non_current": "non_current",
+    "liability_payable": "current",
+    "liability_credit_card": "current",
+    "equity": None,
+    "equity_unaffected": None,
+    "income": None,
+    "income_other": None,
+    "expense": None,
+    "expense_depreciation": None,
+    "expense_direct_cost": None,
+}
+
+# M1.5 P1 tail — normal-balance side for each account_type. Assets/expenses
+# normally carry debit balances; liabilities/equity/income carry credit.
+_DEBIT_NORMAL_TYPES = {
+    AccountType.ASSET,
+    AccountType.EXPENSE,
+    AccountType.COST_OF_SALES,
+    AccountType.OTHER_EXPENSE,
+}
+
+
+def _is_contra_account(name: str, account_type: AccountType) -> bool:
+    """Heuristic contra-account detection: Accumulated Depreciation lines
+    are contra-ASSET accounts — the only contra pattern in the Odoo AU CSV
+    (it carries no explicit contra flag)."""
+    return account_type == AccountType.ASSET and "accum dep" in name.lower()
+
+
+def _normal_balance(account_type: AccountType, is_contra: bool) -> str:
+    debit_normal = account_type in _DEBIT_NORMAL_TYPES
+    if is_contra:
+        debit_normal = not debit_normal
+    return "debit" if debit_normal else "credit"
+
+
+# M1.5 P1 tail — for-profit equity sub-classification, by hyphenated code.
+# The Odoo CSV has no sub-type field for equity rows, so this is a small
+# explicit lookup rather than a heuristic (only 5 equity rows in the seed).
+_EQUITY_SUBTYPE_BY_CODE: dict[str, str] = {
+    "3-1100": "share_capital",  # Capital Investment
+    "3-1200": "drawings",  # Capital Drawings
+    "3-8000": "retained_earnings",  # Retained Earnings
+    "3-9000": "retained_earnings",  # Current Year Earnings
+    "3-9999": "other",  # Historical Balancing
+}
+
 
 # Generic placeholder accounts from Odoo that add no value — skip on seed
 _SKIP_CODES = {"41110", "41120", "41130", "51110", "51120", "51130"}
@@ -144,12 +203,18 @@ async def _load_accounts(session: AsyncSession, company: Company) -> tuple[int, 
             mapped = ODOO_TYPE_MAP.get(odoo_type)
             if mapped is None:
                 raise ValueError(f"Unmapped Odoo account_type {odoo_type!r} on code {code}")
+            name = row["name"].strip()
+            is_contra = _is_contra_account(name, mapped)
             session.add(
                 Account(
                     company_id=company.id,
                     code=code,
-                    name=row["name"].strip(),
+                    name=name,
                     account_type=mapped,
+                    balance_sheet_classification=_BS_CLASSIFICATION_MAP.get(odoo_type),
+                    is_contra=is_contra,
+                    normal_balance=_normal_balance(mapped, is_contra),
+                    equity_subtype=_EQUITY_SUBTYPE_BY_CODE.get(code),
                     reconcile=_parse_bool(row.get("reconcile", "")),
                     extra={
                         "odoo_id": row.get("id"),

@@ -5,11 +5,13 @@ All reports operate on POSTED journal lines only (except aged AR/AP
 + cashflow forecast, which walk ``invoices``/``bills`` tables directly
 so they can show per-document line items).
 """
+import calendar
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import Integer, and_, cast, extract, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,8 +30,12 @@ from saebooks.models.project import Project
 from saebooks.models.recurring_invoice import (
     RecurrenceStatus,
     RecurringInvoice,
+    RecurringInvoiceLine,
 )
-from saebooks.money import money_quantum
+from saebooks.models.supplier_credit_note import (
+    SupplierCreditNote,
+    SupplierCreditNoteStatus,
+)
 
 # Journal-entry statuses that contribute to GL balances in reports.
 #
@@ -65,6 +71,150 @@ PNL_TYPES = {
     AccountType.COST_OF_SALES,
     AccountType.OTHER_EXPENSE,
 }
+
+
+# ---------------------------------------------------------------------------
+# R7 — comparative/prior-period shared helpers
+#
+# ``?compare=previous_period|previous_year`` on the JSON /profit_loss,
+# /balance_sheet, /trial_balance routes (api/v1/reports.py) ports the
+# prior-period math that already existed ONLY inline in the statement-pack
+# PDF route (``statement_pack_pdf`` / its private ``_subtract_one_year_pack``
+# + ``_merge_lines``). These two helpers are the ONE shared implementation
+# for the JSON path -- the PDF route's own copy predates this and is left
+# untouched (out of scope for R7; flagged as pre-existing duplication).
+# ---------------------------------------------------------------------------
+
+
+def subtract_one_year(d: date) -> date:
+    """Return the date exactly one year before ``d``, guarding 29 Feb.
+
+    Leap-safe: 29 Feb in a leap year has no equivalent in a non-leap prior
+    year, so falls back to 28 Feb (matches the statement pack's identical
+    ``_subtract_one_year_pack`` semantics).
+    """
+    try:
+        return d.replace(year=d.year - 1)
+    except ValueError:
+        return d.replace(year=d.year - 1, day=28)
+
+
+def previous_period_range(from_date: date, to_date: date) -> tuple[date, date]:
+    """Return the immediately-preceding period of identical length.
+
+    E.g. 2028-01-01..2028-01-31 (31 days inclusive) -> 2027-12-01..2027-12-31.
+    ``prev_to = from_date - 1 day``; ``prev_from`` is shifted back by the
+    same day-count as ``[from_date, to_date]`` so the comparative period
+    covers exactly as many days as the current one.
+    """
+    prev_to = from_date - timedelta(days=1)
+    prev_from = prev_to - (to_date - from_date)
+    return prev_from, prev_to
+
+
+def fy_bounds_for_company(
+    as_of: date, fin_year_start_month: int, fin_year_start_day: int
+) -> tuple[date, date]:
+    """Return ``(fy_start, fy_end)`` for the financial year containing ``as_of``,
+    anchored at an arbitrary ``(fin_year_start_month, fin_year_start_day)``.
+
+    Jurisdiction-neutral generalisation of ``api/v1/reports.py``'s
+    AU-hardcoded ``_current_fy_bounds`` (1 July), which cannot be reused
+    for a company whose ``Company.fin_year_start_month``/
+    ``fin_year_start_day`` (services/companies.py, validated 1-12 / 1-31;
+    migration 0214) anchor its year elsewhere -- e.g. the UK's 6 April.
+
+    A ``fin_year_start_day`` that does not exist in the anchor month for a
+    given calendar year (e.g. day 31 anchored in February, or day 29-31 in
+    any short month) clamps to that month's actual last day via
+    ``calendar.monthrange`` -- there is no other established clamp
+    convention anywhere in the codebase to follow (migration 0214 is
+    purely additive/storage-only; nothing does date arithmetic with
+    ``fin_year_start_day`` yet), so this keeps the anchor a real date
+    every year rather than overflowing into the next month.
+
+    ``fy_end`` is always the day before the following year's anchor date,
+    so consecutive financial years never overlap or gap.
+    """
+
+    def _anchor(year: int) -> date:
+        last_day_of_month = calendar.monthrange(year, fin_year_start_month)[1]
+        day = min(fin_year_start_day, last_day_of_month)
+        return date(year, fin_year_start_month, day)
+
+    this_year_anchor = _anchor(as_of.year)
+    if as_of >= this_year_anchor:
+        fy_start = this_year_anchor
+        fy_end = _anchor(as_of.year + 1) - timedelta(days=1)
+    else:
+        fy_start = _anchor(as_of.year - 1)
+        fy_end = this_year_anchor - timedelta(days=1)
+    return fy_start, fy_end
+
+
+def merge_comparative_lines(
+    current_lines: list[dict[str, Any]],
+    comparative_lines: list[dict[str, Any]],
+    *,
+    value_key: str,
+    zero_keys: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Attach a ``comparative`` value onto each current-period line.
+
+    Lines are matched by ``account_id``. ``value_key`` names the numeric
+    field to pull the comparative figure from (``"amount"`` for P&L lines,
+    ``"balance"`` for balance-sheet/trial-balance lines) -- every other key
+    on the current line is passed through unchanged.
+
+    An account with activity ONLY in the comparative period (no current-period
+    line) still needs to surface, or the comparison silently drops it -- so
+    those are appended with their current-period value defaulted to 0. This
+    mirrors the account-alignment approach in the statement pack's private
+    ``_merge_lines`` helper (api/v1/reports.py) without reusing it directly:
+    that helper collapses both periods into a ``current_amount``/
+    ``prior_amount`` pair, a different response shape than the JSON reports'
+    existing ``amount``/``balance`` field plus an additive ``comparative``
+    key -- the shape that keeps the opt-in JSON response backward compatible
+    when ``compare`` is omitted.
+
+    ``zero_keys`` (default ``[value_key]``) lists every numeric field that
+    must be zeroed to a genuine current-period 0 on a comparative-only
+    synthetic line. The trial balance has THREE numeric fields per line
+    (``debit_total``/``credit_total``/``balance``) -- zeroing only
+    ``balance`` would leave the comparative period's debit/credit totals
+    misrepresented as the current period's, so its caller passes all three.
+    P&L/BS lines have a single numeric field and can rely on the default.
+
+    Comparative-only synthetic lines are appended after every current-period
+    line, which would otherwise break the ``Account.code`` ordering the raw
+    queries already produce (``ORDER BY Account.code``) -- so the merged
+    result is re-sorted by ``code`` before returning, restoring that
+    invariant for callers/consumers that rely on code order (e.g. CSV
+    export, statement rendering).
+    """
+    zero_keys = zero_keys if zero_keys is not None else [value_key]
+    comparative_by_id: dict[Any, float] = {
+        ln["account_id"]: float(ln[value_key])
+        for ln in comparative_lines
+        if ln.get("account_id") is not None
+    }
+    merged: list[dict[str, Any]] = []
+    seen_ids: set[Any] = set()
+    for line in current_lines:
+        aid = line.get("account_id")
+        seen_ids.add(aid)
+        merged.append({**line, "comparative": comparative_by_id.get(aid, 0.0)})
+    for ln in comparative_lines:
+        aid = ln.get("account_id")
+        if aid is None or aid in seen_ids:
+            continue
+        synthetic = {k: v for k, v in ln.items() if k != value_key}
+        synthetic.update({k: 0.0 for k in zero_keys if k != value_key})
+        synthetic[value_key] = 0.0
+        synthetic["comparative"] = float(ln[value_key])
+        merged.append(synthetic)
+    merged.sort(key=lambda ln: ln.get("code") or "")
+    return merged
 
 
 @dataclass
@@ -492,10 +642,21 @@ async def _bill_settled_asof(
 ) -> dict[uuid.UUID, Decimal]:
     """Per-bill settled amount AS AT ``cutoff`` (point-in-time).
 
-    Sums only POSTED payment allocations whose parent ``Payment.payment_date
-    <= cutoff``. There is no supplier-credit-note model linking to bills
-    (``CreditNote`` carries only ``original_invoice_id``), so the AP side has
-    no credit-note component to make date-aware — only the payment date.
+    Sums:
+
+    * POSTED payment allocations whose parent ``Payment.payment_date <=
+      cutoff``; plus
+    * the FULL total of POSTED supplier credit notes linked via
+      ``original_bill_id`` whose ``issue_date <= cutoff``. Unlike the
+      AR-side ``CreditNote`` (which nets ``total - amount_allocated``
+      because it may be cash-refunded), ``SupplierCreditNote`` has no
+      ``amount_allocated``/cash-refund path in this codebase (no
+      ``payment_allocations.supplier_credit_note_id`` column), so its
+      whole total always relieves the linked bill.
+
+    A payment or credit note dated *after* the report's as-of date does
+    not reduce the outstanding balance — matching the date-aware AP
+    control on the balance sheet (GL ``entry_date <= as_of``).
     """
     settled: dict[uuid.UUID, Decimal] = {bid: Decimal("0") for bid in bill_ids}
     if not bill_ids:
@@ -515,6 +676,21 @@ async def _bill_settled_asof(
         .group_by(PaymentAllocation.bill_id)
     )
     for bill_id, amt in pay_rows.all():
+        settled[bill_id] += Decimal(str(amt or 0))
+
+    cn_rows = await session.execute(
+        select(
+            SupplierCreditNote.original_bill_id,
+            func.coalesce(func.sum(SupplierCreditNote.total), 0),
+        )
+        .where(
+            SupplierCreditNote.original_bill_id.in_(bill_ids),
+            SupplierCreditNote.status == SupplierCreditNoteStatus.POSTED,
+            SupplierCreditNote.issue_date <= cutoff,
+        )
+        .group_by(SupplierCreditNote.original_bill_id)
+    )
+    for bill_id, amt in cn_rows.all():
         settled[bill_id] += Decimal(str(amt or 0))
 
     return settled
@@ -557,6 +733,7 @@ async def aged_ar(
     company_id: uuid.UUID,
     *,
     as_at: date | None = None,
+    tenant_id: uuid.UUID | None = None,
 ) -> AgedReport:
     """Return the aged-debtors report as at ``as_at`` (default today).
 
@@ -571,6 +748,11 @@ async def aged_ar(
     cutoff and IS included until the write-off date; once the write-off
     date is reached it drops out — matching the date-aware Trade Debtors
     control on the balance sheet. Voided and archived invoices are excluded.
+
+    ``tenant_id`` is defense-in-depth, optional (mirrors
+    ``_account_balances``): ``company_id`` is already tenant-scoped by
+    callers going through ``get_active_company_id``, so this narrows the
+    query further rather than being load-bearing on its own.
     """
     cutoff = as_at or date.today()
     # Do NOT pre-filter on the scalar ``total > amount_paid`` — that would
@@ -578,17 +760,20 @@ async def aged_ar(
     # or payment. Include WRITTEN_OFF invoices too, then exclude below the
     # ones whose write-off is already effective as at the cutoff. Fetch all
     # candidates, compute point-in-time outstanding, keep those > 0.
+    conditions = [
+        Invoice.company_id == company_id,
+        Invoice.status.in_(
+            (InvoiceStatus.POSTED, InvoiceStatus.WRITTEN_OFF)
+        ),
+        Invoice.archived_at.is_(None),
+        Invoice.issue_date <= cutoff,
+    ]
+    if tenant_id is not None:
+        conditions.append(Invoice.tenant_id == tenant_id)
     stmt = (
         select(Invoice, Contact.name)
         .join(Contact, Invoice.contact_id == Contact.id)
-        .where(
-            Invoice.company_id == company_id,
-            Invoice.status.in_(
-                (InvoiceStatus.POSTED, InvoiceStatus.WRITTEN_OFF)
-            ),
-            Invoice.archived_at.is_(None),
-            Invoice.issue_date <= cutoff,
-        )
+        .where(*conditions)
         .order_by(Contact.name, Invoice.due_date)
     )
     candidate_rows = (await session.execute(stmt)).all()
@@ -685,6 +870,27 @@ async def aged_ar(
     return report
 
 
+# Leading characters that a spreadsheet (Excel/Sheets/LibreOffice) treats
+# as a formula/function trigger when opening a CSV -- ``=``, ``+``, and
+# ``@`` always; a leading ``-`` is ambiguous (a legitimate negative number
+# vs. e.g. ``-2+3+cmd|...``) but Excel also treats it as a formula trigger
+# on TEXT cells, so it's included here too. Applied ONLY to free-text
+# cells (contact/account names) below -- never to numeric columns, whose
+# negatives legitimately start with "-" and must NOT be quote-prefixed.
+_CSV_FORMULA_TRIGGER_CHARS = ("=", "+", "-", "@")
+
+
+def _csv_sanitize_text(value: str) -> str:
+    """Prefix a leading single quote onto a free-text CSV cell that starts
+    with a spreadsheet formula-trigger character, so opening the export in
+    Excel/Sheets/LibreOffice renders it as literal text rather than
+    evaluating it as a formula (CSV/CWE-1236 formula-injection guard).
+    """
+    if value and value[0] in _CSV_FORMULA_TRIGGER_CHARS:
+        return f"'{value}"
+    return value
+
+
 def aged_ar_csv(report: AgedReport) -> str:
     """Render an aged-AR report as RFC 4180 CSV (one row per invoice).
 
@@ -692,6 +898,15 @@ def aged_ar_csv(report: AgedReport) -> str:
     balance_due,days_overdue,bucket``. A footer row per contact + a
     grand-total footer row would break spreadsheet pivots, so we emit
     only detail rows; users can pivot in their tool of choice.
+
+    ``balance_due`` is the invoice's FULL outstanding balance, i.e.
+    trade-debtor portion + any retention (see ``aged_ar``'s per-invoice
+    ``AgedInvoiceRow``, which does not split retention out the way the
+    JSON ``/aged_receivables`` route's ``_build_report`` does). Summing
+    this column therefore exceeds the JSON route's
+    ``totals.total``/trade-debtors-only figure by the retention amount
+    whenever any invoice carries ``retention_pct > 0`` -- this is not a
+    bug, just a different (document-level, not ledger-line-level) view.
     """
     import csv
     from io import StringIO
@@ -715,7 +930,7 @@ def aged_ar_csv(report: AgedReport) -> str:
         for inv in group.invoices:
             writer.writerow(
                 [
-                    group.contact_name,
+                    _csv_sanitize_text(group.contact_name),
                     inv.number,
                     inv.issue_date.isoformat(),
                     inv.due_date.isoformat(),
@@ -747,27 +962,32 @@ async def aged_ap(
     company_id: uuid.UUID,
     *,
     as_at: date | None = None,
+    tenant_id: uuid.UUID | None = None,
 ) -> AgedReport:
     """Return the aged-creditors report as at ``as_at`` (default today).
 
     POINT-IN-TIME: settlement is computed date-aware (see
-    ``_bill_settled_asof``) so a payment dated after the report date does
-    not reduce the outstanding balance. There is no supplier-credit-note
-    model linking to bills, so the AP side has only the payment-date
-    component (no credit-note component, unlike AR).
+    ``_bill_settled_asof``) so a payment or supplier credit note dated
+    after the report date does not reduce the outstanding balance.
+
+    ``tenant_id`` is defense-in-depth, optional (mirrors ``aged_ar`` /
+    ``_account_balances``) — see ``aged_ar``'s docstring.
     """
     cutoff = as_at or date.today()
     # As with AR, do NOT pre-filter on the scalar ``total > amount_paid`` —
     # a future-dated payment must not drop a bill from the as-of report.
+    conditions = [
+        Bill.company_id == company_id,
+        Bill.status == BillStatus.POSTED,
+        Bill.archived_at.is_(None),
+        Bill.issue_date <= cutoff,
+    ]
+    if tenant_id is not None:
+        conditions.append(Bill.tenant_id == tenant_id)
     stmt = (
         select(Bill, Contact.name)
         .join(Contact, Bill.contact_id == Contact.id)
-        .where(
-            Bill.company_id == company_id,
-            Bill.status == BillStatus.POSTED,
-            Bill.archived_at.is_(None),
-            Bill.issue_date <= cutoff,
-        )
+        .where(*conditions)
         .order_by(Contact.name, Bill.due_date)
     )
     candidate_rows = (await session.execute(stmt)).all()
@@ -821,6 +1041,16 @@ def aged_ap_csv(report: AgedReport) -> str:
 
     Columns: ``contact,bill_number,issue_date,due_date,total,paid,
     balance_due,days_overdue,bucket``.
+
+    ``balance_due`` is the bill's FULL outstanding balance, i.e.
+    ``bill.total - amount_paid``, including any retention held (see
+    ``services/bills.py``'s Retentions Payable posting, which moves the
+    retained portion off Trade Creditors onto a separate liability
+    account at post time). Unlike ``aged_ar_csv``, there is no separate
+    JSON breakout to diverge from here -- the JSON ``/aged_payables``
+    route sums the same full document balance (no retention split), so
+    this column agrees with the JSON totals either way. Informational
+    only.
     """
     import csv
     from io import StringIO
@@ -844,7 +1074,7 @@ def aged_ap_csv(report: AgedReport) -> str:
         for bill in group.invoices:
             writer.writerow(
                 [
-                    group.contact_name,
+                    _csv_sanitize_text(group.contact_name),
                     bill.number,
                     bill.issue_date.isoformat(),
                     bill.due_date.isoformat(),
@@ -1258,12 +1488,53 @@ def _advance_by_frequency(
     return advance(current, RecurrenceFrequency(frequency), anchor_day)
 
 
+async def _recurring_line_total(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    ln: RecurringInvoiceLine,
+) -> Decimal:
+    """One recurring-invoice line's GST-inclusive total.
+
+    Delegates to ``services.invoices._resolve_tax_code`` /
+    ``_compute_line_totals`` -- the exact same functions
+    ``services.recurrence.materialise_one`` uses (via ``invoices.create_draft``
+    -> ``_add_line``) to build the real invoice -- so a forecast item for a
+    GST-registered recurring template agrees with what actually gets
+    invoiced. Previously this projection summed
+    ``qty * unit_price * (1 - discount%)`` only (ex-GST), understating a
+    10%-GST recurring line by 10% versus the invoice/bill branches above
+    (which use ``inv.total`` / ``bill.total`` -- both GST-inclusive).
+    Imports lazily; see ``_advance_by_frequency`` for why reports.py avoids
+    a module-level import of services.invoices.
+    """
+    from saebooks.services.invoices import (
+        _compute_line_totals,
+        _LineInput,
+        _resolve_tax_code,
+    )
+
+    tax_code = await _resolve_tax_code(session, ln.tax_code_id, company_id)
+    line_input = _LineInput(
+        description=ln.description,
+        account_id=ln.account_id,
+        tax_code_id=ln.tax_code_id,
+        quantity=ln.quantity,
+        unit_price=ln.unit_price,
+        discount_pct=ln.discount_pct,
+        project_id=None,
+        item_id=None,
+    )
+    _subtotal, _tax, total = _compute_line_totals(line_input, tax_code)
+    return total
+
+
 async def cashflow_forecast(
     session: AsyncSession,
     company_id: uuid.UUID,
     *,
     horizon_days: int = 90,
     as_of: date | None = None,
+    tenant_id: uuid.UUID | None = None,
 ) -> CashflowForecast:
     """Project cash in/out over the next ``horizon_days`` days.
 
@@ -1275,16 +1546,29 @@ async def cashflow_forecast(
     * Open POSTED bills (same rule) → outflow on ``due_date``.
     * ACTIVE recurring-invoice templates → one inflow per materialisation
       at each ``next_run``, walking forward through the horizon. Totals
-      use the template's lines (qty x unit_price x (1 - discount%)).
+      are the GST-inclusive line totals (see ``_recurring_line_total``),
+      matching what ``materialise_one`` would actually invoice.
 
     Opening balance = GL balance (debit - credit) of all ASSET accounts
     flagged ``reconcile=True`` through ``as_of``. This is the same sum
     the dashboard uses so the two agree.
+
+    ``tenant_id`` is defense-in-depth, optional (mirrors ``aged_ar`` /
+    ``_account_balances``) — see ``aged_ar``'s docstring.
     """
     as_of = as_of or date.today()
     horizon_end = as_of + timedelta(days=horizon_days)
 
     # Opening bank balance — same shape as dashboard.bank_balances total
+    open_conditions = [
+        JournalEntry.company_id == company_id,
+        JournalEntry.status.in_(REPORTABLE_STATUSES),
+        JournalEntry.entry_date <= as_of,
+        Account.account_type == AccountType.ASSET,
+        Account.reconcile.is_(True),
+    ]
+    if tenant_id is not None:
+        open_conditions.append(JournalEntry.tenant_id == tenant_id)
     open_stmt = (
         select(
             func.coalesce(
@@ -1294,13 +1578,7 @@ async def cashflow_forecast(
         )
         .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
         .join(Account, JournalLine.account_id == Account.id)
-        .where(
-            JournalEntry.company_id == company_id,
-            JournalEntry.status.in_(REPORTABLE_STATUSES),
-            JournalEntry.entry_date <= as_of,
-            Account.account_type == AccountType.ASSET,
-            Account.reconcile.is_(True),
-        )
+        .where(*open_conditions)
     )
     opening = (await session.execute(open_stmt)).scalar() or Decimal("0")
     opening = Decimal(str(opening))
@@ -1308,16 +1586,19 @@ async def cashflow_forecast(
     items: list[ForecastItem] = []
 
     # Open invoices → inflows
+    inv_conditions = [
+        Invoice.company_id == company_id,
+        Invoice.status == InvoiceStatus.POSTED,
+        Invoice.archived_at.is_(None),
+        Invoice.total > Invoice.amount_paid,
+        Invoice.due_date <= horizon_end,
+    ]
+    if tenant_id is not None:
+        inv_conditions.append(Invoice.tenant_id == tenant_id)
     inv_stmt = (
         select(Invoice, Contact.name)
         .join(Contact, Invoice.contact_id == Contact.id)
-        .where(
-            Invoice.company_id == company_id,
-            Invoice.status == InvoiceStatus.POSTED,
-            Invoice.archived_at.is_(None),
-            Invoice.total > Invoice.amount_paid,
-            Invoice.due_date <= horizon_end,
-        )
+        .where(*inv_conditions)
     )
     for inv, cname in (await session.execute(inv_stmt)).all():
         due = max(inv.due_date, as_of)  # overdue → land on today
@@ -1332,16 +1613,19 @@ async def cashflow_forecast(
         )
 
     # Open bills → outflows
+    bill_conditions = [
+        Bill.company_id == company_id,
+        Bill.status == BillStatus.POSTED,
+        Bill.archived_at.is_(None),
+        Bill.total > Bill.amount_paid,
+        Bill.due_date <= horizon_end,
+    ]
+    if tenant_id is not None:
+        bill_conditions.append(Bill.tenant_id == tenant_id)
     bill_stmt = (
         select(Bill, Contact.name)
         .join(Contact, Bill.contact_id == Contact.id)
-        .where(
-            Bill.company_id == company_id,
-            Bill.status == BillStatus.POSTED,
-            Bill.archived_at.is_(None),
-            Bill.total > Bill.amount_paid,
-            Bill.due_date <= horizon_end,
-        )
+        .where(*bill_conditions)
     )
     for bill, cname in (await session.execute(bill_stmt)).all():
         due = max(bill.due_date, as_of)
@@ -1357,24 +1641,23 @@ async def cashflow_forecast(
 
     # Recurring-invoice templates → projected inflows at each
     # materialisation in the horizon window.
+    rec_conditions = [
+        RecurringInvoice.company_id == company_id,
+        RecurringInvoice.status == RecurrenceStatus.ACTIVE,
+        RecurringInvoice.archived_at.is_(None),
+    ]
+    if tenant_id is not None:
+        rec_conditions.append(RecurringInvoice.tenant_id == tenant_id)
     rec_stmt = (
         select(RecurringInvoice, Contact.name)
         .join(Contact, RecurringInvoice.contact_id == Contact.id)
         .options(selectinload(RecurringInvoice.lines))
-        .where(
-            RecurringInvoice.company_id == company_id,
-            RecurringInvoice.status == RecurrenceStatus.ACTIVE,
-            RecurringInvoice.archived_at.is_(None),
-        )
+        .where(*rec_conditions)
     )
     for tpl, cname in (await session.execute(rec_stmt)).all():
         total_per_run = Decimal("0")
         for ln in tpl.lines:
-            line_sub = (
-                ln.quantity * ln.unit_price
-                * (Decimal("1") - ln.discount_pct / Decimal("100"))
-            )
-            total_per_run += line_sub.quantize(money_quantum(2))
+            total_per_run += await _recurring_line_total(session, company_id, ln)
         if total_per_run <= 0:
             continue
         run = tpl.next_run

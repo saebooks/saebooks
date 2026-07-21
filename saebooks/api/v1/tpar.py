@@ -8,6 +8,7 @@ Workflow:
   GET    /api/v1/tpar/{id}             — run header (status, totals)
   GET    /api/v1/tpar/{id}/lines       — payee detail rows
   GET    /api/v1/tpar/{id}/lines.csv   — same rows as a downloadable CSV
+  GET    /api/v1/tpar/{id}/lines.bde   — ATO BDE flat file for OS4B upload
   POST   /api/v1/tpar/{id}/finalise    — lock a DRAFT into FINALISED
 """
 from __future__ import annotations
@@ -186,6 +187,45 @@ async def get_tpar_run_csv(
         content=csv_bytes,
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="tpar-{run_id}.csv"'},
+    )
+
+
+@router.get("/{run_id}/lines.bde")
+async def get_tpar_run_bde(
+    run_id: UUID,
+    request: Request,
+    production: bool = False,
+    bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> Response:
+    """Download the run as an ATO BDE (FPAIVV03.0) flat file for OS4B upload.
+
+    Defaults to a **test-facility** file (Run type T); pass ``?production=true``
+    for the production file once self-testing passes. 422s (naming the missing
+    field) if the ledger lacks something the flat file mandates.
+    """
+    from saebooks.jurisdictions.au.bde.tpar import TparBdeError
+    from saebooks.jurisdictions.au.tpar import build_tpar_bde_file_for_run
+    from saebooks.jurisdictions.au.tpar import get_tpar_run as _get
+
+    tenant_id = resolve_tenant_id(request)
+    if (await _get(session, tenant_id=tenant_id, company_id=company_id, run_id=run_id)) is None:
+        raise HTTPException(404, "TPAR run not found")
+    try:
+        data = await build_tpar_bde_file_for_run(
+            session,
+            tenant_id=tenant_id,
+            company_id=company_id,
+            run_id=run_id,
+            run_type="P" if production else "T",
+        )
+    except TparBdeError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return Response(
+        content=data,
+        media_type="text/plain",
+        headers={"Content-Disposition": f'attachment; filename="tpar-{run_id}.bde.txt"'},
     )
 
 

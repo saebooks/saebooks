@@ -48,6 +48,7 @@ from saebooks.main import app
 from saebooks.models.account import Account
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
+from saebooks.models.document_counter import DocumentCounter
 from saebooks.models.journal import (
     EntryStatus,
     JournalEntry,
@@ -60,6 +61,9 @@ from saebooks.models.supplier_credit_note import (
 )
 from saebooks.models.tax_code import TaxCode
 from saebooks.models.tenant import Tenant
+from saebooks.seed.load_au_coa import _load_accounts, ensure_tax_codes
+from saebooks.services import bills as bill_svc
+from saebooks.services import reports as report_svc
 from saebooks.services import supplier_credit_notes as svc
 
 pytestmark = pytest.mark.postgres_only
@@ -427,6 +431,151 @@ async def test_income_account_rejected_on_post() -> None:
                 session, scn.id, "test", scn.version,
                 tenant_id=d["tenant_id"], company_id=d["company_id"],
             )
+
+
+# --------------------------------------------------------------------------- #
+# Cross-company original_bill_id guard (gating finding 1)
+# --------------------------------------------------------------------------- #
+async def _other_company_posted_bill() -> dict[str, Any]:
+    """Create a fully-independent company B with its own CoA + a POSTED bill.
+
+    Returns company_id, contact_id, bill_id and the bill's total for company B.
+    """
+    async with AsyncSessionLocal() as session:
+        company = Company(
+            name=f"SCN-Other-Co-{uuid.uuid4().hex[:8]}",
+            base_currency="AUD",
+            tenant_id=_DEFAULT_TENANT,
+        )
+        session.add(company)
+        await session.commit()
+        await session.refresh(company)
+
+        await ensure_tax_codes(session, company.id)
+        await _load_accounts(session, company)
+        await session.commit()
+
+        session.add(
+            DocumentCounter(
+                company_id=company.id, kind="bill", prefix="OBILL-",
+                pad_width=6, next_value=1,
+            )
+        )
+        contact = Contact(
+            company_id=company.id, tenant_id=company.tenant_id,
+            name="Other Co Supplier", contact_type=ContactType.SUPPLIER,
+        )
+        session.add(contact)
+        await session.commit()
+        await session.refresh(contact)
+
+        expense = (
+            await session.execute(
+                select(Account).where(
+                    Account.company_id == company.id, Account.code == "6-1000"
+                )
+            )
+        ).scalar_one()
+        gst = (
+            await session.execute(
+                select(TaxCode).where(
+                    TaxCode.company_id == company.id, TaxCode.code == "GST"
+                )
+            )
+        ).scalar_one()
+
+    async with AsyncSessionLocal() as session:
+        bill = await bill_svc.create_draft(
+            session,
+            company_id=company.id,
+            contact_id=contact.id,
+            issue_date=date(2026, 6, 6),
+            due_date=date(2026, 7, 6),
+            lines=[_line(expense.id, gst.id, Decimal("100.00"))],
+        )
+    async with AsyncSessionLocal() as session:
+        posted_bill = await bill_svc.post_bill(session, bill.id, posted_by="test")
+
+    return {
+        "company_id": company.id,
+        "contact_id": contact.id,
+        "bill_id": posted_bill.id,
+        "total": posted_bill.total,
+    }
+
+
+async def test_create_rejects_cross_company_original_bill_id() -> None:
+    """A company-A SCN referencing company-B's bill is rejected — and B's
+    bill is left completely untouched (the critic's live-demonstrated leak).
+    """
+    d = await _seed_ctx()
+    other = await _other_company_posted_bill()
+
+    async with AsyncSessionLocal() as session:
+        with pytest.raises(
+            svc.SupplierCreditNoteError, match="not found for this company"
+        ):
+            await svc.api_create(
+                session,
+                company_id=d["company_id"], tenant_id=d["tenant_id"], actor="test",
+                contact_id=d["contact_id"], issue_date=date(2026, 6, 6),
+                lines=[_line(d["expense_id"], d["gst_id"], Decimal("50.00"))],
+                original_bill_id=other["bill_id"],
+            )
+
+    # Probe: company B's bill is untouched -- still fully outstanding and
+    # still visible in its own aged payables.
+    async with AsyncSessionLocal() as session:
+        bill = await bill_svc.get(session, other["bill_id"])
+        assert bill.amount_paid == Decimal("0.00")
+        assert bill.company_id == other["company_id"]
+
+    async with AsyncSessionLocal() as session:
+        report = await report_svc.aged_ap(
+            session, other["company_id"], as_at=date(2026, 6, 6)
+        )
+    assert any(
+        row.invoice_id == other["bill_id"]
+        for group in report.groups
+        for row in group.invoices
+    ), "company B's bill dropped out of its own aged payables"
+
+
+async def test_update_rejects_cross_company_original_bill_id() -> None:
+    """The same guard applies on api_update (setting original_bill_id after
+    the fact), not just api_create."""
+    d = await _seed_ctx()
+    other = await _other_company_posted_bill()
+
+    async with AsyncSessionLocal() as session:
+        scn = await svc.api_create(
+            session,
+            company_id=d["company_id"], tenant_id=d["tenant_id"], actor="test",
+            contact_id=d["contact_id"], issue_date=date(2026, 6, 6),
+            lines=[_line(d["expense_id"], d["gst_id"], Decimal("50.00"))],
+        )
+    assert scn.original_bill_id is None
+
+    async with AsyncSessionLocal() as session:
+        with pytest.raises(
+            svc.SupplierCreditNoteError, match="not found for this company"
+        ):
+            await svc.api_update(
+                session, scn.id, "test", scn.version,
+                tenant_id=d["tenant_id"], company_id=d["company_id"],
+                original_bill_id=other["bill_id"],
+            )
+
+    async with AsyncSessionLocal() as session:
+        reloaded = await svc.api_get(
+            session, scn.id, tenant_id=d["tenant_id"], company_id=d["company_id"]
+        )
+        assert reloaded is not None
+        assert reloaded.original_bill_id is None
+
+    async with AsyncSessionLocal() as session:
+        bill = await bill_svc.get(session, other["bill_id"])
+        assert bill.amount_paid == Decimal("0.00")
 
 
 # --------------------------------------------------------------------------- #

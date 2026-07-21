@@ -62,22 +62,35 @@ async def unauth_client() -> AsyncClient:
 
 @pytest.fixture
 async def account_ids() -> dict[str, str]:
-    """Return an ASSET and an EXPENSE account ID for journal line tests."""
+    """Return an ASSET and an EXPENSE account ID for journal line tests.
+
+    Both accounts MUST belong to the same company the api_client posts under
+    (the seed company) — journal-entry line validation rejects accounts from a
+    different company. With the multi-jurisdiction seed now carrying more than
+    one company, an unscoped ``.limit(1)`` could pick an EXPENSE account from a
+    foreign company (→ 422 "account not found"); scope to the seed company and
+    order deterministically.
+    """
+    from saebooks.services.companies import ensure_seed_company
+
     async with AsyncSessionLocal() as session:
+        company = await ensure_seed_company(session)
         asset = (
             await session.execute(
                 select(Account).where(
+                    Account.company_id == company.id,
                     Account.archived_at.is_(None),
                     Account.account_type == AccountType.ASSET,
-                ).limit(1)
+                ).order_by(Account.code).limit(1)
             )
         ).scalars().first()
         expense = (
             await session.execute(
                 select(Account).where(
+                    Account.company_id == company.id,
                     Account.archived_at.is_(None),
                     Account.account_type == AccountType.EXPENSE,
-                ).limit(1)
+                ).order_by(Account.code).limit(1)
             )
         ).scalars().first()
 
@@ -158,6 +171,40 @@ async def test_journal_entries_list_filter_by_status(
     assert r2.status_code == 200
     for item in r2.json()["items"]:
         assert item["status"] == "DRAFT"
+
+
+async def test_journal_entry_memo_round_trips(
+    api_client: AsyncClient, account_ids: dict[str, str]
+) -> None:
+    """A ``memo`` sent on create round-trips as ``description`` on read.
+
+    Regression: the create body accepted only ``narration``, so a client
+    POSTing ``memo`` had it silently dropped and the entry came back with
+    ``description: null`` on both detail and list.
+    """
+    memo = f"MEMO-{uuid.uuid4().hex[:8].upper()}"
+    payload = _entry_payload(account_ids)
+    payload.pop("narration")
+    payload["memo"] = memo
+
+    r = await api_client.post("/api/v1/journal_entries", json=payload)
+    assert r.status_code == 201, r.text
+    created = r.json()
+    assert created["description"] == memo
+    entry_id = created["id"]
+
+    # Detail
+    detail = await api_client.get(f"/api/v1/journal_entries/{entry_id}")
+    assert detail.status_code == 200
+    assert detail.json()["description"] == memo
+
+    # List (find our entry)
+    listing = await api_client.get(
+        "/api/v1/journal_entries", params={"description": memo}
+    )
+    assert listing.status_code == 200
+    found = [i for i in listing.json()["items"] if i["id"] == entry_id]
+    assert found and found[0]["description"] == memo
 
 
 async def test_journal_entries_list_filter_by_ref(

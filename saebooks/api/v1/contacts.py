@@ -39,13 +39,14 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import date
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
@@ -53,10 +54,12 @@ from saebooks.api.v1.deps import get_active_company_id, get_session
 from saebooks.api.v1.hard_delete_gate import hard_delete_admin_gate
 from saebooks.api.v1.schemas import (
     ConflictBody,
+    ContactBalances,
     ContactCreate,
-    ContactListOut,
+    ContactListWithBalancesOut,
     ContactOut,
     ContactUpdate,
+    ContactWithBalancesOut,
 )
 from saebooks.models.contact import Contact, ContactType
 from saebooks.services import contacts as svc
@@ -98,20 +101,198 @@ def _dump(contact: Contact) -> dict[str, Any]:
     return json.loads(ContactOut.model_validate(contact).model_dump_json())
 
 
+async def _compute_contact_balances(
+    session: AsyncSession,
+    company_id: UUID,
+    contact_ids: list[UUID],
+) -> dict[UUID, ContactBalances]:
+    """Grouped-query balance summary for the given contact ids.
+
+    Backs ``include_balances=true`` on both the list and detail routes.
+    Reuses the aged-AR/AP reports' and the customer-statement builder's
+    convention (POSTED invoices/bills, ``outstanding = total -
+    amount_paid``) but as a live scalar snapshot, NOT the reports'
+    date-aware point-in-time settlement calc.
+
+    Sums the ``base_total``/``base_amount_paid`` shadow columns (company
+    base-currency view of the document, translated at the document's own
+    ``fx_rate`` — see ``models/invoice.py``/``models/bill.py``), not the
+    document-currency ``total``/``amount_paid``. Those base columns are
+    kept in lockstep with every total/amount_paid write (``services.
+    invoices._recalc``, ``services.bills`` posting, and the payment-
+    allocation refresh in ``services.payments``), including AUD-only
+    installs where ``fx_rate`` is always 1 — so this is a strict
+    generalisation, not a behaviour change, for single-currency contacts.
+    Summing document-currency amounts across an invoice in EUR and one in
+    USD for the same contact would silently add unlike units; base-currency
+    sums are the one number that is GL-consistent regardless of how many
+    currencies a contact trades in.
+
+    Runs a constant number of grouped queries (``GROUP BY contact_id``)
+    over the given ids regardless of how many contacts are in play — never
+    one query per contact — so it stays cheap on the list route.
+    """
+    from saebooks.models.bill import Bill, BillStatus
+    from saebooks.models.expense import Expense, ExpenseStatus
+    from saebooks.models.invoice import Invoice, InvoiceStatus
+    from saebooks.models.payment import Payment, PaymentStatus
+
+    zero = Decimal("0")
+    today = date.today()
+    out: dict[UUID, dict[str, Any]] = {
+        cid: {
+            "receivable_unpaid": zero,
+            "receivable_overdue": zero,
+            "payable_unpaid": zero,
+            "payable_overdue": zero,
+            "last_transaction_date": None,
+        }
+        for cid in contact_ids
+    }
+    if not contact_ids:
+        return {}
+
+    overdue_invoice_amt = case(
+        (Invoice.due_date < today, Invoice.base_total - Invoice.base_amount_paid),
+        else_=zero,
+    )
+    inv_rows = (
+        await session.execute(
+            select(
+                Invoice.contact_id,
+                func.coalesce(func.sum(Invoice.base_total - Invoice.base_amount_paid), zero),
+                func.coalesce(func.sum(overdue_invoice_amt), zero),
+            )
+            .where(
+                Invoice.company_id == company_id,
+                Invoice.contact_id.in_(contact_ids),
+                Invoice.status == InvoiceStatus.POSTED,
+                Invoice.archived_at.is_(None),
+            )
+            .group_by(Invoice.contact_id)
+        )
+    ).all()
+    for cid, unpaid, overdue in inv_rows:
+        out[cid]["receivable_unpaid"] = unpaid
+        out[cid]["receivable_overdue"] = overdue
+
+    overdue_bill_amt = case(
+        (Bill.due_date < today, Bill.base_total - Bill.base_amount_paid),
+        else_=zero,
+    )
+    bill_rows = (
+        await session.execute(
+            select(
+                Bill.contact_id,
+                func.coalesce(func.sum(Bill.base_total - Bill.base_amount_paid), zero),
+                func.coalesce(func.sum(overdue_bill_amt), zero),
+            )
+            .where(
+                Bill.company_id == company_id,
+                Bill.contact_id.in_(contact_ids),
+                Bill.status == BillStatus.POSTED,
+                Bill.archived_at.is_(None),
+            )
+            .group_by(Bill.contact_id)
+        )
+    ).all()
+    for cid, unpaid, overdue in bill_rows:
+        out[cid]["payable_unpaid"] = unpaid
+        out[cid]["payable_overdue"] = overdue
+
+    # last_transaction_date: max date across POSTED invoices, bills,
+    # expenses and payments for the contact — one grouped query per source
+    # (four total), never per-contact.
+    last_seen: dict[UUID, date] = {}
+
+    def _fold(rows: list[tuple[UUID, date | None]]) -> None:
+        for cid, dt in rows:
+            if dt is None:
+                continue
+            if cid not in last_seen or dt > last_seen[cid]:
+                last_seen[cid] = dt
+
+    _fold(list(
+        (await session.execute(
+            select(Invoice.contact_id, func.max(Invoice.issue_date))
+            .where(
+                Invoice.company_id == company_id,
+                Invoice.contact_id.in_(contact_ids),
+                Invoice.status == InvoiceStatus.POSTED,
+                Invoice.archived_at.is_(None),
+            )
+            .group_by(Invoice.contact_id)
+        )).all()
+    ))
+    _fold(list(
+        (await session.execute(
+            select(Bill.contact_id, func.max(Bill.issue_date))
+            .where(
+                Bill.company_id == company_id,
+                Bill.contact_id.in_(contact_ids),
+                Bill.status == BillStatus.POSTED,
+                Bill.archived_at.is_(None),
+            )
+            .group_by(Bill.contact_id)
+        )).all()
+    ))
+    _fold(list(
+        (await session.execute(
+            select(Expense.contact_id, func.max(Expense.expense_date))
+            .where(
+                Expense.company_id == company_id,
+                Expense.contact_id.in_(contact_ids),
+                Expense.status == ExpenseStatus.POSTED,
+                Expense.archived_at.is_(None),
+            )
+            .group_by(Expense.contact_id)
+        )).all()
+    ))
+    _fold(list(
+        (await session.execute(
+            select(Payment.contact_id, func.max(Payment.payment_date))
+            .where(
+                Payment.company_id == company_id,
+                Payment.contact_id.in_(contact_ids),
+                Payment.status == PaymentStatus.POSTED,
+                Payment.archived_at.is_(None),
+            )
+            .group_by(Payment.contact_id)
+        )).all()
+    ))
+
+    for cid, dt in last_seen.items():
+        if cid in out:
+            out[cid]["last_transaction_date"] = dt
+
+    return {cid: ContactBalances(**data) for cid, data in out.items()}
+
+
 # ---------------------------------------------------------------------------
 # List
 # ---------------------------------------------------------------------------
 
 
-@router.get("", response_model=ContactListOut)
+@router.get("", response_model=ContactListWithBalancesOut)
 async def list_contacts(
     contact_type: ContactType | None = Query(default=None, alias="type"),
     search: str | None = Query(default=None, alias="q"),
+    include_balances: bool = Query(
+        default=False,
+        description=(
+            "Opt-in: attach a 'balances' object (receivable/payable "
+            "unpaid+overdue, last_transaction_date) to each contact. "
+            "Defaults to false to protect list performance — when true, "
+            "balances are computed via a constant number of grouped "
+            "queries over the page's contact ids, never one query per "
+            "contact."
+        ),
+    ),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
     company_id: UUID = Depends(get_active_company_id),
-) -> ContactListOut:
+) -> JSONResponse:
     # Count (matches filter minus limit/offset).
     count_stmt = (
         select(func.count())
@@ -134,12 +315,26 @@ async def list_contacts(
         limit=limit,
         offset=offset,
     )
-    return ContactListOut(
-        items=[ContactOut.model_validate(c) for c in items],
-        total=total,
-        limit=limit,
-        offset=offset,
-    )
+
+    out_items: list[dict[str, Any]] = [
+        json.loads(ContactOut.model_validate(c).model_dump_json()) for c in items
+    ]
+    if include_balances and items:
+        balances_by_id = await _compute_contact_balances(
+            session, company_id, [c.id for c in items]
+        )
+        for item, contact in zip(out_items, items, strict=True):
+            balances = balances_by_id.get(contact.id)
+            item["balances"] = (
+                json.loads(balances.model_dump_json()) if balances is not None else None
+            )
+
+    return JSONResponse({
+        "items": out_items,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -179,18 +374,32 @@ async def bulk_tag_one_off(
     return {"flipped": flipped}
 
 
-@router.get("/{contact_id}", response_model=ContactOut)
+@router.get("/{contact_id}", response_model=ContactWithBalancesOut)
 async def get_contact(
     contact_id: UUID,
     request: Request,
+    include_balances: bool = Query(
+        default=False,
+        description=(
+            "Opt-in: attach a 'balances' object (receivable/payable "
+            "unpaid+overdue, last_transaction_date) to the response. "
+            "Defaults to false — see GET /contacts for the same param on "
+            "the list route."
+        ),
+    ),
     session: AsyncSession = Depends(get_session),
     company_id: UUID = Depends(get_active_company_id),
-) -> ContactOut:
+) -> JSONResponse:
     tenant_id = resolve_tenant_id(request)
     contact = await svc.get(session, contact_id, tenant_id=tenant_id, company_id=company_id)
     if contact is None:
         raise HTTPException(404, "Contact not found")
-    return ContactOut.model_validate(contact)
+    body = _dump(contact)
+    if include_balances:
+        balances_by_id = await _compute_contact_balances(session, company_id, [contact.id])
+        balances = balances_by_id.get(contact.id)
+        body["balances"] = json.loads(balances.model_dump_json()) if balances is not None else None
+    return JSONResponse(body)
 
 
 # ---------------------------------------------------------------------------

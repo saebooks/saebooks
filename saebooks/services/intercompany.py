@@ -64,22 +64,43 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from saebooks.config import Settings
+from saebooks.config import settings as _default_settings
 from saebooks.models.account import Account
 from saebooks.models.ic import (
     IcEdge,
     IcEdgeDirection,
+    IcEdgeRelayStatus,
+    IcEdgeTopology,
+    IcInbox,
+    IcInboxStatus,
     IcLeg,
     IcLegSide,
+    IcOutbox,
+    IcOutboxStatus,
     IcTxn,
     IcTxnStatus,
 )
 from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine, JournalOrigin
 from saebooks.services import journal as journal_svc
+from saebooks.services.ic_relay import keys as relay_keys
+from saebooks.services.ic_relay import protocol as relay_protocol
+from saebooks.services.ic_relay import signing as relay_signing
 from saebooks.services.journal import PostingError
 
 
 class IntercompanyError(Exception):
     """Raised when an intercompany pair cannot be assembled or posted."""
+
+
+class RemoteRelayDisabled(IntercompanyError):
+    """Raised when a REMOTE edge is posted while the relay flag is OFF.
+
+    The default-off ``SAEBOOKS_IC_REMOTE_RELAY_ENABLED`` flag (plan D4) is the
+    primary reversibility lever: a REMOTE post is refused entirely (no local
+    leg, no outbox row) until Richard signs off a per-stack go-live. LOCAL
+    (same-tenant) posting is never affected by this flag.
+    """
 
 
 async def _resolve_edge(
@@ -248,8 +269,7 @@ async def post_local_pair(
             "Originator and counterparty must be different companies"
         )
 
-    # Resolve both ends of the reciprocal edge. Each side declares its own
-    # control account; both must exist or nothing posts.
+    # Resolve the originator edge FIRST — its topology decides LOCAL vs REMOTE.
     orig_edge = await _resolve_edge(
         session,
         tenant_id=tenant_id,
@@ -257,6 +277,20 @@ async def post_local_pair(
         partner_company_id=counterparty_company_id,
         direction=IcEdgeDirection.ORIGINATOR,
     )
+
+    # REMOTE seam (Phase 3c): a REMOTE edge's partner lives in a DIFFERENT
+    # tenant DB — there is NO shared transaction across two Postgres servers and
+    # NO local counterparty edge to resolve. We branch into the broker outbox
+    # path: post ONLY the originator leg + an ic_outbox row in THIS one local
+    # txn; a dispatcher then relays a signed payload to the partner stack's
+    # /ic/accept. ``post_local_pair`` is reserved for same-tenant pairs.
+    if orig_edge.topology == IcEdgeTopology.REMOTE:
+        raise IntercompanyError(
+            "Originator edge is REMOTE — use post_remote_originator (the LOCAL "
+            "post_local_pair primitive cannot span two tenant DBs)"
+        )
+
+    # LOCAL: resolve the reciprocal counterparty edge too. Both must exist.
     cpty_edge = await _resolve_edge(
         session,
         tenant_id=tenant_id,
@@ -278,14 +312,6 @@ async def post_local_pair(
         company_id=counterparty_company_id,
         account_id=counterparty_contra_account_id,
     )
-
-    # TODO(remote-relay): if either edge were a REMOTE partner (partner in a
-    # different tenant stack / DB — e.g. the real personal<->primary directors-
-    # loan edge), this single-transaction primitive CANNOT be used. Phase 3
-    # branches here into the broker outbox path: post ONLY the originator leg +
-    # an ic_outbox row in this local txn, then a dispatcher relays a signed
-    # payload to the partner stack's /ic/accept. There is no cross-DB shared
-    # transaction. Phase 1 covers same-tenant pairs only.
 
     # The shared economic event.
     ic_txn = IcTxn(
@@ -366,6 +392,292 @@ async def post_local_pair(
     # together or not at all.
     await session.commit()
     return ic_txn
+
+
+async def post_remote_originator(
+    session: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    originator_company_id: uuid.UUID,
+    edge_id: uuid.UUID,
+    amount: Decimal,
+    entry_date: date,
+    description: str | None = None,
+    posted_by: str | None = None,
+    settings: Settings | None = None,
+) -> tuple[IcTxn, IcOutbox]:
+    """Post the ORIGINATOR leg of a REMOTE intercompany event + an outbox row.
+
+    The cross-DB analogue of ``post_local_pair`` for the originator side. In ONE
+    local transaction it: mints the shared ``ic_txn_id``, posts the originator
+    local leg (Dr the edge control account / Cr the contra), links one
+    ``IcLeg`` (ORIGINATOR), and writes one ``ic_outbox`` row carrying the signed
+    canonical payload. The local books are CORRECT AND FINAL on commit,
+    regardless of whether the partner is reachable — a dispatcher relays the
+    outbox row asynchronously.
+
+    Gated by ``SAEBOOKS_IC_REMOTE_RELAY_ENABLED`` (default OFF): with the flag
+    off this raises :class:`RemoteRelayDisabled` BEFORE any write, so a REMOTE
+    edge is fully inert until a named go-live (plan D4). The edge must also be
+    ``topology=REMOTE`` and ``relay_status=ACTIVE`` (only the authoriser flow,
+    holding grants on both tenants, can set ACTIVE — §4.1).
+
+    No account ids cross the wire (§4.3): the payload carries only the amount,
+    date, ids, nonce and freshness anchor. GST is structurally absent — the
+    control account is balance-sheet, so ``auto_post_gst_lines`` is a no-op.
+    """
+    cfg = settings if settings is not None else _default_settings
+    if not cfg.ic_remote_relay_enabled:
+        raise RemoteRelayDisabled(
+            "remote relay disabled — SAEBOOKS_IC_REMOTE_RELAY_ENABLED is off; "
+            "no REMOTE intercompany leg or outbox row was written"
+        )
+    if amount <= Decimal("0"):
+        raise IntercompanyError("Intercompany amount must be positive")
+
+    edge = (
+        await session.execute(
+            select(IcEdge).where(
+                IcEdge.id == edge_id,
+                IcEdge.tenant_id == tenant_id,
+                IcEdge.company_id == originator_company_id,
+                IcEdge.direction == IcEdgeDirection.ORIGINATOR,
+            )
+        )
+    ).scalar_one_or_none()
+    if edge is None:
+        raise IntercompanyError("No ORIGINATOR intercompany edge for this company")
+    if edge.topology != IcEdgeTopology.REMOTE:
+        raise IntercompanyError("Edge is not a REMOTE edge")
+    if edge.relay_status != IcEdgeRelayStatus.ACTIVE:
+        raise IntercompanyError(
+            "REMOTE edge is not ACTIVE — it has not been authorised for relay"
+        )
+    if edge.partner_tenant_id is None or edge.relay_privkey_ciphertext is None:
+        raise IntercompanyError(
+            "REMOTE edge is missing partner tenant / signing key (not enabled)"
+        )
+    if edge.relay_contra_account_id is None:
+        raise IntercompanyError(
+            "REMOTE edge has no contra (bank/clearing) account declared"
+        )
+
+    # Both accounts come from the edge row — NO account id crosses the wire.
+    originator_contra_account_id = edge.relay_contra_account_id
+    await _assert_account_owned(
+        session,
+        tenant_id=tenant_id,
+        company_id=originator_company_id,
+        account_id=originator_contra_account_id,
+    )
+
+    # Shared event id, chosen by the originator and carried in the payload.
+    ic_txn = IcTxn(
+        tenant_id=tenant_id,
+        company_id=originator_company_id,
+        description=description,
+        status=IcTxnStatus.ACTIVE,
+    )
+    session.add(ic_txn)
+    await session.flush()
+
+    # Originator leg: Dr control (due-from) / Cr contra. Same sign convention
+    # as the LOCAL path's originator side.
+    orig_entry = await _build_leg_draft(
+        session,
+        tenant_id=tenant_id,
+        company_id=originator_company_id,
+        entry_date=entry_date,
+        description=description,
+        control_account_id=edge.control_account_id,
+        contra_account_id=originator_contra_account_id,
+        amount=amount,
+        debit_control=True,
+    )
+    await journal_svc.post_in_txn(
+        session,
+        orig_entry.id,
+        posted_by=posted_by,
+        tenant_id=tenant_id,
+        origin=JournalOrigin.INTERCOMPANY,
+        source_type="ic_txn",
+        source_id=ic_txn.id,
+    )
+    session.add(
+        IcLeg(
+            tenant_id=tenant_id,
+            company_id=originator_company_id,
+            ic_txn_id=ic_txn.id,
+            journal_entry_id=orig_entry.id,
+            side=IcLegSide.ORIGINATOR,
+        )
+    )
+
+    # Build + sign the canonical payload, then stage the outbox row in the SAME
+    # txn so the local leg and the relay intent land atomically.
+    nonce = uuid.uuid4()
+    payload = relay_protocol.build_payload(
+        ic_txn_id=ic_txn.id,
+        edge_id=edge.id,
+        src_tenant_id=tenant_id,
+        dst_tenant_id=edge.partner_tenant_id,
+        amount=amount,
+        entry_date=entry_date,
+        description=description,
+        nonce=nonce,
+    )
+    private_raw = relay_keys.unwrap_private_key(
+        edge.relay_privkey_ciphertext.decode("ascii")
+        if isinstance(edge.relay_privkey_ciphertext, (bytes, bytearray))
+        else edge.relay_privkey_ciphertext,
+        settings=cfg,
+    )
+    signature = relay_signing.sign(
+        relay_signing.canonical_payload(payload), private_raw
+    )
+    outbox = IcOutbox(
+        tenant_id=tenant_id,
+        company_id=originator_company_id,
+        ic_txn_id=ic_txn.id,
+        edge_id=edge.id,
+        idempotency_key=ic_txn.id,
+        nonce=nonce,
+        payload_json=payload,
+        signature=signature,
+        status=IcOutboxStatus.PENDING,
+    )
+    session.add(outbox)
+
+    # Single commit — originator leg + ic_leg + ic_outbox land together or not
+    # at all. The reciprocal leg is the partner's job, relayed asynchronously.
+    await session.commit()
+    return ic_txn, outbox
+
+
+async def accept_remote_counterparty(
+    session: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    edge_id: uuid.UUID,
+    ic_txn_id: uuid.UUID,
+    nonce: uuid.UUID,
+    amount: Decimal,
+    entry_date: date,
+    description: str | None,
+    payload_json: dict[str, object],
+    signature: bytes,
+    posted_by: str | None = None,
+) -> IcTxn:
+    """Post the COUNTERPARTY reciprocal leg of a RECEIVED REMOTE event + inbox.
+
+    Called by the ``/ic/accept`` webhook AFTER it has verified the per-edge
+    token, the Ed25519 signature, freshness, and routing (dst_tenant == self).
+    In ONE local txn it: mints a NEW local ``ic_txn`` (carrying the
+    originator-chosen ``ic_txn_id`` only on the inbox row as the external link),
+    posts the reciprocal leg (Cr the edge control account / Dr the contra),
+    links one ``IcLeg`` (COUNTERPARTY), and writes the ``ic_inbox`` audit row
+    (status POSTED, journal_entry_id set).
+
+    Idempotency / replay are enforced by the DB: ``UNIQUE(tenant_id,
+    ic_txn_id)`` and ``UNIQUE(tenant_id, nonce)`` on ``ic_inbox``. A duplicate
+    delivery hits one of those and the caller catches the IntegrityError to
+    return the prior ack WITHOUT posting again. This function assumes the
+    caller has already done the dedupe pre-check; the unique constraints are the
+    last-line race guard.
+
+    The account NEVER comes from the wire — it is the receiver's OWN
+    ``counterparty_contra_account_id`` plus the edge-declared control account
+    (§4.3). GST is structurally absent (balance-sheet control account).
+    """
+    edge = (
+        await session.execute(
+            select(IcEdge).where(
+                IcEdge.id == edge_id,
+                IcEdge.tenant_id == tenant_id,
+                IcEdge.direction == IcEdgeDirection.COUNTERPARTY,
+            )
+        )
+    ).scalar_one_or_none()
+    if edge is None:
+        raise IntercompanyError("No COUNTERPARTY intercompany edge for this tenant")
+    if edge.topology != IcEdgeTopology.REMOTE:
+        raise IntercompanyError("Edge is not a REMOTE edge")
+    if edge.relay_status != IcEdgeRelayStatus.ACTIVE:
+        raise IntercompanyError("REMOTE edge is not ACTIVE")
+    if amount <= Decimal("0"):
+        raise IntercompanyError("Intercompany amount must be positive")
+    if edge.relay_contra_account_id is None:
+        raise IntercompanyError(
+            "REMOTE edge has no contra (bank/clearing) account declared"
+        )
+
+    # Both accounts come from the receiver's OWN edge — the wire carries none.
+    counterparty_contra_account_id = edge.relay_contra_account_id
+    await _assert_account_owned(
+        session,
+        tenant_id=tenant_id,
+        company_id=edge.company_id,
+        account_id=counterparty_contra_account_id,
+    )
+
+    local_txn = IcTxn(
+        tenant_id=tenant_id,
+        company_id=edge.company_id,
+        description=description,
+        status=IcTxnStatus.ACTIVE,
+    )
+    session.add(local_txn)
+    await session.flush()
+
+    # Counterparty leg: Cr control (due-to) / Dr contra.
+    cpty_entry = await _build_leg_draft(
+        session,
+        tenant_id=tenant_id,
+        company_id=edge.company_id,
+        entry_date=entry_date,
+        description=description,
+        control_account_id=edge.control_account_id,
+        contra_account_id=counterparty_contra_account_id,
+        amount=amount,
+        debit_control=False,
+    )
+    await journal_svc.post_in_txn(
+        session,
+        cpty_entry.id,
+        posted_by=posted_by,
+        tenant_id=tenant_id,
+        origin=JournalOrigin.INTERCOMPANY,
+        source_type="ic_txn",
+        source_id=local_txn.id,
+    )
+    session.add(
+        IcLeg(
+            tenant_id=tenant_id,
+            company_id=edge.company_id,
+            ic_txn_id=local_txn.id,
+            journal_entry_id=cpty_entry.id,
+            side=IcLegSide.COUNTERPARTY,
+        )
+    )
+
+    # Inbox audit row: ic_txn_id is the ORIGINATOR-chosen external id (the
+    # idempotency key); the UNIQUE constraints are the last-line replay guard.
+    inbox = IcInbox(
+        tenant_id=tenant_id,
+        company_id=edge.company_id,
+        ic_txn_id=ic_txn_id,
+        edge_id=edge.id,
+        nonce=nonce,
+        payload_json=payload_json,
+        signature=signature,
+        journal_entry_id=cpty_entry.id,
+        status=IcInboxStatus.POSTED,
+    )
+    session.add(inbox)
+
+    # Single commit — reciprocal leg + ic_leg + ic_inbox land together.
+    await session.commit()
+    return local_txn
 
 
 async def reverse_local_pair(

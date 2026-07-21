@@ -14,10 +14,12 @@ Covers:
 from __future__ import annotations
 
 import uuid
+from datetime import date
 from decimal import Decimal
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
 
 from saebooks.api.v1.auth import DEFAULT_TENANT_ID, current_token
@@ -97,14 +99,19 @@ async def _get_company_id() -> uuid.UUID:
 
 
 async def _get_expense_account_id() -> uuid.UUID:
-    """Return an EXPENSE account ID."""
+    """Return an EXPENSE account ID from the SAME company _get_company_id()
+    returns — the multi-jurisdiction seed now carries more than one company, so
+    an unscoped pick can return a foreign-company account and violate the
+    journal_lines (account_id, company_id) FK."""
+    company_id = await _get_company_id()
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(Account).where(
+                Account.company_id == company_id,
                 Account.archived_at.is_(None),
                 Account.account_type == AccountType.EXPENSE,
                 Account.is_header.is_(False),
-            ).limit(1)
+            ).order_by(Account.code).limit(1)
         )
         account = result.scalars().first()
     assert account is not None, "Test DB has no EXPENSE account"
@@ -115,11 +122,17 @@ async def _get_expense_account_id() -> uuid.UUID:
 async def posted_entry_for_bsl(
     unmatched_bsl_id: str,
     bank_account_id: str,
-) -> str:
+):
     """Create a POSTED journal entry whose bank line matches the BSL amount (250.00 debit).
 
     The BSL has amount=250.00 (deposit), so the matching entry needs a debit of
     250.00 to the bank account.
+
+    Teardown deletes the JournalEntry (its lines cascade via
+    ``journal_lines.entry_id`` ON DELETE CASCADE) — without this the credit
+    side leaks a permanent -250.00 into the shared default company's expense
+    account for any report covering 2026-04-01, exactly the residue pattern
+    this branch exists to remove.
     """
     company_id = await _get_company_id()
     expense_id = await _get_expense_account_id()
@@ -158,7 +171,14 @@ async def posted_entry_for_bsl(
             credit=Decimal("250.00"),
         ))
         await session.commit()
-        return str(entry.id)
+        entry_id = entry.id
+
+    try:
+        yield str(entry_id)
+    finally:
+        async with AsyncSessionLocal() as session:
+            await session.execute(sa_delete(JournalEntry).where(JournalEntry.id == entry_id))
+            await session.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +264,90 @@ async def test_reconciliation_unmatched_with_data(
         assert item["status"] == "UNMATCHED"
 
 
+async def test_reconciliation_unmatched_pagination(
+    api_client: AsyncClient,
+) -> None:
+    """limit/offset page through the unmatched set in txn_date order; the
+    body stays a bare array and X-Total-Count carries the unpaginated total."""
+    payload = {
+        "code": f"PAG-{uuid.uuid4().hex[:8].upper()}",
+        "name": "Pagination Recon Account",
+        "bsb": "064-111",
+        "bank_account_number": "99887766",
+        "bank_account_title": "Pagination",
+    }
+    r = await api_client.post("/api/v1/bank_accounts", json=payload)
+    assert r.status_code == 201, r.text
+    account_id = r.json()["id"]
+
+    for day in range(1, 6):
+        r = await api_client.post(
+            "/api/v1/bank_statement_lines",
+            json={
+                "account_id": account_id,
+                "txn_date": f"2026-05-{day:02d}",
+                "amount": f"{day}.00",
+                "description": f"Pagination line {day}",
+                "status": "UNMATCHED",
+            },
+        )
+        assert r.status_code == 201, r.text
+
+    # Legacy shape: no limit → full set, bare array, total header present
+    r = await api_client.get(
+        "/api/v1/reconciliation/unmatched", params={"account_id": account_id}
+    )
+    assert r.status_code == 200, r.text
+    full = r.json()
+    assert isinstance(full, list)
+    assert len(full) == 5
+    assert r.headers["X-Total-Count"] == "5"
+
+    # First page
+    r = await api_client.get(
+        "/api/v1/reconciliation/unmatched",
+        params={"account_id": account_id, "limit": 2},
+    )
+    assert r.status_code == 200, r.text
+    page1 = r.json()
+    assert [item["id"] for item in page1] == [item["id"] for item in full[:2]]
+    assert r.headers["X-Total-Count"] == "5"
+
+    # Second page
+    r = await api_client.get(
+        "/api/v1/reconciliation/unmatched",
+        params={"account_id": account_id, "limit": 2, "offset": 2},
+    )
+    assert r.status_code == 200, r.text
+    page2 = r.json()
+    assert [item["id"] for item in page2] == [item["id"] for item in full[2:4]]
+
+    # Offset past the end → empty page, total unchanged
+    r = await api_client.get(
+        "/api/v1/reconciliation/unmatched",
+        params={"account_id": account_id, "limit": 2, "offset": 10},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json() == []
+    assert r.headers["X-Total-Count"] == "5"
+
+
+async def test_reconciliation_unmatched_pagination_validation(
+    api_client: AsyncClient, bank_account_id: str
+) -> None:
+    """Out-of-range limit/offset values are rejected with 422."""
+    for params in (
+        {"limit": 0},
+        {"limit": 501},
+        {"offset": -1},
+    ):
+        r = await api_client.get(
+            "/api/v1/reconciliation/unmatched",
+            params={"account_id": bank_account_id, **params},
+        )
+        assert r.status_code == 422, (params, r.text)
+
+
 async def test_reconciliation_unmatched_excludes_matched(
     api_client: AsyncClient, bank_account_id: str, unmatched_bsl_id: str,
     posted_entry_for_bsl: str,
@@ -303,6 +407,161 @@ async def test_reconciliation_suggest_returns_candidate(
         assert "entry_date" in entry
         assert "status" in entry
         assert entry["status"] == "POSTED"
+        # R8a — additive scoring fields on every candidate.
+        assert "confidence" in entry
+        assert "match_reason" in entry
+        assert "rule_id" in entry
+
+
+# ---------------------------------------------------------------------------
+# R8a — suggest confidence scoring
+# ---------------------------------------------------------------------------
+
+
+async def test_reconciliation_suggest_scores_amount_and_date_medium(
+    api_client: AsyncClient, unmatched_bsl_id: str, posted_entry_for_bsl: str
+) -> None:
+    """Same-date, no-reference candidate scores MEDIUM / AMOUNT_AND_DATE.
+
+    ``posted_entry_for_bsl`` shares the BSL's txn_date (2026-04-01) with no
+    reference overlap and no bank rule in play — the canonical
+    AMOUNT_AND_DATE fixture.
+    """
+    r = await api_client.get(f"/api/v1/reconciliation/suggest/{unmatched_bsl_id}")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    match = next(e for e in body if e["id"] == posted_entry_for_bsl)
+    assert match["confidence"] == "MEDIUM"
+    assert match["match_reason"] == "AMOUNT_AND_DATE"
+    assert match["rule_id"] is None
+
+
+async def test_reconciliation_suggest_scores_exact_amount_low(
+    api_client: AsyncClient, bank_account_id: str, posted_entry_factory,
+) -> None:
+    """A candidate with a distant date and no reference overlap scores LOW /
+    EXACT_AMOUNT — the weakest tier, amount agreement only."""
+    r = await api_client.post(
+        "/api/v1/bank_statement_lines",
+        json={
+            "account_id": bank_account_id,
+            "txn_date": "2026-04-10",
+            "amount": "333.00",
+            "description": "Miscellaneous receipt",
+            "status": "UNMATCHED",
+        },
+    )
+    assert r.status_code == 201, r.text
+    bsl_id = r.json()["id"]
+
+    entry_id = await posted_entry_factory(
+        account_id=bank_account_id,
+        amount=Decimal("333.00"),
+        entry_date=date(2026, 6, 15),  # far outside the date-proximity window
+        ref=f"FARDATE-{uuid.uuid4().hex[:6].upper()}",
+        description="Unrelated posting",
+    )
+
+    r2 = await api_client.get(f"/api/v1/reconciliation/suggest/{bsl_id}")
+    assert r2.status_code == 200, r2.text
+    match = next(e for e in r2.json() if e["id"] == entry_id)
+    assert match["confidence"] == "LOW"
+    assert match["match_reason"] == "EXACT_AMOUNT"
+    assert match["rule_id"] is None
+
+
+async def test_reconciliation_suggest_scores_reference_overlap_high(
+    api_client: AsyncClient, bank_account_id: str, posted_entry_factory,
+) -> None:
+    """A candidate whose description/ref contains the BSL's reference scores
+    HIGH / AMOUNT_AND_REFERENCE, even with a far-off date."""
+    r = await api_client.post(
+        "/api/v1/bank_statement_lines",
+        json={
+            "account_id": bank_account_id,
+            "txn_date": "2026-04-11",
+            "amount": "888.00",
+            "description": "Settlement",
+            "reference": "REFHIGH-9999",
+            "status": "UNMATCHED",
+        },
+    )
+    assert r.status_code == 201, r.text
+    bsl_id = r.json()["id"]
+
+    entry_id = await posted_entry_factory(
+        account_id=bank_account_id,
+        amount=Decimal("888.00"),
+        entry_date=date(2026, 7, 1),
+        ref="REFHIGH-9999",
+        description="Payment against REFHIGH-9999",
+    )
+
+    r2 = await api_client.get(f"/api/v1/reconciliation/suggest/{bsl_id}")
+    assert r2.status_code == 200, r2.text
+    match = next(e for e in r2.json() if e["id"] == entry_id)
+    assert match["confidence"] == "HIGH"
+    assert match["match_reason"] == "AMOUNT_AND_REFERENCE"
+    assert match["rule_id"] is None
+
+
+async def test_reconciliation_suggest_scores_rule_pattern_high(
+    api_client: AsyncClient, bank_account_id: str, posted_entry_factory,
+) -> None:
+    """A bank rule matching the BSL description scores HIGH / RULE_PATTERN
+    with ``rule_id`` set — the most specific signal, outranking a plain
+    reference overlap."""
+    from saebooks.services import bank_rules as bank_rules_svc
+
+    company_id = await _get_company_id()
+    expense_id = await _get_expense_account_id()
+
+    unique_pattern = f"RULEPAT-{uuid.uuid4().hex[:8].upper()}"
+    async with AsyncSessionLocal() as session:
+        rule = await bank_rules_svc.create(
+            session,
+            company_id,
+            name=f"R8a rule {unique_pattern}",
+            match_pattern=unique_pattern,
+            account_id=expense_id,
+        )
+        rule_id = str(rule.id)
+
+    try:
+        r = await api_client.post(
+            "/api/v1/bank_statement_lines",
+            json={
+                "account_id": bank_account_id,
+                "txn_date": "2026-04-12",
+                "amount": "222.00",
+                "description": f"{unique_pattern} monthly charge",
+                "status": "UNMATCHED",
+            },
+        )
+        assert r.status_code == 201, r.text
+        bsl_id = r.json()["id"]
+
+        entry_id = await posted_entry_factory(
+            account_id=bank_account_id,
+            amount=Decimal("222.00"),
+            entry_date=date(2026, 9, 1),
+            ref=f"NOOVERLAP-{uuid.uuid4().hex[:6].upper()}",
+            description="Unrelated description",
+        )
+
+        r2 = await api_client.get(f"/api/v1/reconciliation/suggest/{bsl_id}")
+        assert r2.status_code == 200, r2.text
+        match = next(e for e in r2.json() if e["id"] == entry_id)
+        assert match["confidence"] == "HIGH"
+        assert match["match_reason"] == "RULE_PATTERN"
+        assert match["rule_id"] == rule_id
+    finally:
+        # This file's own BankRule leak — the seeded default company
+        # otherwise accumulates one throwaway rule per run forever.
+        from saebooks.models.bank_rule import BankRule
+        async with AsyncSessionLocal() as session:
+            await session.execute(sa_delete(BankRule).where(BankRule.id == uuid.UUID(rule_id)))
+            await session.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -426,26 +685,194 @@ async def test_reconciliation_auto_match_returns_count(
     assert body["matched"] == 0
 
 
-async def test_reconciliation_auto_match_matches_line(
+async def test_reconciliation_auto_match_skips_medium_confidence_candidate(
     api_client: AsyncClient,
     unmatched_bsl_id: str,
     bank_account_id: str,
     posted_entry_for_bsl: str,
 ) -> None:
-    """POST /auto_match matches the unmatched BSL to the candidate entry."""
+    """R8d — a same-date, no-reference candidate scores MEDIUM (AMOUNT_AND_DATE),
+    not HIGH, so auto_match does NOT link it. This inverts the pre-R8 greedy
+    behaviour deliberately (see design note R8d) — auto_match only links when
+    exactly one candidate scores HIGH confidence.
+    """
     r = await api_client.post(
         "/api/v1/reconciliation/auto_match", params={"account_id": bank_account_id}
     )
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["matched"] >= 1
+    assert body["matched"] == 0
+    assert body["skipped_no_candidate"] >= 1
 
-    # Verify the BSL is now MATCHED
+    # BSL stays UNMATCHED — a MEDIUM-confidence candidate is not enough.
     async with AsyncSessionLocal() as session:
         bsl = await session.get(BankStatementLine, uuid.UUID(unmatched_bsl_id))
     assert bsl is not None
+    assert bsl.status == StatementLineStatus.UNMATCHED
+    assert bsl.matched_entry_id is None
+
+
+async def _create_posted_entry_for_line(
+    *,
+    account_id: str,
+    amount: Decimal,
+    entry_date,
+    ref: str,
+    description: str,
+) -> str:
+    """Create a POSTED journal entry whose bank-account leg matches ``amount``
+    (positive=debit/deposit, negative=credit/withdrawal) at ``account_id``.
+    """
+    company_id = await _get_company_id()
+    expense_id = await _get_expense_account_id()
+
+    async with AsyncSessionLocal() as session:
+        entry = JournalEntry(
+            id=uuid.uuid4(),
+            company_id=company_id,
+            tenant_id=DEFAULT_TENANT_ID,
+            ref=ref,
+            entry_date=entry_date,
+            description=description,
+            status=EntryStatus.POSTED,
+        )
+        session.add(entry)
+        await session.flush()
+
+        if amount >= 0:
+            bank_debit, bank_credit = abs(amount), Decimal("0")
+            other_debit, other_credit = Decimal("0"), abs(amount)
+        else:
+            bank_debit, bank_credit = Decimal("0"), abs(amount)
+            other_debit, other_credit = abs(amount), Decimal("0")
+
+        session.add(JournalLine(
+            entry_id=entry.id, line_no=1, account_id=uuid.UUID(account_id),
+            debit=bank_debit, credit=bank_credit,
+        ))
+        session.add(JournalLine(
+            entry_id=entry.id, line_no=2, account_id=expense_id,
+            debit=other_debit, credit=other_credit,
+        ))
+        await session.commit()
+        return str(entry.id)
+
+
+@pytest.fixture
+async def posted_entry_factory():
+    """Factory wrapping ``_create_posted_entry_for_line`` with teardown.
+
+    Every one of this file's ``_create_posted_entry_for_line`` call sites
+    posts a real credit (or debit) to the shared default company's EXPENSE
+    account, several dated in real-looking months (2026-05, 2026-06, etc)
+    that other tests/report queries scan over. None of the 5 call sites
+    tore the entry down, so the credit side permanently skewed that
+    account's balance for any report covering the same window (confirmed:
+    this is what broke ``test_reports_financial.py::test_pnl_expense_line``
+    when this file ran in the same session). Delete the JournalEntry on
+    teardown — its lines cascade via ``journal_lines.entry_id`` ON DELETE
+    CASCADE.
+    """
+    created: list[uuid.UUID] = []
+
+    async def _make(**kwargs) -> str:
+        entry_id = await _create_posted_entry_for_line(**kwargs)
+        created.append(uuid.UUID(entry_id))
+        return entry_id
+
+    try:
+        yield _make
+    finally:
+        if created:
+            async with AsyncSessionLocal() as session:
+                await session.execute(sa_delete(JournalEntry).where(JournalEntry.id.in_(created)))
+                await session.commit()
+
+
+async def test_reconciliation_auto_match_matches_high_confidence_reference(
+    api_client: AsyncClient, bank_account_id: str, posted_entry_factory,
+) -> None:
+    """A candidate whose ref/description contains the BSL's reference scores
+    HIGH (AMOUNT_AND_REFERENCE) and, being the ONLY high-confidence candidate,
+    gets auto-matched.
+    """
+    r = await api_client.post(
+        "/api/v1/bank_statement_lines",
+        json={
+            "account_id": bank_account_id,
+            "txn_date": "2026-04-20",
+            "amount": "777.00",
+            "description": "Settlement",
+            "reference": "INV-9001",
+            "status": "UNMATCHED",
+        },
+    )
+    assert r.status_code == 201, r.text
+    bsl_id = r.json()["id"]
+
+    entry_id = await posted_entry_factory(
+        account_id=bank_account_id,
+        amount=Decimal("777.00"),
+        entry_date=date(2026, 5, 1),  # deliberately NOT date-proximate
+        ref="INV-9001",
+        description="Payment against INV-9001",
+    )
+
+    r2 = await api_client.post(
+        "/api/v1/reconciliation/auto_match", params={"account_id": bank_account_id}
+    )
+    assert r2.status_code == 200, r2.text
+    body = r2.json()
+    assert body["matched"] >= 1
+
+    async with AsyncSessionLocal() as session:
+        bsl = await session.get(BankStatementLine, uuid.UUID(bsl_id))
+    assert bsl is not None
     assert bsl.status == StatementLineStatus.MATCHED
-    assert bsl.matched_entry_id == uuid.UUID(posted_entry_for_bsl)
+    assert bsl.matched_entry_id == uuid.UUID(entry_id)
+
+
+async def test_reconciliation_auto_match_skips_ambiguous_high_confidence_candidates(
+    api_client: AsyncClient, bank_account_id: str, posted_entry_factory,
+) -> None:
+    """Two candidates both score HIGH (same reference overlap) → ambiguous,
+    skipped and counted, never guessed at.
+    """
+    r = await api_client.post(
+        "/api/v1/bank_statement_lines",
+        json={
+            "account_id": bank_account_id,
+            "txn_date": "2026-04-21",
+            "amount": "444.00",
+            "description": "Settlement",
+            "reference": "INV-9002",
+            "status": "UNMATCHED",
+        },
+    )
+    assert r.status_code == 201, r.text
+    bsl_id = r.json()["id"]
+
+    for suffix in ("A", "B"):
+        await posted_entry_factory(
+            account_id=bank_account_id,
+            amount=Decimal("444.00"),
+            entry_date=date(2026, 5, 2),
+            ref=f"AMB-{suffix}-{uuid.uuid4().hex[:6].upper()}",
+            description="Payment against INV-9002",
+        )
+
+    r2 = await api_client.post(
+        "/api/v1/reconciliation/auto_match", params={"account_id": bank_account_id}
+    )
+    assert r2.status_code == 200, r2.text
+    body = r2.json()
+    assert body["matched"] == 0
+    assert body["skipped_ambiguous"] >= 1
+
+    async with AsyncSessionLocal() as session:
+        bsl = await session.get(BankStatementLine, uuid.UUID(bsl_id))
+    assert bsl is not None
+    assert bsl.status == StatementLineStatus.UNMATCHED
 
 
 # ---------------------------------------------------------------------------
@@ -576,26 +1003,31 @@ async def test_split_match_404_unknown_bsl(api_client: AsyncClient) -> None:
 
 
 async def _get_ar_account_id() -> uuid.UUID:
-    """Return an ASSET account that is not a bank account (for AR-like use)."""
+    """Return an ASSET account that is not a bank account (for AR-like use),
+    scoped to the SAME company _get_company_id() returns (see
+    _get_expense_account_id — foreign-company accounts break the FK)."""
+    company_id = await _get_company_id()
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(Account).where(
+                Account.company_id == company_id,
                 Account.archived_at.is_(None),
                 Account.account_type == AccountType.ASSET,
                 Account.is_header.is_(False),
                 Account.reconcile.is_(False),
-            ).limit(1)
+            ).order_by(Account.code).limit(1)
         )
         account = result.scalars().first()
     if account is None:
-        # Fall back to any asset account
+        # Fall back to any asset account in the same company
         async with AsyncSessionLocal() as session:
             result = await session.execute(
                 select(Account).where(
+                    Account.company_id == company_id,
                     Account.archived_at.is_(None),
                     Account.account_type == AccountType.ASSET,
                     Account.is_header.is_(False),
-                ).limit(1)
+                ).order_by(Account.code).limit(1)
             )
             account = result.scalars().first()
     assert account is not None, "Test DB has no ASSET account"

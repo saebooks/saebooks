@@ -105,3 +105,16 @@ class TaxReturn(CompanyScoped, Base):
             "(vatPayable/overpaidVat, errors) / koondvaade JSON."
         ),
     )
+
+    # Amendment linkage (M1.5 P1 tail). ``TaxReturnStatus.AMENDED`` already
+    # exists but had no supersedes/amended-by link — this self-FK closes
+    # that gap. Set on the NEW (correcting) return, pointing at the
+    # original it supersedes; NULL for every non-amendment return.
+    supersedes_return_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tax_returns.id", ondelete="SET NULL"),
+        comment="The original return this amendment corrects; NULL = not an amendment",
+    )
+    amendment_reason: Mapped[str | None] = mapped_column(
+        String, comment="Free-text reason for the amendment/correction"
+    )

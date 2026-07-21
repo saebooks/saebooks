@@ -63,6 +63,10 @@ class AuditAction(StrEnum):
     # Journal entry posted into a locked period via an authorised override.
     JOURNAL_OVERRIDE_POST = "journal.override_post"
 
+    # Period-lock forensics — an admin removed a lock row independent of
+    # year-end close (M3b period-locks CRUD).
+    PERIOD_LOCK_DELETE = "period_lock.delete"
+
 
 async def append(
     session: AsyncSession,

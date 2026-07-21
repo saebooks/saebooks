@@ -153,6 +153,21 @@ class FixedAsset(CompanyScoped, Base):
         comment="High-water mark for posted depreciation; NULL = never depreciated",
     )
 
+    # Acquisition-cost component breakdown (M1.5 P1 tail) — optional
+    # itemisation of ``cost`` above, which remains the sole authoritative
+    # total the depreciation/disposal math reads. NULL on every column =
+    # not itemised (every existing asset). Not enforced to sum to
+    # ``cost`` — record-keeping only.
+    purchase_price_component: Mapped[Decimal | None] = mapped_column(
+        Money(), nullable=True, comment="Base purchase price, excl. duty/installation"
+    )
+    duty_component: Mapped[Decimal | None] = mapped_column(
+        Money(), nullable=True, comment="Stamp/import duty paid on acquisition"
+    )
+    installation_component: Mapped[Decimal | None] = mapped_column(
+        Money(), nullable=True, comment="Installation/commissioning cost to bring the asset to use"
+    )
+
     # ---- Lifecycle --------------------------------------------------- #
     status: Mapped[str] = mapped_column(
         String(16),

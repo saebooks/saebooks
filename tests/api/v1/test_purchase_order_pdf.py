@@ -16,11 +16,10 @@ import respx
 from httpx import ASGITransport, AsyncClient, Response
 from sqlalchemy import select
 
-from saebooks.api.v1.auth import DEFAULT_TENANT_ID, current_token
+from saebooks.api.v1.auth import current_token
 from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.account import Account, AccountType
-from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
 
 pytestmark = pytest.mark.postgres_only
@@ -43,37 +42,33 @@ async def api_client() -> AsyncClient:
 @pytest.fixture
 async def po_deps() -> dict[str, str]:
     """Provision an EXPENSE account id + SUPPLIER contact id (self-bootstrapping)."""
+    from saebooks.services.companies import ensure_seed_company
+
     async with AsyncSessionLocal() as session:
+        # Scope to the seed company (multi-company seed → tenant-only picks can
+        # return a foreign-company account; see test_purchase_orders.po_deps).
+        company = await ensure_seed_company(session)
         expense = (
             await session.execute(
                 select(Account).where(
+                    Account.company_id == company.id,
                     Account.archived_at.is_(None),
                     Account.account_type == AccountType.EXPENSE,
-                    Account.tenant_id == DEFAULT_TENANT_ID,
-                ).limit(1)
+                ).order_by(Account.code).limit(1)
             )
         ).scalars().first()
         contact = (
             await session.execute(
                 select(Contact).where(
+                    Contact.company_id == company.id,
                     Contact.archived_at.is_(None),
-                    Contact.tenant_id == DEFAULT_TENANT_ID,
                     Contact.contact_type == ContactType.SUPPLIER,
                 ).limit(1)
             )
         ).scalars().first()
         if contact is None:
-            company = (
-                await session.execute(
-                    select(Company).where(
-                        Company.tenant_id == DEFAULT_TENANT_ID,
-                        Company.archived_at.is_(None),
-                    ).limit(1)
-                )
-            ).scalars().first()
-            assert company is not None, "Seed company missing"
             contact = Contact(
-                tenant_id=DEFAULT_TENANT_ID,
+                tenant_id=company.tenant_id,
                 company_id=company.id,
                 name="PDF Test Vendor",
                 contact_type=ContactType.SUPPLIER,

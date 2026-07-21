@@ -23,15 +23,13 @@ _DEFAULT_TENANT = uuid.UUID("00000000-0000-0000-0000-000000000001")
 class ChangeLog(Base):
     __tablename__ = "change_log"
 
-    # ``BigInteger`` autoincrement primary key. On SQLite a ``BIGINT PRIMARY
-    # KEY`` is NOT the special ``INTEGER PRIMARY KEY`` rowid alias, so inserting
-    # a NULL id does not auto-generate one and every append() would fail with a
-    # NOT NULL violation — breaking the audit trail (and therefore all
-    # service-layer record writes) on the SQLite Cashbook backend. The
-    # ``with_variant`` keeps BigInteger on Postgres (unchanged production DDL)
-    # while emitting plain INTEGER on SQLite, which becomes the auto-incrementing
-    # rowid alias. 64-bit either way, so the change_log cursor semantics are
-    # preserved.
+    # BigInteger on Postgres (sequence-backed). On SQLite a ``BIGINT PRIMARY
+    # KEY`` is NOT the special ``INTEGER PRIMARY KEY`` rowid alias, so it does
+    # not autoincrement — every change_log insert (i.e. every write on the
+    # SQLite/Community one-click) failed with "NOT NULL constraint failed:
+    # change_log.id". The Integer variant emits ``INTEGER PRIMARY KEY`` on
+    # SQLite (rowid-backed autoincrement) while leaving the Postgres DDL
+    # unchanged.
     id: Mapped[int] = mapped_column(
         BigInteger().with_variant(Integer, "sqlite"),
         primary_key=True,

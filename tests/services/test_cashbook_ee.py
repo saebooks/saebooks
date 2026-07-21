@@ -11,8 +11,11 @@ Coverage:
 - Non-registered EE company posts 2-line JEs (no KM line).
 - An EE company with a non-EUR base currency is refused with the same
   typed error code AU uses for non-AUD.
-- A jurisdiction with NO registered cashbook profile is refused
-  (preserves v1 behaviour for everything that isn't AU/EE).
+- A jurisdiction with NO registered cashbook module runs a NEUTRAL,
+  tax-free cashbook in the company's own currency (architecture: the core
+  functions with 0 jurisdiction modules) — NOT refused. Unmapped neutral
+  categories surface ``cashbook_account_unresolved`` (seed-my-chart gap),
+  not a currency error.
 - EE picker taxonomy is served by ``all_defaults("EE")`` with Estonian
   labels and EE tax codes.
 """
@@ -32,6 +35,7 @@ from saebooks.models.journal import JournalEntry
 from saebooks.models.tax_code import TaxCode
 from saebooks.services import settings as settings_svc
 from saebooks.services.cashbook import (
+    CashbookAccountResolutionError,
     CashbookCurrencyError,
     record_cashbook_entry,
 )
@@ -263,12 +267,63 @@ async def test_ee_non_eur_currency_refused() -> None:
     assert exc.value.code == "cashbook_currency_unsupported"
 
 
-async def test_unregistered_jurisdiction_refused() -> None:
+async def test_neutral_jurisdiction_tax_free_two_lines() -> None:
+    """A jurisdiction with NO cashbook module runs a neutral, tax-free
+    cashbook in the company's OWN currency (EUR here) — a 2-line JE with no
+    tax line, even for a tax_registered company. (Prior behaviour refused
+    this with cashbook_currency_unsupported; the neutral core must function
+    with 0 jurisdiction modules, so it now records tax-free.)"""
+    tenant_id, company_id, accts = await _make_ee_cashbook_company(
+        jurisdiction="DE", base_currency="EUR"
+    )
+    # Map the neutral categories onto this company's own chart — the
+    # "seed/map my chart" onboarding step (onboarding UI is out of scope).
+    async with AsyncSessionLocal() as session:
+        company = await session.get(Company, company_id)
+        company.cashbook_categories = {
+            "version": 1,
+            "overrides": {
+                "INC_SALES": {"account_id": str(accts["services"])},
+                "EXP_PURCHASES": {"account_id": str(accts["utilities"])},
+            },
+        }
+        await session.commit()
+
+    async with AsyncSessionLocal() as session:
+        entry = await record_cashbook_entry(
+            db=session,
+            tenant_id=tenant_id,
+            company_id=company_id,
+            entry_date=date(2026, 7, 14),
+            description="Verkauf",
+            amount=Decimal("100.00"),
+            direction="income",
+            category_code="INC_SALES",
+            idempotency_key=_new_key("neutral-inc"),
+            actor="pytest",
+        )
+
+    je = entry
+    assert len(je.lines) == 2  # tax-free: no VAT/GST line
+    debits, credits = _trial_balance(je)
+    assert debits == credits == Decimal("100.00")
+    income_lines = [
+        ln for ln in je.lines if ln.account_id == accts["services"]
+    ]
+    # Full gross lands on the income account — nothing skimmed for tax.
+    assert income_lines[0].credit == Decimal("100.00")
+
+
+async def test_neutral_jurisdiction_unseeded_account_unresolved() -> None:
+    """Neutral categories carry no default account code; without a
+    per-company account_id override the record is refused with
+    ``cashbook_account_unresolved`` — the seed-my-chart onboarding gap,
+    NOT a currency/jurisdiction error."""
     tenant_id, company_id, _ = await _make_ee_cashbook_company(
         jurisdiction="DE", base_currency="EUR"
     )
     async with AsyncSessionLocal() as session:
-        with pytest.raises(CashbookCurrencyError) as exc:
+        with pytest.raises(CashbookAccountResolutionError) as exc:
             await record_cashbook_entry(
                 db=session,
                 tenant_id=tenant_id,
@@ -277,11 +332,22 @@ async def test_unregistered_jurisdiction_refused() -> None:
                 description="x",
                 amount=Decimal("10.00"),
                 direction="expense",
-                category_code="EXP_UTILITIES",
-                idempotency_key=_new_key("nojuris"),
+                category_code="EXP_PURCHASES",
+                idempotency_key=_new_key("neutral-noacct"),
                 actor="pytest",
             )
-    assert exc.value.code == "cashbook_currency_unsupported"
+    assert exc.value.code == "cashbook_account_unresolved"
+
+
+def test_neutral_picker_taxonomy() -> None:
+    """A profile-less jurisdiction serves the neutral, tax-free picker."""
+    codes = [c.code for c in all_defaults("DE")]
+    assert "INC_SALES" in codes and "EXP_PURCHASES" in codes
+    inc = get_default("INC_SALES", "DE")
+    assert inc.tax_code is None and inc.gst_default == Decimal("0")
+    # AU/EE modules are unaffected by the neutral fallback.
+    assert get_default("INC_SALES").gst_default == Decimal("0.10")
+    assert get_default("INC_SERVICES", "EE").gst_default == Decimal("0.24")
 
 
 def test_ee_picker_taxonomy() -> None:

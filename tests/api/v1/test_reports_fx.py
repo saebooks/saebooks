@@ -15,7 +15,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
-from saebooks.api.v1.auth import DEFAULT_TENANT_ID, current_token
+from saebooks.api.v1.auth import current_token
 from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.account import Account, AccountType
@@ -59,28 +59,36 @@ def _set_edition_enterprise(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 async def fx_deps() -> dict[str, str]:
     """Return income account_id, expense account_id, and contact_id."""
+    from saebooks.services.companies import ensure_seed_company
+
     async with AsyncSessionLocal() as session:
+        # Scope to the seed company (multi-company seed → tenant-only picks can
+        # return a foreign-company account; see test_purchase_orders.po_deps).
+        company = await ensure_seed_company(session)
         income = (
             await session.execute(
                 select(Account).where(
+                    Account.company_id == company.id,
                     Account.archived_at.is_(None),
                     Account.account_type == AccountType.INCOME,
-                    Account.tenant_id == DEFAULT_TENANT_ID,
-                ).limit(1)
+                ).order_by(Account.code).limit(1)
             )
         ).scalars().first()
         expense = (
             await session.execute(
                 select(Account).where(
+                    Account.company_id == company.id,
                     Account.archived_at.is_(None),
                     Account.account_type == AccountType.EXPENSE,
-                    Account.tenant_id == DEFAULT_TENANT_ID,
-                ).limit(1)
+                ).order_by(Account.code).limit(1)
             )
         ).scalars().first()
         contact = (
             await session.execute(
-                select(Contact).where(Contact.archived_at.is_(None), Contact.tenant_id == DEFAULT_TENANT_ID).limit(1)
+                select(Contact).where(
+                    Contact.company_id == company.id,
+                    Contact.archived_at.is_(None),
+                ).limit(1)
             )
         ).scalars().first()
     assert income is not None, "Test DB has no INCOME account"

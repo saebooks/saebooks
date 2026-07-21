@@ -396,6 +396,90 @@ register_cashbook_profile(
 )
 
 
+# ---------------------------------------------------------------------------
+# Neutral-core fallback taxonomy (0 jurisdiction modules).
+#
+# The engine must FUNCTION with no jurisdiction module loaded for a company's
+# jurisdiction (architecture directive: bare, jurisdiction-neutral core; the
+# model always functions regardless of which/how many modules are bolted on).
+# A company whose ``jurisdiction`` has no registered cashbook profile therefore
+# gets this MINIMAL, tax-free picker instead of a hard error — the cashbook
+# runs in the company's OWN base currency (see ``cashbook._resolve_company``)
+# and posts plain two-line entries with NO tax lines.
+#
+# DESIGN DECISION (flag for product sign-off): the neutral core has no standard
+# chart of accounts, so these categories carry ``default_account_code=None``.
+# They resolve ONLY through a per-company account_id override
+# (``companies.cashbook_categories.overrides[CODE].account_id``). Until a chart
+# is mapped, recording an entry raises ``cashbook_account_unresolved`` — the
+# "seed/map my chart" onboarding gap (onboarding UI is a consumer-lane
+# feature, deliberately out of scope here). All entries are tax-free
+# (``tax_code=None``, ``gst_default=0``); a jurisdiction that later ships a
+# cashbook module with real tax mapping overrides this fallback entirely.
+# ---------------------------------------------------------------------------
+NEUTRAL_CATEGORIES: tuple[CashbookCategory, ...] = (
+    CashbookCategory(
+        code="INC_SALES",
+        label="Sales",
+        group="income",
+        direction="income",
+        default_account_code=None,
+        gst_default=Decimal("0"),
+        tax_code=None,
+        reporting_type="out_of_scope",
+        hint_text="Money received from customers.",
+    ),
+    CashbookCategory(
+        code="INC_OTHER",
+        label="Other income",
+        group="income",
+        direction="income",
+        default_account_code=None,
+        gst_default=Decimal("0"),
+        tax_code=None,
+        reporting_type="out_of_scope",
+        hint_text="Anything that doesn't fit Sales.",
+    ),
+    CashbookCategory(
+        code="EXP_PURCHASES",
+        label="Purchases",
+        group="materials",
+        direction="expense",
+        default_account_code=None,
+        gst_default=Decimal("0"),
+        tax_code=None,
+        reporting_type="out_of_scope",
+        hint_text="Goods and materials bought for the business.",
+    ),
+    CashbookCategory(
+        code="EXP_OTHER",
+        label="Other expense",
+        group="other_expense",
+        direction="expense",
+        default_account_code=None,
+        gst_default=Decimal("0"),
+        tax_code=None,
+        reporting_type="out_of_scope",
+        hint_text="Any other business expense.",
+    ),
+    CashbookCategory(
+        code="TX_TRANSFER",
+        label="Transfer between accounts",
+        group="transfer",
+        direction="transfer",
+        default_account_code=None,
+        gst_default=Decimal("0"),
+        tax_code=None,
+        reporting_type="out_of_scope",
+        hint_text="P&L-neutral. Moves money between two of your bank accounts.",
+    ),
+)
+
+_NEUTRAL_BY_CODE: dict[str, CashbookCategory] = {
+    c.code: c for c in NEUTRAL_CATEGORIES
+}
+
+
 class CashbookUnsupportedJurisdiction(KeyError):
     """Raised when a jurisdiction has no registered cashbook profile."""
 
@@ -431,11 +515,20 @@ class UnknownCashbookCategory(KeyError):
 
 def get_default(code: str, jurisdiction: str = "AU") -> CashbookCategory:
     """Look up a default category by code within a jurisdiction's profile.
-    Raise on unknown."""
+
+    A jurisdiction with no registered cashbook module falls back to the
+    neutral tax-free taxonomy (``NEUTRAL_CATEGORIES``) so the core keeps
+    functioning with zero jurisdiction modules. Raise on unknown code.
+    """
+    if jurisdiction == "AU":
+        table = _BY_CODE
+    else:
+        try:
+            table = profile_for(jurisdiction).by_code
+        except CashbookUnsupportedJurisdiction:
+            table = _NEUTRAL_BY_CODE
     try:
-        if jurisdiction == "AU":
-            return _BY_CODE[code]
-        return profile_for(jurisdiction).by_code[code]
+        return table[code]
     except KeyError as e:
         raise UnknownCashbookCategory(
             f"Unknown cashbook category code: {code!r}"
@@ -443,10 +536,17 @@ def get_default(code: str, jurisdiction: str = "AU") -> CashbookCategory:
 
 
 def all_defaults(jurisdiction: str = "AU") -> tuple[CashbookCategory, ...]:
-    """Return the canonical default list in picker order."""
+    """Return the canonical default list in picker order.
+
+    Falls back to the neutral tax-free taxonomy for a jurisdiction with no
+    registered cashbook module (zero-modules core still serves a picker).
+    """
     if jurisdiction == "AU":
         return DEFAULT_CATEGORIES
-    return profile_for(jurisdiction).categories
+    try:
+        return profile_for(jurisdiction).categories
+    except CashbookUnsupportedJurisdiction:
+        return NEUTRAL_CATEGORIES
 
 
 def resolve_for_company(

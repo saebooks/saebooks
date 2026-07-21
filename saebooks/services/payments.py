@@ -347,7 +347,10 @@ async def allocate(
 
 
 async def _refresh_invoice_amount_paid(
-    session: AsyncSession, invoice_id: uuid.UUID
+    session: AsyncSession,
+    invoice_id: uuid.UUID,
+    *,
+    expected_company_id: uuid.UUID | None = None,
 ) -> None:
     from sqlalchemy import func
     result = await session.execute(
@@ -381,6 +384,17 @@ async def _refresh_invoice_amount_paid(
 
     inv = await session.get(Invoice, invoice_id)
     if inv is not None:
+        # Defensive backstop: the primary guard lives at the credit note's
+        # api_create/api_update (rejects a cross-company original_invoice_id
+        # up front), but this raw PK fetch has no company filter of its own,
+        # so a caller must pass the expected company explicitly to catch any
+        # cross-company id that slips through (e.g. via the legacy
+        # create_draft/update_draft path, which is not guarded).
+        if expected_company_id is not None and inv.company_id != expected_company_id:
+            raise PaymentError(
+                f"Invoice {invoice_id} does not belong to company "
+                f"{expected_company_id} — refusing to update amount_paid"
+            )
         # Cap at the invoice total so an over-large credit note can't push
         # amount_paid above what was owed.
         total = min(Decimal(str(inv.total)), alloc_sum + cn_applied)
@@ -394,9 +408,18 @@ async def _refresh_invoice_amount_paid(
 
 
 async def _refresh_bill_amount_paid(
-    session: AsyncSession, bill_id: uuid.UUID
+    session: AsyncSession,
+    bill_id: uuid.UUID,
+    *,
+    expected_company_id: uuid.UUID | None = None,
 ) -> None:
     from sqlalchemy import func
+
+    from saebooks.models.supplier_credit_note import (
+        SupplierCreditNote,
+        SupplierCreditNoteStatus,
+    )
+
     result = await session.execute(
         select(func.coalesce(func.sum(PaymentAllocation.amount), 0))
         .join(Payment, PaymentAllocation.payment_id == Payment.id)
@@ -405,9 +428,39 @@ async def _refresh_bill_amount_paid(
             Payment.status == PaymentStatus.POSTED,
         )
     )
-    total = Decimal(str(result.scalar_one() or 0))
+    alloc_sum = Decimal(str(result.scalar_one() or 0))
+
+    # A posted supplier credit note linked to this bill via
+    # original_bill_id relieves the bill by its FULL total. Unlike the
+    # customer-side CreditNote, SupplierCreditNote has no
+    # amount_allocated / cash-refund path in this codebase (no
+    # payment_allocations.supplier_credit_note_id column — see
+    # models/payment.py), so there is no "consumed elsewhere" portion to
+    # net out; the whole posted CN total always relieves the bill it is
+    # linked to.
+    cn_result = await session.execute(
+        select(func.coalesce(func.sum(SupplierCreditNote.total), 0)).where(
+            SupplierCreditNote.original_bill_id == bill_id,
+            SupplierCreditNote.status == SupplierCreditNoteStatus.POSTED,
+        )
+    )
+    cn_applied = Decimal(str(cn_result.scalar_one() or 0))
+
     bill = await session.get(Bill, bill_id)
     if bill is not None:
+        # Defensive backstop: the primary guard lives at the supplier credit
+        # note's api_create/api_update (rejects a cross-company
+        # original_bill_id up front), but this raw PK fetch has no company
+        # filter of its own, so a caller must pass the expected company
+        # explicitly to catch any cross-company id that slips through.
+        if expected_company_id is not None and bill.company_id != expected_company_id:
+            raise PaymentError(
+                f"Bill {bill_id} does not belong to company "
+                f"{expected_company_id} — refusing to update amount_paid"
+            )
+        # Cap at the bill total so an over-large credit note can't push
+        # amount_paid above what was owed.
+        total = min(Decimal(str(bill.total)), alloc_sum + cn_applied)
         bill.amount_paid = total
         bill.base_amount_paid = _q2(total * Decimal(str(bill.fx_rate)))
     await session.flush()

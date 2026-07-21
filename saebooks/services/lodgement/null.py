@@ -42,6 +42,15 @@ class NullLodgementService(LodgementService):
         self._refuse()
         raise RuntimeError("unreachable")  # pragma: no cover
 
+    async def lodge_stp_bundle(
+        self,
+        parts: list[bytes],
+        payevent_id: str,
+        metadata: dict[str, Any],
+    ) -> LodgementResult:
+        self._refuse()
+        raise RuntimeError("unreachable")  # pragma: no cover
+
     async def lodge_bas(
         self,
         envelope: bytes,

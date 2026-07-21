@@ -127,6 +127,7 @@ def _payee_record(
         "tfn_status": employee.tfn_status,
         # Identity
         "name": contact.name if contact else "",
+        "email": contact.email if contact else None,  # PAYEVNTEMP ElectronicContact
         "dob": _date_str(employee.dob),
         # Address (STP2 requires)
         "address": {
@@ -384,27 +385,28 @@ def _validate_employer(employer: dict[str, Any] | None) -> None:
         )
 
 
-def _default_document_builder(payload: dict[str, Any]) -> bytes:
-    """Resolve the gated PAYEVNT XBRL generator lazily.
+def _default_bundle_builder(payload: dict[str, Any]) -> list[bytes]:
+    """Render the PAYEVNT.0004 document set as an ordered parts array.
 
-    The taxonomy generator (``build_stp_pay_event_document``) is gated on
-    the ATO PVT reference pack and lives on a separate branch. We import it
-    lazily so this module loads on branches where it is absent; tests inject
-    a stub ``document_builder`` and never hit this path. If a real submit is
-    attempted on a branch without the generator, fail loudly rather than
-    sending a half-formed envelope.
+    The generator (``build_stp_pay_event_document``) emits the plain-XML
+    PAYEVNT parent + one PAYEVNTEMP per payee (structures verified against
+    the ATO PAYEVNT.0004 2020 Conformance Suite v1.7). The relay contract has
+    now grown the parts array this comment used to await, so the set travels
+    as ``[parent, *payees]`` — parent first, then one child per payee — which
+    the lodge-server reassembles into a single AS4 multipart UserMessage.
+    A payload missing PAYEVNT.0004-required fields fails loudly here — we
+    never send a half-formed document set.
     """
-    try:  # pragma: no cover - exercised only with the gated generator present
-        from saebooks.services.lodgement.sbr.stp import (
-            build_stp_pay_event_document,
-        )
-    except ImportError as exc:  # pragma: no cover
-        raise StpError(
-            "PAYEVNT XBRL generator unavailable on this build — the SBR "
-            "taxonomy half is gated on the ATO PVT reference pack.",
-            code="generator_unavailable",
-        ) from exc
-    return build_stp_pay_event_document(payload)
+    from saebooks.services.lodgement.sbr.stp import (
+        StpDocumentError,
+        build_stp_pay_event_document,
+    )
+
+    try:
+        docs = build_stp_pay_event_document(payload)
+    except StpDocumentError as exc:
+        raise StpError(str(exc), code="payload_incomplete") from exc
+    return [docs.parent, *docs.employees]
 
 
 def _resolve_tfns_for_envelope(
@@ -446,7 +448,7 @@ async def submit_event(
     submission_id: uuid.UUID,
     *,
     lodgement_service: LodgementService,
-    document_builder: Callable[[dict[str, Any]], bytes] | None = None,
+    bundle_builder: Callable[[dict[str, Any]], list[bytes]] | None = None,
     tfn_resolver: Callable[[str], str] | None = None,
     submitted_by: uuid.UUID | None = None,
 ) -> StpSubmitResult:
@@ -460,8 +462,9 @@ async def submit_event(
          WITHOUT re-lodging.
       3. Validate the employer block (named-field error if incomplete).
       4. Decrypt TFNs into a throwaway submit-only payload (never stored).
-      5. Render the SBR3 envelope via ``document_builder`` (gated generator).
-      6. ``lodge_stp`` the envelope (idempotency key = submission id).
+      5. Render the PAYEVNT.0004 document set via ``bundle_builder`` (gated
+         generator) as an ordered parts array (parent + one child per payee).
+      6. ``lodge_stp_bundle`` the parts (idempotency key = submission id).
       7. On success store ``ato_receipt_number`` + ``submitted_at`` and go
          ACCEPTED; on ``LodgementRejected`` record errors and go REJECTED.
 
@@ -496,15 +499,19 @@ async def submit_event(
     _validate_employer(payload.get("employer"))
 
     # (4) Decrypt TFNs into a throwaway copy (never persisted, never logged).
-    builder = document_builder or _default_document_builder
+    builder = bundle_builder or _default_bundle_builder
     resolver = tfn_resolver
     if resolver is None:
         from saebooks.services.crypto import decrypt_field as resolver  # type: ignore
 
     submit_payload = _resolve_tfns_for_envelope(payload, resolver)
+    # The PAYEVNT InteractionTransactionId defaults to the submission id —
+    # it is already the relay-side dedup key, so the two stay aligned.
+    submit_payload.setdefault("transaction_id", str(submission.id))
 
-    # (5) Render the SBR3 envelope. The builder is the gated taxonomy seam.
-    envelope = builder(submit_payload)
+    # (5) Render the PAYEVNT.0004 document set (parent + one child per payee)
+    # as an ordered parts array via the builder seam.
+    parts = builder(submit_payload)
 
     # Mark in-flight before the relay call so a crash mid-lodge leaves a
     # SUBMITTED row (operator can reconcile) rather than a stuck READY.
@@ -524,8 +531,8 @@ async def submit_event(
     # (6) Relay call. payevent_id == submission id is the server-side 24h
     # dedup key, so a network retry never double-lodges.
     try:
-        result: LodgementResult = await lodgement_service.lodge_stp(
-            envelope, str(submission.id), metadata
+        result: LodgementResult = await lodgement_service.lodge_stp_bundle(
+            parts, str(submission.id), metadata
         )
     except LodgementRejected as exc:
         # (b) ATO 422 — record errors, transition REJECTED, do NOT accept.

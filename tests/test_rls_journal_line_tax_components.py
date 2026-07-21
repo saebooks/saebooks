@@ -14,7 +14,11 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import text
 
-from saebooks.db import engine as _owner_engine
+# Catalog-only reads (pg_class / pg_roles / has_table_privilege), so this
+# works under any role — kept as the fixed owner engine (not
+# saebooks.db.engine, which is the saebooks_app role under --rls) for
+# consistency with the sibling RLS probe files.
+from saebooks.db import _owner_role_engine as _owner_engine
 
 pytestmark = pytest.mark.postgres_only
 

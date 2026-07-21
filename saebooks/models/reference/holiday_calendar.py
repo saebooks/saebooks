@@ -36,3 +36,13 @@ class HolidayCalendar(ReferenceBase):
     is_business_day_substituted: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )
+    # M1.5 P1 tail — calendar-scope discriminator. Some jurisdictions'
+    # "public holidays" differ between tax-filing due-date arithmetic and
+    # bank-processing/business-day shifts (e.g. a bank holiday that isn't
+    # a gazetted public holiday, or vice versa). NULL = applies to both
+    # (unchanged behaviour for every existing row — every current
+    # consumer treats every holiday as universally applicable).
+    calendar_scope: Mapped[str | None] = mapped_column(
+        String(8),
+        comment="One of filing / banking / both; NULL = both (unscoped)",
+    )

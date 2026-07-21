@@ -564,7 +564,12 @@ async def delete_quote(
     company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
     tenant_id = resolve_tenant_id(request)
-    existing = await svc.api_get(session, quote_id, tenant_id=tenant_id, company_id=company_id)
+    # Engine-local fetch: hard delete needs the ORM row, and the
+    # pre-accounting module shares this database, so the delegated
+    # getter (which returns a QuoteOut) must not be used here.
+    existing = await svc.api_get_local(
+        session, quote_id, tenant_id=tenant_id, company_id=company_id
+    )
     if existing is None:
         raise HTTPException(404, "Quote not found")
 

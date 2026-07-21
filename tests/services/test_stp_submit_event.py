@@ -5,7 +5,7 @@ This is the GATE-INDEPENDENT half of STP lodgement: the state machine
 idempotency, and the relay-call orchestration. The XBRL PAYEVNT payload
 TAXONOMY generator (``build_stp_pay_event_document``) is gated on the ATO
 PVT pack and lives on a separate branch; here we inject it as a seam
-(``document_builder``) with a deterministic stub, and inject a test-double
+(``bundle_builder``) with a deterministic stub, and inject a test-double
 ``LodgementService`` so NO real ATO transmit ever happens.
 
 Style mirrors tests/api/v1/test_stp_submissions.py: seed StpSubmission rows
@@ -39,10 +39,10 @@ _DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
 class _RecordingLodgement:
-    """Deterministic LodgementService double. Records every lodge_stp call."""
+    """Deterministic LodgementService double. Records every lodge_stp_bundle call."""
 
     def __init__(self, result: LodgementResult | None = None) -> None:
-        self.calls: list[tuple[bytes, str, dict]] = []
+        self.calls: list[tuple[list[bytes], str, dict]] = []
         self._result = result or LodgementResult(
             status=LodgementStatus.ACCEPTED,
             ato_receipt_id="ATO-RECEIPT-123",
@@ -51,19 +51,19 @@ class _RecordingLodgement:
             raw_response={"status": "accepted", "receipt": "ATO-RECEIPT-123"},
         )
 
-    async def lodge_stp(self, envelope, payevent_id, metadata):
-        self.calls.append((envelope, payevent_id, metadata))
+    async def lodge_stp_bundle(self, parts, payevent_id, metadata):
+        self.calls.append((parts, payevent_id, metadata))
         return self._result
 
 
 class _RejectingLodgement:
-    """LodgementService double whose lodge_stp signals an ATO 422 rejection."""
+    """LodgementService double whose lodge_stp_bundle signals an ATO 422 rejection."""
 
     def __init__(self) -> None:
-        self.calls: list[tuple[bytes, str, dict]] = []
+        self.calls: list[tuple[list[bytes], str, dict]] = []
 
-    async def lodge_stp(self, envelope, payevent_id, metadata):
-        self.calls.append((envelope, payevent_id, metadata))
+    async def lodge_stp_bundle(self, parts, payevent_id, metadata):
+        self.calls.append((parts, payevent_id, metadata))
         raise LodgementRejected(
             "ATO rejected payevent",
             ato_errors=[{"code": "CMN.ATO.GEN.XML03", "message": "bad TFN"}],
@@ -71,9 +71,14 @@ class _RejectingLodgement:
         )
 
 
-def _stub_builder(payload: dict) -> bytes:
-    """Stand-in for the gated build_stp_pay_event_document generator."""
-    return b"<payevnt>stub-envelope</payevnt>"
+def _stub_builder(payload: dict) -> list[bytes]:
+    """Stand-in for the gated build_stp_pay_event_document generator.
+
+    Returns a document SET as a parts array: parent PAYEVNT first, then one
+    PAYEVNTEMP child per payee — the shape ``submit_event`` now lodges.
+    """
+    return [b"<payevnt>stub-parent</payevnt>",
+            b"<payevntemp>stub-child</payevntemp>"]
 
 
 # --------------------------------------------------------------------------- #
@@ -175,7 +180,7 @@ async def test_submit_rejects_missing_abn() -> None:
             await stp_svc.submit_event(
                 session, sub_id,
                 lodgement_service=lodge,
-                document_builder=_stub_builder,
+                bundle_builder=_stub_builder,
                 tfn_resolver=lambda ref: "111111111",
             )
     assert "abn" in str(ei.value).lower()
@@ -196,7 +201,7 @@ async def test_submit_rejects_missing_legal_name() -> None:
             await stp_svc.submit_event(
                 session, sub_id,
                 lodgement_service=lodge,
-                document_builder=_stub_builder,
+                bundle_builder=_stub_builder,
                 tfn_resolver=lambda ref: "111111111",
             )
     assert "legal_name" in str(ei.value).lower() or "legal name" in str(ei.value).lower()
@@ -217,7 +222,7 @@ async def test_submit_rejects_missing_branch() -> None:
             await stp_svc.submit_event(
                 session, sub_id,
                 lodgement_service=lodge,
-                document_builder=_stub_builder,
+                bundle_builder=_stub_builder,
                 tfn_resolver=lambda ref: "111111111",
             )
     assert "branch" in str(ei.value).lower()
@@ -240,13 +245,15 @@ async def test_submit_ready_to_accepted() -> None:
         result = await stp_svc.submit_event(
             session, sub_id,
             lodgement_service=lodge,
-            document_builder=_stub_builder,
+            bundle_builder=_stub_builder,
             tfn_resolver=lambda ref: "111111111",
         )
         await session.commit()
     assert len(lodge.calls) == 1
-    envelope, payevent_id, _meta = lodge.calls[0]
-    assert envelope == b"<payevnt>stub-envelope</payevnt>"
+    parts, payevent_id, _meta = lodge.calls[0]
+    # The lodged bundle is the parent + one child per payee, parent first.
+    assert parts == [b"<payevnt>stub-parent</payevnt>",
+                     b"<payevntemp>stub-child</payevntemp>"]
     # idempotency key is the submission id
     assert payevent_id == str(sub_id)
     sub = await _get_sub(sub_id)
@@ -267,7 +274,7 @@ async def test_submit_rejection_records_errors() -> None:
         result = await stp_svc.submit_event(
             session, sub_id,
             lodgement_service=lodge,
-            document_builder=_stub_builder,
+            bundle_builder=_stub_builder,
             tfn_resolver=lambda ref: "111111111",
         )
         await session.commit()
@@ -291,13 +298,13 @@ async def test_submit_idempotent_on_accepted() -> None:
     async with AsyncSessionLocal() as session:
         await stp_svc.submit_event(
             session, sub_id, lodgement_service=lodge,
-            document_builder=_stub_builder, tfn_resolver=lambda ref: "111111111")
+            bundle_builder=_stub_builder, tfn_resolver=lambda ref: "111111111")
         await session.commit()
     # Second call — must be a no-op lodge.
     async with AsyncSessionLocal() as session:
         result2 = await stp_svc.submit_event(
             session, sub_id, lodgement_service=lodge,
-            document_builder=_stub_builder, tfn_resolver=lambda ref: "111111111")
+            bundle_builder=_stub_builder, tfn_resolver=lambda ref: "111111111")
         await session.commit()
     assert len(lodge.calls) == 1, "must not re-lodge an ACCEPTED submission"
     assert result2.status == StpStatus.ACCEPTED.value
@@ -315,7 +322,7 @@ async def test_submit_non_ready_state_no_double_submit() -> None:
         with pytest.raises(stp_svc.StpError) as ei:
             await stp_svc.submit_event(
                 session, sub_id, lodgement_service=lodge,
-                document_builder=_stub_builder,
+                bundle_builder=_stub_builder,
                 tfn_resolver=lambda ref: "111111111")
     assert "state" in str(ei.value).lower() or "submitted" in str(ei.value).lower()
     assert lodge.calls == []
@@ -336,16 +343,16 @@ async def test_tfn_plaintext_never_stored_or_logged(caplog) -> None:
 
     captured_payloads = []
 
-    def _builder(payload: dict) -> bytes:
+    def _builder(payload: dict) -> list[bytes]:
         captured_payloads.append(payload)
-        return b"<payevnt/>"
+        return [b"<payevnt/>"]
 
     lodge = _RecordingLodgement()
     with caplog.at_level("DEBUG"):
         async with AsyncSessionLocal() as session:
             await stp_svc.submit_event(
                 session, sub_id, lodgement_service=lodge,
-                document_builder=_builder, tfn_resolver=_resolver)
+                bundle_builder=_builder, tfn_resolver=_resolver)
             await session.commit()
 
     # decrypt seam was used

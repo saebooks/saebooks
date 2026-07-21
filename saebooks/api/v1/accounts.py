@@ -28,7 +28,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
@@ -193,6 +193,64 @@ _CREDIT_NORMAL = frozenset({
     AccountType.OTHER_INCOME,
 })
 
+# Every ``JournalEntry.source_type`` string a posting path actually stamps
+# (grepped: ``grep -rn 'source_type="' saebooks/ --include='*.py'``). Used to
+# validate the ``source_type`` ledger filter (400 on anything else) — keep
+# in sync when a new posting path introduces a new source_type.
+_KNOWN_LEDGER_SOURCE_TYPES = frozenset({
+    "bank_statement_line",
+    "bill",
+    "credit_note",
+    "dutiable_transaction_event",
+    "expense",
+    "fixed_asset",
+    "ic_txn",
+    "invoice",
+    "journal_entry",
+    "payment",
+    "pay_run",
+    "receipt",
+    "reclassification",
+    "supplier_credit_note",
+    "transfer",
+    "trust_distribution",
+})
+
+# source_type -> model, for the subset of stamped source_types whose model
+# actually carries a ``contact_id`` column (used by the ``contact_id``
+# ledger filter — an OR of per-source subqueries). source_types with no
+# contact linkage (transfer, pay_run, ic_txn, fixed_asset,
+# bank_statement_line, journal_entry, reclassification,
+# dutiable_transaction_event) are simply never matched by this filter.
+# NOTE: trust_distribution is deliberately excluded — TrustDistribution
+# itself has no contact_id; the per-beneficiary link lives one level down
+# on BeneficiaryEntitlement (many rows per distribution, no single contact
+# on the JournalEntry.source_id'd parent row), so it can't be scoped by a
+# single-contact filter the same way the others can.
+def _contact_linked_source_models() -> dict[str, Any]:
+    from saebooks.models.bill import Bill
+    from saebooks.models.credit_note import CreditNote
+    from saebooks.models.expense import Expense
+    from saebooks.models.invoice import Invoice
+    from saebooks.models.payment import Payment
+    from saebooks.models.receipt import Receipt
+    from saebooks.models.supplier_credit_note import SupplierCreditNote
+
+    return {
+        "invoice": Invoice,
+        "bill": Bill,
+        "expense": Expense,
+        "payment": Payment,
+        "credit_note": CreditNote,
+        "supplier_credit_note": SupplierCreditNote,
+        "receipt": Receipt,
+    }
+
+
+def _escape_ilike(term: str) -> str:
+    """Escape ``\\ % _`` so a user-supplied substring is treated literally."""
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
 
 @router.get("/{account_id}/ledger")
 async def get_account_ledger(
@@ -202,6 +260,36 @@ async def get_account_ledger(
     date_to: str | None = Query(default=None, description="ISO date (YYYY-MM-DD)"),
     sort: str = Query(default="date", description="One of: date, ref, description, debit, credit"),
     direction: str = Query(default="desc", regex="^(asc|desc)$"),
+    source_type: str | None = Query(
+        default=None,
+        description=(
+            "Filter to entries stamped with this JournalEntry.source_type "
+            "(e.g. 'invoice', 'bill', 'payment'). 400 on an unrecognised value."
+        ),
+    ),
+    description: str | None = Query(
+        default=None,
+        description="Case-insensitive substring match on JournalLine.description.",
+    ),
+    contact_id: UUID | None = Query(
+        default=None,
+        description=(
+            "Filter to entries whose source record (invoice/bill/expense/"
+            "payment/credit_note/supplier_credit_note/receipt) belongs to "
+            "this contact. source_types with no single-contact linkage "
+            "(transfers, pay runs, trust distributions, etc.) never match."
+        ),
+    ),
+    include_contact_name: bool = Query(
+        default=False,
+        description=(
+            "Opt-in: attach a 'contact_name' field to each row, resolved "
+            "from the source record's contact for source_types that carry "
+            "one. Defaults to false to protect list performance — when "
+            "true, resolved via one grouped query per source_type present "
+            "on the page, never one query per row."
+        ),
+    ),
     limit: int = Query(default=200, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
@@ -217,10 +305,26 @@ async def get_account_ledger(
     When ``sort`` is anything other than ``date``, the running ``balance``
     field is set to ``null`` on every row — it only carries meaning when
     rows are ordered chronologically.
+
+    When any of ``source_type``/``description``/``contact_id`` is supplied,
+    both ``balance`` (every row) and ``opening_balance`` are set to ``null``
+    too: those filters drop rows out of the account's real running total, so
+    a computed balance would silently misrepresent the account. The
+    ``total``/``limit``/``offset`` pagination and ``total_debit``/
+    ``total_credit`` for the filtered page remain accurate.
+
+    Every row also carries ``source_type`` and ``source_id`` (both copied
+    from the owning ``JournalEntry``). ``contact_name`` is opt-in via
+    ``include_contact_name=true`` — omitted from every row when false
+    (default), to protect list performance. When enabled it's resolved via
+    one grouped query per source_type present on the page (never per-row);
+    ``null`` when the source has no contact or no contact linkage exists for
+    that source_type.
     """
     from datetime import date as _date
     from decimal import Decimal
 
+    from saebooks.models.contact import Contact
     from saebooks.models.journal import EntryStatus, JournalEntry, JournalLine
 
     def _parse(s: str | None) -> _date | None:
@@ -237,7 +341,41 @@ async def get_account_ledger(
     _VALID_SORTS = {"date", "ref", "description", "debit", "credit"}
     if sort not in _VALID_SORTS:
         raise HTTPException(400, f"Invalid sort {sort!r}. Valid: {sorted(_VALID_SORTS)}")
-    show_balance = (sort == "date")
+
+    if source_type is not None:
+        source_type = source_type.lower()
+        if source_type not in _KNOWN_LEDGER_SOURCE_TYPES:
+            raise HTTPException(
+                400,
+                f"Unknown source_type {source_type!r}. Valid: {sorted(_KNOWN_LEDGER_SOURCE_TYPES)}",
+            )
+
+    description_pattern: str | None = None
+    if description:
+        description_pattern = f"%{_escape_ilike(description)}%"
+
+    contact_clause = None
+    if contact_id is not None:
+        linked_models = _contact_linked_source_models()
+        contact_clause = or_(*(
+            (JournalEntry.source_type == st)
+            & JournalEntry.source_id.in_(
+                select(model.id).where(
+                    model.contact_id == contact_id,
+                    model.company_id == company_id,
+                )
+            )
+            for st, model in linked_models.items()
+        ))
+
+    filters_active = source_type is not None or description_pattern is not None or contact_clause is not None
+    # Running/opening balance only mean "the true account balance" when the
+    # rows walked are exactly the account's full posted history in date
+    # order — narrowing with the new filters breaks that, so we null both
+    # out rather than show a number that looks authoritative but isn't
+    # (same honesty convention the endpoint already applies to non-date
+    # sorts, extended to cover the filtered case too).
+    show_balance = (sort == "date") and not filters_active
 
     tenant_id = resolve_tenant_id(request)
     account = await svc.get(session, account_id, tenant_id=tenant_id, company_id=company_id)
@@ -247,7 +385,7 @@ async def get_account_ledger(
     credit_normal = account.account_type in _CREDIT_NORMAL
 
     opening_balance = Decimal("0")
-    if parsed_from:
+    if parsed_from and not filters_active:
         ob_stmt = (
             select(
                 func.coalesce(func.sum(JournalLine.debit), Decimal("0")).label("tot_dr"),
@@ -279,6 +417,12 @@ async def get_account_ledger(
         count_stmt = count_stmt.where(JournalEntry.entry_date >= parsed_from)
     if parsed_to:
         count_stmt = count_stmt.where(JournalEntry.entry_date <= parsed_to)
+    if source_type is not None:
+        count_stmt = count_stmt.where(JournalEntry.source_type == source_type)
+    if description_pattern is not None:
+        count_stmt = count_stmt.where(JournalLine.description.ilike(description_pattern, escape="\\"))
+    if contact_clause is not None:
+        count_stmt = count_stmt.where(contact_clause)
     total = (await session.execute(count_stmt)).scalar_one()
 
     # Map sort param to (primary, tiebreak) SQLAlchemy expressions.
@@ -313,12 +457,19 @@ async def get_account_ledger(
         stmt = stmt.where(JournalEntry.entry_date >= parsed_from)
     if parsed_to:
         stmt = stmt.where(JournalEntry.entry_date <= parsed_to)
+    if source_type is not None:
+        stmt = stmt.where(JournalEntry.source_type == source_type)
+    if description_pattern is not None:
+        stmt = stmt.where(JournalLine.description.ilike(description_pattern, escape="\\"))
+    if contact_clause is not None:
+        stmt = stmt.where(contact_clause)
     stmt = stmt.limit(limit).offset(offset)
 
     rows = (await session.execute(stmt)).all()
 
-    # Running balance only makes sense when sorting by date ascending.
-    # For everything else, leave balance null and totals are still useful.
+    # Running balance only makes sense when sorting by date ascending with
+    # no narrowing filter. For everything else, leave balance null and
+    # totals are still useful.
     running = opening_balance
     if show_balance and direction == "asc" and offset > 0:
         pre_stmt = (
@@ -360,6 +511,30 @@ async def get_account_ledger(
         pr = (await session.execute(pre_stmt)).one()
         running += (pr.tot_cr - pr.tot_dr) if credit_normal else (pr.tot_dr - pr.tot_cr)
 
+    # Enrichment (opt-in via include_contact_name): resolve contact_name for
+    # source_types on this page that carry a contact_id — one grouped query
+    # per source_type present, never per-row. Skipped entirely when the
+    # flag is off, to protect list performance.
+    contact_name_by_source: dict[tuple[str, UUID], str] = {}
+    if include_contact_name:
+        linked_models = _contact_linked_source_models()
+        ids_by_source_type: dict[str, list[UUID]] = {}
+        for _jl, je in rows:
+            if je.source_type in linked_models and je.source_id is not None:
+                ids_by_source_type.setdefault(je.source_type, []).append(je.source_id)
+
+        for st, ids in ids_by_source_type.items():
+            model = linked_models[st]
+            name_rows = (
+                await session.execute(
+                    select(model.id, Contact.name)
+                    .join(Contact, model.contact_id == Contact.id)
+                    .where(model.id.in_(ids), model.company_id == company_id)
+                )
+            ).all()
+            for source_id, contact_name in name_rows:
+                contact_name_by_source[(st, source_id)] = contact_name
+
     items: list[dict[str, Any]] = []
     total_debit = Decimal("0")
     total_credit = Decimal("0")
@@ -375,7 +550,7 @@ async def get_account_ledger(
             balance_str: str | None = str(running)
         else:
             balance_str = None
-        items.append({
+        item = {
             "entry_id": str(je.id),
             "entry_date": je.entry_date.isoformat(),
             "ref": je.ref,
@@ -383,14 +558,19 @@ async def get_account_ledger(
             "debit": str(jl.debit),
             "credit": str(jl.credit),
             "balance": balance_str,
-        })
+            "source_type": je.source_type,
+            "source_id": str(je.source_id) if je.source_id is not None else None,
+        }
+        if include_contact_name:
+            item["contact_name"] = contact_name_by_source.get((je.source_type, je.source_id))
+        items.append(item)
 
     body = {
         "items": items,
         "total": total,
         "limit": limit,
         "offset": offset,
-        "opening_balance": str(opening_balance),
+        "opening_balance": str(opening_balance) if not filters_active else None,
         "total_debit": str(total_debit),
         "total_credit": str(total_credit),
         "credit_normal": credit_normal,

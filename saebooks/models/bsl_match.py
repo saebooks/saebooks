@@ -63,6 +63,19 @@ class BslMatch(CompanyScoped, Base):
     )
     notes: Mapped[str | None] = mapped_column(Text)
     matched_by: Mapped[str | None] = mapped_column(String)
+    # Provenance (M3 R8b, migration 0220) — how this allocation came to
+    # exist. MANUAL: /reconciliation/match or split_match. AUTO:
+    # /reconciliation/auto_match (exactly-one-HIGH-confidence linking).
+    # RULE: a bank_rules match. COMPOUND: /reconciliation/create_and_match
+    # (create + post + match in one call). Defaults to MANUAL so every
+    # pre-0220 row backfills correctly.
+    matched_via: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="MANUAL"
+    )
+    rule_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("bank_rules.id", ondelete="SET NULL"),
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

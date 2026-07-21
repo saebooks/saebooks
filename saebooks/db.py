@@ -4,6 +4,7 @@ import logging
 import os
 import uuid as _uuid
 from collections.abc import AsyncIterator
+from typing import Any
 
 from sqlalchemy import event
 from sqlalchemy.engine import make_url
@@ -106,6 +107,40 @@ def backend_supports_rls() -> bool:
         # Fall back to URL inspection if engine not yet bound (shouldn't
         # happen in normal use — kept for safety during module import).
         return not _url_is_sqlite(_runtime_database_url())
+
+
+def upsert_stmt(table: Any) -> Any:
+    """Return a dialect-appropriate INSERT that supports the ``on_conflict_*``
+    upsert API (``on_conflict_do_update`` / ``on_conflict_do_nothing``).
+
+    Postgres and SQLite both implement upsert with the same
+    ``index_elements=`` / ``set_=`` keyword contract, but the constructs live
+    in different dialect modules. Service code that imported
+    ``sqlalchemy.dialects.postgresql.insert`` directly worked on Postgres and
+    raised on the SQLite/Cashbook backend (company-settings writes, budget
+    upserts, bank-feed cursor upserts, reference-data loads all 500'd on
+    Community). Route every upsert through this helper so the same call site
+    works on both backends.
+
+    All engines in a deployment share one dialect (they are built from the
+    same runtime URL), so keying off the global ``engine`` matches the
+    ``backend_supports_rls()`` pattern above. NOTE: the conflict target
+    (``index_elements``) must correspond to a unique constraint/index that
+    actually exists in the SQLite bootstrap schema — otherwise SQLite raises
+    at execute time. Keep the ORM model's unique constraints in lock-step.
+    """
+    name = engine.dialect.name
+    if name == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as _pg_insert
+
+        return _pg_insert(table)
+    if name == "sqlite":
+        from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
+
+        return _sqlite_insert(table)
+    raise RuntimeError(
+        f"upsert_stmt: on_conflict upsert is not supported on dialect {name!r}"
+    )
 
 
 def _engine_kwargs_for(url: str) -> dict[str, object]:

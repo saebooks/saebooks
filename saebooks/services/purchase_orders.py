@@ -435,6 +435,32 @@ async def api_get(
     return result.scalar_one_or_none()
 
 
+async def api_get_local(
+    session: AsyncSession,
+    po_id: uuid.UUID,
+    *,
+    tenant_id: uuid.UUID | None = None,
+    company_id: uuid.UUID | None = None,
+) -> PurchaseOrder | None:
+    """Fetch the ORM row from the engine database, never delegating.
+
+    Hard delete needs the physical row (``__table__`` snapshot + session
+    delete); the pre-accounting module shares this database, so destructive
+    admin operations stay engine-local.
+    """
+    clauses = [PurchaseOrder.id == po_id]
+    if tenant_id is not None:
+        clauses.append(PurchaseOrder.tenant_id == tenant_id)
+    if company_id is not None:
+        clauses.append(PurchaseOrder.company_id == company_id)
+    result = await session.execute(
+        select(PurchaseOrder)
+        .options(selectinload(PurchaseOrder.lines))
+        .where(*clauses)
+    )
+    return result.scalar_one_or_none()
+
+
 async def list_active(
     session: AsyncSession,
     company_id: uuid.UUID,

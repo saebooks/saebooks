@@ -26,9 +26,9 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from saebooks.db import upsert_stmt
 from saebooks.models.bank_feed import (
     BankFeedAccount,
     BankFeedClient,
@@ -106,7 +106,7 @@ async def upsert_bank_feed_account(
         ),
     }
 
-    stmt = pg_insert(BankFeedAccount).values(**values)
+    stmt = upsert_stmt(BankFeedAccount).values(**values)
     stmt = stmt.on_conflict_do_update(
         index_elements=[BankFeedAccount.sds_account_id],
         set_={
@@ -225,7 +225,7 @@ async def upsert_feed_issue(
         "fetched_at": datetime.now(),
     }
 
-    stmt = pg_insert(BankFeedIssue).values(**values)
+    stmt = upsert_stmt(BankFeedIssue).values(**values)
     stmt = stmt.on_conflict_do_update(
         index_elements=[BankFeedIssue.sds_feed_issue_id],
         set_={

@@ -107,6 +107,17 @@ from saebooks.models.supplier_statement import (
     SupplierStatementLine,
 )
 from saebooks.models.supplier_statement_template import SupplierStatementTemplate
+from saebooks.models.sync import (
+    SyncAuditLog,
+    SyncCoaAccountRequest,
+    SyncConnection,
+    SyncConnectionStatus,
+    SyncDirection,
+    SyncObjectType,
+    SyncProvider,
+    SyncState,
+    SyncStateOrigin,
+)
 from saebooks.models.tax_code import TaxCode
 from saebooks.models.tax_period import TaxPeriod, TaxPeriodStatus, TaxPeriodType
 from saebooks.models.tax_return import TaxReturn, TaxReturnStatus
@@ -224,6 +235,15 @@ __all__ = [
     "SupplierStatement",
     "SupplierStatementLine",
     "SupplierStatementTemplate",
+    "SyncAuditLog",
+    "SyncCoaAccountRequest",
+    "SyncConnection",
+    "SyncConnectionStatus",
+    "SyncDirection",
+    "SyncObjectType",
+    "SyncProvider",
+    "SyncState",
+    "SyncStateOrigin",
     "TaxCode",
     "TaxPeriod",
     "TaxPeriodStatus",

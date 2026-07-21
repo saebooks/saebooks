@@ -130,6 +130,34 @@ async def test_create_auto_code_and_defaults() -> None:
         assert asset.residual_value == Decimal("0.00")
         assert asset.status == "active"
         assert asset.last_depreciation_posted_through is None
+        # Acquisition-cost component breakdown (M1.5 P1 tail) — NULL by
+        # default, itemisation optional.
+        assert asset.purchase_price_component is None
+        assert asset.duty_component is None
+        assert asset.installation_component is None
+
+
+async def test_cost_component_breakdown_settable() -> None:
+    """M1.5 P1 tail — purchase_price/duty/installation components are
+    optional record-keeping, independent of the authoritative ``cost``."""
+    ctx = await _ctx()
+    asset = await _fresh_asset(ctx, name="Itemised asset", cost=Decimal("11000"))
+    async with AsyncSessionLocal() as session:
+        refreshed = await svc.get(session, asset.id)
+        assert refreshed is not None
+        refreshed.purchase_price_component = Decimal("10000")
+        refreshed.duty_component = Decimal("500")
+        refreshed.installation_component = Decimal("500")
+        await session.commit()
+
+    async with AsyncSessionLocal() as session:
+        refreshed = await svc.get(session, asset.id)
+        assert refreshed is not None
+        assert refreshed.purchase_price_component == Decimal("10000.00")
+        assert refreshed.duty_component == Decimal("500.00")
+        assert refreshed.installation_component == Decimal("500.00")
+        # cost remains the sole authoritative total — unaffected.
+        assert refreshed.cost == Decimal("11000.00")
 
 
 async def test_update_locks_money_fields_once_depreciated() -> None:
@@ -379,6 +407,116 @@ async def test_dispose_at_exact_nbv_no_gain_loss_line() -> None:
         await session.refresh(entry, ["lines"])
         # Two lines only: DR cash, CR cost
         assert len(entry.lines) == 2
+
+
+async def test_dispose_with_gain_uses_company_override_account() -> None:
+    """Company-configured gain account overrides the hardcoded 4-9100 default."""
+    ctx = await _ctx()
+    asset = await _fresh_asset(
+        ctx, name="Gain sale override", cost=Decimal("6000"), model="asset_5_year_linear"
+    )
+    async with AsyncSessionLocal() as session:
+        company = await session.get(Company, ctx.company_id)
+        assert company is not None
+        company.asset_disposal_gain_account_code = "4-6000"  # Miscellaneous Income
+        await session.commit()
+    try:
+        async with AsyncSessionLocal() as session:
+            refreshed, gain_loss = await svc.dispose_asset(
+                session,
+                asset.id,
+                disposal_date=date(2027, 1, 1),
+                proceeds=Decimal("7000"),
+                cash_account_id=ctx.cash_acct_id,
+                posted_by="test",
+            )
+            assert gain_loss > Decimal("0")
+            entry = await session.get(JournalEntry, refreshed.disposal_journal_id)
+            assert entry is not None
+            await session.refresh(entry, ["lines"])
+
+            override_acct = (
+                await session.execute(
+                    select(Account).where(
+                        Account.company_id == ctx.company_id,
+                        Account.code == "4-6000",
+                    )
+                )
+            ).scalar_one()
+            default_acct = (
+                await session.execute(
+                    select(Account).where(
+                        Account.company_id == ctx.company_id,
+                        Account.code == "4-9100",
+                    )
+                )
+            ).scalar_one()
+            override_lines = [ln for ln in entry.lines if ln.account_id == override_acct.id]
+            default_lines = [ln for ln in entry.lines if ln.account_id == default_acct.id]
+            assert len(override_lines) == 1
+            assert override_lines[0].credit == gain_loss
+            assert default_lines == []
+    finally:
+        async with AsyncSessionLocal() as session:
+            company = await session.get(Company, ctx.company_id)
+            assert company is not None
+            company.asset_disposal_gain_account_code = None
+            await session.commit()
+
+
+async def test_dispose_with_loss_uses_company_override_account() -> None:
+    """Company-configured loss account overrides the hardcoded 6-9100 default."""
+    ctx = await _ctx()
+    asset = await _fresh_asset(
+        ctx, name="Loss sale override", cost=Decimal("6000"), model="asset_5_year_linear"
+    )
+    async with AsyncSessionLocal() as session:
+        company = await session.get(Company, ctx.company_id)
+        assert company is not None
+        company.asset_disposal_loss_account_code = "6-2050"  # Bad Debts (EXPENSE)
+        await session.commit()
+    try:
+        async with AsyncSessionLocal() as session:
+            refreshed, gain_loss = await svc.dispose_asset(
+                session,
+                asset.id,
+                disposal_date=date(2026, 6, 1),
+                proceeds=Decimal("100"),
+                cash_account_id=ctx.cash_acct_id,
+                posted_by="test",
+            )
+            assert gain_loss < 0
+            entry = await session.get(JournalEntry, refreshed.disposal_journal_id)
+            assert entry is not None
+            await session.refresh(entry, ["lines"])
+
+            override_acct = (
+                await session.execute(
+                    select(Account).where(
+                        Account.company_id == ctx.company_id,
+                        Account.code == "6-2050",
+                    )
+                )
+            ).scalar_one()
+            default_acct = (
+                await session.execute(
+                    select(Account).where(
+                        Account.company_id == ctx.company_id,
+                        Account.code == "6-9100",
+                    )
+                )
+            ).scalar_one()
+            override_lines = [ln for ln in entry.lines if ln.account_id == override_acct.id]
+            default_lines = [ln for ln in entry.lines if ln.account_id == default_acct.id]
+            assert len(override_lines) == 1
+            assert override_lines[0].debit == -gain_loss
+            assert default_lines == []
+    finally:
+        async with AsyncSessionLocal() as session:
+            company = await session.get(Company, ctx.company_id)
+            assert company is not None
+            company.asset_disposal_loss_account_code = None
+            await session.commit()
 
 
 async def test_cannot_dispose_already_disposed() -> None:

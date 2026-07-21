@@ -185,50 +185,41 @@ async def _record_send_log(
     "what exact PDF went out at this moment in time" is answerable from the
     audit row alone, with no external service dependency.
     """
-    from sqlalchemy import text
+    # Insert via the ORM (not raw SQL): the array columns bind Python lists,
+    # which the raw text() path could not bind on SQLite ("type 'list' is not
+    # supported") — the EmailSendLog model's ARRAY columns carry a
+    # ``with_variant(JSON, "sqlite")`` so the list serialises as JSON on the
+    # Community/SQLite backend and as a native array on Postgres. The tamper
+    # triggers (migration 0125) block UPDATE/DELETE only, so INSERT is fine.
+    from saebooks.models.email_send_log import EmailSendLog
+
     new_id = uuid.uuid4()
-    await session.execute(
-        text("""
-            INSERT INTO email_send_log (
-                id, tenant_id, doc_type, doc_id, doc_version,
-                sent_by_user_id, from_addr, to_addrs, cc_addrs, bcc_addrs,
-                subject, body_html, body_text,
-                attachment_filenames, attachment_bytes,
-                attachment_sha256, attachment_content_types,
-                resend_message_id, resend_status, resend_error, kill_switch_reason
-            ) VALUES (
-                :id, :tenant_id, :doc_type, :doc_id, :doc_version,
-                :sent_by_user_id, :from_addr, :to_addrs, :cc_addrs, :bcc_addrs,
-                :subject, :body_html, :body_text,
-                :attachment_filenames, :attachment_bytes,
-                :attachment_sha256, :attachment_content_types,
-                :resend_message_id, :resend_status, :resend_error, :kill_switch_reason
-            )
-        """),
-        {
-            "id": str(new_id),
-            "tenant_id": str(tenant_id),
-            "doc_type": doc_type,
-            "doc_id": str(doc_id),
-            "doc_version": doc_version,
-            "sent_by_user_id": str(sent_by_user_id) if sent_by_user_id else None,
-            "from_addr": from_addr,
-            "to_addrs": to,
-            "cc_addrs": cc,
-            "bcc_addrs": bcc,
-            "subject": subject,
-            "body_html": body_html,
-            "body_text": body_text,
-            "attachment_filenames": attachment_filenames,
-            "attachment_bytes": attachment_bytes,
-            "attachment_sha256": attachment_sha256,
-            "attachment_content_types": attachment_content_types,
-            "resend_message_id": resend_message_id,
-            "resend_status": resend_status,
-            "resend_error": resend_error,
-            "kill_switch_reason": kill_switch_reason,
-        },
+    session.add(
+        EmailSendLog(
+            id=new_id,
+            tenant_id=tenant_id,
+            doc_type=doc_type,
+            doc_id=doc_id,
+            doc_version=doc_version,
+            sent_by_user_id=sent_by_user_id,
+            from_addr=from_addr,
+            to_addrs=to,
+            cc_addrs=cc,
+            bcc_addrs=bcc,
+            subject=subject,
+            body_html=body_html,
+            body_text=body_text,
+            attachment_filenames=attachment_filenames,
+            attachment_bytes=attachment_bytes,
+            attachment_sha256=attachment_sha256,
+            attachment_content_types=attachment_content_types,
+            resend_message_id=resend_message_id,
+            resend_status=resend_status,
+            resend_error=resend_error,
+            kill_switch_reason=kill_switch_reason,
+        )
     )
+    await session.flush()
     return new_id
 
 

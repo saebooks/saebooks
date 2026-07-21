@@ -58,7 +58,6 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 from saebooks.api.v1.auth import current_token
-from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
 from saebooks.models.account import Account, AccountType
 from saebooks.models.allocation_rule import AllocationRule
@@ -68,6 +67,7 @@ from saebooks.models.contact import Contact, ContactType
 from saebooks.models.item import Item, ItemType
 from saebooks.models.project import Project
 from saebooks.models.tax_code import TaxCode
+from tests.conftest import tenant_session
 
 pytestmark = pytest.mark.postgres_only
 
@@ -111,7 +111,7 @@ def _set_edition_enterprise(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 async def seed_company_id() -> uuid.UUID:
     """Return the id of the seed company (first by created_at)."""
-    async with AsyncSessionLocal() as session:
+    async with tenant_session(_DEFAULT_TENANT_ID) as session:
         result = await session.execute(
             select(Company)
             .where(Company.archived_at.is_(None))
@@ -132,7 +132,7 @@ async def other_company_id(seed_company_id: uuid.UUID) -> uuid.UUID:
     OTHER company via ``X-Company-Id``.
     """
     cid = uuid.uuid4()
-    async with AsyncSessionLocal() as session:
+    async with tenant_session(_DEFAULT_TENANT_ID) as session:
         session.add(
             Company(
                 id=cid,
@@ -145,7 +145,7 @@ async def other_company_id(seed_company_id: uuid.UUID) -> uuid.UUID:
         )
         await session.commit()
     yield cid
-    async with AsyncSessionLocal() as session:
+    async with tenant_session(_DEFAULT_TENANT_ID) as session:
         co = await session.get(Company, cid)
         if co is not None:
             await session.delete(co)
@@ -173,7 +173,7 @@ async def _new_account(
 ) -> uuid.UUID:
     """Insert a stand-alone account row in the given company."""
     aid = uuid.uuid4()
-    async with AsyncSessionLocal() as session:
+    async with tenant_session(_DEFAULT_TENANT_ID) as session:
         session.add(
             Account(
                 id=aid,
@@ -197,7 +197,7 @@ async def _new_account(
 async def bank_account_in_seed(seed_company_id: uuid.UUID) -> uuid.UUID:
     """Create a bank-side Account row in the seed company."""
     aid = uuid.uuid4()
-    async with AsyncSessionLocal() as session:
+    async with tenant_session(_DEFAULT_TENANT_ID) as session:
         session.add(
             Account(
                 id=aid,
@@ -273,7 +273,7 @@ async def test_bank_account_delete_blocked_cross_company(
 @pytest.fixture
 async def contact_in_seed(seed_company_id: uuid.UUID) -> uuid.UUID:
     cid = uuid.uuid4()
-    async with AsyncSessionLocal() as session:
+    async with tenant_session(_DEFAULT_TENANT_ID) as session:
         session.add(
             Contact(
                 id=cid,
@@ -336,7 +336,7 @@ async def item_in_seed(seed_company_id: uuid.UUID) -> uuid.UUID:
     inv = await _new_account(seed_company_id, kind=AccountType.ASSET)
     cogs = await _new_account(seed_company_id, kind=AccountType.EXPENSE)
     income = await _new_account(seed_company_id, kind=AccountType.INCOME)
-    async with AsyncSessionLocal() as session:
+    async with tenant_session(_DEFAULT_TENANT_ID) as session:
         session.add(
             Item(
                 id=iid,
@@ -446,7 +446,7 @@ async def test_account_delete_blocked_cross_company(
 @pytest.fixture
 async def tax_code_in_seed(seed_company_id: uuid.UUID) -> uuid.UUID:
     tid = uuid.uuid4()
-    async with AsyncSessionLocal() as session:
+    async with tenant_session(_DEFAULT_TENANT_ID) as session:
         session.add(
             TaxCode(
                 id=tid,
@@ -508,7 +508,7 @@ async def test_tax_code_delete_blocked_cross_company(
 @pytest.fixture
 async def project_in_seed(seed_company_id: uuid.UUID) -> uuid.UUID:
     pid = uuid.uuid4()
-    async with AsyncSessionLocal() as session:
+    async with tenant_session(_DEFAULT_TENANT_ID) as session:
         session.add(
             Project(
                 id=pid,
@@ -568,7 +568,7 @@ async def test_project_delete_blocked_cross_company(
 async def budget_in_seed(seed_company_id: uuid.UUID) -> uuid.UUID:
     bid = uuid.uuid4()
     acc = await _new_account(seed_company_id)
-    async with AsyncSessionLocal() as session:
+    async with tenant_session(_DEFAULT_TENANT_ID) as session:
         session.add(
             Budget(
                 id=bid,
@@ -632,7 +632,7 @@ async def allocation_rule_in_seed(seed_company_id: uuid.UUID) -> uuid.UUID:
     src = await _new_account(seed_company_id, kind=AccountType.EXPENSE)
     tgt1 = await _new_account(seed_company_id, kind=AccountType.EXPENSE)
     tgt2 = await _new_account(seed_company_id, kind=AccountType.EXPENSE)
-    async with AsyncSessionLocal() as session:
+    async with tenant_session(_DEFAULT_TENANT_ID) as session:
         session.add(
             AllocationRule(
                 id=rid,

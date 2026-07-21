@@ -72,6 +72,12 @@ KNOWN_SCHEMES: frozenset[str] = frozenset({
     # saebooks.jurisdictions.lv.identifiers on first LV dispatch).
     "lv_regnum",
     "lv_pvn",
+    # M1.5 P1 tail — customs/trade identifier + EU cross-border VAT
+    # simplification scheme-membership records. Format-only validators
+    # below (no checksum algorithm), same posture as us_ein/uk_utr/eu_vat.
+    "eori",  # Economic Operators Registration and Identification (EU customs)
+    "eu_oss_scheme",  # One-Stop-Shop union/non-union scheme membership number
+    "eu_ioss_scheme",  # Import One-Stop-Shop scheme membership number
 })
 
 # Best-effort scheme -> jurisdiction-code mapping (matches the reference DB's
@@ -331,6 +337,14 @@ register_validator("in_gstin")(
 )
 register_validator("in_pan")(_format_validator(r"^[A-Z]{5}\d{4}[A-Z]$"))
 register_validator("ca_bn")(_format_validator(r"^\d{9}(RT\d{4})?$"))
+# EORI: 2-letter ISO country code + up to 15 alphanumeric characters.
+register_validator("eori")(_format_validator(r"^[A-Z]{2}[A-Z0-9]{1,15}$"))
+# OSS/IOSS scheme-membership numbers. IOSS is a fixed shape (IM + 10
+# digits); OSS union-scheme numbers reuse the identification member
+# state's VAT-number shape (EU country code + 2-12 alphanumerics) — same
+# pattern as eu_vat above.
+register_validator("eu_ioss_scheme")(_format_validator(r"^IM\d{10}$"))
+register_validator("eu_oss_scheme")(_format_validator(r"^[A-Z]{2}[A-Z0-9]{2,12}$"))
 
 
 async def get(

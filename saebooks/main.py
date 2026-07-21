@@ -93,6 +93,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             ephemeral_demo.run_reaper_loop(reaper_stop)
         )
 
+    # Intercompany REMOTE-relay outbox dispatcher (Phase 3c). Started ONLY when
+    # SAEBOOKS_IC_REMOTE_RELAY_ENABLED is True (default OFF) — with the flag off
+    # the task is never created and the outbox stays inert. The task drains the
+    # outbox, relays signed payloads to the broker, and backs off / DEADs on
+    # failure (never auto-reverses the local leg). Cancelled on shutdown,
+    # coexisting with the demo reaper task above (independent stop Events).
+    ic_relay_stop: asyncio.Event | None = None
+    ic_relay_task: asyncio.Task | None = None
+    if settings.ic_remote_relay_enabled:
+        from saebooks.services.ic_relay.dispatcher import dispatcher_loop
+
+        ic_relay_stop = asyncio.Event()
+        ic_relay_task = asyncio.create_task(
+            dispatcher_loop(settings=settings, stop=ic_relay_stop)
+        )
+        logger.info("IC remote-relay dispatcher task started")
+
     async def _shutdown() -> None:
         if reaper_stop is not None:
             reaper_stop.set()
@@ -101,6 +118,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 await asyncio.wait_for(reaper_task, timeout=5)
             except TimeoutError:
                 reaper_task.cancel()
+        if ic_relay_stop is not None:
+            ic_relay_stop.set()
+        if ic_relay_task is not None:
+            try:
+                await asyncio.wait_for(ic_relay_task, timeout=5)
+            except TimeoutError:
+                ic_relay_task.cancel()
         await grpc_server.stop(grace=5)
 
     # MCP streamable-HTTP session manager — must run inside an async

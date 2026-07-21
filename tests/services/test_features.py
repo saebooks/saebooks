@@ -25,6 +25,7 @@ from saebooks.config import Settings
 from saebooks.services.features import (
     ALL_FLAGS,
     FLAG_ABR_LOOKUP,
+    FLAG_ACCOUNTING_SYNC,
     FLAG_AI_EXTRACTION,
     FLAG_ALLOCATION_RULES,
     FLAG_ASSET_V2,
@@ -54,6 +55,7 @@ from saebooks.services.features import (
     FLAG_SMTP_RELAY,
     FLAG_SQL_TOOL,
     FLAG_STRIPE_INTEGRATION,
+    FLAG_SYNC_XERO,
     FLAG_TENANT_SWITCHER,
     FLAG_THEMES,
     TIER_ORDER,
@@ -131,6 +133,10 @@ EXPECTED_PRO = EXPECTED_BUSINESS | frozenset({
 
 EXPECTED_ENTERPRISE = EXPECTED_PRO | frozenset({
     FLAG_PER_COMPANY_SISS,
+    # Accounting-package sync — umbrella + Xero sub-flag, both
+    # Enterprise-only.
+    FLAG_ACCOUNTING_SYNC,
+    FLAG_SYNC_XERO,
 })
 
 # Developer tier — internal-only superset of enterprise + the six

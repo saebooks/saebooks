@@ -130,6 +130,68 @@ ssh ci-host "sudo docker exec saebooks-<stack>-db-1 \
 
 If the first probe returns rows, FORCE-RLS is not engaged — escalate.
 
+## CI fixture-migration plan (test suite under --rls)
+
+Separate from the 5 live-stack deployment above: the isolated docker
+test suite (`docker-compose.test.yml` / `scripts/run-tests.sh`) can now
+opt into running the runtime engine as `saebooks_app` via `--rls` (or
+`SAEBOOKS_TEST_RLS=1`) — see `feat/m3-ci-rls-approle`. Default CI stays
+on the owner role unchanged; `--rls` is not yet wired into any CI job.
+
+**Why opt-in, not default:** flipping the whole suite to `--rls`
+reddens ~2000 tests (out of ~5000) with `git checkout feat/m3-ci-rls-approle`'s
+first commit. The root cause is uniform: ~100 test files write fixture
+rows directly via `AsyncSessionLocal()` without stamping the tenant GUC
+(`session.info["tenant_id"]`) that `api/v1/deps.py`'s `after_begin`
+listener reads to issue `SET LOCAL app.current_tenant`. Under the
+owner/BYPASSRLS role this was silently fine; under `saebooks_app`,
+FORCE RLS blocks the write or filters the read to zero rows.
+
+**The fix pattern** (landed for the 19 dedicated RLS/isolation files —
+`test_rls_*.py`, `test_tenant_scope.py`, `test_cross_tenant_isolation.py`,
+`test_cross_company_isolation.py`, `test_principal_cross_tenant.py`,
+`test_integrations_rls.py`) — two helpers in `tests/conftest.py`:
+
+- `tenant_session(tenant_id)` — `AsyncSessionLocal()` with
+  `session.info["tenant_id"]` stamped. Use for any single-tenant
+  read/write in a fixture; harmless no-op under the owner role, load-
+  bearing under `--rls`.
+- `owner_seed_session()` — always the BYPASSRLS owner role
+  (`LoginSessionLocal` / `DATABASE_URL`), for cross-tenant seed/teardown
+  that legitimately writes rows into more than one tenant in a single
+  fixture. Never use for the assertions under test.
+
+Several of these files also imported `from saebooks.db import engine as
+_owner_engine` to build a comparison "owner" connection or to
+`ALTER ROLE saebooks_app` — that's the *runtime* engine, which IS
+`saebooks_app` under `--rls`, so both uses broke. Swapped to
+`saebooks.db._owner_role_engine` (the engine `LoginSessionLocal` is
+built on) — always the real owner/superuser role regardless of mode.
+
+**Remaining work — the ~100-file tail:** every other test file that
+opens `AsyncSessionLocal()` directly for fixture setup/teardown needs
+the same treatment (mostly `tenant_session`, occasionally
+`owner_seed_session` where a fixture spans tenants). This is bulk,
+mechanical, per-file work — not attempted here (task scope was the
+diagnostic + a mergeable beachhead, not the full migration). Suggested
+order: convert alongside normal feature work file-by-file rather than
+as one giant PR, then add a `--rls` CI job once a large majority is
+converted (a lingering handful of red files can stay on an ignore-list
+the same way `tests/KNOWN_FAILURES.txt` works today).
+
+**What this does NOT yet prove:** the dedicated RLS files already
+validated real policy enforcement in default-mode CI (they open their
+own direct `saebooks_app` connections regardless of `--rls`), so that
+part of the picture is unchanged from before this branch. What's new
+here is that the *application's own request path* (`AsyncSessionLocal`
+via `get_session`) has been proven to work correctly against real FORCE
+RLS for two files that exercise it end-to-end
+(`test_cross_company_isolation.py`, `test_tenant_scope.py`). The other
+~98 app-path test files have not been proven either way under
+`saebooks_app` — that's exactly the gap the fixture-migration tail
+above needs to close before a `--rls` CI job would mean anything
+broader than "the 19 files we already trust still pass."
+
 ## Known gaps NOT closed by this work
 
 These were called out in Lane 4 P0-2, P1, P2; they survive after fix-F:

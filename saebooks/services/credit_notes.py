@@ -36,6 +36,7 @@ from sqlalchemy.orm import selectinload
 from saebooks.models.account import Account, AccountType
 from saebooks.models.company import Company
 from saebooks.models.credit_note import CreditNote, CreditNoteLine, CreditNoteStatus
+from saebooks.models.invoice import Invoice
 from saebooks.models.journal import JournalOrigin
 from saebooks.models.tax_code import TaxCode
 from saebooks.money import round_money
@@ -161,6 +162,30 @@ async def _recalc(session: AsyncSession, cn: CreditNote) -> None:
     cn.subtotal = _q2(Decimal(subtotal))
     cn.tax_total = _q2(Decimal(tax))
     cn.total = cn.subtotal + cn.tax_total
+
+
+async def _validate_original_invoice(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    original_invoice_id: uuid.UUID,
+) -> None:
+    """Reject an ``original_invoice_id`` that does not belong to this credit
+    note's company.
+
+    Mirrors the cross-company guard in ``payments.allocate()`` (``if
+    inv.company_id != pay.company_id: raise ...``) and the identical guard
+    added to ``supplier_credit_notes._validate_original_bill`` — this is
+    the AR twin of the same unguarded shape. Without this, an invoice PK
+    from ANY company/tenant is silently accepted here and later mutated by
+    ``payments._refresh_invoice_amount_paid`` via a raw PK fetch that never
+    checks ``company_id`` — a company-A credit note can zero out
+    company-B's invoice and drop it from B's aged receivables.
+    """
+    invoice = await session.get(Invoice, original_invoice_id)
+    if invoice is None or invoice.company_id != company_id:
+        raise CreditNoteError(
+            f"Invoice {original_invoice_id} not found for this company"
+        )
 
 
 async def create_draft(
@@ -408,7 +433,9 @@ async def post_credit_note(
     # invoice's amount_paid so it drops out of aged receivables.
     if cn.original_invoice_id is not None:
         from saebooks.services.payments import _refresh_invoice_amount_paid
-        await _refresh_invoice_amount_paid(session, cn.original_invoice_id)
+        await _refresh_invoice_amount_paid(
+            session, cn.original_invoice_id, expected_company_id=cn.company_id
+        )
         await session.commit()
 
     return await get(session, cn.id)
@@ -450,7 +477,9 @@ async def void_credit_note(
     # the invoice reverts to open and reappears in aged receivables.
     if cn.original_invoice_id is not None:
         from saebooks.services.payments import _refresh_invoice_amount_paid
-        await _refresh_invoice_amount_paid(session, cn.original_invoice_id)
+        await _refresh_invoice_amount_paid(
+            session, cn.original_invoice_id, expected_company_id=cn.company_id
+        )
         await session.commit()
 
     return cn
@@ -658,6 +687,8 @@ async def api_create(
         company = await session.get(Company, company_id)
         if company is not None and company.default_payment_terms:
             payment_terms = company.default_payment_terms
+    if original_invoice_id is not None:
+        await _validate_original_invoice(session, company_id, original_invoice_id)
     cn = CreditNote(
         company_id=company_id,
         tenant_id=tenant_id,
@@ -750,6 +781,7 @@ async def api_update(
     if issue_date is not None:
         cn.issue_date = issue_date
     if original_invoice_id is not None:
+        await _validate_original_invoice(session, cn.company_id, original_invoice_id)
         cn.original_invoice_id = original_invoice_id
     if reason is not None:
         cn.reason = reason

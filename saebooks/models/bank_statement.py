@@ -4,7 +4,18 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import (
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -23,6 +34,25 @@ class StatementLineStatus(enum.StrEnum):
 
 class BankStatementLine(CompanyScoped, Base):
     __tablename__ = "bank_statement_lines"
+    __table_args__ = (
+        # Partial unique index — feed-ingested lines are deduped on
+        # (bank_feed_account_id, external_id); manually-entered lines
+        # (external_id IS NULL) stay unconstrained. This is the conflict
+        # target for the feed bulk upsert in services.statement_lines_bulk.
+        # It was created only by Postgres migration 0016 (raw op.create_index),
+        # so SQLite's bootstrap_schema never had it and the on_conflict upsert
+        # would fail there. Declaring it here creates it on SQLite bootstrap
+        # too (sqlite_where) and keeps the ORM in lock-step with Postgres
+        # (postgresql_where mirrors 0016 exactly — no new migration).
+        Index(
+            "ux_bank_statement_lines_feed_external",
+            "bank_feed_account_id",
+            "external_id",
+            unique=True,
+            postgresql_where=text("external_id IS NOT NULL"),
+            sqlite_where=text("external_id IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4

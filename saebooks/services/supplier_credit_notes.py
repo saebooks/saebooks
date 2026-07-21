@@ -44,6 +44,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from saebooks.models.account import Account, AccountType
+from saebooks.models.bill import Bill
 from saebooks.models.journal import JournalOrigin
 from saebooks.models.supplier_credit_note import (
     SupplierCreditNote,
@@ -233,6 +234,28 @@ async def _get_gst_paid_account(
     ).scalars().first()
 
 
+async def _validate_original_bill(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    original_bill_id: uuid.UUID,
+) -> None:
+    """Reject an ``original_bill_id`` that does not belong to this SCN's
+    company.
+
+    Mirrors the cross-company guard in ``payments.allocate()`` (``if
+    bill.company_id != pay.company_id: raise ...``). Without this, a bill
+    PK from ANY company/tenant is silently accepted here and later mutated
+    by ``payments._refresh_bill_amount_paid`` via a raw PK fetch that never
+    checks ``company_id`` — a company-A supplier credit note can zero out
+    company-B's bill and drop it from B's aged payables.
+    """
+    bill = await session.get(Bill, original_bill_id)
+    if bill is None or bill.company_id != company_id:
+        raise SupplierCreditNoteError(
+            f"Bill {original_bill_id} not found for this company"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Read
 # ---------------------------------------------------------------------------
@@ -377,6 +400,8 @@ async def api_create(
     reason: str | None = None,
     notes: str | None = None,
 ) -> SupplierCreditNote:
+    if original_bill_id is not None:
+        await _validate_original_bill(session, company_id, original_bill_id)
     scn = SupplierCreditNote(
         company_id=company_id,
         tenant_id=tenant_id,
@@ -450,6 +475,7 @@ async def api_update(
     if issue_date is not None:
         scn.issue_date = issue_date
     if original_bill_id is not None:
+        await _validate_original_bill(session, scn.company_id, original_bill_id)
         scn.original_bill_id = original_bill_id
     if supplier_reference is not None:
         scn.supplier_reference = supplier_reference
@@ -603,6 +629,18 @@ async def post_supplier_credit_note(
     scn.posted_at = datetime.now(UTC)
     scn.posted_by = posted_by
     await session.commit()
+
+    # A posted supplier credit note linked to a bill relieves that bill's
+    # outstanding balance. Recompute the bill's amount_paid so it drops
+    # out of aged payables — mirrors credit_notes.post_credit_note's
+    # invoice-side relief.
+    if scn.original_bill_id is not None:
+        from saebooks.services.payments import _refresh_bill_amount_paid
+        await _refresh_bill_amount_paid(
+            session, scn.original_bill_id, expected_company_id=scn.company_id
+        )
+        await session.commit()
+
     result = await _get(session, scn.id)
     assert result is not None
     return result
@@ -694,6 +732,16 @@ async def void_supplier_credit_note(
     scn.status = SupplierCreditNoteStatus.VOIDED
     scn.void_journal_entry_id = reversal.id
     await session.commit()
+
+    # Voiding the credit note removes its relief of the linked bill, so
+    # the bill reverts to open and reappears in aged payables.
+    if scn.original_bill_id is not None:
+        from saebooks.services.payments import _refresh_bill_amount_paid
+        await _refresh_bill_amount_paid(
+            session, scn.original_bill_id, expected_company_id=scn.company_id
+        )
+        await session.commit()
+
     result = await _get(session, scn.id)
     assert result is not None
     return result

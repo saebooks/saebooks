@@ -128,6 +128,16 @@ FLAG_DOCUMENT_INBOX = "document_inbox"
 # Offline is a charter-clean follow-up, not v1.
 FLAG_INBOX_EMAIL = "inbox_email"
 
+# --- Accounting-package sync (Enterprise tier) --------------------------- #
+# Bidirectional sync with an external accounting package. The umbrella flag
+# gates the whole feature surface (Settings -> Sync UI, /api/v1/sync/*
+# routes); FLAG_SYNC_XERO gates the Xero adapter specifically, so a future
+# second provider gets its own sub-flag rather than reusing this one.
+# Enterprise-only — bidirectional sync is "extra work" beyond Pro's banking
+# + lodgement scope. Ported from feat/sync-xero-adapter (docs/sync/xero.md).
+FLAG_ACCOUNTING_SYNC = "accounting_sync"
+FLAG_SYNC_XERO = "sync_xero"
+
 # --- Developer-only flags (not part of any published / billable tier) ----- #
 # These exist ONLY in the ``developer`` tier — Richard's personal instances
 # (primary / acme / app-preview / cashbook-demo) where the codebase is
@@ -200,6 +210,8 @@ ALL_FLAGS: tuple[str, ...] = (
     FLAG_DOCUMENT_INBOX,
     FLAG_INBOX_EMAIL,
     FLAG_EID_AUTH,
+    FLAG_ACCOUNTING_SYNC,
+    FLAG_SYNC_XERO,
 )
 
 _ALL_FLAGS_SET: frozenset[str] = frozenset(ALL_FLAGS)
@@ -259,6 +271,12 @@ _PRO_FLAGS: frozenset[str] = _BUSINESS_FLAGS | frozenset({
 
 _ENTERPRISE_FLAGS: frozenset[str] = _PRO_FLAGS | frozenset({
     FLAG_PER_COMPANY_SISS,
+    # Accounting-package sync — umbrella + Xero sub-flag, both
+    # Enterprise-only. Flipping the umbrella off via the licence JWT
+    # disables the sub-flag too because the sync router checks the
+    # umbrella before the sub-flag (see api/v1/sync_xero.py).
+    FLAG_ACCOUNTING_SYNC,
+    FLAG_SYNC_XERO,
 })
 
 # Developer tier — internal-only. Superset of enterprise + every dev-only

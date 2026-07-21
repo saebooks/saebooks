@@ -5,7 +5,7 @@ Idempotent. Designed to run on every container start when
 service env). Produces:
 
 * Tenant ``00000000-0000-0000-0000-000000000001``
-* Demo company "Sam Sole Trader" in ``bookkeeping_mode=\cashbook\``
+* Demo company "Sam Sole Trader" in ``bookkeeping_mode="cashbook"``
   with AU chart of accounts pre-loaded
 * GST-registered, FY starts 1 July
 * AU GST tax codes seeded

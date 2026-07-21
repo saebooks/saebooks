@@ -22,7 +22,6 @@ from collections.abc import AsyncGenerator
 import pytest
 from sqlalchemy import select
 
-from saebooks.db import AsyncSessionLocal
 from saebooks.models.company import Company
 from saebooks.models.contact import Contact, ContactType
 from saebooks.services.tenant import (
@@ -30,8 +29,16 @@ from saebooks.services.tenant import (
     current_company_id,
     scope,
 )
+from tests.conftest import tenant_session
 
 pytestmark = pytest.mark.postgres_only
+
+# Both scratch companies in this file live under the same (default)
+# tenant — this suite exercises the app-layer company scope filter
+# (saebooks.services.tenant), not cross-tenant RLS, so every session
+# here is legitimately single-tenant. Module-level so every test
+# function can stamp it via tenant_session, not just the fixture.
+_DEFAULT_TENANT = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
 @pytest.fixture
@@ -48,9 +55,7 @@ async def two_companies() -> AsyncGenerator[tuple[uuid.UUID, uuid.UUID], None]:
     contact_a_name = f"Customer-A-{tag}"
     contact_b_name = f"Customer-B-{tag}"
 
-    _DEFAULT_TENANT = uuid.UUID("00000000-0000-0000-0000-000000000001")
-
-    async with AsyncSessionLocal() as session:
+    async with tenant_session(_DEFAULT_TENANT) as session:
         company_a = Company(name=name_a, base_currency="AUD", tenant_id=_DEFAULT_TENANT)
         company_b = Company(name=name_b, base_currency="AUD", tenant_id=_DEFAULT_TENANT)
         session.add_all([company_a, company_b])
@@ -77,7 +82,7 @@ async def two_companies() -> AsyncGenerator[tuple[uuid.UUID, uuid.UUID], None]:
     # whatever scope the last test left bound. Can't combine async-with
     # + sync-with on one line, so nest them explicitly.
     with bypass_tenant_scope():
-        async with AsyncSessionLocal() as session:
+        async with tenant_session(_DEFAULT_TENANT) as session:
             for cid in (cid_a, cid_b):
                 contacts = (
                     await session.execute(
@@ -98,7 +103,7 @@ async def test_no_scope_sees_all_contacts(
     """Unset scope = no filter. Both companies' contacts are visible."""
     cid_a, cid_b = two_companies
     assert current_company_id() is None
-    async with AsyncSessionLocal() as session:
+    async with tenant_session(_DEFAULT_TENANT) as session:
         rows = (
             await session.execute(
                 select(Contact).where(Contact.company_id.in_([cid_a, cid_b]))
@@ -116,7 +121,7 @@ async def test_scope_a_hides_company_b(
     cid_a, cid_b = two_companies
     with scope(cid_a):
         assert current_company_id() == cid_a
-        async with AsyncSessionLocal() as session:
+        async with tenant_session(_DEFAULT_TENANT) as session:
             rows = (await session.execute(select(Contact))).scalars().all()
         companies_seen = {r.company_id for r in rows}
     assert cid_a in companies_seen
@@ -129,7 +134,7 @@ async def test_scope_b_hides_company_a(
     """Symmetric — scope on B hides A."""
     cid_a, cid_b = two_companies
     with scope(cid_b):
-        async with AsyncSessionLocal() as session:
+        async with tenant_session(_DEFAULT_TENANT) as session:
             rows = (await session.execute(select(Contact))).scalars().all()
         companies_seen = {r.company_id for r in rows}
     assert cid_b in companies_seen
@@ -142,7 +147,7 @@ async def test_bypass_overrides_scope(
     """``bypass_tenant_scope`` lets cross-tenant admin queries through."""
     cid_a, cid_b = two_companies
     with scope(cid_a), bypass_tenant_scope():
-        async with AsyncSessionLocal() as session:
+        async with tenant_session(_DEFAULT_TENANT) as session:
             rows = (
                 await session.execute(
                     select(Contact).where(
@@ -165,7 +170,7 @@ async def test_company_table_is_never_filtered(
     """
     cid_a, cid_b = two_companies
     with scope(cid_a):
-        async with AsyncSessionLocal() as session:
+        async with tenant_session(_DEFAULT_TENANT) as session:
             rows = (
                 await session.execute(
                     select(Company).where(Company.id.in_([cid_a, cid_b]))
@@ -182,7 +187,7 @@ async def test_unknown_company_scope_returns_empty(
     """A scope bound to a random UUID returns zero — never falls back."""
     random_cid = uuid.uuid4()
     with scope(random_cid):
-        async with AsyncSessionLocal() as session:
+        async with tenant_session(_DEFAULT_TENANT) as session:
             rows = (await session.execute(select(Contact))).scalars().all()
     assert rows == []
 

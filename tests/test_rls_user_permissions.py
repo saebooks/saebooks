@@ -16,18 +16,23 @@ import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import (
-    AsyncSession,
-    async_sessionmaker,
     create_async_engine,
 )
 from sqlalchemy.pool import NullPool
 
 os.environ.setdefault("SAEBOOKS_ENV", "test")
 
-from saebooks.db import engine as _owner_engine
+# NOTE: deliberately NOT ``saebooks.db.engine`` — that's the runtime
+# engine, which IS the saebooks_app role under --rls (see
+# docker-compose.test.yml). This file needs a connection that is always
+# the real owner/superuser role (ALTER ROLE below requires it, and the
+# catalog probes + URL-template below are clearer reading the one
+# genuinely-fixed owner engine rather than a conditionally-app-role one).
+from saebooks.db import _owner_role_engine as _owner_engine
 from saebooks.models.permission import UserPermission
 from saebooks.models.tenant import Tenant
 from saebooks.models.user import User
+from tests.conftest import owner_seed_session
 
 pytestmark = pytest.mark.postgres_only
 
@@ -69,10 +74,9 @@ async def app_engine() -> AsyncIterator[Any]:
 async def seeded() -> AsyncIterator[dict[str, Any]]:
     """Two tenants, each with one user + one per-user permission
     override row, inserted through the BYPASSRLS owner engine."""
-    Owner = async_sessionmaker(_owner_engine, expire_on_commit=False, class_=AsyncSession)
     suffix = uuid.uuid4().hex[:8]
     out: dict[str, Any] = {"suffix": suffix}
-    async with Owner() as session:
+    async with owner_seed_session() as session:
         code_row = (
             await session.execute(text("SELECT code FROM permissions LIMIT 1"))
         ).first()
@@ -105,7 +109,7 @@ async def seeded() -> AsyncIterator[dict[str, Any]]:
             out[label] = {"tenant_id": tid, "user_id": user.id}
         await session.commit()
     yield out
-    async with Owner() as session:
+    async with owner_seed_session() as session:
         for label in ("tenant_a", "tenant_b"):
             await session.execute(
                 text(f"DELETE FROM {_TABLE} WHERE tenant_id = :tid").bindparams(

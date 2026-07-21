@@ -70,6 +70,11 @@ services:
       SAEBOOKS_EDITION: ${SAEBOOKS_EDITION:-community}
       SAEBOOKS_LOG_LEVEL: ${SAEBOOKS_LOG_LEVEL:-INFO}
       SAEBOOKS_LOG_JSON: ${SAEBOOKS_LOG_JSON:-false}
+      # The gRPC sidecar honours SAEBOOKS_BIND_HOST (config default
+      # 127.0.0.1, secure-by-default for the bare-metal one-click server).
+      # In this Docker bundle the published 50051 port needs the process to
+      # bind all interfaces inside the container, so set it to 0.0.0.0.
+      SAEBOOKS_BIND_HOST: "0.0.0.0"
       # Field-level encryption key for stored secrets (bank tokens etc).
       SAEBOOKS_FIELD_ENCRYPTION_KEY: ${SAEBOOKS_FIELD_ENCRYPTION_KEY:-}
       # PDF render service — container-name-pinned at latex-api. The

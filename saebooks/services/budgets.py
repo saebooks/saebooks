@@ -20,9 +20,9 @@ from typing import Any
 
 from sqlalchemy import delete, select
 from sqlalchemy import func as sa_func
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from saebooks.db import upsert_stmt
 from saebooks.models.budget import Budget
 from saebooks.services import change_log as change_log_svc
 
@@ -112,7 +112,7 @@ async def upsert(
         raise ValueError(f"month {month} is out of range 1..12")
 
     stmt = (
-        pg_insert(Budget)
+        upsert_stmt(Budget)
         .values(
             company_id=company_id,
             account_id=account_id,
@@ -122,7 +122,12 @@ async def upsert(
             notes=notes,
         )
         .on_conflict_do_update(
-            constraint="uq_budgets_company_account_year_month",
+            index_elements=[
+                Budget.company_id,
+                Budget.account_id,
+                Budget.year,
+                Budget.month,
+            ],
             set_={"amount": amount, "notes": notes},
         )
         .returning(Budget)
@@ -201,7 +206,7 @@ async def bulk_upsert(
             written += 1
             continue
         stmt = (
-            pg_insert(Budget)
+            upsert_stmt(Budget)
             .values(
                 company_id=company_id,
                 account_id=row["account_id"],
@@ -211,7 +216,12 @@ async def bulk_upsert(
                 notes=row.get("notes"),
             )
             .on_conflict_do_update(
-                constraint="uq_budgets_company_account_year_month",
+                index_elements=[
+                    Budget.company_id,
+                    Budget.account_id,
+                    Budget.year,
+                    Budget.month,
+                ],
                 set_={"amount": amount, "notes": row.get("notes")},
             )
         )

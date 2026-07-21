@@ -141,6 +141,15 @@ class RemoteLodgementService(LodgementService):
         body = self._build_envelope_body(envelope, payevent_id, metadata)
         return await self._post_envelope("/api/v1/stp/lodge", body)
 
+    async def lodge_stp_bundle(
+        self,
+        parts: list[bytes],
+        payevent_id: str,
+        metadata: dict[str, Any],
+    ) -> LodgementResult:
+        body = self._build_bundle_body(parts, payevent_id, metadata)
+        return await self._post_envelope("/api/v1/stp/lodge", body)
+
     async def lodge_bas(
         self,
         envelope: bytes,
@@ -276,6 +285,34 @@ class RemoteLodgementService(LodgementService):
         return {
             "envelope_xml": b64,
             "envelope_hash": sha,
+            "submitter_abn": self._submitter_abn or "",
+            "payevent_id": idempotency_id,
+            "metadata": metadata,
+        }
+
+    def _build_bundle_body(
+        self,
+        parts: list[bytes],
+        idempotency_id: str,
+        metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Build the multipart (parts-array) contract body for a doc SET.
+
+        The single-doc contract carries ``envelope_xml``; a PAYEVNT.0004
+        submission is a set (parent + one child per payee), so it ships as
+        ``parts`` instead. ``envelope_hash`` is the sha256 over the
+        *concatenated raw parts, in order* — the same buffer the
+        lodge-server's ``_verify_parts_hash`` recomputes from the decoded
+        parts, so an ordering or encoding drift surfaces as a hash mismatch
+        rather than a silently wrong lodgement. Exactly one of
+        ``envelope_xml`` / ``parts`` may be present (server-enforced).
+        """
+        digest = hashlib.sha256()
+        for raw in parts:
+            digest.update(raw)
+        return {
+            "parts": [base64.b64encode(raw).decode("ascii") for raw in parts],
+            "envelope_hash": digest.hexdigest(),
             "submitter_abn": self._submitter_abn or "",
             "payevent_id": idempotency_id,
             "metadata": metadata,

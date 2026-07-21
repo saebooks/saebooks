@@ -37,6 +37,11 @@ services:
       - ${SAEBOOKS_BACKUP_DIR:-/home/youruser/saebooks-backups}:/app/backups:ro
     environment:
       SAEBOOKS_BACKUP_DIR_IN_CONTAINER: /app/backups
+      # In-container binds are all-interfaces so Docker port-publishing and
+      # sibling services can reach REST + gRPC. The gRPC sidecar honours
+      # SAEBOOKS_BIND_HOST (config default 127.0.0.1, secure-by-default for
+      # bare-metal / one-click) — set it explicitly here for the Docker path.
+      SAEBOOKS_BIND_HOST: "0.0.0.0"
     ports:
       - "8042:8000"
 

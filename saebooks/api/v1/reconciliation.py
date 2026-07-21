@@ -22,8 +22,10 @@ GET  /api/v1/reconciliation/unmatched
 
 GET  /api/v1/reconciliation/suggest/{bsl_id}
     Suggest candidate posted journal entries that could match a BSL.
-    Returns a list of entry summaries with no confidence score (service does
-    exact-amount matching).
+    Each candidate carries ``confidence`` (HIGH/MEDIUM/LOW), ``match_reason``
+    (EXACT_AMOUNT/AMOUNT_AND_DATE/AMOUNT_AND_REFERENCE/RULE_PATTERN) and a
+    nullable ``rule_id`` (R8a — additive fields, candidates are still
+    exact-amount matches under the hood).
 
 POST /api/v1/reconciliation/match
     Match a BSL to a specific journal entry.
@@ -33,23 +35,33 @@ POST /api/v1/reconciliation/unmatch/{bsl_id}
     Remove a match from a BSL, returning it to UNMATCHED status.
 
 POST /api/v1/reconciliation/auto_match
-    Run automatic matching for all unmatched BSLs in a given account.
-    Required query param: ``account_id`` (UUID).
-    For each unmatched line, takes the first candidate entry and matches it.
-    Returns ``{"matched": N}`` where N is the number of lines matched.
+    Run "honest" automatic matching for all unmatched BSLs in a given account
+    (R8d). Required query param: ``account_id`` (UUID). Links a line ONLY
+    when exactly one candidate scores HIGH confidence; never posts anything.
+    Returns ``{"matched": N, "skipped_ambiguous": M, "skipped_no_candidate": K}``.
+
+POST /api/v1/reconciliation/create_and_match
+    Compound op (R8c): create a record (expense or payment), post it, and
+    match it to a bank statement line in one call. See
+    ``services/reconciliation.create_and_match`` for the atomicity notes.
+    Body: ``{"bsl_id": "<uuid>", "record_type": "expense"|"payment",
+    "expense": {...} | "payment": {...}}``
 """
 from __future__ import annotations
 
-from typing import Any
+from datetime import date
+from decimal import Decimal
+from typing import Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from saebooks.api.v1.auth import require_bearer
+from saebooks.api.v1.auth import require_bearer, resolve_tenant_id
 from saebooks.api.v1.deps import get_active_company_id, get_session
+from saebooks.api.v1.schemas import ExpenseLineCreate, PaymentAllocationCreate
 from saebooks.models.bank_statement import BankStatementLine, StatementLineStatus
 from saebooks.services import reconciliation as svc
 from saebooks.services.authz import no_additional_gate, require_permission_or_role
@@ -88,6 +100,10 @@ class EntrySummary(BaseModel):
     entry_date: str
     description: str | None
     status: str
+    # R8a — additive scoring fields.
+    confidence: str
+    match_reason: str
+    rule_id: str | None = None
 
 
 class MatchRequest(BaseModel):
@@ -97,6 +113,62 @@ class MatchRequest(BaseModel):
 
 class AutoMatchResult(BaseModel):
     matched: int
+    skipped_ambiguous: int
+    skipped_no_candidate: int
+
+
+# ---------------------------------------------------------------------------
+# Compound create-and-match schemas (R8c)
+# ---------------------------------------------------------------------------
+
+
+class CreateAndMatchExpenseSpec(BaseModel):
+    """Expense side of a create_and_match body.
+
+    ``payment_account_id``, ``amount`` and direction are NEVER accepted
+    here — they are always derived from the bank statement line
+    server-side, so the created expense and the match can never disagree.
+    """
+
+    contact_id: UUID | None = None
+    expense_date: date | None = None
+    reference: str | None = None
+    notes: str | None = None
+    currency: str = Field(default="AUD", min_length=3, max_length=3)
+    fx_rate: Decimal | None = None
+    lines: list[ExpenseLineCreate] = Field(default_factory=list)
+
+
+class CreateAndMatchPaymentSpec(BaseModel):
+    """Payment side of a create_and_match body.
+
+    ``bank_account_id``, ``amount`` and ``direction`` are NEVER accepted
+    here — see ``CreateAndMatchExpenseSpec`` docstring.
+    """
+
+    contact_id: UUID
+    payment_date: date | None = None
+    method: str = "eft"
+    reference: str | None = None
+    notes: str | None = None
+    currency: str = Field(default="AUD", min_length=3, max_length=3)
+    fx_rate: Decimal | None = None
+    allocations: list[PaymentAllocationCreate] = Field(default_factory=list)
+
+
+class CreateAndMatchRequest(BaseModel):
+    bsl_id: UUID
+    record_type: Literal["expense", "payment"]
+    expense: CreateAndMatchExpenseSpec | None = None
+    payment: CreateAndMatchPaymentSpec | None = None
+
+    @model_validator(mode="after")
+    def _spec_matches_record_type(self) -> CreateAndMatchRequest:
+        if self.record_type == "expense" and self.expense is None:
+            raise ValueError("record_type=expense requires an 'expense' spec")
+        if self.record_type == "payment" and self.payment is None:
+            raise ValueError("record_type=payment requires a 'payment' spec")
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -119,13 +191,18 @@ def _dump_bsl(line: BankStatementLine) -> dict[str, Any]:
     }
 
 
-def _dump_entry(entry: Any) -> dict[str, Any]:
+def _dump_entry(
+    entry: Any, confidence: str, match_reason: str, rule_id: UUID | None
+) -> dict[str, Any]:
     return {
         "id": str(entry.id),
         "ref": entry.ref,
         "entry_date": str(entry.entry_date),
         "description": entry.description,
         "status": str(entry.status),
+        "confidence": confidence,
+        "match_reason": match_reason,
+        "rule_id": str(rule_id) if rule_id else None,
     }
 
 
@@ -158,18 +235,36 @@ async def list_reconciliation_accounts(
 @router.get("/unmatched")
 async def list_unmatched_lines(
     account_id: UUID = Query(..., description="Bank account UUID to list unmatched lines for"),
+    limit: int | None = Query(default=None, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
     company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
-    """List unmatched bank statement lines for an account."""
+    """List unmatched bank statement lines for an account.
+
+    Without ``limit`` the full unmatched set is returned (legacy shape).
+    The response body stays a bare array either way; ``X-Total-Count``
+    carries the unpaginated total for pagination UIs.
+    """
     lines = await svc.statement_lines(
+        session,
+        company_id,
+        account_id,
+        status=StatementLineStatus.UNMATCHED,
+        limit=limit,
+        offset=offset,
+    )
+    total = await svc.count_statement_lines(
         session,
         company_id,
         account_id,
         status=StatementLineStatus.UNMATCHED,
     )
 
-    return JSONResponse([_dump_bsl(ln) for ln in lines])
+    return JSONResponse(
+        [_dump_bsl(ln) for ln in lines],
+        headers={"X-Total-Count": str(total)},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -202,7 +297,14 @@ async def suggest_matches(
         stmt_line,
     )
 
-    return JSONResponse([_dump_entry(e) for e in candidates])
+    scored = []
+    for entry in candidates:
+        confidence, match_reason, rule_id = await svc.score_candidate(
+            session, company_id, stmt_line, entry
+        )
+        scored.append(_dump_entry(entry, confidence, match_reason, rule_id))
+
+    return JSONResponse(scored)
 
 
 # ---------------------------------------------------------------------------
@@ -294,35 +396,86 @@ async def auto_match(
     session: AsyncSession = Depends(get_session),
     company_id: UUID = Depends(get_active_company_id),
 ) -> Any:
-    """Run automatic matching for all unmatched BSLs in an account.
+    """Run "honest" automatic matching for all unmatched BSLs in an account (R8d).
 
-    For each unmatched line, finds candidate journal entries using exact-amount
-    matching and matches the line to the first (earliest) candidate found.
-    Returns ``{"matched": N}``.
+    For each unmatched line, candidates are scored (see
+    ``services/reconciliation.score_candidate``) and a link is made ONLY
+    when exactly one candidate scores HIGH confidence — ambiguous lines
+    (2+ HIGH candidates) are skipped and counted, not guessed at. Never
+    posts anything — only links already-POSTED entries (unchanged
+    invariant from before R8).
+
+    Returns ``{"matched": N, "skipped_ambiguous": M, "skipped_no_candidate": K}``.
     """
-    matched = 0
+    result = await svc.auto_match(session, company_id, account_id)
+    return JSONResponse(result)
 
-    unmatched = await svc.statement_lines(
-        session,
-        company_id,
-        account_id,
-        status=StatementLineStatus.UNMATCHED,
-    )
 
-    for line in unmatched:
-        candidates = await svc.candidate_entries(
+# ---------------------------------------------------------------------------
+# POST /reconciliation/create_and_match
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/create_and_match",
+    dependencies=[
+        Depends(require_permission_or_role("reconciliation.match", no_additional_gate))
+    ],
+)
+async def create_and_match(
+    payload: CreateAndMatchRequest,
+    request: Request,
+    bearer: str = Depends(require_bearer),
+    session: AsyncSession = Depends(get_session),
+    company_id: UUID = Depends(get_active_company_id),
+) -> Any:
+    """Compound op (R8c): create a record, post it, and match it to a BSL.
+
+    ``record_type`` selects which record-type engine creates the record —
+    ``expense`` (a withdrawal only) or ``payment`` (either direction).
+    The record's account/amount/direction are always derived from the bank
+    statement line itself, never accepted from the caller, so the created
+    record and the resulting match can never disagree.
+
+    See ``services/reconciliation.create_and_match`` for exactly what is
+    and isn't atomic across the create → post → match pipeline.
+    """
+    tenant_id = resolve_tenant_id(request)
+
+    expense_spec = payload.expense.model_dump() if payload.expense else None
+    if expense_spec is not None:
+        expense_spec["lines"] = [line.model_dump() for line in payload.expense.lines]
+
+    payment_spec = payload.payment.model_dump() if payload.payment else None
+    if payment_spec is not None:
+        payment_spec["allocations"] = [
+            a.model_dump() for a in payload.payment.allocations
+        ]
+
+    try:
+        result = await svc.create_and_match(
             session,
-            company_id,
-            account_id,
-            line,
+            payload.bsl_id,
+            company_id=company_id,
+            tenant_id=tenant_id,
+            actor=f"api:{bearer[:8]}…",
+            record_type=payload.record_type,
+            expense_spec=expense_spec,
+            payment_spec=payment_spec,
         )
-        if not candidates:
-            continue
-        try:
-            await svc.match_line(session, line.id, candidates[0].id)
-            matched += 1
-        except ValueError:
-            # Entry already matched or line state changed — skip
-            continue
+    except ValueError as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(404, msg) from exc
+        raise HTTPException(422, msg) from exc
 
-    return JSONResponse({"matched": matched})
+    return JSONResponse(
+        {
+            "bsl": _dump_bsl(result["bsl"]),
+            "record_type": result["record_type"],
+            "record_id": str(result["record_id"]),
+            "journal_entry_id": str(result["journal_entry_id"]),
+            "match_id": str(result["match_id"]),
+        },
+        status_code=201,
+    )

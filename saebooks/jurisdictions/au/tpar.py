@@ -25,9 +25,13 @@ import uuid
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    from saebooks.jurisdictions.au.bde.tpar import BdePayee
 
 
 @dataclass(frozen=True)
@@ -208,6 +212,8 @@ async def build_tpar_run(
             INSERT INTO tpar_lines (
                 id, tpar_run_id, contact_id, tenant_id,
                 payee_name, payee_abn,
+                payee_family_name, payee_given_name, payee_other_given_name,
+                payee_phone, payee_email, payee_bsb, payee_account_number,
                 payee_address_line1, payee_address_line2,
                 payee_city, payee_state, payee_postcode, payee_country,
                 gross_paid, gst_paid, bill_count, expense_count
@@ -219,6 +225,13 @@ async def build_tpar_run(
                 :t,
                 c.name,
                 c.abn,
+                c.family_name,
+                c.given_name,
+                c.other_given_name,
+                c.phone,
+                c.email,
+                c.bank_bsb,
+                c.bank_account_number,
                 c.address_line1,
                 c.address_line2,
                 c.city,
@@ -362,7 +375,10 @@ async def list_tpar_lines(
                 SELECT contact_id, payee_name, payee_abn,
                        payee_address_line1, payee_address_line2,
                        payee_city, payee_state, payee_postcode, payee_country,
-                       gross_paid, gst_paid, bill_count, expense_count
+                       gross_paid, gst_paid, bill_count, expense_count,
+                       tax_withheld, statement_by_supplier, amendment,
+                       payee_family_name, payee_given_name, payee_other_given_name,
+                       payee_phone, payee_email, payee_bsb, payee_account_number
                   FROM tpar_lines
                  WHERE tpar_run_id = :id AND tenant_id = :t
                  ORDER BY gross_paid DESC
@@ -379,9 +395,144 @@ async def list_tpar_lines(
             "payee_postcode": r[7], "payee_country": r[8],
             "gross_paid": str(r[9]), "gst_paid": str(r[10]),
             "bill_count": r[11], "expense_count": r[12],
+            "tax_withheld": str(r[13]),
+            "statement_by_supplier": r[14], "amendment": r[15],
+            "payee_family_name": r[16], "payee_given_name": r[17],
+            "payee_other_given_name": r[18],
+            "payee_phone": r[19], "payee_email": r[20],
+            "payee_bsb": r[21], "payee_account_number": r[22],
         }
         for r in rows
     ]
+
+
+async def build_tpar_bde_file_for_run(
+    session: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    company_id: uuid.UUID,
+    run_id: uuid.UUID,
+    run_type: str = "P",
+    software_developer: str = "SAE Books",
+    sender_contact_name: str | None = None,
+    sender_phone: str | None = None,
+) -> bytes:
+    """Render a TPAR run as the ATO BDE (FPAIVV03.0) flat file.
+
+    The company is both payer and sender (self-lodger) — its name,
+    ABN (via business_identifiers) and address JSONB feed both blocks.
+    ``run_type="T"`` produces a file for the BDE test facility.
+    Raises ``TparBdeError`` naming any field the file needs and the
+    ledger doesn't have (incomplete payee address, missing name split
+    for an individual, invalid state code, …).
+    """
+    from saebooks.jurisdictions.au.bde.tpar import (
+        BdeAddress,
+        BdePayer,
+        BdeSender,
+        TparBdeError,
+        build_tpar_bde_file,
+    )
+    from saebooks.models.company import Company
+    from saebooks.services.business_identifiers import primary_registry_identifier
+
+    run = await get_tpar_run(
+        session, tenant_id=tenant_id, company_id=company_id, run_id=run_id
+    )
+    if run is None:
+        raise TparBdeError("TPAR run not found")
+    lines = await list_tpar_lines(session, tenant_id=tenant_id, run_id=run_id)
+    if not lines:
+        raise TparBdeError("TPAR run has no payee lines")
+
+    company = await session.get(Company, company_id)
+    if company is None:
+        raise TparBdeError("company not found")
+    company_abn = await primary_registry_identifier(session, company)
+    addr = company.address or {}
+    # Company.address JSONB has no enforced key shape — live data carries
+    # address_line1/city while the STP glue's companies use line1/suburb.
+    company_address = BdeAddress(
+        line1=addr.get("line1") or addr.get("address_line1") or "",
+        line2=addr.get("line2") or addr.get("address_line2") or "",
+        suburb=addr.get("suburb") or addr.get("city") or "",
+        state=(addr.get("state") or "").upper(),
+        postcode=addr.get("postcode") or "",
+    )
+    contact_name = sender_contact_name or company.legal_name or company.name
+    phone = sender_phone or company.phone or ""
+
+    fy_end = date.fromisoformat(run["fy_end"])
+    payer = BdePayer(
+        abn=company_abn,
+        financial_year=fy_end.year,
+        name=company.legal_name or company.name,
+        trading_name=company.trading_name or "",
+        address=company_address,
+        contact_name=contact_name,
+        phone=phone,
+        email=company.email or "",
+    )
+    sender = BdeSender(
+        abn=company_abn,
+        name=company.legal_name or company.name,
+        contact_name=contact_name,
+        phone=phone,
+        address=company_address,
+        email=company.email or "",
+        file_reference=f"TPAR{fy_end.year}",
+    )
+
+    payees = [_line_to_bde_payee(ln) for ln in lines]
+    return build_tpar_bde_file(
+        sender,
+        payer,
+        payees,
+        software_developer=software_developer,
+        run_type=run_type,
+        report_end_date=fy_end,
+    )
+
+
+def _line_to_bde_payee(line: dict) -> BdePayee:
+    """Map one ``tpar_lines`` row (as dicted by ``list_tpar_lines``) onto
+    the flat file's DPAIVS shape.
+
+    A line with a family name is an individual (business name blank,
+    spec 6.48); otherwise the display name is the business name (6.51).
+    A non-Australian country flips the address to the overseas shape —
+    state OTH + postcode 9999 + country named (6.55-6.57).
+    """
+    from saebooks.jurisdictions.au.bde.tpar import BdeAddress, BdePayee
+
+    country = (line.get("payee_country") or "").strip()
+    domestic = country.upper() in ("", "AU", "AUS", "AUSTRALIA")
+    address = BdeAddress(
+        line1=line.get("payee_address_line1") or "",
+        line2=line.get("payee_address_line2") or "",
+        suburb=line.get("payee_city") or "",
+        state=(line.get("payee_state") or "").upper() if domestic else "OTH",
+        postcode=(line.get("payee_postcode") or "") if domestic else "9999",
+        country="" if domestic else country,
+    )
+    family = (line.get("payee_family_name") or "").strip()
+    return BdePayee(
+        address=address,
+        gross=line["gross_paid"],
+        tax_withheld=line.get("tax_withheld") or 0,
+        gst=line["gst_paid"],
+        abn=line.get("payee_abn") or "",
+        business_name="" if family else (line.get("payee_name") or ""),
+        family_name=family,
+        given_name=(line.get("payee_given_name") or "") if family else "",
+        other_given_name=(line.get("payee_other_given_name") or "") if family else "",
+        phone=line.get("payee_phone") or "",
+        bsb=line.get("payee_bsb") or "",
+        account_number=line.get("payee_account_number") or "",
+        email=line.get("payee_email") or "",
+        statement_by_supplier=bool(line.get("statement_by_supplier")),
+        amendment=bool(line.get("amendment")),
+    )
 
 
 def lines_to_csv(lines: list[dict]) -> bytes:

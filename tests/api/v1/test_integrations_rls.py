@@ -37,8 +37,8 @@ os.environ.setdefault("SAEBOOKS_ENV", "test")
 os.environ.setdefault("SAEBOOKS_TEST_TRUSTED_USER_HEADER", "1")
 
 from saebooks.config import settings
-from saebooks.db import AsyncSessionLocal
 from saebooks.main import app
+from tests.conftest import owner_seed_session
 
 
 @pytest.fixture(autouse=True)
@@ -125,7 +125,7 @@ async def test_saebooks_app_role_is_not_bypassrls_or_superuser() -> None:
     If this fails, Lane 4 P0-1 is still open and nothing else in this
     file can prove RLS is enforced.
     """
-    async with AsyncSessionLocal() as session:
+    async with owner_seed_session() as session:
         row = (
             await session.execute(
                 text(
@@ -159,7 +159,7 @@ async def test_paperless_secret_invisible_without_set_local() -> None:
     label = f"rls-probe-{uuid.uuid4().hex[:8]}"
 
     # 1. Seed a secret as the owner role (BYPASSRLS — no GUC needed).
-    async with AsyncSessionLocal() as session:
+    async with owner_seed_session() as session:
         # Need a tenants row first so the FK to tenants(id) holds.
         await session.execute(
             text(
@@ -217,7 +217,7 @@ async def test_paperless_secret_invisible_without_set_local() -> None:
         await app_engine.dispose()
 
     # 3. Clean up via owner role.
-    async with AsyncSessionLocal() as session:
+    async with owner_seed_session() as session:
         await session.execute(
             text(
                 "DELETE FROM paperless_webhook_secrets WHERE tenant_id = :tid"
@@ -255,7 +255,7 @@ async def test_paperless_webhook_succeeds_with_real_db_and_app_role(
     #    We store the literal-bytes ciphertext that decrypt_field will
     #    return, then monkeypatch decrypt_field so the test does not
     #    require SAEBOOKS_FIELD_ENCRYPTION_KEY to be set in CI.
-    async with AsyncSessionLocal() as session:
+    async with owner_seed_session() as session:
         await session.execute(
             text(
                 "INSERT INTO tenants (id, name, slug) "
@@ -310,7 +310,7 @@ async def test_paperless_webhook_succeeds_with_real_db_and_app_role(
             )
     finally:
         await app_engine.dispose()
-        async with AsyncSessionLocal() as session:
+        async with owner_seed_session() as session:
             await session.execute(
                 text(
                     "DELETE FROM paperless_webhook_secrets WHERE tenant_id = :tid"

@@ -10,7 +10,14 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from saebooks.models.account import AccountType
 from saebooks.models.contact import ContactType, PaymentTermsBasis
@@ -22,6 +29,11 @@ class ContactBase(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     name: str = Field(min_length=1, max_length=255)
+    # Person-name split (migration 0219) — set for individuals; AU TPAR's
+    # flat file needs surname + given name when there is no business name.
+    family_name: str | None = Field(default=None, max_length=64)
+    given_name: str | None = Field(default=None, max_length=64)
+    other_given_name: str | None = Field(default=None, max_length=64)
     contact_type: ContactType
     email: str | None = None
     phone: str | None = None
@@ -71,6 +83,9 @@ class ContactUpdate(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     name: str | None = Field(default=None, min_length=1, max_length=255)
+    family_name: str | None = Field(default=None, max_length=64)
+    given_name: str | None = Field(default=None, max_length=64)
+    other_given_name: str | None = Field(default=None, max_length=64)
     contact_type: ContactType | None = None
     email: str | None = None
     phone: str | None = None
@@ -105,6 +120,48 @@ class ContactOut(ContactBase):
 
 class ContactListOut(BaseModel):
     items: list[ContactOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class ContactBalances(BaseModel):
+    """Opt-in balance summary — ``GET /contacts?include_balances=true`` and
+    ``GET /contacts/{id}?include_balances=true``.
+
+    Mirrors the aged-AR/AP reports' and the customer-statement builder's
+    outstanding convention (POSTED invoices/bills, ``outstanding = total -
+    amount_paid``) but is a *live* scalar snapshot, not the reports' date-aware
+    point-in-time settlement calc — use ``GET /reports/aged_receivables`` /
+    ``aged_payables`` when you need a balance as-at a past date.
+    """
+
+    receivable_unpaid: Decimal
+    receivable_overdue: Decimal
+    payable_unpaid: Decimal
+    payable_overdue: Decimal
+    last_transaction_date: date | None = None
+
+
+class ContactWithBalancesOut(ContactOut):
+    """GET-only response shape — adds the opt-in ``balances`` object.
+
+    ``ContactOut`` is reused by the write endpoints (create/update, and the
+    409 conflict body's ``current`` field), where ``balances`` must never
+    appear, so the field lives on this subclass instead. Used as the
+    ``response_model`` for ``GET /contacts`` and ``GET /contacts/{id}`` only
+    — the two routes with an ``include_balances`` opt-in. ``balances`` is
+    ``None`` (and omitted from the actual JSON body — the handlers build the
+    response by hand) unless ``include_balances=true`` was passed.
+    """
+
+    balances: ContactBalances | None = None
+
+
+class ContactListWithBalancesOut(BaseModel):
+    """``response_model`` for ``GET /contacts`` — see ``ContactWithBalancesOut``."""
+
+    items: list[ContactWithBalancesOut]
     total: int
     limit: int
     offset: int
@@ -230,6 +287,7 @@ class CompanyOut(BaseModel):
     acn: str | None = None
     base_currency: str
     fin_year_start_month: int
+    fin_year_start_day: int = 1
     audit_mode: str
     tax_registered: bool = False
     gst_effective_date: date | None = None
@@ -244,6 +302,17 @@ class CompanyOut(BaseModel):
     # services/control_accounts.py.
     ar_control_account_code: str | None = None
     ap_control_account_code: str | None = None
+    # Asset-disposal gain/loss account override (M1.5 P1 tail). NULL =
+    # engine resolves the AU convention codes ("4-9100"/"6-9100") — see
+    # services/assets.py::dispose_asset.
+    asset_disposal_gain_account_code: str | None = None
+    asset_disposal_loss_account_code: str | None = None
+    # Entity lifecycle status (M1.5 P1 tail) — active / dormant /
+    # in_liquidation / deregistered. Distinct from archived_at.
+    lifecycle_status: str = "active"
+    # Industry classification linkage (M1.5 P1 tail). Value is
+    # IndustryCode.code in the reference DB; NULL = not yet classified.
+    industry_code: str | None = None
     # Multi-jurisdiction routing key + CoA/reference-data template key.
     # Read-through from the Company columns; the web previously probed
     # tax_codes as a workaround because CompanyOut lacked jurisdiction.
@@ -306,6 +375,7 @@ class CompanyUpdate(BaseModel):
     acn: str | None = None
     base_currency: str | None = Field(default=None, min_length=3, max_length=3)
     fin_year_start_month: int | None = Field(default=None, ge=1, le=12)
+    fin_year_start_day: int | None = Field(default=None, ge=1, le=31)
     audit_mode: str | None = None
     tax_registered: bool | None = None
     gst_effective_date: date | None = None
@@ -318,6 +388,13 @@ class CompanyUpdate(BaseModel):
     # AR/AP control-account override (0198, Packet 4b).
     ar_control_account_code: str | None = None
     ap_control_account_code: str | None = None
+    # Asset-disposal gain/loss account override (M1.5 P1 tail).
+    asset_disposal_gain_account_code: str | None = None
+    asset_disposal_loss_account_code: str | None = None
+    # Entity lifecycle status (M1.5 P1 tail).
+    lifecycle_status: str | None = None
+    # Industry classification linkage (M1.5 P1 tail).
+    industry_code: str | None = None
     # EE company-registry identifiers. No jurisdiction field on this schema
     # (jurisdiction is immutable via PATCH) — format is enforced here when a
     # value is supplied; the EE-only guard lives in services.companies.update.
@@ -431,6 +508,20 @@ class CompanyUpdate(BaseModel):
 
         return validate_kmv_number(v.strip())
 
+    @model_validator(mode="after")
+    def fin_year_day_valid_for_month(self) -> CompanyUpdate:
+        # Only cross-checkable here when BOTH fields arrive in the same
+        # PATCH -- a lone fin_year_start_day (or lone fin_year_start_month)
+        # needs the company's *other*, already-stored value to validate
+        # against, which this schema has no access to. That case is caught
+        # belt-and-braces in services.companies.update() against the
+        # company's final resolved state.
+        if self.fin_year_start_month is not None and self.fin_year_start_day is not None:
+            from saebooks.services.companies import validate_fin_year_start_day
+
+            validate_fin_year_start_day(self.fin_year_start_month, self.fin_year_start_day)
+        return self
+
 
 class CompanyCreate(BaseModel):
     """POST body for creating a new company."""
@@ -444,6 +535,10 @@ class CompanyCreate(BaseModel):
     acn: str | None = None
     base_currency: str = Field(default="AUD", min_length=3, max_length=3)
     fin_year_start_month: int = Field(default=7, ge=1, le=12)
+    # Day-of-month the financial year starts on (M1.5 P1 tail companion to
+    # fin_year_start_month above). Cross-validated against the month in
+    # ``fin_year_day_valid_for_month`` below.
+    fin_year_start_day: int = Field(default=1, ge=1, le=31)
     # Multi-jurisdiction routing key + CoA/reference-data template key.
     # jurisdiction is validated against the engine's creatable set
     # (services.templates.known_jurisdictions); coa_template_key must match
@@ -494,7 +589,7 @@ class CompanyCreate(BaseModel):
         return validate_kmv_number(v.strip())
 
     @model_validator(mode="after")
-    def ee_fields_valid_for_jurisdiction(self) -> "CompanyCreate":
+    def ee_fields_valid_for_jurisdiction(self) -> CompanyCreate:
         if self.jurisdiction == "EE":
             # registrikood (the äriregistri kood) is mandatory for every EE
             # company — the engine, as system of record, enforces it rather
@@ -541,6 +636,13 @@ class CompanyCreate(BaseModel):
             raise ValueError(
                 f"coa_template_key must be one of: {known_templates()}"
             )
+        return self
+
+    @model_validator(mode="after")
+    def fin_year_day_valid_for_month(self) -> CompanyCreate:
+        from saebooks.services.companies import validate_fin_year_start_day
+
+        validate_fin_year_start_day(self.fin_year_start_month, self.fin_year_start_day)
         return self
 
 
@@ -846,10 +948,22 @@ class JournalLineCreate(BaseModel):
 
 
 class JournalEntryBase(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    # populate_by_name so the canonical ``narration`` name still works even
+    # though the field carries validation aliases below.
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     entry_date: date
-    narration: str | None = None
+    # The header narration is stored in the ``journal_entries.description``
+    # column and surfaced as ``description`` on read. Historically the create
+    # body accepted ONLY ``narration``, so a client POSTing the natural field
+    # name ``memo`` (or ``description``, mirroring the read shape) had it
+    # silently dropped — the entry came back with ``description: null`` (the
+    # money-movement JE round-trip bug). Accept all three input spellings so
+    # whichever a caller sends lands in the same column and round-trips.
+    narration: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("narration", "memo", "description"),
+    )
     reference: str | None = Field(default=None, max_length=32)
 
 
@@ -876,10 +990,15 @@ class JournalEntryCreate(JournalEntryBase):
 class JournalEntryUpdate(BaseModel):
     """PATCH body — every field optional."""
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     entry_date: date | None = None
-    narration: str | None = None
+    # Same memo/description/narration aliasing as JournalEntryBase so a PATCH
+    # that edits the header narration under any of those names is honoured.
+    narration: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("narration", "memo", "description"),
+    )
     reference: str | None = Field(default=None, max_length=32)
     status: str | None = None
     lines: list[JournalLineCreate] | None = None
@@ -2263,12 +2382,18 @@ class BudgetConflictBody(BaseModel):
 
 
 class PnLAccountLine(BaseModel):
-    """One account's net amount in a P&L section."""
+    """One account's net amount in a P&L section.
+
+    ``comparative`` (R7) is only populated when the request opted in via
+    ``?compare=previous_period|previous_year`` -- absent from the response
+    entirely otherwise (route uses ``response_model_exclude_none``).
+    """
 
     account_id: uuid.UUID
     account_name: str
     code: str
     amount: float
+    comparative: float | None = None
 
 
 class PnLIncome(BaseModel):
@@ -2277,6 +2402,7 @@ class PnLIncome(BaseModel):
     INCOME: list[PnLAccountLine] = Field(default_factory=list)
     OTHER_INCOME: list[PnLAccountLine] = Field(default_factory=list)
     total_income: float
+    total_income_comparative: float | None = None
 
 
 class PnLExpenses(BaseModel):
@@ -2286,10 +2412,19 @@ class PnLExpenses(BaseModel):
     COST_OF_SALES: list[PnLAccountLine] = Field(default_factory=list)
     OTHER_EXPENSE: list[PnLAccountLine] = Field(default_factory=list)
     total_expenses: float
+    total_expenses_comparative: float | None = None
 
 
 class PnLReport(BaseModel):
-    """Full profit & loss report for a date range."""
+    """Full profit & loss report for a date range.
+
+    R7 comparative fields (``compare``, ``net_profit_comparative``,
+    ``comparative_from_date``, ``comparative_to_date``, and each line's
+    ``comparative``/``total_*_comparative``) are populated ONLY when the
+    caller opts in via ``?compare=previous_period|previous_year`` -- omitted
+    from the JSON response entirely when not requested, so existing
+    consumers see the unchanged shape.
+    """
 
     from_date: date
     to_date: date
@@ -2297,15 +2432,25 @@ class PnLReport(BaseModel):
     expenses: PnLExpenses
     net_profit: float
     warnings: list[str] = Field(default_factory=list)
+    compare: str | None = None
+    net_profit_comparative: float | None = None
+    comparative_from_date: date | None = None
+    comparative_to_date: date | None = None
 
 
 class BSAccountLine(BaseModel):
-    """One account's balance in a balance sheet section."""
+    """One account's balance in a balance sheet section.
+
+    ``comparative`` (R7) is the account's balance as at the comparative
+    date -- only populated when ``?compare=previous_period|previous_year``
+    was requested; absent from the response otherwise.
+    """
 
     account_id: uuid.UUID
     account_name: str
     code: str
     balance: float
+    comparative: float | None = None
 
 
 class BSAssets(BaseModel):
@@ -2313,6 +2458,7 @@ class BSAssets(BaseModel):
 
     ASSET: list[BSAccountLine] = Field(default_factory=list)
     total_assets: float
+    total_assets_comparative: float | None = None
 
 
 class BSLiabilities(BaseModel):
@@ -2320,6 +2466,7 @@ class BSLiabilities(BaseModel):
 
     LIABILITY: list[BSAccountLine] = Field(default_factory=list)
     total_liabilities: float
+    total_liabilities_comparative: float | None = None
 
 
 class BSEquity(BaseModel):
@@ -2327,10 +2474,20 @@ class BSEquity(BaseModel):
 
     EQUITY: list[BSAccountLine] = Field(default_factory=list)
     total_equity: float
+    total_equity_comparative: float | None = None
 
 
 class BSReport(BaseModel):
-    """Full balance sheet as at a given date."""
+    """Full balance sheet as at a given date.
+
+    R7 comparative fields (``compare``, ``comparative_as_of_date``, and
+    each line's ``comparative``/``total_*_comparative``) are populated
+    ONLY when the caller opts in via ``?compare=previous_period|previous_year``
+    -- omitted from the JSON response entirely when not requested.
+    Balance-sheet comparative = the balance AS AT the comparative date
+    (not a period movement), matching the statement-pack PDF's prior-year
+    balance-sheet semantics.
+    """
 
     as_of_date: date
     assets: BSAssets
@@ -2339,6 +2496,8 @@ class BSReport(BaseModel):
     balanced: bool
     difference: float
     warnings: list[str] = Field(default_factory=list)
+    compare: str | None = None
+    comparative_as_of_date: date | None = None
 
 
 class AgedContact(BaseModel):
@@ -2616,7 +2775,12 @@ class FixedAssetConvertToInventoryResponse(BaseModel):
 
 
 class TrialBalanceLine(BaseModel):
-    """One account row in the trial balance."""
+    """One account row in the trial balance.
+
+    ``comparative`` (R7) is the account's balance as at the comparative
+    date -- only populated when ``?compare=previous_period|previous_year``
+    was requested; absent from the response otherwise.
+    """
 
     account_id: uuid.UUID
     code: str
@@ -2625,16 +2789,34 @@ class TrialBalanceLine(BaseModel):
     debit_total: float
     credit_total: float
     balance: float
+    comparative: float | None = None
 
 
 class TrialBalanceReport(BaseModel):
-    """Full trial balance as at a given date."""
+    """Full trial balance as at a given date.
+
+    R7 comparative fields (``compare``, ``comparative_as_of_date``,
+    ``total_debits_comparative``, ``total_credits_comparative``, and each
+    line's ``comparative``) are populated ONLY when the caller opts in via
+    ``?compare=previous_period|previous_year`` -- omitted from the JSON
+    response entirely when not requested. Like the balance sheet (and
+    unlike P&L), the trial balance has no ``from_date``/period length of
+    its own -- it is cumulative-from-inception as at a single date -- so
+    its comparative is the AS-AT balance at the comparative date, not a
+    period movement (see api/v1/reports.py's ``_tb_comparative_asof``
+    docstring for the exact deviation from the task's "TB = movement"
+    phrasing).
+    """
 
     as_of_date: date
     accounts: list[TrialBalanceLine]
     total_debits: float
     total_credits: float
     balanced: bool
+    compare: str | None = None
+    comparative_as_of_date: date | None = None
+    total_debits_comparative: float | None = None
+    total_credits_comparative: float | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -2728,6 +2910,44 @@ class RevenueByCustomerReport(BaseModel):
     total_revenue: float
     top_customer_pct: float | None
     concentration_warning: bool
+
+
+# ---------------------------------------------------------------------------
+# Cashflow Forecast
+# ---------------------------------------------------------------------------
+
+
+class CashflowForecastItem(BaseModel):
+    """One projected cash event. ``amount`` is signed: +=inflow, -=outflow."""
+
+    expected_date: date
+    description: str
+    source: str  # "invoice" | "bill" | "recurring"
+    source_id: uuid.UUID
+    amount: float
+
+
+class CashflowForecastWeek(BaseModel):
+    """One 7-day slice of the horizon for the weekly roll-up."""
+
+    start: date
+    inflows: float
+    outflows: float
+    net: float
+    running_balance: float
+
+
+class CashflowForecastReport(BaseModel):
+    """Full cash-flow forecast: items, weekly buckets, grand totals."""
+
+    from_date: date
+    to_date: date
+    opening_balance: float
+    total_inflows: float
+    total_outflows: float
+    projected_closing: float
+    items: list[CashflowForecastItem]
+    weeks: list[CashflowForecastWeek]
 
 
 # ---------------------------------------------------------------------------

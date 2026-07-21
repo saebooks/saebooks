@@ -216,6 +216,13 @@ class IcEdge(CompanyScoped, Base):
             name="fk_ic_edges_control_account_company",
             ondelete="RESTRICT",
         ),
+        # NOTE: the relay_contra_account_id composite FK to accounts(id,
+        # company_id) is declared in migration 0217 (the authoritative DDL) and
+        # NOT mirrored here. A SECOND model-level ForeignKeyConstraint that
+        # reuses ``company_id`` to the same target table tripped a metadata
+        # FK-resolution error (NoReferencedTableError on accounts.company_id)
+        # under full-suite import order. The DB FK still enforces the bound; the
+        # ORM does not need the constraint object to map the column.
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -289,6 +296,16 @@ class IcEdge(CompanyScoped, Base):
     authorised_by_principal_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("principals.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # Phase 3c (migration 0217): the REMOTE leg's CONTRA account (this side's
+    # bank / clearing). Composite-FK'd to accounts(id, company_id) at the table
+    # level so it can only be one of THIS edge's company's own postable accounts
+    # — keeping the invariant that NO account id ever crosses the wire (the
+    # receiver resolves both control + contra from its OWN edge row). Nullable:
+    # LOCAL edges never use it; inert until the relay flag is on.
+    relay_contra_account_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
         nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(

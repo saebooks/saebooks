@@ -53,6 +53,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from saebooks.models.account import Account
+from saebooks.models.company import Company
 from saebooks.models.depreciation_model import DepreciationModel
 from saebooks.models.fixed_asset import FixedAsset
 from saebooks.models.journal import JournalOrigin
@@ -541,6 +542,30 @@ async def post_depreciation(
 # ---------------------------------------------------------------------- #
 
 
+_DEFAULT_DISPOSAL_GAIN_CODE = "4-9100"
+_DEFAULT_DISPOSAL_LOSS_CODE = "6-9100"
+
+
+async def _resolve_disposal_account_code(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    *,
+    column,
+    default_code: str,
+) -> str:
+    """Resolve the gain/loss account code for a disposal, company-configurable.
+
+    NULL/blank ``Company.asset_disposal_{gain,loss}_account_code`` falls
+    back to the AU convention code — unchanged behaviour for every
+    existing (AU) company. Mirrors ``control_accounts.resolve_ar_code``.
+    """
+    row = (
+        await session.execute(select(column).where(Company.id == company_id))
+    ).scalar_one_or_none()
+    code = (row or "").strip()
+    return code or default_code
+
+
 async def _find_account_by_code(
     session: AsyncSession, company_id: uuid.UUID, code: str
 ) -> Account:
@@ -635,8 +660,14 @@ async def dispose_asset(
         }
     )
     if gain_loss > 0:
+        gain_code = await _resolve_disposal_account_code(
+            session,
+            asset.company_id,
+            column=Company.asset_disposal_gain_account_code,
+            default_code=_DEFAULT_DISPOSAL_GAIN_CODE,
+        )
         gain_acct = await _find_account_by_code(
-            session, asset.company_id, "4-9100"
+            session, asset.company_id, gain_code
         )
         lines.append(
             {
@@ -647,8 +678,14 @@ async def dispose_asset(
             }
         )
     elif gain_loss < 0:
+        loss_code = await _resolve_disposal_account_code(
+            session,
+            asset.company_id,
+            column=Company.asset_disposal_loss_account_code,
+            default_code=_DEFAULT_DISPOSAL_LOSS_CODE,
+        )
         loss_acct = await _find_account_by_code(
-            session, asset.company_id, "6-9100"
+            session, asset.company_id, loss_code
         )
         lines.append(
             {

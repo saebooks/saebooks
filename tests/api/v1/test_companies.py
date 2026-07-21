@@ -891,6 +891,264 @@ async def test_companies_patch_gst_fields(api_client: AsyncClient) -> None:
     )
 
 
+async def test_companies_patch_asset_disposal_account_override(api_client: AsyncClient) -> None:
+    """PATCH asset_disposal_gain/loss_account_code round-trips (M1.5 P1 tail)."""
+    company_id, version = await _get_seed_company()
+    r = await api_client.patch(
+        f"/api/v1/companies/{company_id}",
+        json={
+            "asset_disposal_gain_account_code": "4-6000",
+            "asset_disposal_loss_account_code": "6-2050",
+        },
+        headers={"If-Match": str(version)},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["asset_disposal_gain_account_code"] == "4-6000"
+    assert body["asset_disposal_loss_account_code"] == "6-2050"
+    assert body["version"] == version + 1
+
+    # Empty string clears back to NULL; restores state for other tests.
+    r2 = await api_client.patch(
+        f"/api/v1/companies/{company_id}",
+        json={
+            "asset_disposal_gain_account_code": "",
+            "asset_disposal_loss_account_code": "",
+        },
+        headers={"If-Match": str(version + 1)},
+    )
+    assert r2.status_code == 200, r2.text
+    body2 = r2.json()
+    assert body2["asset_disposal_gain_account_code"] is None
+    assert body2["asset_disposal_loss_account_code"] is None
+
+
+async def test_companies_patch_lifecycle_status(api_client: AsyncClient) -> None:
+    """PATCH lifecycle_status round-trips + rejects unknown values (M1.5 P1 tail)."""
+    company_id, version = await _get_seed_company()
+    r = await api_client.patch(
+        f"/api/v1/companies/{company_id}",
+        json={"lifecycle_status": "dormant"},
+        headers={"If-Match": str(version)},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["lifecycle_status"] == "dormant"
+    assert body["version"] == version + 1
+
+    bad = await api_client.patch(
+        f"/api/v1/companies/{company_id}",
+        json={"lifecycle_status": "not_a_status"},
+        headers={"If-Match": str(version + 1)},
+    )
+    assert bad.status_code == 422, bad.text
+
+    # Restore
+    await api_client.patch(
+        f"/api/v1/companies/{company_id}",
+        json={"lifecycle_status": "active"},
+        headers={"If-Match": str(version + 1)},
+    )
+
+
+async def test_companies_patch_industry_code(api_client: AsyncClient) -> None:
+    """PATCH industry_code round-trips (M1.5 P1 tail)."""
+    company_id, version = await _get_seed_company()
+    r = await api_client.patch(
+        f"/api/v1/companies/{company_id}",
+        json={"industry_code": "6920"},
+        headers={"If-Match": str(version)},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["industry_code"] == "6920"
+    assert body["version"] == version + 1
+
+    # Empty string clears back to NULL; restores state for other tests.
+    r2 = await api_client.patch(
+        f"/api/v1/companies/{company_id}",
+        json={"industry_code": ""},
+        headers={"If-Match": str(version + 1)},
+    )
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["industry_code"] is None
+
+
+async def test_companies_patch_fin_year_start_day(api_client: AsyncClient) -> None:
+    """PATCH fin_year_start_day round-trips + validates 1-31 (M1.5 P1 tail)."""
+    company_id, version = await _get_seed_company()
+    r = await api_client.patch(
+        f"/api/v1/companies/{company_id}",
+        json={"fin_year_start_day": 6},
+        headers={"If-Match": str(version)},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["fin_year_start_day"] == 6
+    assert body["version"] == version + 1
+
+    bad = await api_client.patch(
+        f"/api/v1/companies/{company_id}",
+        json={"fin_year_start_day": 32},
+        headers={"If-Match": str(version + 1)},
+    )
+    assert bad.status_code == 422, bad.text
+
+    # Restore
+    await api_client.patch(
+        f"/api/v1/companies/{company_id}",
+        json={"fin_year_start_day": 1},
+        headers={"If-Match": str(version + 1)},
+    )
+
+
+async def test_companies_patch_fin_year_start_day_invalid_for_month_422(
+    api_client: AsyncClient,
+) -> None:
+    """PATCH cross-validates day against month when BOTH arrive together
+    (period-picker engine spec 2026-07-21): 31 is invalid for a 30-day
+    month, and Feb 29/30/31 is rejected outright (leap-year ambiguity),
+    not silently clamped."""
+    company_id, version = await _get_seed_company()
+
+    # month=4 (April, 30 days) + day=31 together -> 422.
+    bad_30day = await api_client.patch(
+        f"/api/v1/companies/{company_id}",
+        json={"fin_year_start_month": 4, "fin_year_start_day": 31},
+        headers={"If-Match": str(version)},
+    )
+    assert bad_30day.status_code == 422, bad_30day.text
+
+    # month=2 (February) + day=29 together -> 422, even though 2026/2028
+    # etc. are leap years -- the field has no year, so this is rejected
+    # outright rather than clamped.
+    bad_feb29 = await api_client.patch(
+        f"/api/v1/companies/{company_id}",
+        json={"fin_year_start_month": 2, "fin_year_start_day": 29},
+        headers={"If-Match": str(version)},
+    )
+    assert bad_feb29.status_code == 422, bad_feb29.text
+
+    # month=2 + day=28 together -> valid.
+    ok_feb28 = await api_client.patch(
+        f"/api/v1/companies/{company_id}",
+        json={"fin_year_start_month": 2, "fin_year_start_day": 28},
+        headers={"If-Match": str(version)},
+    )
+    assert ok_feb28.status_code == 200, ok_feb28.text
+    body = ok_feb28.json()
+    assert body["fin_year_start_month"] == 2
+    assert body["fin_year_start_day"] == 28
+    new_version = body["version"]
+
+    # Belt-and-braces: a LONE day=31 PATCH against the now-February company
+    # (service-layer cross-check against the final resolved state, since
+    # the schema layer alone can't see the company's stored month).
+    bad_lone_day = await api_client.patch(
+        f"/api/v1/companies/{company_id}",
+        json={"fin_year_start_day": 31},
+        headers={"If-Match": str(new_version)},
+    )
+    assert bad_lone_day.status_code == 422, bad_lone_day.text
+
+    # Restore to the original month=7/day=1 seed state.
+    await api_client.patch(
+        f"/api/v1/companies/{company_id}",
+        json={"fin_year_start_month": 7, "fin_year_start_day": 1},
+        headers={"If-Match": str(new_version)},
+    )
+
+
+async def test_post_company_fin_year_start_day_defaults_and_roundtrips(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST accepts fin_year_start_day, defaulting to 1 when omitted and
+    round-tripping through GET when supplied explicitly."""
+    from saebooks.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "edition", "enterprise")
+
+    tag = uuid.uuid4().hex[:8]
+    default_name = f"FYDefault_{tag}"
+    explicit_name = f"FYExplicit_{tag}"
+    try:
+        default_resp = await api_client.post(
+            "/api/v1/companies", json={"name": default_name}
+        )
+        assert default_resp.status_code == 201, default_resp.text
+        assert default_resp.json()["fin_year_start_day"] == 1
+
+        explicit_resp = await api_client.post(
+            "/api/v1/companies",
+            json={
+                "name": explicit_name,
+                "fin_year_start_month": 4,
+                "fin_year_start_day": 15,
+            },
+        )
+        assert explicit_resp.status_code == 201, explicit_resp.text
+        body = explicit_resp.json()
+        assert body["fin_year_start_month"] == 4
+        assert body["fin_year_start_day"] == 15
+
+        get_resp = await api_client.get(f"/api/v1/companies/{body['id']}")
+        assert get_resp.status_code == 200, get_resp.text
+        assert get_resp.json()["fin_year_start_day"] == 15
+    finally:
+        from sqlalchemy import delete
+
+        from saebooks.models.company import Company
+
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                delete(Company).where(
+                    Company.name.in_([default_name, explicit_name])
+                )
+            )
+            await session.commit()
+
+
+async def test_post_company_fin_year_start_day_invalid_for_month_422(
+    api_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST rejects a day that can never occur in the chosen start month
+    at the schema layer (422 before a Company row is ever created)."""
+    from saebooks.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "edition", "enterprise")
+
+    tag = uuid.uuid4().hex[:8]
+
+    # 30-day month (September) + day=31.
+    resp_30day = await api_client.post(
+        "/api/v1/companies",
+        json={
+            "name": f"FYBad30_{tag}",
+            "fin_year_start_month": 9,
+            "fin_year_start_day": 31,
+        },
+    )
+    assert resp_30day.status_code == 422, resp_30day.text
+
+    # February + day=29 (leap-year-only, rejected outright not clamped).
+    resp_feb29 = await api_client.post(
+        "/api/v1/companies",
+        json={
+            "name": f"FYBadFeb_{tag}",
+            "fin_year_start_month": 2,
+            "fin_year_start_day": 29,
+        },
+    )
+    assert resp_feb29.status_code == 422, resp_feb29.text
+
+    # Neither invalid request should have left a row behind.
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Company).where(Company.name.like(f"FYBad%{tag}"))
+        )
+        assert result.scalars().first() is None
+
+
 async def test_companies_patch_letterhead_and_terms_fields(api_client: AsyncClient) -> None:
     """PATCH phone/email/website/default_payment_terms round-trips (0171)."""
     company_id, version = await _get_seed_company()

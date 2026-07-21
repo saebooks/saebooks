@@ -54,13 +54,28 @@ def _resolve_token() -> str:
     token = os.environ.get(_ENV_VAR, "").strip()
     if token:
         return token
-    # Generate once per process; log so dev can grab it.
+    # Generate once per process. NEVER print the token VALUE outside an
+    # explicit dev/test environment: the one-click server (SAEBOOKS_ENV
+    # unset / production) runs with a user-facing console, and a cleartext
+    # bearer on stdout is a secret-to-stdout leak — scary and quotable. On a
+    # real dev box (SAEBOOKS_ENV=dev/test) the value is a convenience so the
+    # developer can grab it; there stdout is the developer's own terminal.
     generated = secrets.token_urlsafe(32)
-    logger.info(
-        "%s not set; using ephemeral dev token (pass as 'Authorization: Bearer %s')",
-        _ENV_VAR,
-        generated,
-    )
+    _env = os.environ.get(_DEV_ENV_GUARD, "").strip().lower()
+    if _env in ("dev", "development", "test"):
+        logger.info(
+            "%s not set; using ephemeral dev token (pass as 'Authorization: Bearer %s')",
+            _ENV_VAR,
+            generated,
+        )
+    else:
+        logger.info(
+            "%s not set; generated a random ephemeral API token for this "
+            "process (value suppressed). Set %s to a fixed value to pin it "
+            "across restarts and to authenticate API clients.",
+            _ENV_VAR,
+            _ENV_VAR,
+        )
     os.environ[_ENV_VAR] = generated
     return generated
 

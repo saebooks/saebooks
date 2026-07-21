@@ -723,6 +723,19 @@ def main(argv: list[str] | None = None) -> int:
         help="Claim batch size per tenant per run (default 10, spec §5).",
     )
 
+    rotate = sub.add_parser(
+        "rotate-field-keys",
+        help="Re-encrypt every Fernet-encrypted field under the primary key "
+        "(index 0 of the comma-separated SAEBOOKS_FIELD_ENCRYPTION_KEY list). "
+        "Run between prepending the new key and dropping the old one.",
+    )
+    rotate.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="Count what would rotate; write nothing.",
+    )
+
     refload = sub.add_parser(
         "reference-load",
         help="Load reference-DB seed YAMLs (multi-jurisdiction master data).",
@@ -775,6 +788,10 @@ def main(argv: list[str] | None = None) -> int:
         return asyncio.run(
             _inbox_extract(allow_bypass=args.allow_bypass, batch=args.batch)
         )
+    if args.command == "rotate-field-keys":
+        from saebooks.cli.rotate_field_keys import rotate_field_keys
+
+        return asyncio.run(rotate_field_keys(dry_run=args.dry_run))
     if args.command == "reference-load":
         from saebooks.services.reference.loader import (
             SeedLoaderNotConfiguredError,

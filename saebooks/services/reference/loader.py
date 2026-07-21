@@ -30,10 +30,9 @@ from typing import Any
 
 import yaml
 from sqlalchemy import inspect, text
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from saebooks.db import ReferenceBase, ReferenceMigrationSession
+from saebooks.db import ReferenceBase, ReferenceMigrationSession, upsert_stmt
 
 logger = logging.getLogger("saebooks.reference.loader")
 
@@ -115,7 +114,7 @@ async def _apply_file(session: AsyncSession, path: Path) -> int:
                 f"{path}: row has unknown columns {sorted(unknown)} for "
                 f"table {table_name}"
             )
-        stmt = pg_insert(table).values(**row)
+        stmt = upsert_stmt(table).values(**row)
         # Build the ON CONFLICT update to refresh every non-key column.
         update_cols = {
             c.name: stmt.excluded[c.name]
