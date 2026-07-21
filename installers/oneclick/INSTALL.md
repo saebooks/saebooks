@@ -6,13 +6,14 @@ no internet needed after the download.
 
 ## 1. Download
 
-Grab the file for your computer:
+Grab the file for your computer from the
+[latest release](https://github.com/saebooks/saebooks/releases):
 
 | Your computer | File |
 |---|---|
 | Windows | `SAEBooks-windows-x64.exe` |
-| Mac (Apple Silicon) | `SAEBooks-macos-arm64` |
 | Linux | `SAEBooks-linux-x86_64` |
+| Mac | *coming soon — not in this release yet* (use the Docker install in the meantime) |
 
 ## 2. Run it
 
@@ -22,10 +23,9 @@ SmartScreen shows "Windows protected your PC" — click **More info**, then
 "Starting SAE Books" window then appears while the first run unpacks — this
 takes about a minute, once only. No need to click anything or start it again.
 
-**Mac:** the first time, right-click the file, choose **Open**, then **Open**
-again in the warning dialog. (The app is not notarised with Apple; that
-warning is expected.) If nothing happens when double-clicking, open Terminal
-and run: `chmod +x ~/Downloads/SAEBooks-macos-arm64` then run the file again.
+**Mac:** the Mac build is not published yet. When it ships: the first time,
+right-click the file, choose **Open**, then **Open** again in the warning
+dialog (the app is not notarised with Apple; that warning is expected).
 
 **Linux:** make it executable and run it:
 

@@ -1,11 +1,9 @@
 # Contributing to SAE Books
 
-**The project is currently in private development and not accepting
-external contributions.** This document exists now so the policy is set
-before the repo ever goes public — CLA coverage only works if it's in
-place from the first external PR.
-
-When SAE Books goes public, the rules below apply.
+**SAE Books is in public beta and contributions are welcome.** Bug
+reports and pull requests are appreciated — a signed CLA is required
+before any pull request can be merged (CLA coverage only works if it's
+in place from the first external PR).
 
 ## Licence
 
