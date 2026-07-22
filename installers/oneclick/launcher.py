@@ -167,6 +167,13 @@ def configure_env(ddir: Path, web_port: int, api_port: int, grpc_port: int) -> N
         "SAEBOOKS_DEMO_EMAIL": DEMO_EMAIL,
         "SAEBOOKS_DEMO_PASSWORD": DEMO_PASSWORD,
         "SAEBOOKS_DEMO_COMPANY_NAME": "My Business",
+        # customer_email's engine-side .eml audit copy defaults to
+        # /app/mail-outbox (the docker WORKDIR, writable in-container). The
+        # one-click binary has no /app — mkdir there PermissionError-500s
+        # every send-email call (with or without an attachment). Redirect
+        # into the per-user data dir, matching every other per-install path
+        # below.
+        "SAEBOOKS_MAIL_OUTBOX_DIR": (ddir / "mail-outbox").as_posix(),
         # PDF rendering: the engine POSTs document facts to the web app's
         # /internal/render, which in turn needs the latex-api XeLaTeX service.
         # One-click bundles no latex-api, so PDFs are unavailable — but wiring
