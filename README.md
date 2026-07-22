@@ -51,7 +51,7 @@ One file, no Docker, no dependencies. Download from the
 |---|---|---|
 | Windows | `SAEBooks-windows-x64.exe` | Double-click. SmartScreen will show "Windows protected your PC" — click **More info → Run anyway** (the binary is unsigned; expected). First run unpacks for about a minute, once only. |
 | Linux | `SAEBooks-linux-x86_64` | `chmod +x SAEBooks-linux-x86_64 && ./SAEBooks-linux-x86_64` |
-| macOS | *build pending* | A macOS one-click build is coming; use the Docker path below in the meantime. |
+| macOS (Apple Silicon) | `SAEBooks-macos-arm64` | `chmod +x SAEBooks-macos-arm64 && ./SAEBooks-macos-arm64`. First run, macOS Gatekeeper blocks an unsigned binary: clear the download flag with `xattr -d com.apple.quarantine SAEBooks-macos-arm64`, or right-click the file in Finder and choose **Open**. Ad-hoc signed, not notarised; that warning is expected. |
 
 The launcher starts the engine and web UI on localhost and opens your browser
 at **http://127.0.0.1:18960** (web UI; API on `127.0.0.1:18961`). Sign in with
@@ -95,10 +95,11 @@ yourself.
 
 ### Desktop clients (optional)
 
-Native Qt desktop clients (Windows MSI, Linux AppImage) live in
+Native Qt desktop clients (Windows MSI, Linux AppImage, macOS DMG) live in
 [`saebooks-desktop`](https://github.com/saebooks/saebooks-desktop) —
 **v0.4** auto-detects and pairs with a locally running one-click server.
-macOS is at v0.3.0 (DMG) until the next build round. The Estonian brand of the
+The macOS client is a **v0.4 universal2 DMG** (ad-hoc signed, not notarised —
+right-click → **Open** on first launch). The Estonian brand of the
 same client ships as **tasur** ([tasur.ee](https://tasur.ee); Estonian and
 Russian UI is machine-translated pending human review).
 

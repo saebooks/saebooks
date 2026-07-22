@@ -13,7 +13,7 @@ Grab the file for your computer from the
 |---|---|
 | Windows | `SAEBooks-windows-x64.exe` |
 | Linux | `SAEBooks-linux-x86_64` |
-| Mac | *coming soon — not in this release yet* (use the Docker install in the meantime) |
+| Mac (Apple Silicon) | `SAEBooks-macos-arm64` |
 
 ## 2. Run it
 
@@ -23,9 +23,16 @@ SmartScreen shows "Windows protected your PC" — click **More info**, then
 "Starting SAE Books" window then appears while the first run unpacks — this
 takes about a minute, once only. No need to click anything or start it again.
 
-**Mac:** the Mac build is not published yet. When it ships: the first time,
-right-click the file, choose **Open**, then **Open** again in the warning
-dialog (the app is not notarised with Apple; that warning is expected).
+**Mac (Apple Silicon):** the first time you run it, macOS Gatekeeper blocks an
+unsigned binary. Either clear the download flag with `xattr -d
+com.apple.quarantine SAEBooks-macos-arm64`, or right-click the file in Finder,
+choose **Open**, then **Open** again in the dialog. The app is ad-hoc signed,
+not notarised with Apple; that warning is expected. Then, in a terminal:
+
+```
+chmod +x SAEBooks-macos-arm64
+./SAEBooks-macos-arm64
+```
 
 **Linux:** make it executable and run it:
 
